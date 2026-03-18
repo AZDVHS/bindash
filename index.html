@@ -1006,7 +1006,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div class="nav-i" onclick="hwNav(this,'hw-account')"><span class="ic">👤</span> Account &amp; Plan</div>
       <div class="s-bot">
         <div class="u-chip" style="margin-bottom:10px"><div class="avatar" id="hw-sidebar-avatar">—</div><div><div class="u-name" id="hw-sidebar-name">My Account</div><div class="u-role">Homeowner</div></div></div>
-        <button class="btn btn-ghost btn-full btn-sm" onclick="go('S-land')">Log Out</button>
+        <button class="btn btn-ghost btn-full btn-sm" onclick="bindashLogout()">Log Out</button>
       </div>
     </div>
     <div class="main">
@@ -1042,9 +1042,9 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
-            <div class="sc2"><div class="sn" style="color:var(--cyan)">14</div><div class="sl2">Collections Done</div></div>
-            <div class="sc2"><div class="sn" style="color:var(--blue)">1</div><div class="sl2">Upcoming</div></div>
-            <div class="sc2"><div class="sn" style="color:var(--amber)">4.9★</div><div class="sl2">Service Rating</div></div>
+            <div class="sc2"><div class="sn" style="color:var(--cyan)" id="hw-collections-count">0</div><div class="sl2">Collections Done</div></div>
+            <div class="sc2"><div class="sn" style="color:var(--blue)" id="hw-upcoming-count">0</div><div class="sl2">Upcoming</div></div>
+            <div class="sc2"><div class="sn" style="color:var(--amber)" id="hw-rating">—</div><div class="sl2">Service Rating</div></div>
           </div>
 
           <!-- ZONE INFO STRIP -->
@@ -1054,7 +1054,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <span style="color:var(--muted)">·</span>
             <span style="color:var(--sub)" id="hw-confirm-zip">—</span>
             <span style="color:var(--muted)">·</span>
-            <span style="color:var(--sub)">Your day: <strong style="color:var(--text)">Thursday</strong></span>
+            <span style="color:var(--sub)">Your day: <strong style="color:var(--text)" id="hw-collection-day">—</strong></span>
             <span style="color:var(--muted)">·</span>
             <span style="color:var(--sub)" id="hw-assigned-runner">Runner: <strong style="color:var(--cyan)">TBD — pending activation</strong></span>
           </div>
@@ -1353,7 +1353,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div class="nav-i" onclick="rnNav(this,'rn-account')"><span class="ic">👤</span> My Info</div>
       <div class="s-bot">
         <div class="u-chip" style="margin-bottom:10px"><div class="avatar" style="background:linear-gradient(135deg,var(--amber),var(--red))" id="rn-sidebar-avatar">—</div><div><div class="u-name" id="rn-sidebar-name">Runner</div><div class="u-role" id="rn-sidebar-role">Pending approval</div></div></div>
-        <button class="btn btn-ghost btn-full btn-sm" onclick="go('S-land')">Log Out</button>
+        <button class="btn btn-ghost btn-full btn-sm" onclick="bindashLogout()">Log Out</button>
       </div>
     </div>
     <div class="main">
@@ -2054,6 +2054,221 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 function go(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0)}
 
+// ── CURRENT USER STATE ────────────────────────────
+// Set on login/session restore, cleared on logout
+let currentUser = null  // { id, email, role, first_name, last_name, zone_id, ... }
+
+function setCurrentUser(supabaseUser){
+  if(!supabaseUser){ currentUser = null; return }
+  currentUser = {
+    id:         supabaseUser.id,
+    email:      supabaseUser.email,
+    role:       supabaseUser.user_metadata?.role       || 'hw',
+    first_name: supabaseUser.user_metadata?.first_name || '',
+    last_name:  supabaseUser.user_metadata?.last_name  || '',
+    status:     supabaseUser.user_metadata?.status     || 'pending_review',
+    zone_id:    supabaseUser.user_metadata?.zone_id    || null,
+  }
+}
+
+// ── POPULATE HW DASHBOARD from currentUser + Supabase ────────
+async function populateHWDashboard(){
+  if(!currentUser) return
+  const fn = currentUser.first_name || 'there'
+  const ln = currentUser.last_name  || ''
+  const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'HW'
+
+  // Sidebar
+  const nameEl = document.getElementById('hw-sidebar-name')
+  const avEl   = document.getElementById('hw-sidebar-avatar')
+  const grEl   = document.getElementById('hw-greeting')
+  if(nameEl) nameEl.textContent = fn + ' ' + ln
+  if(avEl)   avEl.textContent   = initials
+  if(grEl)   grEl.textContent   = 'Welcome back, ' + fn + ' 👋'
+
+  // Load their signup record from Supabase to get zone, day, runner
+  try {
+    const res = await _supa
+      .from('homeowner_signups')
+      .select('*')
+      .eq('email', currentUser.email)
+      .single()
+
+    const row = res?.data
+    if(!row) return
+
+    // Zone strip
+    const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id)
+    const zoneEl = document.getElementById('hw-zone-name')
+    const zipEl  = document.getElementById('hw-confirm-zip')
+    const dayEl  = document.querySelector('#hw-home [style*="color:var(--text)"]')
+    if(zoneEl) zoneEl.textContent = zone?.name || 'Pending zone assignment'
+    if(zipEl)  zipEl.textContent  = row.zip_code || ''
+
+    // Collection day from their signup
+    const dayText = row.collection_day || '—'
+    const dayStrip = document.getElementById('hw-collection-day')
+    if(dayStrip) dayStrip.textContent = dayText
+
+    // Runner assignment
+    const runnerEl = document.getElementById('hw-assigned-runner')
+    if(runnerEl){
+      if(row.assigned_runner){
+        const runner = RUNNERS.find(r=>r.id===row.assigned_runner)
+        runnerEl.innerHTML = 'Runner: <strong style="color:var(--cyan)">' + (runner?.name || 'Assigned') + '</strong>'
+      } else {
+        runnerEl.innerHTML = 'Runner: <strong style="color:var(--muted)">TBD — pending activation</strong>'
+      }
+    }
+
+    // Status-aware greeting subtitle
+    const subEl = document.querySelector('#hw-home .sl2, #hw-home [style*="color:var(--sub)"]')
+    if(row.status === 'pending_review'){
+      const nextColEl = document.querySelector('#hw-home div[style*="font-size:14px"]')
+      if(nextColEl) nextColEl.innerHTML = 'Your account is <strong style="color:var(--amber)">pending review</strong> — we'll email you once approved and your first collection is scheduled'
+    } else if(row.status === 'approved'){
+      const nextColEl = document.querySelector('#hw-home div[style*="font-size:14px"]')
+      if(nextColEl) nextColEl.innerHTML = 'Service active · Collection day: <strong style="color:var(--cyan)">' + dayText + '</strong>'
+    }
+
+    // Stats — zeros until real jobs exist
+    const colCount = document.getElementById('hw-collections-count')
+    const upCount  = document.getElementById('hw-upcoming-count')
+    if(colCount) colCount.textContent = row.collections_done || 0
+    if(upCount)  upCount.textContent  = row.upcoming_count   || 0
+
+  } catch(err){
+    console.warn('[BinDash] HW profile load failed:', String(err?.message||err))
+  }
+}
+
+// ── POPULATE RUNNER DASHBOARD from currentUser + Supabase ────
+async function populateRNDashboard(){
+  if(!currentUser) return
+  const fn = currentUser.first_name || 'Runner'
+  const ln = currentUser.last_name  || ''
+  const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'RN'
+
+  // Sidebar
+  const nameEl = document.getElementById('rn-sidebar-name')
+  const avEl   = document.getElementById('rn-sidebar-avatar')
+  const roleEl = document.getElementById('rn-sidebar-role')
+  const grEl   = document.getElementById('rn-home-subtitle')
+  if(nameEl) nameEl.textContent = fn + ' ' + ln
+  if(avEl)   avEl.textContent   = initials
+  if(roleEl) roleEl.textContent = 'Runner'
+
+  // Load their application record
+  try {
+    const res = await _supa
+      .from('runner_applications')
+      .select('*')
+      .eq('email', currentUser.email)
+      .single()
+
+    const row = res?.data
+    if(!row) return
+
+    if(row.status === 'pending_review'){
+      if(grEl) grEl.textContent = 'Your application is pending review — we'll notify you within 24–48 hrs'
+    } else if(row.status === 'approved'){
+      if(grEl) grEl.textContent = 'Account active · Check your routes below'
+      await loadRunnerRoutes(row)
+    } else if(row.status === 'rejected'){
+      if(grEl) grEl.textContent = 'Application not approved — contact support for details'
+    }
+
+    // Account page pre-fill
+    const fnEl = document.querySelector('#rn-account input[placeholder="First name"]')
+    const lnEl = document.querySelector('#rn-account input[placeholder="Last name"]')
+    const emEl = document.querySelector('#rn-account input[placeholder="Email address"]')
+    const phEl = document.querySelector('#rn-account input[placeholder="Phone number"]')
+    if(fnEl) fnEl.value = row.first_name || ''
+    if(lnEl) lnEl.value = row.last_name  || ''
+    if(emEl) emEl.value = row.email      || ''
+    if(phEl) phEl.value = row.phone      || ''
+
+  } catch(err){
+    console.warn('[BinDash] RN profile load failed:', String(err?.message||err))
+  }
+}
+
+// ── LOAD RUNNER ROUTES (jobs assigned to this runner) ─────────
+async function loadRunnerRoutes(runnerRow){
+  try {
+    const res = await _supa
+      .from('jobs')
+      .select('*, homeowner_signups(first_name, last_name, street_address, zip_code, service_type)')
+      .eq('runner_id', runnerRow.id)
+      .in('status', ['scheduled','in_progress'])
+      .order('scheduled_date', { ascending: true })
+
+    const jobs = res?.data || []
+    if(!jobs.length) return
+
+    const batchArea = document.getElementById('rn-home-batch-area')
+    const upcomingList = document.getElementById('upcoming-batch-list')
+
+    if(!jobs.length){
+      if(batchArea) batchArea.innerHTML = `<div style="text-align:center;padding:40px 20px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--muted)"><div style="font-size:36px;margin-bottom:10px">📬</div><div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No routes yet</div><div style="font-size:13px">Batch offers will appear here before each collection day.</div></div>`
+      return
+    }
+
+    // Group jobs by batch_id
+    const batches = {}
+    jobs.forEach(j=>{
+      const key = j.batch_id || j.id
+      if(!batches[key]) batches[key] = { id:key, date:j.scheduled_date, type:j.visit_type, stops:[] }
+      batches[key].stops.push(j)
+    })
+
+    const batchCards = Object.values(batches).map(batch => {
+      const earn = (batch.stops.length * 3.25).toFixed(2)
+      const mapsAddresses = batch.stops.map(s=>encodeURIComponent((s.homeowner_signups?.street_address||'') + ', ' + (s.homeowner_signups?.zip_code||''))).join('|')
+      const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${mapsAddresses.split('|').pop()}&waypoints=${mapsAddresses.split('|').slice(0,-1).join('|')}&travelmode=driving`
+
+      return `<div class="batch-card" style="margin-bottom:14px">
+        <div class="batch-head ${batch.type==='bin_out'?'out':'in'}">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="${batch.type==='bin_out'?'vt-out':'vt-in'}">${batch.type==='bin_out'?'🌙 BIN OUT':'☀️ BIN IN'}</span>
+              <span style="font-weight:700;font-size:13px">${batch.id.slice(0,12).toUpperCase()}</span>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">${new Date(batch.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</div>
+          </div>
+          <div style="text-align:right"><div style="font-size:18px;font-weight:800;color:${batch.type==='bin_out'?'#a5b4fc':'#6ee7b7'}">$${earn}</div><div style="font-size:10px;color:var(--muted)">${batch.stops.length} stops</div></div>
+        </div>
+        <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
+          ${batch.stops.map((s,i)=>`
+          <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:${i<batch.stops.length-1?'1px solid rgba(30,40,64,.5)':'none'}">
+            <div style="width:22px;height:22px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:600">${(s.homeowner_signups?.first_name||'') + ' ' + (s.homeowner_signups?.last_name||'')}</div>
+              <div style="font-size:11px;color:var(--muted)">${s.homeowner_signups?.street_address||'—'}</div>
+              ${s.gate_code ? `<div style="font-size:11px;color:#fbbf24;margin-top:2px">🔑 Gate: ${s.gate_code}</div>` : ''}
+              ${s.pet_note  ? `<div style="font-size:11px;color:#fbbf24;margin-top:2px">🐾 ${s.pet_note}</div>` : ''}
+            </div>
+            <div style="font-size:11px;color:var(--green);font-weight:600">$3.25</div>
+          </div>`).join('')}
+        </div>
+        <div style="padding:10px 16px 14px;display:flex;gap:8px;flex-wrap:wrap">
+          <a href="${mapsUrl}" target="_blank" rel="noopener"
+             style="display:inline-flex;align-items:center;gap:6px;background:#1a73e8;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;color:#fff;text-decoration:none">
+            📍 Open Route in Google Maps
+          </a>
+          <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600;align-self:center">Est. $${earn}</span>
+        </div>
+      </div>`
+    }).join('')
+
+    if(batchArea) batchArea.innerHTML = batchCards
+    if(upcomingList) upcomingList.innerHTML = batchCards
+
+  } catch(err){
+    console.warn('[BinDash] Route load failed:', String(err?.message||err))
+  }
+}
+
 // ── Session restore on page load ──
 async function initApp(){
   try {
@@ -2074,22 +2289,13 @@ async function initApp(){
       setTimeout(() => adNav(null, 'ad-overview'), 80)
       loadSignupsFromSupabase()
     } else if(role === 'rn'){
-      const nameEl = document.getElementById('rn-sidebar-name')
-      const avEl   = document.getElementById('rn-sidebar-avatar')
-      const roleEl = document.getElementById('rn-sidebar-role')
-      if(nameEl) nameEl.textContent = fn + ' ' + ln
-      if(avEl)   avEl.textContent   = initials
-      if(roleEl) roleEl.textContent = 'Runner'
+      setCurrentUser(user)
       go('S-rn-dash')
+      populateRNDashboard()
     } else {
-      // Homeowner
-      const nameEl = document.getElementById('hw-sidebar-name')
-      const avEl   = document.getElementById('hw-sidebar-avatar')
-      const grEl   = document.getElementById('hw-greeting')
-      if(nameEl) nameEl.textContent = fn + ' ' + ln
-      if(avEl)   avEl.textContent   = initials
-      if(grEl)   grEl.textContent   = 'Welcome back, ' + fn + ' 👋'
+      setCurrentUser(user)
       go('S-hw-dash')
+      populateHWDashboard()
     }
     // Always load zones regardless of session state
     await loadZonesFromSupabase()
@@ -2139,26 +2345,14 @@ async function doLogin(){
     document.getElementById('l-pass').value = ''
     if(btn){ btn.disabled=false; btn.textContent='Sign In →' }
 
+    setCurrentUser(data.user)
     if(role === 'rn'){
-      // Populate runner sidebar
-      const initials = (data.user?.user_metadata?.first_name?.[0]||'R') + (data.user?.user_metadata?.last_name?.[0]||'')
-      const el = document.getElementById('rn-sidebar-name')
-      const av = document.getElementById('rn-sidebar-avatar')
-      const ro = document.getElementById('rn-sidebar-role')
-      if(el) el.textContent = name + ' ' + (data.user?.user_metadata?.last_name||'')
-      if(av) av.textContent = initials.toUpperCase()
-      if(ro) ro.textContent = 'Runner'
       go('S-rn-dash')
+      populateRNDashboard()
       showToast('Welcome back, ' + name + ' 👋', 'ok')
     } else {
-      // Homeowner
-      const el = document.getElementById('hw-sidebar-name')
-      const av = document.getElementById('hw-sidebar-avatar')
-      const gr = document.getElementById('hw-greeting')
-      if(el) el.textContent = name + ' ' + (data.user?.user_metadata?.last_name||'')
-      if(av) av.textContent = ((data.user?.user_metadata?.first_name?.[0]||'H') + (data.user?.user_metadata?.last_name?.[0]||'')).toUpperCase()
-      if(gr) gr.textContent = 'Welcome back, ' + name + ' 👋'
       go('S-hw-dash')
+      populateHWDashboard()
       showToast('Welcome back, ' + name + ' 👋', 'ok')
     }
   } catch(err) {
@@ -6284,14 +6478,16 @@ function zoneToRow(z){
 // Load all zones from Supabase on page load (called from initApp)
 async function loadZonesFromSupabase(){
   try {
-    const res   = await _supa
-      .from('zones')
-      .select('*')
-      .order('created_at', { ascending: true })
-
-    const data  = res?.data  || []
-    const error = res?.error || null
-    if(error){ console.warn('[BinDash] Could not load zones:', String(error.message || error)); return }
+    let data = [], loadErr = null
+    try {
+      const res = await _supa
+        .from('zones')
+        .select('*')
+        .order('created_at', { ascending: true })
+      data    = res?.data    || []
+      loadErr = res?.error?.message || null
+    } catch(fetchErr){ loadErr = String(fetchErr?.message || fetchErr) }
+    if(loadErr){ console.warn('[BinDash] Could not load zones:', loadErr); return }
     if(!data.length) return
 
     // Rebuild ADMIN_ZONES from DB rows
@@ -6328,15 +6524,17 @@ async function loadZonesFromSupabase(){
 // Load homeowner signups from Supabase into in-memory arrays
 async function loadSignupsFromSupabase(){
   try {
-    const res = await _supa
-      .from('homeowner_signups')
-      .select('*')
-      .in('status', ['pending_review','waitlisted'])
-      .order('created_at', { ascending: false })
-
-    const data  = res?.data  || []
-    const error = res?.error || null
-    if(error){ console.warn('[BinDash] Could not load signups:', String(error.message || error)); return }
+    let data = [], loadErr = null
+    try {
+      const res = await _supa
+        .from('homeowner_signups')
+        .select('*')
+        .in('status', ['pending_review','waitlisted'])
+        .order('created_at', { ascending: false })
+      data    = res?.data    || []
+      loadErr = res?.error?.message || null
+    } catch(fetchErr){ loadErr = String(fetchErr?.message || fetchErr) }
+    if(loadErr){ console.warn('[BinDash] Could not load signups:', loadErr); return }
     if(!data.length) return
 
     // Clear then repopulate in-memory arrays
@@ -6381,15 +6579,17 @@ async function loadSignupsFromSupabase(){
 
 async function loadRunnerApplicationsFromSupabase(){
   try {
-    const res = await _supa
-      .from('runner_applications')
-      .select('*')
-      .eq('status', 'pending_review')
-      .order('created_at', { ascending: false })
-
-    const data  = res?.data  || []
-    const error = res?.error || null
-    if(error){ console.warn('[BinDash] Could not load runner apps:', String(error.message || error)); return }
+    let data = [], loadErr = null
+    try {
+      const res = await _supa
+        .from('runner_applications')
+        .select('*')
+        .eq('status', 'pending_review')
+        .order('created_at', { ascending: false })
+      data    = res?.data    || []
+      loadErr = res?.error?.message || null
+    } catch(fetchErr){ loadErr = String(fetchErr?.message || fetchErr) }
+    if(loadErr){ console.warn('[BinDash] Could not load runner apps:', loadErr); return }
 
     PENDING_RUNNERS.length = 0
     data.forEach(row => {
@@ -6447,6 +6647,20 @@ function syncZoneData(){
 
 // Zone data for runner signup lookup — built dynamically from ADMIN_ZONES via syncZoneData()
 let ZONE_DATA = {}
+
+function checkRunnerZipCoverage(zip){
+  if(zip.length < 5) return
+  const zone = findZoneForZip(zip)
+  const el = document.getElementById('r-zip-coverage')
+  if(!el) return
+  if(zone){
+    el.style.cssText = 'display:block;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:8px;padding:8px 12px;font-size:12px;margin-top:6px'
+    el.innerHTML = `<span style="color:#22c55e;font-weight:700">✅ Zone available: ${zone.name}</span><br><span style="color:var(--sub)">Your route will be built in this area</span>`
+  } else {
+    el.style.cssText = 'display:block;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:8px 12px;font-size:12px;margin-top:6px'
+    el.innerHTML = `<span style="color:#a5b4fc;font-weight:700">📍 No zone yet for ZIP ${zip}</span><br><span style="color:var(--sub)">We'll add you to the interest list — you'll be first contacted when we launch here</span>`
+  }
+}
 
 const ZONE_STATUS_CONFIG = {
   live:     { dot:'#22c55e', label:'Live — accepting runners', badge:'background:#22c55e22;color:#22c55e' },
@@ -6653,6 +6867,12 @@ async function doAdminLogin(){
     errBox.style.display = 'block'
     if(btn){ btn.disabled=false; btn.textContent='Sign In to Staff Portal →' }
   }
+}
+
+async function bindashLogout(){
+  try { await _supa.auth.signOut() } catch(e){}
+  currentUser = null
+  go('S-land')
 }
 
 async function adminLogout(){
