@@ -5,6 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BinDash — Smart Bin Collection</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;853&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ══════════════════════════════════════════════════
+//  SUPABASE CONFIG — replace with your project keys
+//  Supabase Dashboard → Settings → API
+// ══════════════════════════════════════════════════
+const SUPABASE_URL = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
+const SUPABASE_ANON_KEY = 'sb_publishable_PzQNU1g9t7nH_c8GrK37sQ_2OocnlNQ'
+const _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+// ── SUPABASE HELPER — centralised error handler ──
+async function dbInsert(table, payload){
+  const { data, error } = await _supa.from(table).insert([payload]).select()
+  if(error){ console.error('[BinDash DB]', table, error); throw error }
+  return data?.[0]
+}
+async function dbUpsert(table, payload, onConflict='email'){
+  const { data, error } = await _supa.from(table).upsert([payload], { onConflict }).select()
+  if(error){ console.error('[BinDash DB]', table, error); throw error }
+  return data?.[0]
+}
+</script>
 <style>
 :root{
   --bg:#07090f;--surface:#0f1420;--surface2:#161d2e;--surface3:#1e2840;
@@ -2505,7 +2527,7 @@ function hBack(s){
   const sl=document.getElementById('h-sl'+(s-1));if(sl)sl.classList.remove('done')
   const csc=document.getElementById('h-sc'+s);if(csc)csc.classList.remove('active')
 }
-function hSubmit(){
+async function hSubmit(){
   if(!document.getElementById('h-terms').checked){showToast('Please agree to the Terms of Service','err');return}
 
   const fn   = document.getElementById('h-fn')?.value || 'New'
@@ -2516,6 +2538,8 @@ function hSubmit(){
   const city = document.getElementById('h-city')?.value || ''
   const zip  = document.getElementById('h-zip')?.value || ''
   const last4= document.getElementById('cc-num')?.value?.replace(/\s/g,'')?.slice(-4)||'––'
+  const cardName = document.getElementById('cc-name')?.value || ''
+  const cardExp  = document.getElementById('cc-exp')?.value || ''
 
   const newApp = {
     id: 'HW-APP-'+String(Date.now()).slice(-4),
@@ -2530,6 +2554,39 @@ function hSubmit(){
     submittedAt: 'Just now',
     status: 'pending',
     zoneId: null,
+  }
+
+  // ── Save to Supabase ──
+  const submitBtn = document.querySelector('#h-s5 .btn-cyan')
+  if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Saving...' }
+
+  try {
+    await dbInsert('homeowner_signups', {
+      first_name:      fn,
+      last_name:       ln,
+      email:           em,
+      phone:           ph,
+      street_address:  addr,
+      city:            city,
+      zip_code:        zip,
+      service_type:    document.getElementById('h-svc')?.value || 'Recycling',
+      frequency:       obSelectedFreq,
+      plan_id:         obSelectedPlan,
+      collection_day:  document.getElementById('h-day')?.value || null,
+      service_notes:   document.getElementById('h-svc-notes')?.value || null,
+      card_last4:      last4,
+      card_holder:     cardName,
+      card_expiry:     cardExp,
+      status:          'pending_review',
+      created_at:      new Date().toISOString(),
+    })
+    console.log('[BinDash] Homeowner signup saved to Supabase ✅')
+  } catch(err) {
+    // Non-blocking — still route the user forward even if DB write fails
+    // so a Supabase config error doesn't break the demo
+    console.warn('[BinDash] DB write failed (check Supabase config):', err.message)
+  } finally {
+    if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='🚀 Activate My Account' }
   }
 
   // Route to waitlist screen if ZIP has no live coverage, otherwise pending approval
@@ -2550,7 +2607,44 @@ function rNext(s){
   window.scrollTo(0,0)
 }
 function rBack(s){document.getElementById('r-s'+s).style.display='none';document.getElementById('r-s'+(s-1)).style.display='block';const sc=document.getElementById('r-sc'+(s-1));sc.classList.remove('done');sc.classList.add('active');sc.textContent=s-1;const sl=document.getElementById('r-sl'+(s-1));if(sl)sl.classList.remove('done')}
-function rSubmit(){showToast("Application submitted! We'll review within 24–48 hrs 📧",'ok');setTimeout(()=>go('S-land'),2000)}
+async function rSubmit(){
+  const fn   = document.getElementById('r-fn')?.value?.trim() || ''
+  const ln   = document.getElementById('r-ln')?.value?.trim() || ''
+  const em   = document.getElementById('r-em')?.value?.trim() || ''
+  const ph   = document.getElementById('r-ph')?.value?.trim() || ''
+  const zip  = document.getElementById('r-zip')?.value?.trim() || ''
+  const veh  = document.getElementById('r-vehicle')?.value || ''
+  const vp   = document.querySelector('#vp-both.on') ? 'both'
+               : document.querySelector('#vp-out.on') ? 'bin_out'
+               : 'bin_in'
+  const bgc  = document.getElementById('r-bgc')?.checked || false
+
+  const submitBtn = document.querySelector('#r-s5 .btn-cyan')
+  if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Submitting...' }
+
+  try {
+    await dbInsert('runner_applications', {
+      first_name:       fn,
+      last_name:        ln,
+      email:            em,
+      phone:            ph,
+      zip_code:         zip,
+      vehicle_type:     veh,
+      visit_preference: vp,
+      bgc_consent:      bgc,
+      status:           'pending_review',
+      created_at:       new Date().toISOString(),
+    })
+    console.log('[BinDash] Runner application saved to Supabase ✅')
+  } catch(err) {
+    console.warn('[BinDash] DB write failed (check Supabase config):', err.message)
+  } finally {
+    if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Submit Application' }
+  }
+
+  showToast("Application submitted! We'll review within 24–48 hrs 📧",'ok')
+  setTimeout(()=>go('S-land'),2000)
+}
 
 // Nav
 function hwNav(el,pg){document.querySelectorAll('#S-hw-dash .nav-i').forEach(n=>n.classList.remove('on'));if(el)el.classList.add('on');document.querySelectorAll('#S-hw-dash .pg').forEach(p=>p.classList.remove('on'));document.getElementById(pg).classList.add('on');const t={'hw-home':'Dashboard','hw-collections':'My Collections','hw-property':'My Property','hw-schedule':'Schedule','hw-account':'Account & Plan'};document.getElementById('hw-pg-title').textContent=t[pg]}
@@ -6744,7 +6838,7 @@ function checkRunnerCode(){
   }
 }
 
-function submitRunnerInterest(){
+async function submitRunnerInterest(){
   const name  = document.getElementById('runner-interest-name')?.value.trim()
   const zip   = document.getElementById('runner-interest-zip')?.value.trim()
   const email = document.getElementById('runner-interest-email')?.value.trim()
@@ -6752,9 +6846,24 @@ function submitRunnerInterest(){
     showToast('Please enter your name and email','err')
     return
   }
+
+  const btn = document.querySelector('#modal-box .btn-outline.btn-full')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+
+  try {
+    await dbUpsert('runner_interest', {
+      full_name:  name,
+      email:      email,
+      zip_code:   zip || null,
+      created_at: new Date().toISOString(),
+    })
+    console.log('[BinDash] Runner interest saved to Supabase ✅')
+  } catch(err) {
+    console.warn('[BinDash] DB write failed (check Supabase config):', err.message)
+  }
+
   closeM()
   showToast('Interest logged — we\'ll be in touch when spots open! 🎟️','ok')
-  // In production: POST to /api/runner-interest { name, email, zip }
 }
 </script>
 </body>
