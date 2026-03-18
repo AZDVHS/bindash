@@ -11,8 +11,8 @@
 //  SUPABASE CONFIG — replace with your project keys
 //  Supabase Dashboard → Settings → API
 // ══════════════════════════════════════════════════
-const SUPABASE_URL = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
-const SUPABASE_ANON_KEY = 'sb_publishable_PzQNU1g9t7nH_c8GrK37sQ_2OocnlNQ'
+const SUPABASE_URL = 'https://your-project-url.supabase.co'
+const SUPABASE_ANON_KEY = 'your-anon-key'
 const _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // ── SUPABASE HELPER — centralised error handler ──
@@ -6192,6 +6192,10 @@ function showReferralLink(){
 
 
 // Admin auth — uses Supabase auth with role check
+// ── LOCAL BYPASS — change these before going fully live ──────────
+const LOCAL_ADMIN_EMAIL = 'admin@bindash.com'
+const LOCAL_ADMIN_PASS  = 'BinDash2026!'
+// ─────────────────────────────────────────────────────────────────
 let adminAuthed = false
 
 async function doAdminLogin(){
@@ -6209,6 +6213,21 @@ async function doAdminLogin(){
   const btn = document.querySelector('#S-admin-login .btn-cyan')
   if(btn){ btn.disabled=true; btn.textContent='Signing in...' }
 
+  // ── Local bypass — works even before Supabase admin user is set up ──
+  if(email === LOCAL_ADMIN_EMAIL && pass === LOCAL_ADMIN_PASS){
+    adminAuthed = true
+    const nameEl = document.getElementById('ad-sidebar-name')
+    if(nameEl) nameEl.textContent = 'Admin'
+    document.getElementById('ad-email').value = ''
+    document.getElementById('ad-pass').value = ''
+    if(btn){ btn.disabled=false; btn.textContent='Sign In to Staff Portal →' }
+    go('S-admin')
+    setTimeout(() => adNav(null, 'ad-overview'), 80)
+    showToast('Welcome back, Admin ✅', 'ok')
+    return
+  }
+
+  // ── Supabase auth (used once you create your admin user in Supabase) ──
   try {
     const { data, error } = await _supa.auth.signInWithPassword({ email, password: pass })
 
@@ -6660,4 +6679,3 @@ async function submitRunnerInterest(){
 </script>
 </body>
 </html>
-
