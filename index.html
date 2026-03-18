@@ -11,8 +11,8 @@
 //  SUPABASE CONFIG — replace with your project keys
 //  Supabase Dashboard → Settings → API
 // ══════════════════════════════════════════════════
-const SUPABASE_URL = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
-const SUPABASE_ANON_KEY = 'sb_publishable_PzQNU1g9t7nH_c8GrK37sQ_2OocnlNQ'
+const SUPABASE_URL = 'https://your-project-url.supabase.co'
+const SUPABASE_ANON_KEY = 'your-anon-key'
 const _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // ── SUPABASE HELPER — centralised error handler ──
@@ -177,7 +177,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .vs-sub{font-size:11px;color:var(--sub);line-height:1.5}
 </style>
 </head>
-<body>
+<body onload="initApp()">
 
 <!-- ══════════ LANDING ══════════ -->
 <div id="S-land" class="screen active">
@@ -486,10 +486,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       </div>
       <div class="field"><label>Email</label><input type="email" id="l-email" placeholder="you@example.com"></div>
       <div class="field"><label>Password</label><input type="password" id="l-pass" placeholder="••••••••"></div>
-      <button class="btn btn-cyan btn-full" style="margin-bottom:14px" onclick="doLogin()">Sign In →</button>
+      <div id="login-error" style="display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:#fca5a5;margin-bottom:12px"></div>
+        <button class="btn btn-cyan btn-full" style="margin-bottom:14px" onclick="doLogin()">Sign In →</button>
       <div style="text-align:center;font-size:13px;color:var(--muted);margin-bottom:16px">Don't have an account? <a onclick="go('S-signup')" style="color:var(--cyan);cursor:pointer;font-weight:600">Sign up free</a></div>
       <button class="btn btn-ghost btn-full btn-sm" onclick="go('S-land')">← Back to Home</button>
-      <div style="margin-top:18px;background:var(--surface2);border-radius:8px;padding:12px;font-size:11px;color:var(--sub)"><strong style="color:var(--cyan)">Demo:</strong> <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="7f1710121a1008111a0d3f1b1a1210511c1012">[email&#160;protected]</a> / demo123 &nbsp;|&nbsp; <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="6311160d0d06112307060e0c4d000c0e">[email&#160;protected]</a> / demo123</div>
+      
     </div>
   </div>
 </div>
@@ -728,7 +729,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           </div>
         </div>
         <div class="field"><label>Special Instructions <span style="color:var(--muted);font-size:10px;font-weight:400">(optional)</span></label>
-          <textarea id="h-svc-notes" placeholder="e.g. Please knock before collecting. Recycling bin lid is broken — handle with care."></textarea>
+          <textarea id="h-svc-notes" placeholder="e.g. —. Recycling bin lid is broken — handle with care."></textarea>
         </div>
 
         <div style="display:flex;justify-content:space-between;margin-top:6px"><button class="btn btn-outline" onclick="hBack(3)">← Back</button><button class="btn btn-cyan" onclick="hNext(3)">Next: Payment →</button></div>
@@ -916,7 +917,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <div style="color:var(--sub);font-size:14px;margin-bottom:16px">BinDash runners are 1099 independent contractors.</div>
         <div class="warn-box">⚠️ <strong>Important:</strong> You are an independent contractor, not an employee. You are responsible for your own taxes. BinDash will issue a 1099-NEC if you earn over $600 in a calendar year.</div>
         <div class="sec-h">Tax Information</div>
-        <div class="field"><label>Legal Full Name (as on tax docs)</label><input placeholder="Marcus James Reid"></div>
+        <div class="field"><label>Legal Full Name (as on tax docs)</label><input placeholder="—"></div>
         <div class="g2"><div class="field"><label>SSN / Tax ID</label><input type="password" placeholder="XXX-XX-XXXX"></div><div class="field"><label>Business Structure</label><select><option>Individual / Sole Proprietor</option><option>Single-member LLC</option><option>Partnership</option><option>S-Corp</option></select></div></div>
         <div class="sec-h">Agreements</div>
         <div style="background:var(--surface2);border-radius:8px;padding:12px;font-size:12px;color:var(--sub);line-height:1.7;max-height:120px;overflow-y:auto;margin-bottom:14px;border:1px solid var(--border)"><strong style="color:var(--text)">BinDash Contractor Agreement (Summary)</strong><br><br>You are an independent contractor. You set your own schedule and may work elsewhere. You are responsible for equipment, insurance, and your own tax obligations. BinDash issues a 1099-NEC for earnings over $600/year. You agree to professional conduct with all homeowners and consent to BinDash's platform policies.</div>
@@ -1004,7 +1005,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div class="nav-i" onclick="hwNav(this,'hw-schedule')"><span class="ic">📅</span> Schedule</div>
       <div class="nav-i" onclick="hwNav(this,'hw-account')"><span class="ic">👤</span> Account &amp; Plan</div>
       <div class="s-bot">
-        <div class="u-chip" style="margin-bottom:10px"><div class="avatar">JD</div><div><div class="u-name">Jane Demo</div><div class="u-role">Homeowner</div></div></div>
+        <div class="u-chip" style="margin-bottom:10px"><div class="avatar" id="hw-sidebar-avatar">—</div><div><div class="u-name" id="hw-sidebar-name">My Account</div><div class="u-role">Homeowner</div></div></div>
         <button class="btn btn-ghost btn-full btn-sm" onclick="go('S-land')">Log Out</button>
       </div>
     </div>
@@ -1014,7 +1015,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- HW HOME -->
         <div class="pg on" id="hw-home">
-          <div style="margin-bottom:18px"><div style="font-size:21px;font-weight:700">Good morning, Jane 👋</div><div style="color:var(--sub);font-size:14px;margin-top:3px">Next collection: <strong style="color:var(--cyan)">Thursday Mar 14</strong> — Bin Out tonight at 6pm</div></div>
+          <div style="margin-bottom:18px"><div style="font-size:21px;font-weight:700" id="hw-greeting">Welcome to BinDash 👋</div><div style="color:var(--sub);font-size:14px;margin-top:3px">Next collection: <strong style="color:var(--cyan)">Thursday Mar 14</strong> — Bin Out tonight at 6pm</div></div>
 
           <!-- TRUCK CONFIRMATION PROMPT — shown on collection day -->
           <div id="hw-truck-confirm-card" style="background:rgba(245,158,11,.07);border:1.5px solid rgba(245,158,11,.3);border-radius:14px;padding:16px;margin-bottom:18px">
@@ -1055,7 +1056,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <span style="color:var(--muted)">·</span>
             <span style="color:var(--sub)">Your day: <strong style="color:var(--text)">Thursday</strong></span>
             <span style="color:var(--muted)">·</span>
-            <span style="color:var(--sub)">Runner: <strong style="color:var(--cyan)">Marcus Reid</strong></span>
+            <span style="color:var(--sub)" id="hw-assigned-runner">Runner: <strong style="color:var(--cyan)">TBD — pending activation</strong></span>
           </div>
 
           <!-- NEXT COLLECTION — shows both visits -->
@@ -1066,14 +1067,14 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <div class="vt-out" style="margin-bottom:8px">🌙 BIN OUT</div>
                 <div style="font-size:13px;font-weight:600;margin-bottom:3px">Wed Mar 13 · Evening</div>
                 <div style="font-size:12px;color:var(--sub);margin-bottom:6px">Runner moves bins to curb</div>
-                <div style="font-size:11px;color:var(--muted)">Runner: Marcus Reid</div>
+                <div style="font-size:11px;color:var(--muted)">Runner: TBD</div>
                 <span class="badge" style="background:#3b82f622;color:#3b82f6;margin-top:8px">Scheduled</span>
               </div>
               <div style="border:1.5px solid rgba(6,214,160,.3);background:rgba(6,214,160,.05);border-radius:10px;padding:14px">
                 <div class="vt-in" style="margin-bottom:8px">☀️ BIN IN</div>
                 <div style="font-size:13px;font-weight:600;margin-bottom:3px">Thu Mar 14 · Daytime</div>
                 <div style="font-size:12px;color:var(--sub);margin-bottom:6px">Runner returns bins to property</div>
-                <div style="font-size:11px;color:var(--muted)">Runner: Marcus Reid</div>
+                <div style="font-size:11px;color:var(--muted)">Runner: TBD</div>
                 <span class="badge" style="background:#3b82f622;color:#3b82f6;margin-top:8px">Scheduled</span>
               </div>
             </div>
@@ -1119,12 +1120,12 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
             <div class="card">
               <div class="card-ttl">Property Details</div>
-              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Address</div><div>123 Main Street, Glendale AZ 85374</div></div>
+              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Address</div><div>Address from your signup</div></div>
               <div class="dl" style="margin-bottom:9px"><div class="dl-l">Property Type</div><div>Single Family Home</div></div>
               <div class="dl" style="margin-bottom:9px"><div class="dl-l">Bin Storage</div><div>Back yard</div></div>
-              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Curb Placement</div><div>Left of driveway, outside front gate</div></div>
-              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Gate</div><div>Locked — code: 1234</div></div>
-              <div class="dl"><div class="dl-l">Pets</div><div>Dog (friendly)</div></div>
+              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Curb Placement</div><div>Confirmed after first collection</div></div>
+              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Gate</div><div>From your signup form</div></div>
+              <div class="dl"><div class="dl-l">Pets</div><div>From your signup form</div></div>
               <button class="btn btn-outline btn-sm" style="margin-top:14px" onclick="showEditProperty()">✏️ Edit Property</button>
             </div>
             <div class="card">
@@ -1134,7 +1135,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               <div class="dl" style="margin-bottom:9px"><div class="dl-l">Collection Day</div><div>Thursday</div></div>
               <div class="dl" style="margin-bottom:9px"><div class="dl-l">Bin Out night</div><div style="color:#a5b4fc">Wednesday evening</div></div>
               <div class="dl" style="margin-bottom:9px"><div class="dl-l">Number of Bins</div><div>2</div></div>
-              <div class="dl"><div class="dl-l">Special Instructions</div><div style="color:var(--sub);font-size:12px">Please knock before collecting</div></div>
+              <div class="dl"><div class="dl-l">Special Instructions</div><div style="color:var(--sub);font-size:12px">—</div></div>
               <button class="btn btn-outline btn-sm" style="margin-top:14px" onclick="showEditPreferences()">✏️ Edit Preferences</button>
             </div>
           </div>
@@ -1351,7 +1352,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div class="nav-i" onclick="rnNav(this,'rn-tax')"><span class="ic">📄</span> Tax Documents</div>
       <div class="nav-i" onclick="rnNav(this,'rn-account')"><span class="ic">👤</span> My Info</div>
       <div class="s-bot">
-        <div class="u-chip" style="margin-bottom:10px"><div class="avatar" style="background:linear-gradient(135deg,var(--amber),var(--red))">MR</div><div><div class="u-name">Marcus Reid</div><div class="u-role">Runner · Both visits</div></div></div>
+        <div class="u-chip" style="margin-bottom:10px"><div class="avatar" style="background:linear-gradient(135deg,var(--amber),var(--red))" id="rn-sidebar-avatar">—</div><div><div class="u-name" id="rn-sidebar-name">Runner</div><div class="u-role" id="rn-sidebar-role">Pending approval</div></div></div>
         <button class="btn btn-ghost btn-full btn-sm" onclick="go('S-land')">Log Out</button>
       </div>
     </div>
@@ -1396,76 +1397,23 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           </div>
 
           <div style="margin-bottom:18px">
-            <div style="font-size:21px;font-weight:700">Hey Marcus 👋</div>
-            <div style="color:var(--sub);font-size:14px;margin-top:3px">Today: <strong style="color:var(--indigo)">3-stop Bin Out batch</strong> this evening — starts 6pm</div>
-          </div>
-
-          <!-- TODAY'S VISIT TYPE SUMMARY -->
-          <div class="visit-split" style="margin-bottom:16px">
-            <div class="vs-col">
-              <div class="vs-label" style="color:#a5b4fc">🌙 Tonight — Bin Out</div>
-              <div class="vs-time">Wed Mar 13 · 6:00 PM</div>
-              <div class="vs-pay" style="color:#a5b4fc">$12.75</div>
-              <div class="vs-sub">3 stops · OUT-CGL-047</div>
-            </div>
-            <div class="vs-col">
-              <div class="vs-label" style="color:#6ee7b7">☀️ Tomorrow — Bin In</div>
-              <div class="vs-time">Thu Mar 14 · ~10:30 AM</div>
-              <div class="vs-pay" style="color:#6ee7b7">$12.75</div>
-              <div class="vs-sub">3 stops · IN-CGL-047 (same properties)</div>
-            </div>
+            <div style="font-size:21px;font-weight:700">Runner Dashboard 👋</div>
+            <div style="color:var(--sub);font-size:14px;margin-top:3px" id="rn-home-subtitle">No routes assigned yet — check back once approved</div>
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
-            <div class="sc2"><div class="sn" style="color:var(--cyan)">284</div><div class="sl2">Total Visits</div></div>
-            <div class="sc2"><div class="sn" style="color:var(--green)">$1,840</div><div class="sl2">This Month</div></div>
-            <div class="sc2"><div class="sn" style="color:var(--amber)">4.8★</div><div class="sl2">Rating</div></div>
-            <div class="sc2"><div class="sn" style="color:var(--indigo)">Both</div><div class="sl2">Visit Type</div></div>
+            <div class="sc2"><div class="sn" style="color:var(--cyan)" id="rn-stat-visits">0</div><div class="sl2">Total Visits</div></div>
+            <div class="sc2"><div class="sn" style="color:var(--green)" id="rn-stat-month">$0</div><div class="sl2">This Month</div></div>
+            <div class="sc2"><div class="sn" style="color:var(--amber)" id="rn-stat-rating">—</div><div class="sl2">Rating</div></div>
+            <div class="sc2"><div class="sn" style="color:var(--indigo)" id="rn-stat-type">—</div><div class="sl2">Visit Type</div></div>
           </div>
 
           <div style="display:grid;grid-template-columns:3fr 2fr;gap:14px">
-            <div>
-              <!-- TONIGHT'S BATCH -->
-              <div class="batch-card" style="margin-bottom:12px">
-                <div class="batch-head out">
-                  <div style="display:flex;align-items:center;gap:8px"><span class="vt-out">🌙 BIN OUT</span><span style="font-size:13px;font-weight:600">OUT-CGL-047</span></div>
-                  <div style="font-size:11px;color:#a5b4fc">Tonight · 6:00 PM start · 1.1 mi</div>
-                </div>
-                <div class="batch-stops">
-                  <div class="stop-row">
-                    <div class="stop-num" style="background:rgba(99,102,241,.2);color:#a5b4fc">1</div>
-                    <div style="flex:1"><div style="font-size:13px;font-weight:600">Margaret Thompson</div><div style="font-size:11px;color:var(--muted)">4821 W Glendale Ave · 🔑 Gate: 1234 · 🐕 Dog friendly · Bins in back yard</div></div>
-                    <span class="badge" style="background:#f59e0b22;color:#f59e0b">Pending</span>
-                  </div>
-                  <div class="stop-row">
-                    <div class="stop-num" style="background:rgba(99,102,241,.2);color:#a5b4fc">2</div>
-                    <div style="flex:1"><div style="font-size:13px;font-weight:600">James Okafor</div><div style="font-size:11px;color:var(--muted)">15302 N Sarival Ave · No gate · No pets · Bins at side of house</div></div>
-                    <span class="badge" style="background:#f59e0b22;color:#f59e0b">Pending</span>
-                  </div>
-                  <div class="stop-row">
-                    <div class="stop-num" style="background:rgba(99,102,241,.2);color:#a5b4fc">3</div>
-                    <div style="flex:1"><div style="font-size:13px;font-weight:600">Sarah Chen</div><div style="font-size:11px;color:var(--muted)">9873 W Peoria Ave · Unlocked gate · Bins in garage</div></div>
-                    <span class="badge" style="background:#f59e0b22;color:#f59e0b">Pending</span>
-                  </div>
-                </div>
-                <div style="padding:10px 16px 14px;display:flex;gap:8px">
-                  <button class="btn btn-purple btn-sm" onclick="showStartRoute('OUT-CGL-047','Bin Out',['4821 W Glendale Ave — Margaret T.','15302 N Sarival Ave — James O.','9873 W Peoria Ave — Sarah C.'])">▶ Start Bin Out Route</button>
-                  <button class="btn btn-outline btn-sm" onclick="openRouteInMaps()">🗺️ Open in Maps</button>
-                  <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600;align-self:center">Est. $12.75</span>
-                </div>
-              </div>
-
-              <!-- TOMORROW'S BATCH PREVIEW -->
-              <div class="batch-card">
-                <div class="batch-head in">
-                  <div style="display:flex;align-items:center;gap:8px"><span class="vt-in">☀️ BIN IN</span><span style="font-size:13px;font-weight:600">IN-CGL-047</span></div>
-                  <div style="font-size:11px;color:#6ee7b7">Tomorrow · ~10:30 AM · Same 3 properties</div>
-                </div>
-                <div style="padding:12px 16px;font-size:12px;color:var(--sub)">Same stops as tonight's Bin Out — dispatched after truck confirms passage through this zone.</div>
-                <div style="padding:0 16px 14px;display:flex;gap:8px">
-                  <button class="btn btn-outline btn-sm" style="opacity:.5;cursor:default" disabled>Unlocks tomorrow morning</button>
-                  <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600;align-self:center">Est. $12.75</span>
-                </div>
+            <div id="rn-home-batch-area">
+              <div style="text-align:center;padding:40px 20px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--muted)">
+                <div style="font-size:36px;margin-bottom:10px">📬</div>
+                <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No routes yet</div>
+                <div style="font-size:13px">Once approved, batch offers will appear here before each collection day.</div>
               </div>
             </div>
 
@@ -1473,16 +1421,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               <div class="earn-card" style="margin-bottom:12px">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
                   <div class="card-ttl" style="margin-bottom:0">Today's Projected Pay</div>
-                  <span style="font-size:10px;background:rgba(245,158,11,.15);color:#fbbf24;border-radius:99px;padding:2px 8px;font-weight:600">⏳ Pending Approval</span>
                 </div>
-                <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:853;color:var(--cyan)" id="rn-projected-pay">$13.00</div>
-                <div style="font-size:12px;color:var(--sub);margin-top:2px;margin-bottom:8px" id="rn-projected-sub">4 stops · Bin Out only · tonight</div>
-                <div style="background:rgba(0,0,0,.2);border-radius:7px;padding:9px;text-align:center;margin-bottom:8px">
-                  <div style="font-size:8px;color:var(--muted);text-transform:uppercase">🌙 Bin Out — Tonight</div>
-                  <div style="font-size:16px;font-weight:700;margin-top:2px;color:#a5b4fc" id="rn-binout-pay">$13.00</div>
-                </div>
+                <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:853;color:var(--cyan)" id="rn-projected-pay">$0.00</div>
+                <div style="font-size:12px;color:var(--sub);margin-top:2px;margin-bottom:8px" id="rn-projected-sub">No routes assigned</div>
                 <div style="font-size:11px;color:var(--muted);line-height:1.5;background:rgba(245,158,11,.06);border-radius:6px;padding:8px 10px">
-                  ☀️ Bin In unlocks after truck confirms. Pay for both visits held <strong style="color:var(--text)">24–48 hrs</strong> pending completion review.
+                  Bin In pay unlocks after truck confirms. Pay held <strong style="color:var(--text)">24–48 hrs</strong> pending completion review.
                 </div>
               </div>
               <div class="card">
@@ -1500,12 +1443,12 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <div style="margin-bottom:10px">
                   <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px">
                     <span style="color:var(--sub)">Stops recruited</span>
-                    <span style="font-weight:700;color:var(--cyan)">7 / 10 <span style="color:var(--muted);font-weight:400">for Builder tier</span></span>
+                    <span style="font-weight:700;color:var(--cyan)" id="rn-growth-label">0 / 10 <span style="color:var(--muted);font-weight:400">for Builder tier</span></span>
                   </div>
                   <div style="background:var(--surface2);border-radius:99px;height:6px;overflow:hidden">
-                    <div style="width:70%;height:100%;background:var(--cyan);border-radius:99px;transition:width .4s"></div>
+                    <div style="width:0%;height:100%;background:var(--cyan);border-radius:99px;transition:width .4s" id="rn-growth-bar"></div>
                   </div>
-                  <div style="font-size:10px;color:var(--muted);margin-top:4px">3 more stops unlocks $3.50/stop permanently</div>
+                  <div style="font-size:10px;color:var(--muted);margin-top:4px" id="rn-growth-sub">Recruit homeowners to grow your route and earn more</div>
                 </div>
                 <div style="background:rgba(6,214,160,.06);border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12px">
                   <div style="display:flex;justify-content:space-between;margin-bottom:3px">
@@ -1539,93 +1482,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
           <!-- UPCOMING TAB -->
           <div id="rn-routes-upcoming">
-
-            <div style="font-size:12px;color:var(--sub);margin-bottom:12px;line-height:1.5">
-              Your scheduled batches. Stop order shown is the <strong style="color:var(--text)">zone default</strong> — tap <strong style="color:var(--text)">Reorder Stops</strong> on any batch to set your preferred sequence before you start.
-            </div>
-
-            <!-- BIN OUT BATCH — upcoming -->
-            <div class="batch-card" id="batch-card-OUT-CGL-047" style="margin-bottom:14px">
-              <div class="batch-head out">
-                <div>
-                  <div style="display:flex;align-items:center;gap:8px">
-                    <span class="vt-out">🌙 BIN OUT</span>
-                    <span style="font-weight:700;font-size:13px">OUT-CGL-047</span>
-                  </div>
-                  <div style="font-size:11px;color:var(--muted);margin-top:3px">Thu Mar 14 · Depart 6:00 PM · 1.1 mi</div>
-                </div>
-                <div style="text-align:right"><div style="font-size:18px;font-weight:800;color:#a5b4fc">$13.00</div><div style="font-size:10px;color:var(--muted)">4 stops</div></div>
-              </div>
-              <div style="background:rgba(34,197,94,.08);border-bottom:1px solid rgba(34,197,94,.2);padding:8px 16px;font-size:12px;color:#4ade80">
-                ⚠️ <strong>Stop 4 (David Park)</strong> — ♻️ Recycling only today. Split-service customer.
-              </div>
-              <div style="display:flex;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border)">
-                <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;flex:1;text-align:center"><div style="font-size:8px;color:var(--muted)">STOPS</div><div style="font-size:18px;font-weight:700;margin-top:2px">4</div></div>
-                <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;flex:1;text-align:center"><div style="font-size:8px;color:var(--muted)">DISTANCE</div><div style="font-size:18px;font-weight:700;margin-top:2px">1.1 mi</div></div>
-                <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;flex:1;text-align:center"><div style="font-size:8px;color:var(--muted)">EST. TIME</div><div style="font-size:18px;font-weight:700;margin-top:2px">~30min</div></div>
-                <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;flex:1;text-align:center"><div style="font-size:8px;color:var(--muted)">EARN</div><div style="font-size:18px;font-weight:700;margin-top:2px;color:var(--green)">$13</div></div>
-              </div>
-              <!-- Stop preview list -->
-              <div id="stoplist-OUT-CGL-047" style="padding:8px 16px;border-bottom:1px solid var(--border)">
-                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Stop Order <span style="font-weight:400;color:var(--muted)">(tap Reorder to change)</span></div>
-                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;color:var(--sub)">1 · Margaret Thompson — 4821 W Glendale Ave</div>
-                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;color:var(--sub)">2 · James Okafor — 15302 N Sarival Ave</div>
-                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;color:var(--sub)">3 · Sarah Chen — 9873 W Peoria Ave</div>
-                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;color:var(--sub)">4 · David Park — 13455 W Waddell Rd ♻️ only</div>
-              </div>
-              <div style="padding:10px 16px 14px;display:flex;gap:8px;flex-wrap:wrap">
-                <button class="btn btn-purple btn-sm" onclick="startBatchRoute('OUT-CGL-047')">▶ Start Route</button>
-                <button class="btn btn-outline btn-sm" onclick="showReorderStops('OUT-CGL-047')">⠿ Reorder Stops</button>
-                <button class="btn btn-ghost btn-sm" onclick="showMapView('OUT-CGL-047')">🗺 Map</button>
-                <button class="btn btn-ghost btn-sm" style="color:#ef4444;margin-left:auto" onclick="showOptOutBatch('OUT-CGL-047')">Can't do this route</button>
-              </div>
-            </div>
-
-            <!-- BIN IN BATCH — locked -->
-            <div class="batch-card" style="opacity:.65;margin-bottom:14px" id="batch-card-IN-CGL-047">
-              <div class="batch-head in">
-                <div>
-                  <div style="display:flex;align-items:center;gap:8px"><span class="vt-in">☀️ BIN IN</span><span style="font-weight:700;font-size:13px">IN-CGL-047</span></div>
-                  <div style="font-size:11px;color:var(--muted);margin-top:3px">Thu Mar 14 · Unlocks ~7:22 AM after truck clears zone</div>
-                </div>
-                <div style="text-align:right"><div style="font-size:18px;font-weight:800;color:#6ee7b7">$13.00</div><div style="font-size:10px;color:var(--muted)">4 stops</div></div>
-              </div>
-              <div style="padding:12px 16px;font-size:13px;color:var(--sub)">🔒 Same 4 properties as Bin Out. Unlocks automatically once the truck clears Central Glendale — you'll get a push notification.</div>
-            </div>
-
-            <!-- FRIDAY SEPARATOR -->
-            <div style="font-size:13px;font-weight:700;margin-bottom:10px;margin-top:4px;color:var(--sub)">Friday Mar 15</div>
-
-            <!-- SMART MIXED ROUTE -->
-            <div class="batch-card" id="batch-card-MIX-CGL-015" style="border:1.5px solid rgba(6,214,160,.35)">
-              <div style="background:rgba(6,214,160,.06);padding:8px 16px;border-bottom:1px solid rgba(6,214,160,.2);display:flex;align-items:center;gap:8px">
-                <span style="background:var(--cyan);color:#07090f;font-size:10px;font-weight:800;padding:2px 8px;border-radius:5px">⚡ SMART MIXED</span>
-                <span style="font-size:11px;color:var(--sub)">Bin In + Bin Out combined by proximity</span>
-              </div>
-              <div class="batch-head" style="border-bottom:1px solid var(--border)">
-                <div>
-                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
-                    <span class="vt-in" style="font-size:10px">☀️ IN</span>
-                    <span class="vt-out" style="font-size:10px">🌙 OUT</span>
-                    <span style="font-weight:700;font-size:13px">MIX-CGL-015</span>
-                  </div>
-                  <div style="font-size:11px;color:var(--muted)">Fri Mar 15 · ~8:30 AM · 0.9 mi</div>
-                </div>
-                <div style="text-align:right"><div style="font-size:18px;font-weight:800;color:var(--cyan)">$17.88</div><div style="font-size:10px;color:var(--muted)">5 stops</div></div>
-              </div>
-              <div style="padding:8px 16px;border-bottom:1px solid var(--border)">
-                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Stop Order</div>
-                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;color:var(--sub)">1 · Rachel Torres — 9245 W Northern Ave <span class="vt-in" style="font-size:9px;margin-left:4px">☀️ IN</span></div>
-                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;color:var(--sub)">2 · Brian Kowalski — 14802 W Greenway Rd <span class="vt-out" style="font-size:9px;margin-left:4px">🌙 OUT</span></div>
-                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;color:var(--sub)">3 · Tom &amp; Wendy Ellis — 9301 W Northern Ave <span class="vt-in" style="font-size:9px;margin-left:4px">☀️ IN</span></div>
-                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;color:var(--sub)">4 · Sandra Kim — 9315 W Northern Ave <span class="vt-out" style="font-size:9px;margin-left:4px">🌙 OUT</span></div>
-                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;color:var(--sub)">5 · Luis Herrera — 14900 W Greenway Rd <span class="vt-in" style="font-size:9px;margin-left:4px">☀️ IN</span></div>
-              </div>
-              <div style="padding:10px 16px 14px;display:flex;gap:8px;flex-wrap:wrap">
-                <button class="btn btn-purple btn-sm" onclick="startBatchRoute('MIX-CGL-015')">▶ Start Route</button>
-                <button class="btn btn-outline btn-sm" onclick="showReorderStops('MIX-CGL-015')">⠿ Reorder Stops</button>
-                <button class="btn btn-ghost btn-sm" onclick="showMapView('MIX-CGL-015')">🗺 Map</button>
-                <button class="btn btn-ghost btn-sm" style="color:#ef4444;margin-left:auto" onclick="showOptOutBatch('MIX-CGL-015')">Can't do this route</button>
+            <div id="upcoming-batch-list">
+              <div style="text-align:center;padding:40px 20px;color:var(--muted)">
+                <div style="font-size:40px;margin-bottom:12px">📬</div>
+                <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No upcoming routes</div>
+                <div style="font-size:13px">Batch offers will appear here 24 hours before your collection day.</div>
               </div>
             </div>
           </div>
@@ -1662,40 +1523,35 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <!-- RN EARNINGS -->
         <div class="pg" id="rn-earnings">
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
-            <div class="earn-card"><div class="card-ttl">This Week</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--cyan)">$357.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px">42 visits · both types</div></div>
-            <div class="earn-card"><div class="card-ttl">This Month</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--green)">$1,840.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px">217 visits · 22 days worked</div></div>
-            <div class="earn-card"><div class="card-ttl">Year to Date</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--blue)">$4,220.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px">Since Jan 1, 2025</div></div>
+            <div class="earn-card"><div class="card-ttl">This Week</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--cyan)">$0.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px">No visits yet</div></div>
+            <div class="earn-card"><div class="card-ttl">This Month</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--green)">$0.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px">No visits yet</div></div>
+            <div class="earn-card"><div class="card-ttl">Year to Date</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--blue)">$0.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px">Year to date</div></div>
           </div>
 
           <!-- VISIT TYPE BREAKDOWN -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
             <div style="border:1px solid rgba(99,102,241,.3);background:rgba(99,102,241,.05);border-radius:10px;padding:14px">
               <div class="card-ttl" style="color:#a5b4fc">🌙 Bin Out Visits — This Month</div>
-              <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:#a5b4fc">$920.00</div>
-              <div style="font-size:12px;color:var(--sub);margin-top:4px">108 stops · avg $3.75 · Evenings</div>
+              <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:#a5b4fc">$0.00</div>
+              <div style="font-size:12px;color:var(--sub);margin-top:4px">No Bin Out visits yet</div>
             </div>
             <div style="border:1px solid rgba(6,214,160,.3);background:rgba(6,214,160,.05);border-radius:10px;padding:14px">
               <div class="card-ttl" style="color:#6ee7b7">☀️ Bin In Visits — This Month</div>
-              <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:#6ee7b7">$920.00</div>
-              <div style="font-size:12px;color:var(--sub);margin-top:4px">109 stops · avg $3.75 · Daytimes</div>
+              <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:#6ee7b7">$0.00</div>
+              <div style="font-size:12px;color:var(--sub);margin-top:4px">No Bin In visits yet</div>
             </div>
           </div>
 
           <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px">
             <div class="card">
               <div class="card-ttl">Pay History</div>
-              <table><thead><tr><th>Period</th><th>Visits</th><th>Out</th><th>In</th><th>Total</th><th>Status</th></tr></thead><tbody>
-                <tr><td style="font-weight:600">Mar 8–14</td><td>42</td><td style="color:#a5b4fc">$68.25</td><td style="color:#6ee7b7">$68.25</td><td style="color:var(--green);font-weight:600">$136.50</td><td><span class="badge" style="background:rgba(245,158,11,.15);color:#fbbf24">⏳ Pending Approval</span></td></tr>
-                <tr><td style="font-weight:600">Mar 1–7</td><td>38</td><td style="color:#a5b4fc">$80.75</td><td style="color:#6ee7b7">$80.75</td><td style="color:var(--green);font-weight:600">$161.50</td><td><span class="badge" style="background:#22c55e22;color:#22c55e">Paid</span></td></tr>
-                <tr><td style="font-weight:600">Feb 22–28</td><td>44</td><td style="color:#a5b4fc">$93.50</td><td style="color:#6ee7b7">$93.50</td><td style="color:var(--green);font-weight:600">$187.00</td><td><span class="badge" style="background:#22c55e22;color:#22c55e">Paid</span></td></tr>
-                <tr><td style="font-weight:600">Feb 15–21</td><td>40</td><td style="color:#a5b4fc">$85.00</td><td style="color:#6ee7b7">$85.00</td><td style="color:var(--green);font-weight:600">$170.00</td><td><span class="badge" style="background:#22c55e22;color:#22c55e">Paid</span></td></tr>
-              </tbody></table>
+              <table><thead><tr><th>Period</th><th>Visits</th><th>Out</th><th>In</th><th>Total</th><th>Status</th></tr></thead><tbody id="pay-history-tbody"><tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">No pay history yet</td></tr></tbody></table>
             </div>
             <div>
               <div class="card" style="margin-bottom:12px">
                 <div class="card-ttl">Pay Method</div>
-                <div style="font-size:13px;font-weight:600;margin-bottom:4px">Direct Deposit</div>
-                <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Chase ••••4821 · Paid every Friday</div>
+                <div style="font-size:13px;font-weight:600;margin-bottom:4px">No bank account on file</div>
+                <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Add your bank details to receive payouts</div>
                 <button class="btn btn-outline btn-full btn-sm" onclick="showBankModal()">Update Bank Info</button>
               </div>
               <div class="card">
@@ -1721,19 +1577,19 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <div class="card">
               <div class="card-ttl">Tax Documents</div>
               <div style="display:flex;flex-direction:column;gap:8px">
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 13px;background:var(--surface2);border-radius:9px"><div><div style="font-size:13px;font-weight:600">1099-NEC — 2024</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Total earnings: $18,420.00</div></div><button class="btn btn-outline btn-sm" onclick="showToast('Downloading 1099-NEC PDF...','ok')">⬇ Download</button></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 13px;background:var(--surface2);border-radius:9px"><div><div style="font-size:13px;font-weight:600">1099-NEC — 2024</div><div style="font-size:11px;color:var(--muted);margin-top:2px">No earnings on file yet</div></div><button class="btn btn-outline btn-sm" onclick="showToast('Downloading 1099-NEC PDF...','ok')">⬇ Download</button></div>
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 13px;background:var(--surface2);border-radius:9px"><div><div style="font-size:13px;font-weight:600">Earnings Summary — 2024</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Visit-by-visit breakdown with Out/In split</div></div><button class="btn btn-outline btn-sm" onclick="showToast('Downloading CSV...','ok')">⬇ CSV</button></div>
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 13px;background:var(--surface2);border-radius:9px"><div><div style="font-size:13px;font-weight:600">1099-NEC — 2023</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Total earnings: $14,250.00</div></div><button class="btn btn-outline btn-sm" onclick="showToast('Downloading 1099-NEC PDF...','ok')">⬇ Download</button></div>
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 13px;background:var(--surface2);border-radius:9px"><div><div style="font-size:13px;font-weight:600">Mileage Log — 2024</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Route distances for mileage deduction</div></div><button class="btn btn-outline btn-sm" onclick="showToast('Downloading mileage CSV...','ok')">⬇ CSV</button></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 13px;background:var(--surface2);border-radius:9px"><div><div style="font-size:13px;font-weight:600">1099-NEC — 2023</div><div style="font-size:11px;color:var(--muted);margin-top:2px">No earnings on file yet</div></div><button class="btn btn-outline btn-sm" onclick="showToast('Downloading 1099-NEC PDF...','ok')">⬇ Download</button></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 13px;background:var(--surface2);border-radius:9px"><div><div style="font-size:13px;font-weight:600">Mileage Log</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Available after your first completed route</div></div><button class="btn btn-outline btn-sm" onclick="showToast('Downloading mileage CSV...','ok')">⬇ CSV</button></div>
               </div>
             </div>
             <div>
               <div class="card" style="margin-bottom:12px">
                 <div class="card-ttl">Tax Info on File</div>
-                <div class="dl" style="margin-bottom:8px"><div class="dl-l">Legal Name</div><div>Marcus James Reid</div></div>
-                <div class="dl" style="margin-bottom:8px"><div class="dl-l">SSN / Tax ID</div><div>••• – •• – 4821</div></div>
+                <div class="dl" style="margin-bottom:8px"><div class="dl-l">Legal Name</div><div>—</div></div>
+                <div class="dl" style="margin-bottom:8px"><div class="dl-l">SSN / Tax ID</div><div>—</div></div>
                 <div class="dl" style="margin-bottom:8px"><div class="dl-l">Business Type</div><div>Individual / Sole Proprietor</div></div>
-                <div class="dl"><div class="dl-l">W-9 Status</div><div style="color:var(--green)">✅ On file (Mar 2023)</div></div>
+                <div class="dl"><div class="dl-l">W-9 Status</div><div style="color:var(--green)">⚠️ Not yet submitted</div></div>
                 <button class="btn btn-outline btn-sm" style="margin-top:12px" onclick="showTaxInfoModal()">Update Tax Info</button>
               </div>
               <div class="card">
@@ -1753,11 +1609,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
             <div class="card">
               <div class="card-ttl">Personal Information</div>
-              <div class="field"><label>First Name</label><input value="Marcus"></div>
-              <div class="field"><label>Last Name</label><input value="Reid"></div>
-              <div class="field"><label>Email</label><input value="marcus@demo.com"></div>
-              <div class="field"><label>Phone</label><input value="(555) 800-0001"></div>
-              <div class="field"><label>Home Address</label><input value="15302 N Sarival Ave, Glendale AZ"></div>
+              <div class="field"><label>First Name</label><input placeholder="First name"></div>
+              <div class="field"><label>Last Name</label><input placeholder="Last name"></div>
+              <div class="field"><label>Email</label><input placeholder="Email address"></div>
+              <div class="field"><label>Phone</label><input placeholder="Phone number"></div>
+              <div class="field"><label>Home Address</label><input placeholder="Home address"></div>
               <button class="btn btn-cyan btn-sm" onclick="showToast('Information updated ✅','ok')">Save Changes</button>
             </div>
             <div>
@@ -1830,7 +1686,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <button class="btn btn-cyan btn-full" onclick="doAdminLogin()" style="margin-bottom:14px;padding:12px">Sign In to Staff Portal →</button>
 
         <div style="text-align:center;font-size:12px;color:var(--muted)">
-          <span>Demo: <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="1071747d797e5072797e747163783e737f7d">[email&#160;protected]</a> / admin123</span>
+          <span style="color:rgba(74,85,104,.3)">Staff access only</span>
         </div>
       </div>
 
@@ -1866,9 +1722,9 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div class="nav-i" onclick="adNav(this,'ad-dispatch')"><span class="ic">🗺️</span> Dispatch</div>
       <div class="nav-i" onclick="adNav(this,'ad-overview')"><span class="ic">📊</span> Overview</div>
       <div class="s-sect">Approvals</div>
-      <div class="nav-i" onclick="adNav(this,'ad-pending-hw')"><span class="ic">🏠</span> Pending Homeowners <span id="hw-pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none">2</span></div>
-      <div class="nav-i" onclick="adNav(this,'ad-pending')"><span class="ic">🚐</span> Pending Runners <span id="pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none">3</span></div>
-      <div class="nav-i" onclick="adNav(this,'ad-waitlist')"><span class="ic">📋</span> Interest List <span id="waitlist-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none">1</span></div>
+      <div class="nav-i" onclick="adNav(this,'ad-pending-hw')"><span class="ic">🏠</span> Pending Homeowners <span id="hw-pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none" id="hw-pcount">0</span></div>
+      <div class="nav-i" onclick="adNav(this,'ad-pending')"><span class="ic">🚐</span> Pending Runners <span id="pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none" id="pcount">0</span></div>
+      <div class="nav-i" onclick="adNav(this,'ad-waitlist')"><span class="ic">📋</span> Interest List <span id="waitlist-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none" id="waitlist-badge" style="display:none">0</span></div>
       <div class="s-sect">Management</div>
       <div class="nav-i" onclick="adNav(this,'ad-homeowners')"><span class="ic">🏠</span> Homeowners</div>
       <div class="nav-i" onclick="adNav(this,'ad-runners')"><span class="ic">🚐</span> Runners</div>
@@ -1886,10 +1742,10 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <!-- AD OVERVIEW -->
         <div class="pg" id="ad-overview">
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
-            <div class="sc2" onclick="adNav(document.querySelector('#S-admin .nav-i:nth-child(8)'),'ad-homeowners')" style="cursor:pointer"><div class="sn" style="color:var(--blue)" id="ov-hw-count">5</div><div class="sl2">Active Homeowners</div></div>
-            <div class="sc2" onclick="adNav(document.querySelector('#S-admin .nav-i:nth-child(9)'),'ad-runners')" style="cursor:pointer"><div class="sn" style="color:var(--green)" id="ov-rn-count">2</div><div class="sl2">Active Runners</div></div>
-            <div class="sc2" onclick="adNav(null,'ad-pending-hw')" style="cursor:pointer"><div class="sn" style="color:var(--amber)" id="ov-pending-count">5</div><div class="sl2">Pending Review</div></div>
-            <div class="sc2"><div class="sn" style="color:var(--indigo)">24</div><div class="sl2">Jobs Today</div></div>
+            <div class="sc2" onclick="adNav(document.querySelector('#S-admin .nav-i:nth-child(8)'),'ad-homeowners')" style="cursor:pointer"><div class="sn" style="color:var(--blue)" id="ov-hw-count">0</div><div class="sl2">Active Homeowners</div></div>
+            <div class="sc2" onclick="adNav(document.querySelector('#S-admin .nav-i:nth-child(9)'),'ad-runners')" style="cursor:pointer"><div class="sn" style="color:var(--green)" id="ov-rn-count">0</div><div class="sl2">Active Runners</div></div>
+            <div class="sc2" onclick="adNav(null,'ad-pending-hw')" style="cursor:pointer"><div class="sn" style="color:var(--amber)" id="ov-pending-count">0</div><div class="sl2">Pending Review</div></div>
+            <div class="sc2"><div class="sn" style="color:var(--indigo)" id="ov-jobs-count">0</div><div class="sl2">Jobs Today</div></div>
           </div>
 
           <!-- DENSITY ALERTS (rendered by JS) -->
@@ -1899,14 +1755,14 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
             <div style="border:1px solid rgba(99,102,241,.3);background:rgba(99,102,241,.06);border-radius:10px;padding:14px">
               <div class="card-ttl" style="color:#a5b4fc">🌙 Tonight's Bin Out Batches</div>
-              <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;color:#a5b4fc">4 routes</div>
-              <div style="font-size:12px;color:var(--sub);margin-top:4px">47 stops · 5 runners assigned · Starts 6pm</div>
+              <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;color:#a5b4fc" id="ov-out-routes">—</div>
+              <div style="font-size:12px;color:var(--sub);margin-top:4px" id="ov-out-sub">No batches generated yet</div>
               <button class="btn btn-sm" style="margin-top:10px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3)" onclick="adNav(null,'ad-dispatch')">View Dispatch →</button>
             </div>
             <div style="border:1px solid rgba(6,214,160,.3);background:rgba(6,214,160,.05);border-radius:10px;padding:14px">
               <div class="card-ttl" style="color:#6ee7b7">☀️ Tomorrow's Bin In Batches</div>
-              <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;color:#6ee7b7">4 routes</div>
-              <div style="font-size:12px;color:var(--sub);margin-top:4px">47 stops · auto-unlocks after truck clears</div>
+              <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;color:#6ee7b7" id="ov-in-routes">—</div>
+              <div style="font-size:12px;color:var(--sub);margin-top:4px" id="ov-in-sub">Pre-queued after Bin Out is generated</div>
               <button class="btn btn-sm" style="margin-top:10px;background:rgba(6,214,160,.1);color:#6ee7b7;border:1px solid rgba(6,214,160,.25)" onclick="adNav(null,'ad-dispatch')">View Dispatch →</button>
             </div>
           </div>
@@ -1931,7 +1787,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               <div class="card-ttl">Quick Actions</div>
               <div style="display:flex;flex-direction:column;gap:7px">
                 <button class="btn btn-cyan btn-full" onclick="adNav(null,'ad-pending-hw')">🏠 Review Pending Homeowners <span id="ov-hw-badge" style="background:rgba(0,0,0,.3);border-radius:99px;font-size:10px;padding:1px 7px;margin-left:4px">2</span></button>
-                <button class="btn btn-outline btn-full" onclick="adNav(null,'ad-pending')">🚐 Review Pending Runners (3)</button>
+                <button class="btn btn-outline btn-full" onclick="adNav(null,'ad-pending')">🚐 Review Pending Runners (<span id="ov-rn-badge">0</span>)</button>
                 <button class="btn btn-outline btn-full" onclick="adNav(null,'ad-dispatch')">🗺️ View Tonight's Dispatch</button>
                 <button class="btn btn-outline btn-full" onclick="adNav(null,'ad-runners')">🚐 Manage Runners</button>
                 <button class="btn btn-outline btn-full" onclick="adNav(null,'ad-homeowners')">🏠 Manage Homeowners</button>
@@ -1961,94 +1817,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <div class="pg" id="ad-pending">
           <div style="color:var(--sub);font-size:13px;margin-bottom:14px">Review runner applications. Check 1099 agreements, background check consent, assign a service zone, then approve to add them to the dispatch pool.</div>
 
-          <div class="pc" id="pc1">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-              <div style="display:flex;align-items:center;gap:10px"><div class="avatar" style="width:44px;height:44px;font-size:16px;background:linear-gradient(135deg,#8b5cf6,#3b82f6)">DO</div><div><div style="font-size:15px;font-weight:700">David Osei</div><div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">APP-001 · 2 hrs ago</div></div></div>
-              <span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending</span>
-            </div>
-            <div class="cc-grid" style="margin-bottom:12px">
-              <div class="dl"><div class="dl-l">Email</div><div><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="d5b1b4a3bcb1fbbaa6b0bc95b0b8b4bcb9fbb6bab8">[email&#160;protected]</a></div></div>
-              <div class="dl"><div class="dl-l">ZIP / Area</div><div>85301 — Central Glendale · 5mi</div></div>
-              <div class="dl"><div class="dl-l">Vehicle</div><div>✅ Van · Full license</div></div>
-              <div class="dl"><div class="dl-l">Visit Pref.</div><div style="color:#a5b4fc">🌙☀️ Both visits</div></div>
-              <div class="dl"><div class="dl-l">1099 Agreement</div><div>✅ Signed</div></div>
-              <div class="dl"><div class="dl-l">BG Check</div><div>✅ Consented</div></div>
-              <div class="dl"><div class="dl-l">Hours/week</div><div>20–30 hrs</div></div>
-              <div class="dl"><div class="dl-l">Avail. Days</div><div>Mon–Fri + Sat eve</div></div>
-            </div>
-            <div class="field" style="margin-bottom:10px">
-              <label style="font-size:11px">Assign Service Zone <span style="color:var(--muted);font-weight:400">(ZIP 85301 — suggested: Central Glendale)</span></label>
-              <select id="pc1-zone" style="font-size:12px">
-                <option value="">— Select zone —</option>
-                <option value="z-gl-c" selected>Central Glendale (85301)</option>
-                <option value="z-gl-n">North Glendale (85304)</option>
-                <option value="z-sur-w">Surprise West (85374)</option>
-                <option value="_new">+ Create new zone from their ZIP</option>
-              </select>
-            </div>
-            <div style="display:flex;gap:8px">
-              <button class="btn btn-green btn-sm" onclick="approveR('pc1','David Osei','pc1-zone')">✅ Approve</button>
-              <button class="btn btn-outline btn-sm" onclick="showToast('Email sent to David Osei','info')">📧 Request Info</button>
-              <button class="btn btn-red btn-sm" onclick="rejectR('pc1','David Osei')">✕ Reject</button>
-            </div>
-          </div>
-
-          <div class="pc" id="pc2">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-              <div style="display:flex;align-items:center;gap:10px"><div class="avatar" style="width:44px;height:44px;font-size:16px;background:linear-gradient(135deg,#ec4899,#8b5cf6)">LN</div><div><div style="font-size:15px;font-weight:700">Layla Nakamura</div><div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">APP-002 · 5 hrs ago</div></div></div>
-              <span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending</span>
-            </div>
-            <div class="cc-grid" style="margin-bottom:12px">
-              <div class="dl"><div class="dl-l">ZIP / Area</div><div>85374 — Surprise · 2mi</div></div>
-              <div class="dl"><div class="dl-l">Vehicle</div><div>✅ Cargo bike · No license</div></div>
-              <div class="dl"><div class="dl-l">Visit Pref.</div><div style="color:#6ee7b7">☀️ Bin In only</div></div>
-              <div class="dl"><div class="dl-l">1099</div><div>✅ Signed</div></div>
-              <div class="dl"><div class="dl-l">BG Check</div><div>✅ Consented</div></div>
-              <div class="dl"><div class="dl-l">Hours/week</div><div>10–20 hrs · Weekdays</div></div>
-            </div>
-            <div class="field" style="margin-bottom:10px">
-              <label style="font-size:11px">Assign Service Zone <span style="color:var(--muted);font-weight:400">(ZIP 85374 — Surprise area)</span></label>
-              <select id="pc2-zone" style="font-size:12px">
-                <option value="">— Select zone —</option>
-                <option value="z-sur-w" selected>Surprise West (85374)</option>
-                <option value="z-sur-e">Surprise East (85379)</option>
-                <option value="_new">+ Create new zone for ZIP 85374</option>
-              </select>
-            </div>
-            <div style="display:flex;gap:8px">
-              <button class="btn btn-green btn-sm" onclick="approveR('pc2','Layla Nakamura','pc2-zone')">✅ Approve</button>
-              <button class="btn btn-outline btn-sm" onclick="showToast('Email sent to Layla Nakamura','info')">📧 Request Info</button>
-              <button class="btn btn-red btn-sm" onclick="rejectR('pc2','Layla Nakamura')">✕ Reject</button>
-            </div>
-          </div>
-
-          <div class="pc" id="pc3">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-              <div style="display:flex;align-items:center;gap:10px"><div class="avatar" style="width:44px;height:44px;font-size:16px;background:linear-gradient(135deg,#22c55e,#06b6d4)">KA</div><div><div style="font-size:15px;font-weight:700">Kwame Asante</div><div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">APP-003 · Yesterday</div></div></div>
-              <span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending</span>
-            </div>
-            <div class="cc-grid" style="margin-bottom:12px">
-              <div class="dl"><div class="dl-l">ZIP / Area</div><div>85338 — Surprise South · 10mi</div></div>
-              <div class="dl"><div class="dl-l">Vehicle</div><div>✅ Car · Full license</div></div>
-              <div class="dl"><div class="dl-l">Visit Pref.</div><div style="color:#a5b4fc">🌙 Bin Out only</div></div>
-              <div class="dl"><div class="dl-l">1099</div><div>✅ Signed</div></div>
-              <div class="dl"><div class="dl-l">BG Check</div><div style="color:var(--amber)">⚠️ Not yet consented — resolve before approving</div></div>
-              <div class="dl"><div class="dl-l">Hours/week</div><div>10–20 hrs · Evenings</div></div>
-            </div>
-            <div class="field" style="margin-bottom:10px">
-              <label style="font-size:11px">Assign Service Zone <span style="color:var(--muted);font-weight:400">(ZIP 85338 — Surprise South)</span></label>
-              <select id="pc3-zone" style="font-size:12px">
-                <option value="">— Select zone —</option>
-                <option value="z-sur-w" selected>Surprise West (85374)</option>
-                <option value="z-sur-e">Surprise East (85379)</option>
-                <option value="_new">+ Create new zone for ZIP 85338</option>
-              </select>
-            </div>
-            <div style="display:flex;gap:8px">
-              <button class="btn btn-green btn-sm" onclick="approveR('pc3','Kwame Asante','pc3-zone')">✅ Approve</button>
-              <button class="btn btn-outline btn-sm" onclick="showToast('BG check request sent to Kwame','info')">📧 Request BG Consent</button>
-              <button class="btn btn-red btn-sm" onclick="rejectR('pc3','Kwame Asante')">✕ Reject</button>
-            </div>
+          <div id="pending-runner-list" style="display:flex;flex-direction:column;gap:12px">
+            <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No pending runner applications.</div>
           </div>
         </div>
         <div class="pg" id="ad-homeowners">
@@ -2088,17 +1858,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <input placeholder="Search..." style="width:150px">
             <select style="width:auto"><option>All Visit Types</option><option>🌙 Bin Out</option><option>☀️ Bin In</option><option>🚨 SOS</option></select>
             <select style="width:auto"><option>All Status</option><option>Pending</option><option>In Progress</option><option>Complete</option></select>
-            <span class="tc">24 jobs · 12 pairs</span>
+            <span class="tc" id="jobs-count">0 jobs</span>
             <button class="btn btn-cyan btn-sm" onclick="showCreateJobModal()">+ Create</button>
           </div>
           <div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
-            <table><thead><tr><th>Job ID</th><th>Homeowner</th><th>Visit</th><th>Service</th><th>Date</th><th>Runner</th><th>Pay</th><th>Status</th><th></th></tr></thead><tbody>
-              <tr><td style="font-family:'DM Mono',monospace;font-size:10px">J001-OUT</td><td>Margaret Thompson</td><td><span class="vt-out">🌙 Bin Out</span></td><td><span class="badge" style="background:#22c55e22;color:#22c55e;font-size:9px">♻ Recycling</span></td><td style="color:var(--muted);font-size:11px">Mar 13 eve</td><td>Marcus Reid</td><td style="color:var(--green);font-weight:600;font-size:11px">$3.25</td><td><span class="badge" style="background:#22c55e22;color:#22c55e">✓ Done</span></td><td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:4px 8px" onclick="showEditJobModal('J001-OUT','Margaret Thompson','BIN_OUT','RECYCLING','Mar 13','Marcus Reid','COMPLETE')">Edit</button></td></tr>
-              <tr><td style="font-family:'DM Mono',monospace;font-size:10px">J001-IN</td><td>Margaret Thompson</td><td><span class="vt-in">☀️ Bin In</span></td><td><span class="badge" style="background:#22c55e22;color:#22c55e;font-size:9px">♻ Recycling</span></td><td style="color:var(--muted);font-size:11px">Mar 14 day</td><td>Marcus Reid</td><td style="color:var(--green);font-weight:600;font-size:11px">$3.25</td><td><span class="badge" style="background:#3b82f622;color:#3b82f6">In Progress</span></td><td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:4px 8px" onclick="showEditJobModal('J001-IN','Margaret Thompson','BIN_IN','RECYCLING','Mar 14','Marcus Reid','IN_PROGRESS')">Edit</button></td></tr>
-              <tr><td style="font-family:'DM Mono',monospace;font-size:10px">J002-OUT</td><td>James Okafor</td><td><span class="vt-out">🌙 Bin Out</span></td><td><span class="badge" style="background:#94a3b822;color:#94a3b8;font-size:9px">🗑 General</span></td><td style="color:var(--muted);font-size:11px">Mar 13 eve</td><td>Marcus Reid</td><td style="color:var(--green);font-weight:600;font-size:11px">$3.25</td><td><span class="badge" style="background:#22c55e22;color:#22c55e">✓ Done</span></td><td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:4px 8px" onclick="showEditJobModal('J002-OUT','James Okafor','BIN_OUT','GENERAL','Mar 13','Marcus Reid','COMPLETE')">Edit</button></td></tr>
-              <tr><td style="font-family:'DM Mono',monospace;font-size:10px">J002-IN</td><td>James Okafor</td><td><span class="vt-in">☀️ Bin In</span></td><td><span class="badge" style="background:#94a3b822;color:#94a3b8;font-size:9px">🗑 General</span></td><td style="color:var(--muted);font-size:11px">Mar 14 day</td><td>Aisha Patel</td><td style="color:var(--green);font-weight:600;font-size:11px">$3.25</td><td><span class="badge" style="background:#f59e0b22;color:#f59e0b">Pending</span></td><td><button class="btn btn-outline btn-sm" style="font-size:10px;padding:4px 8px" onclick="showAssignJobModal('J002-IN','James Okafor')">Assign</button></td></tr>
-              <tr><td style="font-family:'DM Mono',monospace;font-size:10px">J003-SOS</td><td>Sarah Chen</td><td><span class="vt-sos">🚨 SOS</span></td><td><span class="badge" style="background:#22c55e22;color:#22c55e;font-size:9px">♻ Recycling</span></td><td style="color:var(--muted);font-size:11px">Mar 14</td><td style="color:var(--muted)">Unassigned</td><td style="color:var(--green);font-weight:600;font-size:11px">$9.25</td><td><span class="badge" style="background:#ef444422;color:#ef4444">● Urgent</span></td><td><button class="btn btn-red btn-sm" style="font-size:10px;padding:4px 8px" onclick="showAssignJobModal('J003-SOS','Sarah Chen')">Assign</button></td></tr>
-            </tbody></table>
+            <table><thead><tr><th>Job ID</th><th>Homeowner</th><th>Visit</th><th>Service</th><th>Date</th><th>Runner</th><th>Pay</th><th>Status</th><th></th></tr></thead><tbody id="jobs-tbody"><tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No jobs yet — will populate as homeowners are enrolled and dispatched</td></tr></tbody></table>
           </div>
         </div>
 
@@ -2293,6 +2057,47 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 function go(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0)}
 
+// ── Session restore on page load ──
+async function initApp(){
+  try {
+    const { data: { session } } = await _supa.auth.getSession()
+    if(!session) return // No session — stay on landing page
+
+    const user = session.user
+    const role = user?.user_metadata?.role
+    const fn   = user?.user_metadata?.first_name || ''
+    const ln   = user?.user_metadata?.last_name  || ''
+    const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || '—'
+
+    if(role === 'admin' || role === 'ops'){
+      adminAuthed = true
+      const nameEl = document.getElementById('ad-sidebar-name')
+      if(nameEl) nameEl.textContent = user?.user_metadata?.name || 'Admin'
+      go('S-admin')
+      setTimeout(() => adNav(null, 'ad-overview'), 80)
+    } else if(role === 'rn'){
+      const nameEl = document.getElementById('rn-sidebar-name')
+      const avEl   = document.getElementById('rn-sidebar-avatar')
+      const roleEl = document.getElementById('rn-sidebar-role')
+      if(nameEl) nameEl.textContent = fn + ' ' + ln
+      if(avEl)   avEl.textContent   = initials
+      if(roleEl) roleEl.textContent = 'Runner'
+      go('S-rn-dash')
+    } else {
+      // Homeowner
+      const nameEl = document.getElementById('hw-sidebar-name')
+      const avEl   = document.getElementById('hw-sidebar-avatar')
+      const grEl   = document.getElementById('hw-greeting')
+      if(nameEl) nameEl.textContent = fn + ' ' + ln
+      if(avEl)   avEl.textContent   = initials
+      if(grEl)   grEl.textContent   = 'Welcome back, ' + fn + ' 👋'
+      go('S-hw-dash')
+    }
+  } catch(err) {
+    console.warn('[BinDash] Session restore failed:', err)
+  }
+}
+
 // Demo modal
 function openDemoModal(){document.getElementById('demo-modal').classList.add('open')}
 function closeDemoModal(){document.getElementById('demo-modal').classList.remove('open')}
@@ -2301,12 +2106,63 @@ function startDemo(role){closeDemoModal();go(role==='hw'?'S-hw-dash':'S-rn-dash'
 // Login
 let loginRole='hw'
 function setLR(r){loginRole=r;document.getElementById('lr-hw').classList.toggle('on',r==='hw');document.getElementById('lr-rn').classList.toggle('on',r==='rn')}
-function doLogin(){
-  const em=document.getElementById('l-email').value,pw=document.getElementById('l-pass').value
-  if(!em||!pw){showToast('Please enter email and password','err');return}
-  if(em==='homeowner@demo.com'&&pw==='demo123'){go('S-hw-dash');return}
-  if(em==='runner@demo.com'&&pw==='demo123'){go('S-rn-dash');return}
-  showToast('Invalid credentials — use demo credentials below','err')
+async function doLogin(){
+  const em = document.getElementById('l-email').value.trim()
+  const pw = document.getElementById('l-pass').value
+  const errEl = document.getElementById('login-error')
+  if(errEl) errEl.style.display = 'none'
+
+  if(!em || !pw){ showToast('Please enter email and password','err'); return }
+
+  const btn = document.querySelector('#S-login .btn-cyan')
+  if(btn){ btn.disabled = true; btn.textContent = 'Signing in...' }
+
+  try {
+    // Try Supabase auth sign-in
+    const { data, error } = await _supa.auth.signInWithPassword({ email: em, password: pw })
+
+    if(error){
+      if(errEl){ errEl.textContent = 'Incorrect email or password. Please try again.'; errEl.style.display='block' }
+      if(btn){ btn.disabled=false; btn.textContent='Sign In →' }
+      document.getElementById('l-pass').value = ''
+      return
+    }
+
+    // Determine role from user metadata
+    const role = data.user?.user_metadata?.role || 'hw'
+    const name = data.user?.user_metadata?.first_name || 'there'
+
+    document.getElementById('l-email').value = ''
+    document.getElementById('l-pass').value = ''
+    if(btn){ btn.disabled=false; btn.textContent='Sign In →' }
+
+    if(role === 'rn'){
+      // Populate runner sidebar
+      const initials = (data.user?.user_metadata?.first_name?.[0]||'R') + (data.user?.user_metadata?.last_name?.[0]||'')
+      const el = document.getElementById('rn-sidebar-name')
+      const av = document.getElementById('rn-sidebar-avatar')
+      const ro = document.getElementById('rn-sidebar-role')
+      if(el) el.textContent = name + ' ' + (data.user?.user_metadata?.last_name||'')
+      if(av) av.textContent = initials.toUpperCase()
+      if(ro) ro.textContent = 'Runner'
+      go('S-rn-dash')
+      showToast('Welcome back, ' + name + ' 👋', 'ok')
+    } else {
+      // Homeowner
+      const el = document.getElementById('hw-sidebar-name')
+      const av = document.getElementById('hw-sidebar-avatar')
+      const gr = document.getElementById('hw-greeting')
+      if(el) el.textContent = name + ' ' + (data.user?.user_metadata?.last_name||'')
+      if(av) av.textContent = ((data.user?.user_metadata?.first_name?.[0]||'H') + (data.user?.user_metadata?.last_name?.[0]||'')).toUpperCase()
+      if(gr) gr.textContent = 'Welcome back, ' + name + ' 👋'
+      go('S-hw-dash')
+      showToast('Welcome back, ' + name + ' 👋', 'ok')
+    }
+  } catch(err) {
+    console.error('[BinDash] Login error:', err)
+    if(errEl){ errEl.textContent = 'Something went wrong. Please try again.'; errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='Sign In →' }
+  }
 }
 
 // Signup
@@ -2322,22 +2178,10 @@ function setVP(v){['both','out','in'].forEach(x=>document.getElementById('vp-'+x
 
 // HW onboarding
 // ── COLLECTIONS DATA & RENDERING ─────────────────
-const collections = [
-  {id:'C001', date:'Thu Mar 14', sortKey:'2025-03-14', visit:'BIN_OUT', label:'🌙 Bin Out', service:'♻ Recycling', runner:'Marcus Reid', status:'scheduled', type:'subscription'},
-  {id:'C002', date:'Thu Mar 14', sortKey:'2025-03-14', visit:'BIN_IN',  label:'☀️ Bin In',  service:'♻ Recycling', runner:'Marcus Reid', status:'scheduled', type:'subscription'},
-  {id:'C003', date:'Thu Mar 7',  sortKey:'2025-03-07', visit:'BIN_IN',  label:'☀️ Bin In',  service:'♻ Recycling', runner:'Aisha Patel', status:'complete',  type:'subscription'},
-  {id:'C004', date:'Thu Mar 7',  sortKey:'2025-03-07', visit:'BIN_OUT', label:'🌙 Bin Out', service:'♻ Recycling', runner:'Marcus Reid', status:'complete',  type:'subscription'},
-]
+const collections = [] // Populated from Supabase jobs
 
-// Upcoming scheduled slots (subscription) shown in schedule tab
-const scheduledSlots = [
-  {dateLabel:'Wed Mar 13', sortKey:'2025-03-13', visit:'BIN_OUT', label:'🌙 Bin Out', timing:'Evening · Runner: Marcus Reid', badge:'Tonight',  badgeStyle:'background:#3b82f622;color:#3b82f6', skippable:false, isCallout:false},
-  {dateLabel:'Thu Mar 14', sortKey:'2025-03-14', visit:'BIN_IN',  label:'☀️ Bin In',  timing:'After truck passes · Runner: Marcus Reid', badge:'Tomorrow', badgeStyle:'background:#3b82f622;color:#3b82f6', skippable:false, isCallout:false},
-  {dateLabel:'Wed Mar 20', sortKey:'2025-03-20', visit:'BIN_OUT', label:'🌙 Bin Out', timing:'Evening · Runner TBD', badge:'Scheduled', badgeStyle:'background:var(--surface3);color:var(--sub)', skippable:true, isCallout:false},
-  {dateLabel:'Thu Mar 21', sortKey:'2025-03-21', visit:'BIN_IN',  label:'☀️ Bin In',  timing:'After truck passes · Runner TBD', badge:'Scheduled', badgeStyle:'background:var(--surface3);color:var(--sub)', skippable:true, isCallout:false},
-  {dateLabel:'Wed Mar 27', sortKey:'2025-03-27', visit:'BIN_OUT', label:'🌙 Bin Out', timing:'Evening · Runner TBD', badge:'Scheduled', badgeStyle:'background:var(--surface3);color:var(--sub)', skippable:true, isCallout:false},
-  {dateLabel:'Thu Mar 28', sortKey:'2025-03-28', visit:'BIN_IN',  label:'☀️ Bin In',  timing:'After truck passes · Runner TBD', badge:'Scheduled', badgeStyle:'background:var(--surface3);color:var(--sub)', skippable:true, isCallout:false},
-]
+// Upcoming scheduled slots — populated from Supabase jobs
+const scheduledSlots = []
 
 function renderCollections(){
   const tbody = document.getElementById('collections-tbody')
@@ -2561,7 +2405,27 @@ async function hSubmit(){
   if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Saving...' }
 
   try {
+    // 1. Create auth account
+    const pw = document.getElementById('h-pw')?.value || ''
+    const { data: authData, error: authErr } = await _supa.auth.signUp({
+      email: em,
+      password: pw,
+      options: {
+        data: {
+          role: 'hw',
+          first_name: fn,
+          last_name: ln,
+          status: 'pending_review',
+        }
+      }
+    })
+    if(authErr && authErr.message !== 'User already registered'){
+      console.warn('[BinDash] Auth signup warning:', authErr.message)
+    }
+
+    // 2. Save full signup record
     await dbInsert('homeowner_signups', {
+      auth_user_id:    authData?.user?.id || null,
       first_name:      fn,
       last_name:       ln,
       email:           em,
@@ -2623,7 +2487,27 @@ async function rSubmit(){
   if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Submitting...' }
 
   try {
+    // 1. Create auth account
+    const pw = document.getElementById('r-pw')?.value || ''
+    const { data: authData, error: authErr } = await _supa.auth.signUp({
+      email: em,
+      password: pw,
+      options: {
+        data: {
+          role: 'rn',
+          first_name: fn,
+          last_name: ln,
+          status: 'pending_review',
+        }
+      }
+    })
+    if(authErr && authErr.message !== 'User already registered'){
+      console.warn('[BinDash] Auth signup warning:', authErr.message)
+    }
+
+    // 2. Save full application record
     await dbInsert('runner_applications', {
+      auth_user_id:     authData?.user?.id || null,
       first_name:       fn,
       last_name:        ln,
       email:            em,
@@ -2685,11 +2569,8 @@ function adNav(el, pg){
 // Admin actions
 let pc=3
 // ── RUNNER DATA SYSTEM ───────────────────────────
-let nextRunnerId = 3
-const RUNNERS = [
-  {id:'R001', name:'Marcus Reid',    initials:'MR', email:'marcus@email.com',  phone:'480-555-0001', area:'Central Glendale', radius:'5mi', vehicle:'VAN',   status:'ON_ROUTE',  visitType:'BOTH',    rating:4.8, visits:284, zoneId:'z-gl-c', coverageZones:['z-gl-c','z-gl-n'], color:'linear-gradient(135deg,var(--amber),var(--red))'},
-  {id:'R002', name:'Aisha Patel',    initials:'AP', email:'aisha@email.com',   phone:'480-555-0002', area:'Old Town Glendale',  radius:'2mi', vehicle:'TRUCK', status:'AVAILABLE', visitType:'BIN_IN',  rating:4.9, visits:203, zoneId:'z-gl-c', coverageZones:['z-gl-c'], color:'linear-gradient(135deg,#ec4899,#8b5cf6)'},
-]
+let nextRunnerId = 1
+const RUNNERS = [] // Populated as runners are approved
 
 const STATUS_BADGE = {
   ON_ROUTE:  ['#3b82f622','#3b82f6','● On Route'],
@@ -3039,7 +2920,7 @@ function showHWEdit(name,id,addr,zip,ph,em,svc,sched,binloc,gate,pets,curb){
   openM()
 }
 function showAddHW(){
-  document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">Add Homeowner</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb"><div class="g2"><div class="field"><label>First Name</label><input placeholder="Jane"></div><div class="field"><label>Last Name</label><input placeholder="Smith"></div></div><div class="field"><label>Email</label><input type="email" placeholder="jane@example.com"></div><div class="g2"><div class="field"><label>Phone</label><input placeholder="555-000-0000"></div><div class="field"><label>ZIP</label><input placeholder="85374"></div></div><div class="field"><label>Address</label><input placeholder="123 Main Street, Glendale"></div><div class="g2"><div class="field"><label>Service</label><select><option>RECYCLING</option><option>GENERAL_WASTE</option></select></div><div class="field"><label>Schedule</label><select><option>WEEKLY</option><option>FORTNIGHTLY</option><option>MONTHLY</option></select></div></div><div class="field"><label>Bin Storage</label><input placeholder="Back yard, side of house..."></div><div class="field"><label>Curb Placement</label><input placeholder="Left of driveway, outside front gate..."></div><div class="field"><label>Gate / Access</label><textarea placeholder="Gate code, access details..."></textarea></div></div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Homeowner added ✅','ok')">Add</button></div>`
+  document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">Add Homeowner</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb"><div class="g2"><div class="field"><label>First Name</label><input placeholder="Jane"></div><div class="field"><label>Last Name</label><input placeholder="Smith"></div></div><div class="field"><label>Email</label><input type="email" placeholder="jane@example.com"></div><div class="g2"><div class="field"><label>Phone</label><input placeholder="555-000-0000"></div><div class="field"><label>ZIP</label><input placeholder="85374"></div></div><div class="field"><label>Address</label><input placeholder="123 Main Street, Glendale"></div><div class="g2"><div class="field"><label>Service</label><select><option>RECYCLING</option><option>GENERAL_WASTE</option></select></div><div class="field"><label>Schedule</label><select><option>WEEKLY</option><option>FORTNIGHTLY</option><option>MONTHLY</option></select></div></div><div class="field"><label>Bin Storage</label><input placeholder="Back yard, side of house..."></div><div class="field"><label>Curb Placement</label><input placeholder="Confirmed after first collection..."></div><div class="field"><label>Gate / Access</label><textarea placeholder="Gate code, access details..."></textarea></div></div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Homeowner added ✅','ok')">Add</button></div>`
   openM()
 }
 function showCallout(){
@@ -3119,7 +3000,7 @@ function showSosHW(){
   openM()
 }
 function showAdminSos(){
-  document.getElementById('modal-box').innerHTML=`<div class="mh" style="background:rgba(239,68,68,.06)"><div style="font-size:15px;font-weight:700;color:#fca5a5">🚨 Admin Emergency Dispatch</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb"><div class="field"><label>Homeowner</label><select><option>Margaret Thompson — 4821 W Glendale Ave</option><option>James Okafor — 15302 N Sarival Ave</option><option>Sarah Chen — 9873 W Peoria Ave</option></select></div><div class="field"><label>Service Type</label><div class="radio-row"><div class="r-opt on" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">♻️ Recycling</div><div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">🗑️ General Waste</div></div></div><div class="field"><label>Visit Type Needed</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="r-opt on" style="text-align:center;padding:10px" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')"><div style="font-size:18px">🌙</div><div style="font-size:11px;font-weight:700;margin-top:3px">Bin Out</div></div><div class="r-opt" style="text-align:center;padding:10px" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')"><div style="font-size:18px">☀️</div><div style="font-size:11px;font-weight:700;margin-top:3px">Bin In</div></div></div></div><div class="field"><label>Notes</label><textarea placeholder="Reason for emergency dispatch..."></textarea></div></div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-red" onclick="closeM();showToast('🚨 Emergency dispatched to nearest available runner!','err')">🚨 Confirm Dispatch</button></div>`
+  document.getElementById('modal-box').innerHTML=`<div class="mh" style="background:rgba(239,68,68,.06)"><div style="font-size:15px;font-weight:700;color:#fca5a5">🚨 Admin Emergency Dispatch</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb"><div class="field"><label>Homeowner</label><select><option value="">— Select homeowner —</option></select></div><div class="field"><label>Service Type</label><div class="radio-row"><div class="r-opt on" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">♻️ Recycling</div><div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">🗑️ General Waste</div></div></div><div class="field"><label>Visit Type Needed</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="r-opt on" style="text-align:center;padding:10px" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')"><div style="font-size:18px">🌙</div><div style="font-size:11px;font-weight:700;margin-top:3px">Bin Out</div></div><div class="r-opt" style="text-align:center;padding:10px" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')"><div style="font-size:18px">☀️</div><div style="font-size:11px;font-weight:700;margin-top:3px">Bin In</div></div></div></div><div class="field"><label>Notes</label><textarea placeholder="Reason for emergency dispatch..."></textarea></div></div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-red" onclick="closeM();showToast('🚨 Emergency dispatched to nearest available runner!','err')">🚨 Confirm Dispatch</button></div>`
   openM()
 }
 
@@ -3133,7 +3014,7 @@ function showScheduleModal(){
 <div class="field"><label>Collection Day</label><select><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option></select></div>
 </div>
 <div class="field"><label>Number of Bins</label><select><option>1 bin</option><option selected>2 bins</option><option>3 bins</option><option>4+ bins</option></select></div>
-<div class="field"><label>Special Instructions</label><textarea placeholder="e.g. Please knock on arrival. Recycling bin lid is broken.">Please knock before collecting</textarea></div>
+<div class="field"><label>Special Instructions</label><textarea placeholder="e.g. Please knock on arrival. Recycling bin lid is broken.">—</textarea></div>
 <div style="background:var(--surface2);border-radius:8px;padding:12px;font-size:12px;color:var(--sub);margin-top:4px">Need to skip a single week? Use the <strong style="color:var(--text)">Skip</strong> button next to any upcoming slot instead of changing your whole schedule.</div>
 </div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Schedule updated ✅ Changes apply from next collection','ok')">Save Schedule</button></div>`
   openM()
@@ -3207,7 +3088,7 @@ function showEditProperty(){
 <div class="field"><label>Property Type</label><select><option selected>Single Family Home</option><option>Townhouse</option><option>Condo</option><option>Apartment</option></select></div>
 <div class="sec-h">Bin Storage &amp; Access</div>
 <div class="field"><label>Where are your bins stored?</label><select><option selected>Back yard</option><option>Side of house</option><option>Front of house</option><option>Garage</option></select></div>
-<div class="field"><label>Curb placement instructions</label><textarea>Left of driveway, outside front gate</textarea></div>
+<div class="field"><label>Curb placement instructions</label><textarea>Confirmed after first collection</textarea></div>
 <div class="field"><label>Gate access</label><select><option>No gate</option><option>Unlocked gate</option><option selected>Locked gate (code below)</option></select></div>
 <div class="field"><label>Gate code / access notes</label><input value="1234"></div>
 <div class="field"><label>Pets</label><select><option>No pets</option><option selected>Dog — friendly</option><option>Dog — keep gate closed</option><option>Other pets</option></select></div>
@@ -3222,7 +3103,7 @@ function showEditPreferences(){
 <div class="field"><label>Preferred Collection Day</label><select><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option selected>Thursday</option><option>Friday</option></select></div>
 </div>
 <div class="field"><label>Number of Bins</label><select><option>1</option><option selected>2</option><option>3</option><option>4+</option></select></div>
-<div class="field"><label>Special Instructions</label><textarea>Please knock before collecting</textarea></div>
+<div class="field"><label>Special Instructions</label><textarea>—</textarea></div>
 </div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Preferences updated ✅','ok')">Save Changes</button></div>`
   openM()
 }
@@ -3231,7 +3112,7 @@ function showEditPreferences(){
 function showBankModal(){
   document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">💵 Update Bank Info</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
 <div class="info-box">Pay is deposited every Friday. Changes take effect from the next pay cycle.</div>
-<div class="field"><label>Account Holder Name</label><input value="Marcus James Reid"></div>
+<div class="field"><label>Account Holder Name</label><input value="—"></div>
 <div class="g2"><div class="field"><label>Routing Number</label><input value="021000021" type="password"></div><div class="field"><label>Account Number</label><input value="4821" type="password"></div></div>
 <div class="field"><label>Account Type</label><select><option selected>Checking</option><option>Savings</option></select></div>
 <div class="field"><label>Bank Name</label><input value="Chase Bank"></div>
@@ -3241,9 +3122,9 @@ function showBankModal(){
 function showTaxInfoModal(){
   document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">📄 Update Tax Info</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
 <div class="warn-box">⚠️ Tax info is used to generate your 1099-NEC. Ensure your legal name and SSN match your IRS records exactly.</div>
-<div class="field"><label>Legal Full Name</label><input value="Marcus James Reid"></div>
+<div class="field"><label>Legal Full Name</label><input value="—"></div>
 <div class="g2"><div class="field"><label>SSN / Tax ID</label><input type="password" placeholder="XXX-XX-XXXX"></div><div class="field"><label>Business Structure</label><select><option selected>Individual / Sole Proprietor</option><option>Single-member LLC</option><option>S-Corp</option></select></div></div>
-<div class="field"><label>Mailing Address</label><input value="15302 N Sarival Ave, Glendale AZ 85302"></div>
+<div class="field"><label>Mailing Address</label><input placeholder="Mailing address"></div>
 </div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Tax info updated ✅','ok')">Save Tax Info</button></div>`
   openM()
 }
@@ -3251,9 +3132,9 @@ function showTaxInfoModal(){
 // ── ADMIN JOB MODALS ──────────────────────────────
 function showCreateJobModal(){
   document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">+ Create Job</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
-<div class="g2"><div class="field"><label>Homeowner</label><select><option>Margaret Thompson</option><option>James Okafor</option><option>Sarah Chen</option></select></div><div class="field"><label>Service</label><select><option>♻ Recycling</option><option>🗑 General Waste</option></select></div></div>
+<div class="g2"><div class="field"><label>Homeowner</label><select><option value="">— Select homeowner —</option></select></div><div class="field"><label>Service</label><select><option>♻ Recycling</option><option>🗑 General Waste</option></select></div></div>
 <div class="g2"><div class="field"><label>Visit Type</label><select><option>🌙 Bin Out</option><option>☀️ Bin In</option><option>🚨 SOS</option></select></div><div class="field"><label>Date</label><input type="date"></div></div>
-<div class="field"><label>Assign Runner</label><select><option value="">— Unassigned —</option><option>Marcus Reid</option><option>Aisha Patel</option><option>Tom Bradley</option></select></div>
+<div class="field"><label>Assign Runner</label><select><option value="">— Unassigned —</option></select></div>
 <div class="field"><label>Notes</label><textarea placeholder="Any special instructions for this job..."></textarea></div>
 </div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Job created ✅','ok')">Create Job</button></div>`
   openM()
@@ -3264,7 +3145,7 @@ function showEditJobModal(jobId, homeowner, visitType, service, date, runner, st
 <div class="g2"><div class="field"><label>Homeowner</label><input value="${homeowner}" readonly style="opacity:.5"></div><div class="field"><label>Job ID</label><input value="${jobId}" readonly style="opacity:.4"></div></div>
 <div class="g2"><div class="field"><label>Visit Type</label><select><option${visitType==='BIN_OUT'?' selected':''}>BIN_OUT</option><option${visitType==='BIN_IN'?' selected':''}>BIN_IN</option><option${visitType==='SOS'?' selected':''}>SOS</option></select></div><div class="field"><label>Service</label><select><option${service==='RECYCLING'?' selected':''}>RECYCLING</option><option${service==='GENERAL'?' selected':''}>GENERAL</option></select></div></div>
 <div class="g2"><div class="field"><label>Date</label><input value="${date}"></div><div class="field"><label>Status</label><select><option${status==='PENDING'?' selected':''}>PENDING</option><option${status==='IN_PROGRESS'?' selected':''}>IN_PROGRESS</option><option${status==='COMPLETE'?' selected':''}>COMPLETE</option><option${status==='CANCELLED'?' selected':''}>CANCELLED</option></select></div></div>
-<div class="field"><label>Assigned Runner</label><select><option value="">— Unassigned —</option><option${runner==='Marcus Reid'?' selected':''}>Marcus Reid</option><option${runner==='Aisha Patel'?' selected':''}>Aisha Patel</option><option${runner==='Tom Bradley'?' selected':''}>Tom Bradley</option></select></div>
+<div class="field"><label>Assigned Runner</label><select><option value="">— Unassigned —</option><option value=''>— Select runner —</option></select></div>
 <div class="field"><label>Notes</label><textarea placeholder="Internal notes..."></textarea></div>
 </div><div class="mf"><button class="btn btn-red btn-sm" onclick="closeM();showToast('Job cancelled','err')">Cancel Job</button><button class="btn btn-ghost btn-sm" onclick="closeM()">Close</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Job ${jobId} updated ✅','ok')">Save</button></div>`
   openM()
@@ -3272,7 +3153,7 @@ function showEditJobModal(jobId, homeowner, visitType, service, date, runner, st
 function showAssignJobModal(jobId, homeowner){
   document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">Assign Runner — ${jobId}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
 <div style="font-size:13px;color:var(--sub);margin-bottom:14px">Homeowner: <strong style="color:var(--text)">${homeowner}</strong></div>
-<div class="field"><label>Assign to Runner</label><select><option value="">— Select runner —</option><option>Marcus Reid · Central Glendale · Available</option><option>Aisha Patel · Old Town Glendale · Available</option><option>Tom Bradley · North · Off Duty</option></select></div>
+<div class="field"><label>Assign to Runner</label><select><option value="">— Select runner —</option><option value="">— No runners available —</option></select></div>
 <div class="field"><label>Notes for runner</label><textarea placeholder="Any special instructions..."></textarea></div>
 </div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Runner assigned to ${jobId} ✅','ok')">Confirm Assignment</button></div>`
   openM()
@@ -3309,28 +3190,7 @@ function makePropertyPhoto(label, sublabel){
   } catch(e){ return null }
 }
 
-const NAV_STOPS = [
-  { name:'Margaret Thompson', address:'4821 W Glendale Ave',
-    details:'🔑 Gate code: 1234 · 🐕 Dog friendly', bins:'2 recycling bins · stored in back yard',
-    phone:'480-555-0001', notes:'Leave bins at left of front gate',
-    get propertyPhoto(){ return makePropertyPhoto('4821 W Glendale Ave','Bin storage: back yard (right side of gate)') },
-    mapX:80, mapY:270 },
-  { name:'James Okafor', address:'15302 N Sarival Ave',
-    details:'No gate · No pets', bins:'1 general waste bin · stored side of house',
-    phone:'480-555-0002', notes:'',
-    propertyPhoto: null,
-    mapX:180, mapY:160 },
-  { name:'Sarah Chen', address:'9873 W Peoria Ave',
-    details:'🔑 Gate code: 5678 · No pets', bins:'2 recycling bins · stored in garage',
-    phone:'480-555-0003', notes:'Bins are just inside garage on left',
-    get propertyPhoto(){ return makePropertyPhoto('9873 W Peoria Ave','Garage on left · bins inside on left wall') },
-    mapX:280, mapY:80 },
-  { name:'David Park', address:'13455 W Waddell Rd',
-    details:'No gate · Split service — ♻️ only today', bins:'1 recycling bin · front garden',
-    phone:'480-555-0004', notes:'Split service — recycling Thu, waste Mon. Green-lid bin only today.',
-    propertyPhoto: null,
-    mapX:340, mapY:40 },
-]
+const NAV_STOPS = [] // Populated when a runner starts a route
 
 // ── ROUTE STATE — persists across modal open/close ──
 let navStop    = 0
@@ -3823,18 +3683,8 @@ function saveUpdatedCard(){
 // ── NOTIFICATION SYSTEM ───────────────────────────
 
 const NOTIFS = {
-  rn: [
-    { id:"rn1", read:false, time:"2 min ago", icon:"🔔", accent:"#3b82f6", title:"Route reminder — tomorrow morning", body:"You have a Bin Out route scheduled for Wed Mar 19 at 7:00 AM. 3 stops in your area.", actions:[{label:"I can't make this", style:"err", fn:"rnOptOut('rn1')"},{label:"Got it ✓", style:"ok", fn:"rnConfirm('rn1')"}] },
-    { id:"rn2", read:false, time:"1 hour ago", icon:"⏰", accent:"#f59e0b", title:"Start route in 15 minutes", body:"Your Bin Out route (OUT-CGL-047) starts at 7:00 AM. Tap to open route details.", actions:[{label:"Can't start — reassign", style:"err", fn:"rnOptOut('rn2')"},{label:"Open Route →", style:"ok", fn:"navLaunchFromNotif()"}] },
-    { id:"rn3", read:true,  time:"Yesterday", icon:"✅", accent:"#22c55e", title:"Payout processed", body:"$38.25 has been sent to your bank account. Arrives within 1–2 business days.", actions:[] },
-    { id:"rn4", read:true,  time:"2 days ago", icon:"⭐", accent:"#f59e0b", title:"New 5-star rating", body:'Margaret Thompson left you a 5-star review: "Punctual and careful with the bins every time."', actions:[] },
-  ],
-  hw: [
-    { id:"hw1", read:false, time:"Just now", icon:"🔔", accent:"#3b82f6", title:"Collection tomorrow — runner confirmed", body:"Marcus Reid is confirmed for your Wed Mar 19 Bin Out. He'll arrive between 6:30–7:30 AM.", actions:[] },
-    { id:"hw2", read:false, time:"3 min ago", icon:"🚨", accent:"#ef4444", title:"Runner delay — we're on it", body:"Your scheduled runner hasn't started the route. We're finding a replacement now. No action needed.", actions:[{label:"Cancel this collection", style:"err", fn:"hwCancelFromNotif()"},{label:"Keep waiting", style:"ok", fn:"hwDismissDelay('hw2')"}] },
-    { id:"hw3", read:true,  time:"Yesterday", icon:"✅", accent:"#22c55e", title:"Bins are back in — all done!", body:"Marcus returned your bins at 11:42 AM. Photo confirmation attached. Great job done.", actions:[{label:"Rate Marcus ⭐", style:"ok", fn:"showRateRunner()"}] },
-    { id:"hw4", read:true,  time:"3 days ago", icon:"📦", accent:"#f59e0b", title:"One-time callout confirmed", body:"Your Bin Out callout for Fri Mar 14 was completed. $12.99 charged to card •••• 4242.", actions:[] },
-  ]
+  rn: [], // Populated from Supabase notifications
+  hw: [], // Populated from Supabase notifications
 }
 
 function openRouteInMaps(){
@@ -3844,7 +3694,7 @@ function openRouteInMaps(){
 
 function navLaunchFromNotif(){
   closeNotifPanel()
-  showStartRoute("OUT-CGL-047","Bin Out",["4821 W Glendale Ave — Margaret T.","15302 N Sarival Ave — James O.","9873 W Peoria Ave — Sarah C."])
+  showToast("No active route — check your upcoming routes tab","info")
 }
 
 
@@ -3911,7 +3761,7 @@ function rnOptOut(id){
     <div class="mb">
       <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
         <div style="font-size:13px;font-weight:600;margin-bottom:2px">Bin Out Route — Wed Mar 19, 7:00 AM</div>
-        <div style="font-size:12px;color:var(--sub)">OUT-CGL-047 · 3 stops · $12.75</div>
+        <div style="font-size:12px;color:var(--sub)">Route details from your assignment</div>
       </div>
       <div class="field">
         <label>Reason (helps us improve coverage)</label>
@@ -3936,7 +3786,7 @@ function confirmRnOptOut(){
   closeM()
   showToast('Route reassigned — reliability note logged on your profile','info')
   // Add escalation notif to admin
-  NOTIFS.rn.unshift({ id:'rn_esc', read:false, time:'Just now', icon:'⚠️', accent:'#ef4444', title:'Route opt-out recorded', body:'Your opt-out for OUT-CGL-047 has been logged. The route is being reassigned to another runner.', actions:[] })
+  NOTIFS.rn.unshift({ id:'rn_esc', read:false, time:'Just now', icon:'⚠️', accent:'#ef4444', title:'Route opt-out recorded', body:'Your opt-out has been logged. The route is being reassigned to another runner.', actions:[] })
 }
 
 function rnConfirm(id){
@@ -3965,7 +3815,7 @@ function showRateRunner(){
     </div>
     <div class="mb" style="text-align:center">
       <div style="font-size:40px;margin-bottom:8px">👤</div>
-      <div style="font-size:16px;font-weight:700;margin-bottom:4px">Marcus Reid</div>
+      <div style="font-size:16px;font-weight:700;margin-bottom:4px" id="rate-runner-name">Your Runner</div>
       <div style="font-size:12px;color:var(--sub);margin-bottom:20px">Bin In · Thu Mar 14 · 11:42 AM</div>
       <div style="display:flex;justify-content:center;gap:10px;margin-bottom:20px" id="star-row">
         ${[1,2,3,4,5].map(i=>`<span style="font-size:32px;cursor:pointer;transition:transform .1s" onclick="setStars(${i})" onmouseover="hoverStars(${i})" onmouseout="renderStars(window._stars||0)" id="star-${i}">☆</span>`).join('')}
@@ -4150,34 +4000,8 @@ function updateObSvcValue(){
 }
 
 // ── HOMEOWNER DATA MODEL ──────────────────────────
-let nextHWId = 4
-const HOMEOWNERS = [
-  { id:'C001', name:'Margaret Thompson', initials:'MT', email:'margaret@email.com', phone:'555-853-0001',
-    address:'4821 W Glendale Ave', city:'Glendale', state:'AZ', zip:'85301', zoneId:'z-gl-c',
-    service:'RECYCLING', plan:'1bin-weekly', freq:'weekly', day:'Thu', bins:2,
-    storage:'Back yard', gate:'Locked — code 1234', pets:'Dog (friendly)', curb:'Left of front gate',
-    notes:'Leave bins at left of front gate', status:'active', assignedRunner:'R001', color:'linear-gradient(135deg,var(--cyan),var(--blue))' },
-  { id:'C002', name:'James Okafor', initials:'JO', email:'james@email.com', phone:'555-853-0002',
-    address:'15302 N Sarival Ave', city:'Glendale', state:'AZ', zip:'85301', zoneId:'z-gl-c',
-    service:'GENERAL', plan:'1bin-weekly', freq:'weekly', day:'Thu', bins:1,
-    storage:'Side of house', gate:'No gate', pets:'None', curb:'Front pavement',
-    notes:'', status:'active', assignedRunner:'R001', color:'linear-gradient(135deg,#8b5cf6,#3b82f6)' },
-  { id:'C003', name:'Sarah Chen', initials:'SC', email:'sarah@email.com', phone:'555-853-0003',
-    address:'9873 W Peoria Ave', city:'Glendale', state:'AZ', zip:'85301', zoneId:'z-gl-c',
-    service:'RECYCLING', plan:'2bin-weekly', freq:'weekly', day:'Thu', bins:2,
-    storage:'Garage', gate:'Gate code 5678', pets:'None', curb:'Outside driveway',
-    notes:'', status:'active', assignedRunner:'R001', color:'linear-gradient(135deg,#22c55e,#06b6d4)' },
-  { id:'C004', name:'David Park', initials:'DP', email:'david@email.com', phone:'555-853-0004',
-    address:'13455 W Waddell Rd', city:'Glendale', state:'AZ', zip:'85301', zoneId:'z-gl-c',
-    service:'SPLIT', plan:'2bin-split', freq:'weekly', dayRecycling:'Thu', dayWaste:'Mon', bins:2,
-    storage:'Front garden', gate:'No gate', pets:'None', curb:'Pavement edge',
-    notes:'Split service — recycling Thu, waste Mon', status:'active', assignedRunner:'R001', color:'linear-gradient(135deg,#f59e0b,#ef4444)' },
-  { id:'C005', name:'Lisa Nguyen', initials:'LN', email:'lisa@email.com', phone:'555-853-0005',
-    address:'6701 W Thunderbird Rd', city:'Glendale', state:'AZ', zip:'85301', zoneId:'z-gl-c',
-    service:'RECYCLING', plan:'1bin-biweekly', freq:'biweekly', day:'Thu', bins:1,
-    storage:'Side alley', gate:'Gate code 9012', pets:'Cat', curb:'Left of front door',
-    notes:'', status:'active', assignedRunner:'R002', color:'linear-gradient(135deg,#ec4899,#8b5cf6)' },
-]
+let nextHWId = 1
+const HOMEOWNERS = [] // Populated as homeowners are approved
 
 // Runner unavailability log
 const RUNNER_UNAVAILABILITY = [
@@ -4410,9 +4234,9 @@ function removeHW(id){ const i=HOMEOWNERS.findIndex(x=>x.id===id); if(i>=0){HOME
 
 // Batch state tracking — persists across tab switches
 const BATCH_STATE = {
-  'OUT-CGL-047':  { status:'upcoming', stops:['4821 W Glendale Ave','15302 N Sarival Ave','9873 W Peoria Ave','13455 W Waddell Rd'], customOrder:null },
-  'IN-CGL-047':   { status:'locked',   stops:[], customOrder:null },
-  'MIX-CGL-015':  { status:'upcoming', stops:['9245 W Northern Ave','14802 W Greenway Rd','9301 W Northern Ave','9315 W Northern Ave','14900 W Greenway Rd'], customOrder:null },
+  
+  
+
 }
 
 let currentRouteTab = 'upcoming'
@@ -4713,47 +4537,7 @@ function initRoutesTabs(){
 
 // ── COMPLETED ROUTE HISTORY ───────────────────────
 
-const COMPLETED_ROUTES = [
-  { id:'OUT-CGL-046', date:'2025-03-14', label:'Today',     type:'Bin Out', zone:'Central Glendale', stops:4, earned:13.00, duration:'28 min', distance:'1.1 mi', submittedAt:'6:42 AM', payStatus:'pending',
-    stopLog:[
-      {num:1, name:'Margaret Thompson', address:'4821 W Glendale Ave', done:'6:18 AM', note:'Gate code used · 2 bins moved'},
-      {num:2, name:'James Okafor',       address:'15302 N Sarival Ave', done:'6:24 AM', note:'No gate · bins at side'},
-      {num:3, name:'Sarah Chen',         address:'9873 W Peoria Ave',   done:'6:31 AM', note:'Garage unlocked · 2 bins'},
-      {num:4, name:'David Park',         address:'13455 W Waddell Rd',  done:'6:39 AM', note:'♻️ Recycling only · split service'},
-    ]},
-  { id:'OUT-CGL-044', date:'2025-03-13', label:'Yesterday', type:'Bin Out', zone:'Central Glendale', stops:4, earned:13.00, duration:'31 min', distance:'1.1 mi', submittedAt:'6:38 PM', payStatus:null,
-    stopLog:[
-      {num:1, name:'Margaret Thompson', address:'4821 W Glendale Ave', done:'6:09 PM', note:''},
-      {num:2, name:'James Okafor',       address:'15302 N Sarival Ave', done:'6:16 PM', note:''},
-      {num:3, name:'Sarah Chen',         address:'9873 W Peoria Ave',   done:'6:25 PM', note:''},
-      {num:4, name:'David Park',         address:'13455 W Waddell Rd',  done:'6:35 PM', note:'♻️ only'},
-    ]},
-  { id:'IN-CGL-044',  date:'2025-03-13', label:'Yesterday', type:'Bin In',  zone:'Central Glendale', stops:4, earned:13.00, duration:'25 min', distance:'1.0 mi', submittedAt:'11:12 AM', payStatus:null,
-    stopLog:[
-      {num:1, name:'Margaret Thompson', address:'4821 W Glendale Ave', done:'10:51 AM', note:''},
-      {num:2, name:'James Okafor',       address:'15302 N Sarival Ave', done:'10:58 AM', note:''},
-      {num:3, name:'Sarah Chen',         address:'9873 W Peoria Ave',   done:'11:05 AM', note:''},
-      {num:4, name:'David Park',         address:'13455 W Waddell Rd',  done:'11:10 AM', note:'♻️ only'},
-    ]},
-  { id:'MIX-CGL-012', date:'2025-03-12', label:'Mar 12',    type:'Mixed',   zone:'Central Glendale', stops:5, earned:17.88, duration:'38 min', distance:'0.9 mi', submittedAt:'9:04 AM',  payStatus:null,
-    stopLog:[
-      {num:1, name:'Rachel Torres',   address:'9245 W Northern Ave',  done:'8:28 AM', note:'☀️ IN'},
-      {num:2, name:'Brian Kowalski',  address:'14802 W Greenway Rd',  done:'8:34 AM', note:'🌙 OUT'},
-      {num:3, name:'Tom & Wendy Ellis',address:'9301 W Northern Ave', done:'8:42 AM', note:'☀️ IN · gate 4491'},
-      {num:4, name:'Sandra Kim',      address:'9315 W Northern Ave',  done:'8:51 AM', note:'🌙 OUT'},
-      {num:5, name:'Luis Herrera',    address:'14900 W Greenway Rd',  done:'9:01 AM', note:'☀️ IN'},
-    ]},
-  { id:'OUT-CGL-042', date:'2025-03-12', label:'Mar 12',    type:'Bin Out', zone:'Central Glendale', stops:3, earned:9.75,  duration:'22 min', distance:'0.8 mi', submittedAt:'6:55 PM',  payStatus:null,
-    stopLog:[
-      {num:1, name:'Margaret Thompson', address:'4821 W Glendale Ave', done:'6:35 PM', note:''},
-      {num:2, name:'James Okafor',       address:'15302 N Sarival Ave', done:'6:44 PM', note:''},
-      {num:3, name:'Sarah Chen',         address:'9873 W Peoria Ave',   done:'6:53 PM', note:''},
-    ]},
-  { id:'IN-CGL-040',  date:'2025-03-11', label:'Mar 11',    type:'Bin In',  zone:'Central Glendale', stops:4, earned:13.00, duration:'24 min', distance:'1.0 mi', submittedAt:'10:47 AM', payStatus:null, stopLog:[]},
-  { id:'OUT-NGL-018', date:'2025-03-11', label:'Mar 11',    type:'Bin Out', zone:'North Glendale',   stops:3, earned:9.75,  duration:'20 min', distance:'0.7 mi', submittedAt:'6:50 PM',  payStatus:null, stopLog:[]},
-  { id:'IN-NGL-018',  date:'2025-03-10', label:'Mar 10',    type:'Bin In',  zone:'North Glendale',   stops:3, earned:9.75,  duration:'18 min', distance:'0.7 mi', submittedAt:'11:05 AM', payStatus:null, stopLog:[]},
-  { id:'OUT-CGL-038', date:'2025-03-10', label:'Mar 10',    type:'Bin Out', zone:'Central Glendale', stops:4, earned:13.00, duration:'30 min', distance:'1.1 mi', submittedAt:'6:44 PM',  payStatus:null, stopLog:[]},
-]
+const COMPLETED_ROUTES = [] // Populated from Supabase completed jobs
 
 function renderCompletedRoutes(){
   const container = document.getElementById('completed-route-container')
@@ -5184,15 +4968,7 @@ function createZoneAndApproveHW(appId){
 }
 
 // ── PENDING HOMEOWNER APPROVAL SYSTEM ────────────
-const PENDING_HOMEOWNERS = [
-  // Pre-seeded pending application — someone who hasn't been approved yet
-  { id:'HW-APP-0001', name:'Rachel Torres', initials:'RT', email:'rachel.torres@email.com', phone:'480-555-0012',
-    address:'9245 W Northern Ave', zip:'85305', service:'Recycling', freq:'weekly', plan:'w1',
-    day:'Thu', svcNotes:'Dog in yard — always friendly, but please close gate', cardLast4:'4491', submittedAt:'1 hr ago', status:'pending', zoneId:null },
-  { id:'HW-APP-0002', name:'Brian Kowalski', initials:'BK', email:'brian.k@email.com', phone:'480-555-0031',
-    address:'14802 W Greenway Rd', zip:'85374', service:'General Waste', freq:'biweekly', plan:'b1',
-    day:'Wed', svcNotes:'', cardLast4:'7732', submittedAt:'3 hrs ago', status:'pending', zoneId:null },
-]
+const PENDING_HOMEOWNERS = [] // Populated from Supabase homeowner_signups
 
 function renderPendingHWList(){
   const el = document.getElementById('pending-hw-list')
@@ -6415,16 +6191,14 @@ function showReferralLink(){
 }
 
 
-const ADMIN_CREDS = [
-  { email:'admin@bindash.com', password:'admin123', name:'Admin', role:'Super Admin' },
-  { email:'ops@bindash.com',   password:'ops456',   name:'Ops Manager', role:'Operations' },
-]
+// Admin auth — uses Supabase auth with role check
 let adminAuthed = false
 
-function doAdminLogin(){
-  const email = document.getElementById('ad-email').value.trim().toLowerCase()
-  const pass  = document.getElementById('ad-pass').value
+async function doAdminLogin(){
+  const email  = document.getElementById('ad-email').value.trim().toLowerCase()
+  const pass   = document.getElementById('ad-pass').value
   const errBox = document.getElementById('admin-login-error')
+  errBox.style.display = 'none'
 
   if(!email || !pass){
     errBox.textContent = 'Please enter your email and password.'
@@ -6432,38 +6206,58 @@ function doAdminLogin(){
     return
   }
 
-  const match = ADMIN_CREDS.find(c => c.email === email && c.password === pass)
-  if(!match){
-    errBox.style.display = 'block'
-    errBox.textContent = 'Incorrect credentials. Please try again.'
+  const btn = document.querySelector('#S-admin-login .btn-cyan')
+  if(btn){ btn.disabled=true; btn.textContent='Signing in...' }
+
+  try {
+    const { data, error } = await _supa.auth.signInWithPassword({ email, password: pass })
+
+    if(error || !data?.user){
+      errBox.style.display = 'block'
+      errBox.textContent = 'Incorrect credentials. Please try again.'
+      document.getElementById('ad-pass').value = ''
+      document.getElementById('ad-pass').focus()
+      const card = errBox.closest('div[style*="border-radius:16px"]') || errBox.parentElement
+      card.style.animation = 'shake .35s ease'
+      setTimeout(()=>card.style.animation='', 400)
+      if(btn){ btn.disabled=false; btn.textContent='Sign In to Staff Portal →' }
+      return
+    }
+
+    // Check admin role in user metadata
+    const role = data.user?.user_metadata?.role
+    if(role !== 'admin' && role !== 'ops'){
+      await _supa.auth.signOut()
+      errBox.style.display = 'block'
+      errBox.textContent = 'Access denied — staff accounts only.'
+      if(btn){ btn.disabled=false; btn.textContent='Sign In to Staff Portal →' }
+      return
+    }
+
+    adminAuthed = true
+    const displayName = data.user?.user_metadata?.name || 'Admin'
+    const nameEl = document.getElementById('ad-sidebar-name')
+    if(nameEl) nameEl.textContent = displayName
+
+    document.getElementById('ad-email').value = ''
     document.getElementById('ad-pass').value = ''
-    document.getElementById('ad-pass').focus()
-    // Shake animation
-    const card = errBox.closest('div[style*="border-radius:16px"]') || errBox.parentElement
-    card.style.animation = 'shake .35s ease'
-    setTimeout(()=>card.style.animation='', 400)
-    return
+    if(btn){ btn.disabled=false; btn.textContent='Sign In to Staff Portal →' }
+
+    go('S-admin')
+    setTimeout(() => adNav(null, 'ad-overview'), 80)
+    showToast('Welcome back, ' + displayName + ' ✅', 'ok')
+
+  } catch(err) {
+    console.error('[BinDash] Admin login error:', err)
+    errBox.textContent = 'Something went wrong. Please try again.'
+    errBox.style.display = 'block'
+    if(btn){ btn.disabled=false; btn.textContent='Sign In to Staff Portal →' }
   }
-
-  errBox.style.display = 'none'
-
-  // In a real app — show 2FA here. For demo, skip straight to dashboard.
-  adminAuthed = true
-  const nameEl = document.getElementById('ad-sidebar-name')
-  if(nameEl) nameEl.textContent = match.name
-
-  // Clear fields
-  document.getElementById('ad-email').value = ''
-  document.getElementById('ad-pass').value = ''
-
-  go('S-admin')
-  // Explicitly activate overview page after login
-  setTimeout(() => adNav(null, 'ad-overview'), 80)
-  showToast('Welcome back, ' + match.name + ' ✅', 'ok')
 }
 
-function adminLogout(){
+async function adminLogout(){
   adminAuthed = false
+  await _supa.auth.signOut()
   // Reset login form
   const errBox = document.getElementById('admin-login-error')
   if(errBox) errBox.style.display = 'none'
@@ -6657,11 +6451,9 @@ function showOfferDetail(){
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Stops</div>
     <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px">
       ${[
-        {n:'Margaret Thompson',a:'4821 W Glendale Ave',d:'🔑 Gate: 1234 · 🐕 Dog friendly · Bins in back yard',s:'♻ Recycling'},
-        {n:'James Okafor',a:'15302 N Sarival Ave',d:'No gate · No pets · Bins at side of house',s:'🗑 General'},
-        {n:'Sarah Chen',a:'9873 W Peoria Ave',d:'🔑 Gate: 5678 · Bins in garage',s:'♻ Recycling'},
-        {n:'David Park',a:'13455 W Waddell Rd',d:'No gate · Bins in front garden',s:'🗑 General'},
-        {n:'Lisa Nguyen',a:'6701 W Thunderbird Rd',d:'🔑 Gate: 9012 · No pets · Bins in side alley',s:'♻ Recycling'},
+        {n:'Stop 1',a:'Address from your batch',d:'Details will load from your assignment',s:'♻ Recycling'},
+        {n:'Stop 2',a:'Address from your batch',d:'Details will load from your assignment',s:'♻ Recycling'},
+        {n:'Stop 3',a:'Address from your batch',d:'Details will load from your assignment',s:'♻ Recycling'},
       ].map((s,i)=>`<div style="display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border-radius:8px;padding:9px 12px">
         <div style="width:22px;height:22px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
         <div style="flex:1">
@@ -6725,7 +6517,7 @@ function adForceReassign(batchId){
   <div class="mb">
     <div style="font-size:13px;color:var(--sub);margin-bottom:14px">Aisha Patel hasn't responded. Choose a runner to re-offer to, or broadcast to all available.</div>
     <div style="display:flex;flex-direction:column;gap:8px">
-      ${['Marcus Reid · 4.8★ · 0.25 mi away','Tom Walsh · 4.6★ · 0.7 mi away','Priya Singh · 4.9★ · 0.9 mi away'].map(r=>`
+      ${RUNNERS.length ? RUNNERS.map(r=>r.name+' · '+r.rating+'★ · '+(r.area||'your zone')) : ['No runners available in this zone'].map(r=>`
         <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border-radius:8px;padding:9px 12px;font-size:13px">
           <span>${r}</span>
           <button class="btn btn-outline btn-sm" style="font-size:10px" onclick="closeM();showToast('Offer sent to ${r.split(' ·')[0]} ✅','ok')">Offer →</button>
@@ -6744,7 +6536,7 @@ function adManualAssign(batchId){
   <div class="mb">
     <div class="warn-box" style="margin-bottom:12px">⚠️ Force assigning bypasses the offer system. Only use if all broadcast options are exhausted.</div>
     <div style="display:flex;flex-direction:column;gap:8px">
-      ${['Marcus Reid · 4.8★ · Already has 1 batch tonight','Tom Walsh · 4.6★ · Available','Priya Singh · 4.9★ · Available'].map((r,i)=>`
+      ${RUNNERS.length ? RUNNERS.map(r=>r.name+' · '+r.rating+'★ · '+(r.status==='AVAILABLE'?'Available':'On Route')) : ['No runners available'].map((r,i)=>`
         <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border-radius:8px;padding:9px 12px;font-size:13px">
           <span style="${i===0?'color:var(--muted)':''}">${r}</span>
           <button class="btn btn-sm" style="font-size:10px;background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)" onclick="closeM();showToast('${r.split(' ·')[0]} assigned to ${batchId} ✅','ok')">🚨 Force Assign</button>
@@ -6868,3 +6660,4 @@ async function submitRunnerInterest(){
 </script>
 </body>
 </html>
+
