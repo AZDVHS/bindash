@@ -995,6 +995,77 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
   </div>
 </div>
 
+
+<!-- ══════════ HW ZONE ACTIVATED — CONFIRM SERVICE ══════════ -->
+<div id="S-hw-confirm" class="screen">
+  <div style="min-height:100vh;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:36px 20px">
+    <div style="max-width:560px;width:100%">
+
+      <!-- Header -->
+      <div style="text-align:center;margin-bottom:28px">
+        <div style="font-size:56px;margin-bottom:12px">🎉</div>
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:8px">Great news — BinDash is in your area!</div>
+        <div style="font-size:15px;color:var(--sub);line-height:1.6">
+          We've launched service in your zone. Confirm your details below and we'll get you set up.
+        </div>
+      </div>
+
+      <!-- Zone info -->
+      <div style="background:rgba(6,214,160,.08);border:1.5px solid rgba(6,214,160,.3);border-radius:14px;padding:18px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="font-size:28px">📍</div>
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--cyan)" id="confirm-zone-name">Your Zone</div>
+            <div style="font-size:12px;color:var(--sub);margin-top:2px">Service is now available in your area</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Confirm details card -->
+      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:22px;margin-bottom:20px">
+        <div style="font-size:14px;font-weight:700;margin-bottom:14px">Confirm your service details</div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:13px;line-height:2.2;color:var(--sub);margin-bottom:16px" id="confirm-details-grid">
+          <!-- Populated by populateConfirmScreen() -->
+        </div>
+
+        <!-- Editable fields -->
+        <div class="field">
+          <label>Preferred collection day</label>
+          <select id="confirm-day">
+            <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+            <option selected>Thursday</option><option>Friday</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Any updates to your property notes? <span style="color:var(--muted);font-weight:400;font-size:10px">(optional)</span></label>
+          <textarea id="confirm-notes" placeholder="Gate code changes, new pets, bin location updates..." style="min-height:60px"></textarea>
+        </div>
+
+        <!-- Terms -->
+        <div class="chk-row" style="margin-top:8px">
+          <input type="checkbox" id="confirm-terms">
+          <div><div style="font-size:13px">I confirm my details are correct and I agree to the <a style="color:var(--cyan);cursor:pointer">Terms of Service</a></div></div>
+        </div>
+        <div class="chk-row">
+          <input type="checkbox" id="confirm-comms" checked>
+          <div><div style="font-size:13px">Send me collection reminders and service updates by email</div></div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button class="btn btn-outline" onclick="bindashLogout()">Not now — log out</button>
+        <button class="btn btn-cyan btn-lg" onclick="submitServiceConfirmation()">✅ Confirm &amp; Request Service</button>
+      </div>
+
+      <div style="text-align:center;margin-top:14px;font-size:12px;color:var(--muted)">
+        We'll review your request within 24–48 hours and email you when you're approved.
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="S-hw-dash" class="screen">
   <div class="dash-wrap">
     <div class="sidebar">
@@ -1722,9 +1793,10 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div class="nav-i" onclick="adNav(this,'ad-dispatch')"><span class="ic">🗺️</span> Dispatch</div>
       <div class="nav-i" onclick="adNav(this,'ad-overview')"><span class="ic">📊</span> Overview</div>
       <div class="s-sect">Approvals</div>
-      <div class="nav-i" onclick="adNav(this,'ad-pending-hw')"><span class="ic">🏠</span> Pending Homeowners <span id="hw-pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none" id="hw-pcount">0</span></div>
-      <div class="nav-i" onclick="adNav(this,'ad-pending')"><span class="ic">🚐</span> Pending Runners <span id="pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none" id="pcount">0</span></div>
-      <div class="nav-i" onclick="adNav(this,'ad-waitlist')"><span class="ic">📋</span> Interest List <span id="waitlist-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none" id="waitlist-badge" style="display:none">0</span></div>
+      <div class="nav-i" onclick="adNav(this,'ad-pending-hw')"><span class="ic">🏠</span> Pending Homeowners <span id="hw-pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
+      <div class="nav-i" onclick="adNav(this,'ad-pending')"><span class="ic">🚐</span> Pending Runners <span id="pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
+      <div class="nav-i" onclick="adNav(this,'ad-runner-requests')"><span class="ic">🎟️</span> Runner Requests <span id="rr-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
+      <div class="nav-i" onclick="adNav(this,'ad-waitlist')"><span class="ic">📋</span> Interest List <span id="waitlist-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
       <div class="s-sect">Management</div>
       <div class="nav-i" onclick="adNav(this,'ad-homeowners')"><span class="ic">🏠</span> Homeowners</div>
       <div class="nav-i" onclick="adNav(this,'ad-runners')"><span class="ic">🚐</span> Runners</div>
@@ -1799,6 +1871,16 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div style="color:var(--sub);font-size:13px;margin-bottom:14px">Homeowners who signed up in areas BinDash doesn't yet service. When a runner activates in their ZIP, notify them to complete enrollment.</div>
           <div id="waitlist-list" style="display:flex;flex-direction:column;gap:10px">
             <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No waitlist signups yet.</div>
+          </div>
+        </div>
+
+        <!-- AD RUNNER REQUESTS -->
+        <div class="pg" id="ad-runner-requests">
+          <div style="color:var(--sub);font-size:13px;margin-bottom:14px">
+            People who requested a runner invite code. Review their details, approve to generate a unique code — it will display here and can be shared with them directly.
+          </div>
+          <div id="runner-request-list" style="display:flex;flex-direction:column;gap:12px">
+            <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No runner requests yet.</div>
           </div>
         </div>
 
@@ -2078,67 +2160,148 @@ async function populateHWDashboard(){
   const ln = currentUser.last_name  || ''
   const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'HW'
 
-  // Sidebar
-  const nameEl = document.getElementById('hw-sidebar-name')
-  const avEl   = document.getElementById('hw-sidebar-avatar')
-  const grEl   = document.getElementById('hw-greeting')
-  if(nameEl) nameEl.textContent = fn + ' ' + ln
-  if(avEl)   avEl.textContent   = initials
-  if(grEl)   grEl.textContent   = 'Welcome back, ' + fn + ' 👋'
-
-  // Load their signup record from Supabase to get zone, day, runner
   try {
-    const res = await _supa
-      .from('homeowner_signups')
-      .select('*')
-      .eq('email', currentUser.email)
-      .single()
+    let data = null, loadErr = null
+    try {
+      const res = await _supa
+        .from('homeowner_signups')
+        .select('*')
+        .eq('email', currentUser.email)
+        .single()
+      data    = res?.data
+      loadErr = res?.error?.message || null
+    } catch(e){ loadErr = String(e?.message||e) }
 
-    const row = res?.data
-    if(!row) return
+    if(loadErr || !data){
+      console.warn('[BinDash] HW profile load:', loadErr)
+      // Can\'t load profile — show dashboard anyway
+      go('S-hw-dash')
+      return
+    }
 
-    // Zone strip
-    const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id)
-    const zoneEl = document.getElementById('hw-zone-name')
-    const zipEl  = document.getElementById('hw-confirm-zip')
-    const dayEl  = document.querySelector('#hw-home [style*="color:var(--text)"]')
-    if(zoneEl) zoneEl.textContent = zone?.name || 'Pending zone assignment'
-    if(zipEl)  zipEl.textContent  = row.zip_code || ''
+    const row = data
+    const status = row.status
 
-    // Collection day from their signup
-    const dayText = row.collection_day || '—'
-    const dayStrip = document.getElementById('hw-collection-day')
-    if(dayStrip) dayStrip.textContent = dayText
-
-    // Runner assignment
-    const runnerEl = document.getElementById('hw-assigned-runner')
-    if(runnerEl){
-      if(row.assigned_runner){
+    if(status === 'approved'){
+      // ── FULLY ACTIVE: show dashboard ──
+      go('S-hw-dash')
+      const nameEl = document.getElementById('hw-sidebar-name')
+      const avEl   = document.getElementById('hw-sidebar-avatar')
+      const grEl   = document.getElementById('hw-greeting')
+      if(nameEl) nameEl.textContent = fn + ' ' + ln
+      if(avEl)   avEl.textContent   = initials
+      if(grEl)   grEl.textContent   = 'Welcome back, ' + fn + ' \uD83D\uDC4B'
+      // Populate zone/day/runner strip
+      const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id)
+      const zoneEl = document.getElementById('hw-zone-name')
+      const zipEl  = document.getElementById('hw-confirm-zip')
+      const dayEl  = document.getElementById('hw-collection-day')
+      if(zoneEl) zoneEl.textContent = zone?.name || 'Your zone'
+      if(zipEl)  zipEl.textContent  = row.zip_code || ''
+      if(dayEl)  dayEl.textContent  = row.collection_day || '—'
+      const runnerEl = document.getElementById('hw-assigned-runner')
+      if(runnerEl){
         const runner = RUNNERS.find(r=>r.id===row.assigned_runner)
-        runnerEl.innerHTML = 'Runner: <strong style="color:var(--cyan)">' + (runner?.name || 'Assigned') + '</strong>'
-      } else {
-        runnerEl.innerHTML = 'Runner: <strong style="color:var(--muted)">TBD — pending activation</strong>'
+        runnerEl.innerHTML = runner
+          ? 'Runner: <strong style="color:var(--cyan)">' + runner.name + '</strong>'
+          : 'Runner: <strong style="color:var(--muted)">TBD — pending assignment</strong>'
       }
-    }
+      const colCount = document.getElementById('hw-collections-count')
+      if(colCount) colCount.textContent = row.collections_done || 0
 
-    // Status-aware greeting subtitle
-    const subEl = document.querySelector('#hw-home .sl2, #hw-home [style*="color:var(--sub)"]')
-    if(row.status === 'pending_review'){
-      const nextColEl = document.querySelector('#hw-home div[style*="font-size:14px"]')
-      if(nextColEl) nextColEl.innerHTML = 'Your account is <strong style="color:var(--amber)">pending review</strong> \u2014 we\'ll email you once approved and your first collection is scheduled'
-    } else if(row.status === 'approved'){
-      const nextColEl = document.querySelector('#hw-home div[style*="font-size:14px"]')
-      if(nextColEl) nextColEl.innerHTML = 'Service active · Collection day: <strong style="color:var(--cyan)">' + dayText + '</strong>'
-    }
+    } else if(status === 'waitlisted'){
+      // ── WAITLISTED: check if a zone now exists for their ZIP ──
+      const zip = row.zip_code || ''
+      const zone = findZoneForZip(zip)
+      if(zone && (zone.status === 'live' || zone.pilot)){
+        // Zone has been activated — prompt homeowner to confirm service
+        populateConfirmScreen(row, zone)
+        go('S-hw-confirm')
+      } else {
+        // Still no zone — show updated waitlist screen
+        const zipDisplay = document.getElementById('waitlist-zip-display')
+        if(zipDisplay) zipDisplay.textContent = 'ZIP ' + zip
+        go('S-hw-waitlist')
+      }
 
-    // Stats — zeros until real jobs exist
-    const colCount = document.getElementById('hw-collections-count')
-    const upCount  = document.getElementById('hw-upcoming-count')
-    if(colCount) colCount.textContent = row.collections_done || 0
-    if(upCount)  upCount.textContent  = row.upcoming_count   || 0
+    } else if(status === 'pending_review'){
+      // ── PENDING REVIEW: already confirmed, waiting for admin ──
+      go('S-hw-pending')
+
+    } else if(status === 'rejected'){
+      // Rejected — back to landing with message
+      showToast('Your application was not approved. Contact support for details.', 'err')
+      go('S-land')
+
+    } else {
+      // Unknown status — default to pending screen
+      go('S-hw-pending')
+    }
 
   } catch(err){
     console.warn('[BinDash] HW profile load failed:', String(err?.message||err))
+    go('S-hw-dash')
+  }
+}
+
+// ── POPULATE CONFIRM SCREEN with homeowner\'s existing data ──
+function populateConfirmScreen(row, zone){
+  const zoneNameEl = document.getElementById('confirm-zone-name')
+  if(zoneNameEl) zoneNameEl.textContent = zone.name + ' — ZIP ' + (row.zip_code||'')
+
+  const grid = document.getElementById('confirm-details-grid')
+  if(grid){
+    grid.innerHTML = `
+      <div><strong style="color:var(--text)">Name:</strong> ${row.first_name} ${row.last_name}</div>
+      <div><strong style="color:var(--text)">Email:</strong> ${row.email}</div>
+      <div><strong style="color:var(--text)">Address:</strong> ${row.street_address||'—'}</div>
+      <div><strong style="color:var(--text)">ZIP:</strong> ${row.zip_code||'—'}</div>
+      <div><strong style="color:var(--text)">Service:</strong> ${row.service_type||'Recycling'}</div>
+      <div><strong style="color:var(--text)">Frequency:</strong> ${row.frequency||'Weekly'}</div>
+      <div><strong style="color:var(--text)">Card on file:</strong> •••• ${row.card_last4||'——'}</div>
+      <div><strong style="color:var(--text)">Plan:</strong> ${row.plan_id||'—'}</div>
+    `
+  }
+
+  // Pre-select their collection day if they had one
+  const dayEl = document.getElementById('confirm-day')
+  if(dayEl && row.collection_day){
+    const opts = dayEl.querySelectorAll('option')
+    opts.forEach(o=>{ if(o.value===row.collection_day || o.textContent===row.collection_day) o.selected=true })
+  }
+
+  // Store zone_id for submission
+  window._confirmZoneId = zone.id
+  window._confirmEmail  = row.email
+}
+
+// ── SUBMIT SERVICE CONFIRMATION → goes to admin pending queue ──
+async function submitServiceConfirmation(){
+  if(!document.getElementById('confirm-terms')?.checked){
+    showToast('Please confirm your details and agree to the Terms of Service', 'err')
+    return
+  }
+  const day   = document.getElementById('confirm-day')?.value   || ''
+  const notes = document.getElementById('confirm-notes')?.value || ''
+  const btn   = document.querySelector('#S-hw-confirm .btn-cyan')
+  if(btn){ btn.disabled=true; btn.textContent='Submitting...' }
+
+  try {
+    await _supa.from('homeowner_signups').update({
+      status:          'pending_review',
+      zone_id:         window._confirmZoneId || null,
+      collection_day:  day,
+      service_notes:   notes || null,
+      updated_at:      new Date().toISOString(),
+    }).eq('email', window._confirmEmail || currentUser?.email)
+
+    console.log('[BinDash] Service confirmation submitted ✅')
+    if(btn){ btn.disabled=false; btn.textContent='✅ Confirm & Request Service' }
+    go('S-hw-pending')
+  } catch(err){
+    console.warn('[BinDash] Confirmation failed:', String(err?.message||err))
+    showToast('Something went wrong — please try again', 'err')
+    if(btn){ btn.disabled=false; btn.textContent='✅ Confirm & Request Service' }
   }
 }
 
@@ -2746,6 +2909,7 @@ function adNav(el, pg){
     'ad-pending-hw': 'Pending Homeowners',
     'ad-pending':    'Pending Runners',
     'ad-waitlist':   'Interest List',
+    'ad-runner-requests': 'Runner Requests',
     'ad-homeowners': 'Homeowner Management',
     'ad-runners':    'Runner Management',
     'ad-jobs':       'Jobs',
@@ -2761,6 +2925,7 @@ function adNav(el, pg){
   if(pg === 'ad-homeowners') setTimeout(renderHomeownerList, 50)
   if(pg === 'ad-pending-hw') setTimeout(renderPendingHWList, 50)
   if(pg === 'ad-waitlist')   setTimeout(renderWaitlistPage, 50)
+  if(pg === 'ad-runner-requests') setTimeout(loadRunnerRequests, 50)
 }
 
 // Admin actions
@@ -4965,7 +5130,10 @@ function updateWaitlistBadge(){
   const count = WAITLIST_SIGNUPS.filter(s=>s.status==='waitlist').length
   const b = document.getElementById('waitlist-badge')
   const ov = document.getElementById('ov-waitlist-count')
-  if(b)  b.textContent  = count
+  if(b){
+    b.textContent    = count
+    b.style.display  = count > 0 ? 'inline' : 'none'
+  }
   if(ov) ov.textContent = count
 }
 
@@ -5173,19 +5341,45 @@ async function confirmCreateZoneFromWaitlist(zip){
   ADMIN_ZONES.push(newZone)
   syncZoneData(); renderAdminZones()
   dbSaveZone(newZone)
-  // Move waitlisted signups to pending_review now that zone exists
-  const waiting = WAITLIST_SIGNUPS.filter(s=>s.zip===zip&&s.status==='waitlist')
-  waiting.forEach(s=>{ s.status='notified'; s.zoneId=newZone.id })
+
+  // ── Assign zone_id to waitlisted homeowners but keep status as 'waitlisted'
+  // They will see the zone on next login and confirm service themselves
+  // THEN it goes to admin Pending Homeowners for final approval
+  let notifiedCount = 0
   try {
-    for(const s of waiting){
+    const res = await _supa
+      .from('homeowner_signups')
+      .select('id, email')
+      .eq('zip_code', zip)
+      .eq('status', 'waitlisted')
+
+    const rows = res?.data || []
+    notifiedCount = rows.length
+
+    for(const row of rows){
+      // Assign zone but keep status = 'waitlisted'
+      // Next time they log in, populateHWDashboard detects zone exists
+      // and routes them to S-hw-confirm to confirm their service
       await _supa.from('homeowner_signups').update({
-        status:'pending_review', zone_id:newZone.id, updated_at:new Date().toISOString()
-      }).eq('email', s.email)
+        zone_id:    newZone.id,
+        updated_at: new Date().toISOString()
+      }).eq('id', row.id)
     }
-    console.log('[BinDash] Waitlist updated to pending_review for ZIP', zip)
-  } catch(err){ console.warn('[BinDash] Waitlist move failed:', err) }
-  updateWaitlistBadge(); renderWaitlistPage(); closeM()
-  showToast('Zone "'+name+'" created · '+waiting.length+' waitlist homeowner'+(waiting.length!==1?'s':'')+' moved to pending review ✅','ok')
+
+    // Update in-memory waitlist entries too
+    WAITLIST_SIGNUPS.forEach(s=>{
+      if(s.zip===zip && s.status==='waitlist') s.zoneId = newZone.id
+    })
+
+    console.log('[BinDash] Zone assigned to', notifiedCount, 'waitlisted homeowners for ZIP', zip)
+  } catch(err){
+    console.warn('[BinDash] Zone assignment failed:', String(err?.message||err))
+  }
+
+  updateWaitlistBadge()
+  renderWaitlistPage()
+  closeM()
+  showToast('Zone "'+name+'" created ✅ · '+notifiedCount+' homeowner'+(notifiedCount!==1?'s':'')+' will be prompted to confirm service on next login','ok')
 }
 
 // ── AUTO-ZONE NAME SUGGESTION ON APPROVAL ─────────
@@ -5361,14 +5555,20 @@ function renderPendingHWList(){
     return
   }
 
-  el.innerHTML = pending.map(app=>`
+  el.innerHTML = pending.map(app=>{
+    const assignedZone = ADMIN_ZONES.find(z=>z.id===app.zoneId)
+    const zoneBadge = assignedZone
+      ? `<span class="badge" style="background:rgba(6,214,160,.1);color:var(--cyan);margin-left:8px">📍 ${assignedZone.name}</span>`
+      : `<span class="badge" style="background:rgba(239,68,68,.1);color:#ef4444;margin-left:8px">⚠️ No zone yet</span>`
+
+    return `
     <div class="pc" id="hwpc-${app.id}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:10px">
           <div class="avatar" style="width:44px;height:44px;font-size:16px;background:linear-gradient(135deg,var(--cyan),var(--blue))">${app.initials}</div>
           <div>
-            <div style="font-size:15px;font-weight:700">${app.name}</div>
-            <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">${app.id} · ${app.submittedAt}</div>
+            <div style="font-size:15px;font-weight:700">${app.name} ${zoneBadge}</div>
+            <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">${String(app.id).slice(0,8)} · ${app.submittedAt}</div>
           </div>
         </div>
         <span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending</span>
@@ -5386,13 +5586,16 @@ function renderPendingHWList(){
       </div>
 
       <div class="field" style="margin-bottom:10px">
-        <label style="font-size:11px">Assign Service Zone
-          <span style="color:var(--muted);font-weight:400">(ZIP ${app.zip} — ${getZoneSuggestion(app.zip)})</span>
+        <label style="font-size:11px">Service Zone
+          <span style="color:var(--muted);font-weight:400">(ZIP ${app.zip})</span>
         </label>
         <select id="hwpc-zone-${app.id}" style="font-size:12px">
           <option value="">— Select zone —</option>
-          ${ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>`<option value="${z.id}" ${z.zip===app.zip||z.zip.slice(0,3)===app.zip.slice(0,3)?'selected':''}>${z.name} (ZIP ${z.zip})</option>`).join('')}
-          <option value="_new">+ Create new zone from ZIP ${app.zip}</option>
+          ${ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>`
+            <option value="${z.id}" ${(app.zoneId===z.id || (!app.zoneId && (z.zips?.includes(app.zip) || z.zip===app.zip.slice(0,3))))?'selected':''}>
+              ${z.name} (ZIP ${z.zips?.join(', ')||z.zip})
+            </option>`).join('')}
+          <option value="_new">+ Create new zone for ZIP ${app.zip}</option>
         </select>
       </div>
 
@@ -5407,7 +5610,8 @@ function renderPendingHWList(){
         <button class="btn btn-outline btn-sm" onclick="showToast('Email sent to ${app.name}','info')">📧 Request Info</button>
         <button class="btn btn-red btn-sm" onclick="rejectHW('${app.id}','${app.name}')">✕ Reject</button>
       </div>
-    </div>`).join('')
+    </div>`
+  }).join('')
 }
 
 function getZoneSuggestion(zip){
@@ -6818,6 +7022,7 @@ async function doAdminLogin(){
     setTimeout(() => adNav(null, 'ad-overview'), 80)
     loadSignupsFromSupabase()
     loadRunnerApplicationsFromSupabase()
+    loadRunnerRequestsBadge()
     showToast('Welcome back, Admin ✅', 'ok')
     return
   }
@@ -7184,6 +7389,153 @@ function adManualAssign(batchId){
   openM()
 }
 
+
+
+// Just updates the badge count — full load happens when page is visited
+async function loadRunnerRequestsBadge(){
+  try {
+    let data = [], err = null
+    try {
+      const res = await _supa.from('runner_interest').select('id, invite_code')
+      data = res?.data || []
+      err  = res?.error?.message || null
+    } catch(e){ err = String(e?.message||e) }
+    if(err) return
+    const pending = data.filter(r=>!r.invite_code).length
+    const badge = document.getElementById('rr-badge')
+    if(badge){ badge.textContent = pending; badge.style.display = pending > 0 ? 'inline' : 'none' }
+  } catch(e){}
+}
+
+// ── RUNNER INVITE REQUESTS ────────────────────────
+// Loaded from Supabase runner_interest table
+
+const RUNNER_REQUESTS = [] // In-memory cache
+
+function generateInviteCode(){
+  // Format: BD-XXXX-XXXX where X is alphanumeric
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const seg = n => Array.from({length:n},()=>chars[Math.floor(Math.random()*chars.length)]).join('')
+  return 'BD-' + seg(4) + '-' + seg(4)
+}
+
+async function loadRunnerRequests(){
+  const el = document.getElementById('runner-request-list')
+  if(!el) return
+
+  try {
+    let data = [], loadErr = null
+    try {
+      const res = await _supa
+        .from('runner_interest')
+        .select('*')
+        .order('created_at', { ascending: false })
+      data    = res?.data    || []
+      loadErr = res?.error?.message || null
+    } catch(e){ loadErr = String(e?.message||e) }
+
+    if(loadErr){ console.warn('[BinDash] Runner requests load:', loadErr) }
+
+    // Update badge
+    const pending = data.filter(r=>!r.invite_code)
+    const badge = document.getElementById('rr-badge')
+    if(badge){
+      badge.textContent = pending.length
+      badge.style.display = pending.length > 0 ? 'inline' : 'none'
+    }
+
+    if(!data.length){
+      el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No runner requests yet.</div>'
+      return
+    }
+
+    el.innerHTML = data.map(req => {
+      const hasCode = !!req.invite_code
+      const initials = (req.full_name||'?').split(' ').map(w=>w[0]||'').join('').slice(0,2).toUpperCase()
+      return `
+      <div class="pc" id="rr-${req.id}" style="${hasCode ? 'opacity:.7' : ''}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="avatar" style="width:40px;height:40px;font-size:14px;background:linear-gradient(135deg,#8b5cf6,#6366f1)">${initials}</div>
+            <div>
+              <div style="font-size:15px;font-weight:700">${req.full_name || '—'}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:1px">${req.email} · ZIP ${req.zip_code||'—'} · ${new Date(req.created_at).toLocaleDateString()}</div>
+            </div>
+          </div>
+          ${hasCode
+            ? `<span class="badge" style="background:#22c55e22;color:#22c55e">✅ Code Issued</span>`
+            : `<span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending</span>`
+          }
+        </div>
+
+        ${hasCode ? `
+          <div style="background:rgba(6,214,160,.07);border:1.5px solid rgba(6,214,160,.3);border-radius:10px;padding:14px;margin-bottom:10px">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">Invite Code</div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="font-family:'DM Mono',monospace;font-size:20px;font-weight:700;color:var(--cyan);letter-spacing:.08em">${req.invite_code}</div>
+              <button onclick="navigator.clipboard.writeText('${req.invite_code}');showToast('Code copied ✅','ok')" style="background:rgba(6,214,160,.1);border:1px solid rgba(6,214,160,.2);color:var(--cyan);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">📋 Copy</button>
+            </div>
+            <div style="font-size:11px;color:var(--sub);margin-top:8px">Share this code with ${req.full_name?.split(' ')[0]||'the runner'} — they enter it on the BinDash launch screen to start enrollment.</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-outline btn-sm" onclick="reissueRunnerCode('${req.id}','${req.email}','${req.full_name}')">🔄 Reissue Code</button>
+            <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="denyRunnerRequest('${req.id}','${req.full_name}')">✕ Remove</button>
+          </div>
+        ` : `
+          <div class="cc-grid" style="margin-bottom:12px">
+            <div class="dl"><div class="dl-l">Name</div><div>${req.full_name||'—'}</div></div>
+            <div class="dl"><div class="dl-l">Email</div><div>${req.email}</div></div>
+            <div class="dl"><div class="dl-l">ZIP</div><div>${req.zip_code||'—'}</div></div>
+            <div class="dl"><div class="dl-l">Requested</div><div>${new Date(req.created_at).toLocaleDateString()}</div></div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-cyan btn-sm" onclick="approveRunnerRequest('${req.id}','${req.email}','${req.full_name}')">🎟️ Approve &amp; Generate Code</button>
+            <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="denyRunnerRequest('${req.id}','${req.full_name}')">✕ Deny</button>
+          </div>
+        `}
+      </div>`
+    }).join('')
+
+  } catch(err){
+    console.warn('[BinDash] Runner requests failed:', String(err?.message||err))
+    if(el) el.innerHTML = '<div style="padding:20px;color:var(--muted)">Could not load requests.</div>'
+  }
+}
+
+async function approveRunnerRequest(id, email, name){
+  const code = generateInviteCode()
+  try {
+    // Save code to Supabase
+    await _supa.from('runner_interest').update({
+      invite_code: code,
+      approved_at: new Date().toISOString(),
+    }).eq('id', id)
+
+    // Reload the list to show the code
+    await loadRunnerRequests()
+    showToast('Code generated for ' + (name||'runner') + ' ✅', 'ok')
+    // In production: also send email via your email service
+    // e.g. POST to /api/send-invite { email, name, code }
+  } catch(err){
+    console.warn('[BinDash] Approve request failed:', String(err?.message||err))
+    showToast('Something went wrong — try again', 'err')
+  }
+}
+
+async function reissueRunnerCode(id, email, name){
+  await approveRunnerRequest(id, email, name)
+}
+
+async function denyRunnerRequest(id, name){
+  try {
+    await _supa.from('runner_interest').delete().eq('id', id)
+    await loadRunnerRequests()
+    showToast((name||'Request') + ' removed', 'info')
+  } catch(err){
+    showToast('Could not remove request', 'err')
+  }
+}
+
 // ── RUNNER INVITE CODE MODAL ──────────────────────
 function showRunnerInviteModal(){
   document.getElementById('modal-box').innerHTML=`
@@ -7249,20 +7601,55 @@ function showRunnerInviteModal(){
   openM()
 }
 
+// Static admin bypass codes — change or remove these once fully live
 const VALID_RUNNER_CODES = ['BINDASH-2026','RUNNER-ALPHA','BD-LAUNCH']
 
-function checkRunnerCode(){
+async function checkRunnerCode(){
   const val = (document.getElementById('runner-invite-input')?.value || '').trim().toUpperCase()
   const errEl = document.getElementById('runner-code-error')
+  const btn   = document.querySelector('#modal-box .btn-cyan[onclick*="checkRunnerCode"]')
+
+  if(!val) return
+
+  // 1. Check hardcoded bypass codes first (instant)
   if(VALID_RUNNER_CODES.includes(val)){
     closeM()
     showToast('Invite code accepted — welcome to BinDash! ✅','ok')
     setTimeout(()=>go('S-rn-ob'), 600)
-  } else {
-    if(errEl) errEl.style.display = 'block'
-    const input = document.getElementById('runner-invite-input')
-    if(input){ input.style.borderColor='rgba(239,68,68,.5)'; setTimeout(()=>input.style.borderColor='var(--border)',1800) }
+    return
   }
+
+  // 2. Check Supabase runner_interest table for admin-issued codes
+  if(btn){ btn.disabled=true; btn.textContent='Checking...' }
+  try {
+    let data = null, loadErr = null
+    try {
+      const res = await _supa
+        .from('runner_interest')
+        .select('id, invite_code, full_name')
+        .eq('invite_code', val)
+        .single()
+      data    = res?.data
+      loadErr = res?.error?.message || null
+    } catch(e){ loadErr = String(e?.message||e) }
+
+    if(data && data.invite_code === val){
+      // Valid code found
+      closeM()
+      showToast('Invite code accepted — welcome, ' + (data.full_name?.split(' ')[0]||'Runner') + '! ✅','ok')
+      setTimeout(()=>go('S-rn-ob'), 600)
+      return
+    }
+  } catch(err){
+    console.warn('[BinDash] Code check failed:', String(err?.message||err))
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent='Verify →' }
+  }
+
+  // 3. Code not found anywhere
+  if(errEl) errEl.style.display = 'block'
+  const input = document.getElementById('runner-invite-input')
+  if(input){ input.style.borderColor='rgba(239,68,68,.5)'; setTimeout(()=>input.style.borderColor='var(--border)',1800) }
 }
 
 async function submitRunnerInterest(){
