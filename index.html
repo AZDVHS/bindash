@@ -2125,7 +2125,7 @@ async function populateHWDashboard(){
     const subEl = document.querySelector('#hw-home .sl2, #hw-home [style*="color:var(--sub)"]')
     if(row.status === 'pending_review'){
       const nextColEl = document.querySelector('#hw-home div[style*="font-size:14px"]')
-      if(nextColEl) nextColEl.innerHTML = 'Your account is <strong style="color:var(--amber)">pending review</strong> — we'll email you once approved and your first collection is scheduled'
+      if(nextColEl) nextColEl.innerHTML = 'Your account is <strong style="color:var(--amber)">pending review</strong> \u2014 we\'ll email you once approved and your first collection is scheduled'
     } else if(row.status === 'approved'){
       const nextColEl = document.querySelector('#hw-home div[style*="font-size:14px"]')
       if(nextColEl) nextColEl.innerHTML = 'Service active · Collection day: <strong style="color:var(--cyan)">' + dayText + '</strong>'
@@ -2170,7 +2170,7 @@ async function populateRNDashboard(){
     if(!row) return
 
     if(row.status === 'pending_review'){
-      if(grEl) grEl.textContent = 'Your application is pending review — we'll notify you within 24–48 hrs'
+      if(grEl) grEl.textContent = 'Your application is pending review \u2014 we\'ll notify you within 24\u201348 hrs'
     } else if(row.status === 'approved'){
       if(grEl) grEl.textContent = 'Account active · Check your routes below'
       await loadRunnerRoutes(row)
