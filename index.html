@@ -227,14 +227,14 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <p style="color:var(--sub);font-size:16px;margin-bottom:26px">Join your neighbours on BinDash — free to sign up</p>
       <button class="btn btn-cyan btn-lg" onclick="go('S-hw-ob')">🚀 Get Started Free</button>
       <div style="margin-top:20px;font-size:13px;color:var(--muted)">
-        Want to earn on your own schedule? <a onclick="go('S-runner-info')" style="color:var(--cyan);cursor:pointer;font-weight:600">Become a BinDash runner →</a>
+        Want to earn on your own schedule? <a onclick="showRunnerInviteModal()" style="color:var(--cyan);cursor:pointer;font-weight:600">Become a BinDash runner →</a>
       </div>
     </div>
     <footer style="padding:24px 56px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--border)">
       <div style="font-size:12px;color:var(--muted)">© 2025 BinDash. All rights reserved.</div>
       <div style="display:flex;gap:20px;align-items:center;font-size:12px;color:var(--muted)">
         <a style="cursor:pointer">Privacy</a><a style="cursor:pointer">Terms</a>
-        <a onclick="go('S-runner-info')" style="cursor:pointer;color:var(--muted)">Become a Runner</a>
+        <a onclick="showRunnerInviteModal()" style="cursor:pointer;color:var(--muted)">Become a Runner</a>
         <a onclick="go('S-admin-login')" style="cursor:pointer;color:rgba(74,85,104,.25);font-size:11px">Staff Portal</a>
       </div>
     </footer>
@@ -251,7 +251,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:853;letter-spacing:-.02em">🗑️ BIN<em style="color:var(--cyan);font-style:normal">DASH</em></div>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="btn btn-ghost" onclick="go('S-land')">← Back</button>
-        <button class="btn btn-cyan" onclick="go('S-rn-ob')">Apply Now →</button>
+        <button class="btn btn-cyan" onclick="showRunnerInviteModal()">Apply Now →</button>
       </div>
     </nav>
 
@@ -261,7 +261,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <h1 style="font-family:'Syne',sans-serif;font-size:56px;font-weight:853;line-height:1.0;letter-spacing:-.03em;margin-bottom:20px">Build Your Own<br><span style="color:var(--cyan)">Recurring Route</span></h1>
       <p style="font-size:18px;color:var(--sub);font-weight:300;max-width:540px;margin:0 auto 36px;line-height:1.65">Earn consistent weekly income in your neighbourhood. The more stops you grow, the more you earn — it's your route, your business.</p>
       <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:14px">
-        <button class="btn btn-cyan btn-lg" onclick="go('S-rn-ob')">🚀 Apply to Become a Runner</button>
+        <button class="btn btn-cyan btn-lg" onclick="showRunnerInviteModal()">🚀 Apply to Become a Runner</button>
         <button class="btn btn-outline btn-lg" onclick="document.getElementById('ri-how').scrollIntoView({behavior:'smooth'})">How it works ↓</button>
       </div>
       <p style="font-size:13px;color:var(--muted)">Free to join · No upfront costs · Start earning within days of approval</p>
@@ -420,7 +420,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
     <div style="background:linear-gradient(135deg,rgba(6,214,160,.08),rgba(59,130,246,.08));border-top:1px solid rgba(6,214,160,.12);padding:52px 56px;text-align:center">
       <h2 style="font-family:'Syne',sans-serif;font-size:34px;font-weight:800;margin-bottom:10px">Ready to build your route?</h2>
       <p style="color:var(--sub);font-size:16px;margin-bottom:26px">Takes 5 minutes to apply. We review within 24–48 hours.</p>
-      <button class="btn btn-cyan btn-lg" onclick="go('S-rn-ob')">🚀 Apply Now — It's Free</button>
+      <button class="btn btn-cyan btn-lg" onclick="showRunnerInviteModal()">🚀 Apply Now — It's Free</button>
       <div style="margin-top:16px;font-size:13px;color:var(--muted)">Already a runner? <a onclick="go('S-login')" style="color:var(--cyan);cursor:pointer;font-weight:600">Log in here →</a></div>
     </div>
 
@@ -467,7 +467,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <button class="btn btn-cyan btn-full" style="margin-bottom:14px" onclick="doLogin()">Sign In →</button>
       <div style="text-align:center;font-size:13px;color:var(--muted);margin-bottom:16px">Don't have an account? <a onclick="go('S-signup')" style="color:var(--cyan);cursor:pointer;font-weight:600">Sign up free</a></div>
       <button class="btn btn-ghost btn-full btn-sm" onclick="go('S-land')">← Back to Home</button>
-      <div style="margin-top:18px;background:var(--surface2);border-radius:8px;padding:12px;font-size:11px;color:var(--sub)"><strong style="color:var(--cyan)">Demo:</strong> homeowner@demo.com / demo123 &nbsp;|&nbsp; runner@demo.com / demo123</div>
+      <div style="margin-top:18px;background:var(--surface2);border-radius:8px;padding:12px;font-size:11px;color:var(--sub)"><strong style="color:var(--cyan)">Demo:</strong> <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="7f1710121a1008111a0d3f1b1a1210511c1012">[email&#160;protected]</a> / demo123 &nbsp;|&nbsp; <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="6311160d0d06112307060e0c4d000c0e">[email&#160;protected]</a> / demo123</div>
     </div>
   </div>
 </div>
@@ -965,7 +965,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         </div>
       </div>
       <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:14px 16px;font-size:13px;color:var(--sub);margin-bottom:24px">
-        📧 We'll email you at the address you provided. If you have any questions in the meantime, reply to that email or contact <span style="color:var(--cyan)">support@bindash.com</span>
+        📧 We'll email you at the address you provided. If you have any questions in the meantime, reply to that email or contact <span style="color:var(--cyan)"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="becdcbceced1cccafedcd7d0dadfcdd690ddd1d3">[email&#160;protected]</a></span>
       </div>
       <button class="btn btn-outline btn-lg" onclick="go('S-land')" style="margin-right:10px">← Back to BinDash</button>
     </div>
@@ -1428,7 +1428,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 </div>
                 <div style="padding:10px 16px 14px;display:flex;gap:8px">
                   <button class="btn btn-purple btn-sm" onclick="showStartRoute('OUT-CGL-047','Bin Out',['4821 W Glendale Ave — Margaret T.','15302 N Sarival Ave — James O.','9873 W Peoria Ave — Sarah C.'])">▶ Start Bin Out Route</button>
-                  <button class="btn btn-outline btn-sm" onclick="showMapView('OUT-CGL-047')">View Map</button>
+                  <button class="btn btn-outline btn-sm" onclick="openRouteInMaps()">🗺️ Open in Maps</button>
                   <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600;align-self:center">Est. $12.75</span>
                 </div>
               </div>
@@ -1808,7 +1808,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <button class="btn btn-cyan btn-full" onclick="doAdminLogin()" style="margin-bottom:14px;padding:12px">Sign In to Staff Portal →</button>
 
         <div style="text-align:center;font-size:12px;color:var(--muted)">
-          <span>Demo: admin@bindash.com / admin123</span>
+          <span>Demo: <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="1071747d797e5072797e747163783e737f7d">[email&#160;protected]</a> / admin123</span>
         </div>
       </div>
 
@@ -1945,7 +1945,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               <span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending</span>
             </div>
             <div class="cc-grid" style="margin-bottom:12px">
-              <div class="dl"><div class="dl-l">Email</div><div>david.osei@email.com</div></div>
+              <div class="dl"><div class="dl-l">Email</div><div><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="d5b1b4a3bcb1fbbaa6b0bc95b0b8b4bcb9fbb6bab8">[email&#160;protected]</a></div></div>
               <div class="dl"><div class="dl-l">ZIP / Area</div><div>85301 — Central Glendale · 5mi</div></div>
               <div class="dl"><div class="dl-l">Vehicle</div><div>✅ Van · Full license</div></div>
               <div class="dl"><div class="dl-l">Visit Pref.</div><div style="color:#a5b4fc">🌙☀️ Both visits</div></div>
@@ -2268,7 +2268,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 <div id="toast"></div>
 
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 function go(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0)}
 
 // Demo modal
@@ -3262,124 +3262,196 @@ function showMapView(batchId){
   showStartRoute(batchId, navVisitType || 'Bin Out', [])
 }
 
+// Build a Google Maps directions URL from the stops list
+function buildGoogleMapsUrl(stops){
+  if(!stops || !stops.length) return '#'
+  const encoded = stops.map(s => encodeURIComponent(s.address + ', Glendale, AZ'))
+  if(encoded.length === 1) return `https://www.google.com/maps/dir/?api=1&destination=${encoded[0]}`
+  const origin      = encoded[0]
+  const destination = encoded[encoded.length - 1]
+  const waypoints   = encoded.slice(1, -1).join('|')
+  let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=driving`
+  if(waypoints) url += `&waypoints=${waypoints}`
+  return url
+}
+
 function _renderNavModal(){
-  const batchId   = navBatchId
-  const visitType = navVisitType
-  const s = NAV_STOPS[navStop] || NAV_STOPS[NAV_STOPS.length-1]
+  const batchId    = navBatchId
+  const visitType  = navVisitType
+  const s          = NAV_STOPS[navStop] || NAV_STOPS[NAV_STOPS.length-1]
   const totalEarnings = (NAV_STOPS.length * 3.25).toFixed(2)
   const completedCount = navStop
-  const progressPct = Math.round((completedCount/NAV_STOPS.length)*100)
+  const progressPct    = Math.round((completedCount / NAV_STOPS.length) * 100)
+  const mapsUrl        = buildGoogleMapsUrl(NAV_STOPS)
 
-  const runnerX = navStop===0 ? 40 : NAV_STOPS[Math.max(0,navStop-1)].mapX
-  const runnerY = navStop===0 ? 290 : NAV_STOPS[Math.max(0,navStop-1)].mapY
+  // Google Maps CTA — prominent button used across phases
+  const mapsCTA = `
+    <a href="${mapsUrl}" target="_blank" rel="noopener"
+       style="display:flex;align-items:center;justify-content:center;gap:9px;
+              background:linear-gradient(135deg,#1a73e8,#0d6efd);
+              border-radius:10px;padding:11px 16px;
+              font-size:13px;font-weight:700;color:#fff;
+              text-decoration:none;margin-bottom:14px;
+              box-shadow:0 4px 16px rgba(26,115,232,.35)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="#fff" opacity=".9"/>
+        <circle cx="12" cy="9" r="2.5" fill="#1a73e8"/>
+      </svg>
+      Open Full Route in Google Maps
+      <span style="font-size:11px;opacity:.75;font-weight:400">${NAV_STOPS.length} stops &#x2192;</span>
+    </a>`
 
-  // Phase-specific content
+  // Full stop list — always shown
+  const stopListHTML = NAV_STOPS.map((st, i) => {
+    const isDone = i < navStop
+    const isCur  = i === navStop && navPhase !== 'idle' && navPhase !== 'done'
+    const hasPet = st.details.toLowerCase().includes('dog') || st.details.toLowerCase().includes('pet')
+    const hasGate= st.details.toLowerCase().includes('gate')
+    const stopMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(st.address + ', Glendale, AZ')}&travelmode=driving`
+    const dotBg    = isDone ? '#22c55e' : isCur ? '#06d6a0' : 'rgba(99,102,241,.25)'
+    const dotColor = isDone || isCur ? '#07090f' : '#a5b4fc'
+    const rowBorder= isCur ? '1.5px solid rgba(6,214,160,.4)' : '1px solid var(--border)'
+    const rowBg    = isCur ? 'rgba(6,214,160,.05)' : isDone ? 'rgba(34,197,94,.03)' : 'var(--surface2)'
+    return `
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;
+                background:${rowBg};border:${rowBorder};border-radius:10px">
+      <div style="width:24px;height:24px;border-radius:50%;background:${dotBg};
+                  color:${dotColor};font-size:10px;font-weight:800;
+                  display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">
+        ${isDone ? '&#x2713;' : i+1}
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700;margin-bottom:2px;
+                    ${isDone ? 'color:var(--muted);text-decoration:line-through' : ''}">
+          ${st.name}
+        </div>
+        <div style="font-size:11px;color:var(--sub);margin-bottom:4px">${st.address}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:${isCur?'8px':'0'}">
+          ${hasGate  ? `<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;border-radius:5px;padding:2px 6px;font-weight:600">&#x1F511; ${st.details.match(/Gate:?\s*[\w\d]+/i)?.[0] || 'Gated'}</span>` : ''}
+          ${hasPet   ? `<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;border-radius:5px;padding:2px 6px;font-weight:600">&#x1F43E; Pet</span>` : ''}
+          <span style="font-size:10px;background:var(--surface3);color:var(--muted);border-radius:5px;padding:2px 6px">${st.bins}</span>
+        </div>
+        ${isCur ? `
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <a href="${stopMapsUrl}" target="_blank" rel="noopener"
+             style="display:inline-flex;align-items:center;gap:5px;
+                    background:#1a73e8;border-radius:6px;padding:5px 10px;
+                    font-size:11px;font-weight:700;color:#fff;text-decoration:none">
+            &#x1F4CD; Navigate Here
+          </a>
+          <button onclick="showStopDetail(${i})"
+                  style="background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);
+                         color:#a5b4fc;border-radius:6px;padding:5px 10px;
+                         font-size:11px;font-weight:600;cursor:pointer">
+            &#x2139;&#xFE0F; Stop Details
+          </button>
+        </div>` : ''}
+      </div>
+      ${isCur ? `<span style="font-size:9px;font-weight:700;color:var(--cyan);letter-spacing:.06em;text-transform:uppercase;flex-shrink:0;margin-top:3px">Current</span>` : ''}
+    </div>`
+  }).join('')
+
+  const stopList = `
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Route Stops</div>
+      <div style="display:flex;flex-direction:column;gap:7px">${stopListHTML}</div>
+    </div>`
+
+  // Phase-specific action card
   let phaseCard = ''
-  let actionBtn = ''
+  let actionBtn  = ''
 
   if(navPhase === 'idle'){
     phaseCard = `
-      <div style="background:rgba(139,92,246,.1);border:1.5px solid rgba(139,92,246,.3);border-radius:12px;padding:16px;margin-bottom:12px">
-        <div style="font-size:11px;font-weight:700;color:var(--purple);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Ready to Start</div>
-        <div style="font-size:20px;font-weight:700;margin-bottom:2px">Stop 1 of ${NAV_STOPS.length}</div>
-        <div style="font-size:15px;font-weight:600;color:var(--cyan);margin-bottom:6px">${NAV_STOPS[0].address}</div>
-        <div style="font-size:12px;color:var(--sub)">${NAV_STOPS[0].name}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:14px">
+        <div style="background:var(--surface2);border-radius:8px;padding:9px">
+          <div style="font-size:16px;font-weight:800;color:var(--cyan)">${NAV_STOPS.length}</div>
+          <div style="font-size:10px;color:var(--muted)">Stops</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:9px">
+          <div style="font-size:16px;font-weight:800;color:var(--amber)">~45m</div>
+          <div style="font-size:10px;color:var(--muted)">Est. Time</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:9px">
+          <div style="font-size:16px;font-weight:800;color:var(--green)">$${totalEarnings}</div>
+          <div style="font-size:10px;color:var(--muted)">Earnings</div>
+        </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:4px">
-        <div style="background:var(--surface2);border-radius:8px;padding:9px"><div style="font-size:16px;font-weight:800;color:var(--cyan)">${NAV_STOPS.length}</div><div style="font-size:10px;color:var(--muted)">Stops</div></div>
-        <div style="background:var(--surface2);border-radius:8px;padding:9px"><div style="font-size:16px;font-weight:800;color:var(--amber)">~45m</div><div style="font-size:10px;color:var(--muted)">Est. Time</div></div>
-        <div style="background:var(--surface2);border-radius:8px;padding:9px"><div style="font-size:16px;font-weight:800;color:var(--green)">$${totalEarnings}</div><div style="font-size:10px;color:var(--muted)">Earnings</div></div>
-      </div>`
+      ${mapsCTA}
+      ${stopList}`
     actionBtn = `<button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
-      <button class="btn btn-purple" onclick="navBegin()">🧭 Begin Navigation</button>`
+      <button class="btn btn-purple" onclick="navBegin()">&#x25B6; Start Route</button>`
   }
-  else if(navPhase === 'travelling'){
-    phaseCard = `
-      <div style="background:rgba(59,130,246,.08);border:1.5px solid rgba(59,130,246,.3);border-radius:12px;padding:16px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-          <div style="font-size:24px;animation:pulse 1s infinite">🧭</div>
-          <div>
-            <div style="font-size:11px;font-weight:700;color:#3b82f6;letter-spacing:.1em;text-transform:uppercase">Navigating</div>
-            <div style="font-size:15px;font-weight:700;margin-top:1px">Stop ${navStop+1} of ${NAV_STOPS.length} — ${s.address}</div>
-          </div>
-        </div>
-        <div style="background:var(--surface3);border-radius:6px;height:6px;overflow:hidden;margin-bottom:8px">
-          <div style="height:100%;width:45%;background:linear-gradient(90deg,var(--blue),var(--cyan));border-radius:6px;animation:progress-sim 3s ease forwards" id="travel-bar"></div>
-        </div>
-        <div style="font-size:12px;color:var(--sub)">📍 ~0.5 mi away · Est. 4 min</div>
-      </div>
-      <div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--sub);line-height:1.8">
-        <div style="font-weight:700;color:var(--text);margin-bottom:4px">Turn-by-turn</div>
-        <div>↑ Head north on Bell Rd</div>
-        <div>→ Turn right onto ${s.address.split(' ').slice(2).join(' ')}</div>
-        <div style="color:var(--cyan);font-weight:600">📍 Arrive at ${s.address}</div>
-      </div>`
-    actionBtn = `<button class="btn btn-ghost btn-sm" onclick="navPauseConfirm()">⏸ Pause Route</button>
-      <button class="btn btn-cyan" onclick="navArrive()">📍 Mark Arrived</button>`
-  }
-  else if(navPhase === 'arrived'){
-    const hasPhoto = s.propertyPhoto
+  else if(navPhase === 'travelling' || navPhase === 'arrived'){
     const hasPet = s.details.toLowerCase().includes('dog') || s.details.toLowerCase().includes('pet')
+    const stopMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(s.address + ', Glendale, AZ')}&travelmode=driving`
+
     phaseCard = `
-      <div style="background:rgba(6,214,160,.07);border:1.5px solid rgba(6,214,160,.3);border-radius:12px;padding:14px;margin-bottom:10px">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px">
+      <div style="background:rgba(6,214,160,.07);border:1.5px solid rgba(6,214,160,.3);border-radius:12px;padding:14px;margin-bottom:12px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px">
           <div>
-            <div style="font-size:11px;font-weight:700;color:var(--cyan);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">📍 Stop ${navStop+1} of ${NAV_STOPS.length}</div>
+            <div style="font-size:11px;font-weight:700;color:var(--cyan);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">&#x1F4CD; Stop ${navStop+1} of ${NAV_STOPS.length}</div>
             <div style="font-size:17px;font-weight:700;margin-bottom:2px">${s.address}</div>
             <div style="font-size:13px;color:var(--sub)">${s.name}</div>
           </div>
-          <button onclick="showStopDetail(${navStop})" style="background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);color:#a5b4fc;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0">ℹ️ More Info</button>
+          <button onclick="showStopDetail(${navStop})"
+                  style="background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);
+                         color:#a5b4fc;border-radius:8px;padding:6px 10px;
+                         font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0">
+            &#x2139;&#xFE0F; Details
+          </button>
         </div>
-
-        ${hasPhoto ? `
-        <div style="margin-bottom:8px">
-          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Property Reference Photo</div>
-          <img src="${s.propertyPhoto}" style="width:100%;max-height:120px;object-fit:cover;border-radius:9px;border:1px solid var(--border)">
-          <div style="font-size:10px;color:var(--muted);margin-top:4px">Photo from first visit — use for bin placement reference</div>
-        </div>` : ''}
-
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <div style="background:var(--surface3);border-radius:8px;padding:9px 12px;font-size:12px">
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+          <div style="background:var(--surface3);border-radius:8px;padding:8px 11px;font-size:12px">
             <span style="color:var(--muted)">Access:</span> <strong style="color:var(--text)">${s.details}</strong>
           </div>
-          <div style="background:var(--surface3);border-radius:8px;padding:9px 12px;font-size:12px">
+          <div style="background:var(--surface3);border-radius:8px;padding:8px 11px;font-size:12px">
             <span style="color:var(--muted)">Bins:</span> <strong style="color:var(--text)">${s.bins}</strong>
           </div>
-          ${hasPet ? `<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:9px 12px;font-size:12px;font-weight:600;color:#fbbf24">🐾 Pet on premises — see access notes above</div>` : ''}
-          <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:9px 12px;font-size:12px;font-weight:600">
-            🌙 Place bins at curb — handles facing road
-          </div>
+          ${hasPet ? `<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:8px 11px;font-size:12px;font-weight:600;color:#fbbf24">&#x1F43E; Pet on premises &#x2014; check access notes</div>` : ''}
         </div>
+        <a href="${stopMapsUrl}" target="_blank" rel="noopener"
+           style="display:flex;align-items:center;justify-content:center;gap:7px;
+                  background:#1a73e8;border-radius:8px;padding:9px 14px;
+                  font-size:13px;font-weight:700;color:#fff;text-decoration:none">
+          &#x1F4CD; Navigate to This Stop
+        </a>
       </div>
 
       <div style="margin-bottom:4px">
-        <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px">📸 Photo required to complete stop</div>
-        <div style="font-size:11px;color:var(--sub);margin-bottom:10px">Take a photo showing the bins at curb. Confirms the job and serves as placement reference for future visits.</div>
+        <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px">&#x1F4F8; Photo required to complete stop</div>
+        <div style="font-size:11px;color:var(--sub);margin-bottom:10px">Take a photo showing the bins at curb to confirm completion.</div>
         <input type="file" accept="image/*" capture="environment" id="stop-photo-${navStop}" style="display:none" onchange="navPhotoTaken(this)">
-        <div id="photo-preview-${navStop}" style="background:var(--surface2);border:2px dashed var(--border2);border-radius:12px;min-height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;transition:border-color .2s" onclick="document.getElementById('stop-photo-${navStop}').click()">
-          <div style="font-size:28px">📷</div>
+        <div id="photo-preview-${navStop}" style="background:var(--surface2);border:2px dashed var(--border2);border-radius:12px;min-height:100px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer" onclick="document.getElementById('stop-photo-${navStop}').click()">
+          <div style="font-size:28px">&#x1F4F7;</div>
           <div style="font-size:12px;font-weight:600;color:var(--sub)">Tap to take photo</div>
           <div style="font-size:10px;color:var(--muted)">or upload from gallery</div>
         </div>
+      </div>
+
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+        ${stopList}
       </div>`
-    actionBtn = `<button class="btn btn-ghost btn-sm" onclick="navPauseConfirm()">⏸ Pause Route</button>
-      <button class="btn btn-surface btn-sm" id="complete-btn-${navStop}" style="opacity:.4;cursor:not-allowed" disabled>✅ Bins Out — Mark Complete</button>`
+    actionBtn = `<button class="btn btn-ghost btn-sm" onclick="navPauseConfirm()">&#x23F8; Pause</button>
+      <button class="btn btn-surface btn-sm" id="complete-btn-${navStop}" style="opacity:.4;cursor:not-allowed" disabled>&#x2705; Mark Complete</button>`
   }
   else if(navPhase === 'paused'){
     phaseCard = `
-      <div style="background:rgba(245,158,11,.07);border:1.5px solid rgba(245,158,11,.3);border-radius:12px;padding:20px;text-align:center;margin-bottom:12px">
-        <div style="font-size:32px;margin-bottom:8px">⏸</div>
+      <div style="background:rgba(245,158,11,.07);border:1.5px solid rgba(245,158,11,.3);border-radius:12px;padding:20px;text-align:center;margin-bottom:14px">
+        <div style="font-size:32px;margin-bottom:8px">&#x23F8;</div>
         <div style="font-size:17px;font-weight:800;margin-bottom:4px">Route Paused</div>
         <div style="font-size:13px;color:var(--sub);margin-bottom:4px">${completedCount} of ${NAV_STOPS.length} stops done</div>
-        <div style="font-size:12px;color:var(--muted)">Your progress is saved. Resume when ready — your stops and earnings are held.</div>
-      </div>`
-    actionBtn = `<button class="btn btn-red btn-sm" onclick="navAbandonConfirm()">✕ End Route</button>
-      <button class="btn btn-cyan" onclick="navResume()">▶ Resume Route</button>`
+        <div style="font-size:12px;color:var(--muted)">Your progress is saved. Resume when ready.</div>
+      </div>
+      ${mapsCTA}
+      ${stopList}`
+    actionBtn = `<button class="btn btn-red btn-sm" onclick="navAbandonConfirm()">&#x2715; End Route</button>
+      <button class="btn btn-cyan" onclick="navResume()">&#x25B6; Resume</button>`
   }
   else if(navPhase === 'done'){
     phaseCard = `
-      <div style="background:rgba(34,197,94,.07);border:1.5px solid rgba(34,197,94,.3);border-radius:12px;padding:20px;text-align:center;margin-bottom:12px">
-        <div style="font-size:40px;margin-bottom:8px">🎉</div>
+      <div style="background:rgba(34,197,94,.07);border:1.5px solid rgba(34,197,94,.3);border-radius:12px;padding:20px;text-align:center;margin-bottom:14px">
+        <div style="font-size:40px;margin-bottom:8px">&#x1F389;</div>
         <div style="font-size:18px;font-weight:800;margin-bottom:4px">Route Complete!</div>
         <div style="font-size:13px;color:var(--sub);margin-bottom:16px">All ${NAV_STOPS.length} stops completed</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -3393,8 +3465,8 @@ function _renderNavModal(){
           </div>
         </div>
       </div>
-      <div style="font-size:12px;color:var(--sub);text-align:center;line-height:1.6">Pay processed on your next Friday payout. Bin In batch unlocks after the truck clears your zone.</div>`
-    actionBtn = `<button class="btn btn-cyan" onclick="navSubmitRoute()">Submit & Finish ✓</button>`
+      <div style="font-size:12px;color:var(--sub);text-align:center;line-height:1.6;margin-bottom:14px">Pay processed on your next Friday payout. Bin In batch unlocks after the truck clears your zone.</div>`
+    actionBtn = `<button class="btn btn-cyan" onclick="navSubmitRoute()">Submit &amp; Finish &#x2713;</button>`
   }
 
   // Progress bar
@@ -3408,58 +3480,25 @@ function _renderNavModal(){
       </div>
     </div>`
 
-  // Route resume banner — shown when modal is reopened mid-route
   const resumeBanner = navRouteActive && navPhase !== 'idle' && navPhase !== 'done' ? `
     <div style="background:rgba(6,214,160,.07);border-bottom:1px solid rgba(6,214,160,.2);padding:8px 14px;font-size:12px;color:var(--cyan);display:flex;align-items:center;gap:6px">
-      <span>🔄</span> <span>Route in progress — you can safely close and reopen this without losing your place.</span>
+      <span>&#x1F504;</span> <span>Route in progress &#x2014; close and reopen any time without losing your place.</span>
     </div>` : ''
 
   document.getElementById('modal-box').innerHTML=`
     <div class="mh" style="background:linear-gradient(135deg,rgba(139,92,246,.1),rgba(6,214,160,.06));flex-shrink:0">
       <div>
-        <div style="font-size:15px;font-weight:700">${navPhase==='done'?'✅ Route Complete':navPhase==='paused'?'⏸ Route Paused':navPhase==='travelling'?'🧭 Navigating...':navPhase==='arrived'?'📍 At Stop':'▶ '+visitType+' Route'}</div>
-        <div style="font-size:11px;color:var(--sub);margin-top:2px">${batchId} · ${NAV_STOPS.length} stops · $${totalEarnings} total</div>
+        <div style="font-size:15px;font-weight:700">${navPhase==='done'?'&#x2705; Route Complete':navPhase==='paused'?'&#x23F8; Route Paused':'&#x25B6; '+visitType+' Route'}</div>
+        <div style="font-size:11px;color:var(--sub);margin-top:2px">${batchId} &#x00B7; ${NAV_STOPS.length} stops &#x00B7; $${totalEarnings} total</div>
       </div>
-      ${navPhase!=='done'?`<button class="btn btn-ghost btn-sm" onclick="closeM()" title="Close — route stays active">✕</button>`:''}
+      ${navPhase!=='done'?`<button class="btn btn-ghost btn-sm" onclick="closeM()" title="Close &#x2014; route stays active">&#x2715;</button>`:''}
     </div>
     ${resumeBanner}
     <div class="mb" style="padding:14px">
-
-      <!-- Mini map -->
-      <div style="height:140px;background:linear-gradient(160deg,#0d1117,#131a24,#0f1a1a);border-radius:12px;position:relative;overflow:hidden;margin-bottom:14px;border:1px solid var(--border)">
-        <svg style="position:absolute;inset:0;width:100%;height:100%;opacity:.1" xmlns="http://www.w3.org/2000/svg">
-          <line x1="0" y1="50"  x2="100%" y2="50"  stroke="#94a3b8" stroke-width="1"/>
-          <line x1="0" y1="100" x2="100%" y2="100" stroke="#94a3b8" stroke-width="1"/>
-          <line x1="80"  y1="0" x2="80"  y2="100%" stroke="#94a3b8" stroke-width="1"/>
-          <line x1="180" y1="0" x2="180" y2="100%" stroke="#94a3b8" stroke-width="1"/>
-          <line x1="280" y1="0" x2="280" y2="100%" stroke="#94a3b8" stroke-width="1"/>
-          <line x1="340" y1="0" x2="340" y2="100%" stroke="#94a3b8" stroke-width="1"/>
-        </svg>
-        <svg style="position:absolute;inset:0;width:100%;height:100%" xmlns="http://www.w3.org/2000/svg">
-          <polyline points="80,125 80,70 180,70 180,35 280,35 340,18" fill="none" stroke="#06d6a0" stroke-width="2" stroke-dasharray="5,3" opacity=".5"/>
-        </svg>
-        ${NAV_STOPS.map((st,i)=>{
-          const mx=st.mapX, my=Math.round(st.mapY/2.2)
-          const done=i<navStop, cur=i===navStop
-          const col=done?'#22c55e':cur?'#06d6a0':'#6366f1'
-          const tc=done||cur?'#07090f':'#fff'
-          return `<div style="position:absolute;left:${mx-10}px;top:${my-10}px;width:20px;height:20px;background:${col};border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:${tc};z-index:2">${done?'✓':i+1}</div>`
-        }).join('')}
-        <div id="runner-dot" style="position:absolute;width:14px;height:14px;background:var(--amber);border-radius:50%;border:2px solid #fff;z-index:3;transition:all .6s cubic-bezier(.4,0,.2,1);left:${runnerX-7}px;top:${Math.round(runnerY/2.2)-7}px;box-shadow:0 0 0 4px rgba(245,158,11,.3)"></div>
-      </div>
-
       ${phaseCard}
     </div>
     ${progressBar}
     <div class="mf">${actionBtn}</div>`
-
-  // Animate runner dot
-  if(navPhase==='travelling'){
-    setTimeout(()=>{
-      const dot=document.getElementById('runner-dot')
-      if(dot){ dot.style.left=(s.mapX-7)+'px'; dot.style.top=(Math.round(s.mapY/2.2)-7)+'px' }
-    }, 100)
-  }
 }
 
 
@@ -3702,6 +3741,11 @@ const NOTIFS = {
     { id:"hw3", read:true,  time:"Yesterday", icon:"✅", accent:"#22c55e", title:"Bins are back in — all done!", body:"Marcus returned your bins at 11:42 AM. Photo confirmation attached. Great job done.", actions:[{label:"Rate Marcus ⭐", style:"ok", fn:"showRateRunner()"}] },
     { id:"hw4", read:true,  time:"3 days ago", icon:"📦", accent:"#f59e0b", title:"One-time callout confirmed", body:"Your Bin Out callout for Fri Mar 14 was completed. $12.99 charged to card •••• 4242.", actions:[] },
   ]
+}
+
+function openRouteInMaps(){
+  const url = buildGoogleMapsUrl(NAV_STOPS)
+  window.open(url, '_blank', 'noopener')
 }
 
 function navLaunchFromNotif(){
@@ -6229,7 +6273,7 @@ function checkZoneAvailability(){
   result.style.display = 'block'
   if(!zones){
     result.innerHTML = `<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:10px;padding:14px 16px;font-size:13px;color:var(--sub);text-align:center">
-      No zones near <strong style="color:var(--text)">${zip}</strong> yet. <a onclick="go('S-rn-ob')" style="color:var(--cyan);cursor:pointer;font-weight:600">Register your interest →</a> — you'll be first contacted when BinDash expands to your area.
+      No zones near <strong style="color:var(--text)">${zip}</strong> yet. <a onclick="showRunnerInviteModal()" style="color:var(--cyan);cursor:pointer;font-weight:600">Register your interest →</a> — you'll be first contacted when BinDash expands to your area.
     </div>`
     return
   }
@@ -6238,7 +6282,7 @@ function checkZoneAvailability(){
   result.innerHTML = `<div style="background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:14px 16px;font-size:13px;text-align:center">
     <div style="font-weight:700;color:var(--green);margin-bottom:4px">${live} live zone${live!==1?'s':''} · ${wl} waitlist zone${wl!==1?'s':''} near ${zip}</div>
     <div style="color:var(--sub);margin-bottom:12px">Apply now to claim your spot</div>
-    <button class="btn btn-cyan btn-sm" onclick="go('S-rn-ob')">Apply to become a runner →</button>
+    <button class="btn btn-cyan btn-sm" onclick="showRunnerInviteModal()">Apply to become a runner →</button>
   </div>`
 }
 
@@ -6609,19 +6653,108 @@ function adManualAssign(batchId){
       ${['Marcus Reid · 4.8★ · Already has 1 batch tonight','Tom Walsh · 4.6★ · Available','Priya Singh · 4.9★ · Available'].map((r,i)=>`
         <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border-radius:8px;padding:9px 12px;font-size:13px">
           <span style="${i===0?'color:var(--muted)':''}">${r}</span>
-          <button class="btn btn-sm" style="font-size:10px;background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)" onclick="closeM();showToast('${r.split(' ·')[0]} force-assigned to ${batchId} 🚨','err')">Force assign</button>
+          <button class="btn btn-sm" style="font-size:10px;background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3)" onclick="closeM();showToast('${r.split(' ·')[0]} assigned to ${batchId} ✅','ok')">🚨 Force Assign</button>
         </div>`).join('')}
     </div>
   </div>
-  <div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button></div>`
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+  </div>`
   openM()
 }
 
-function showToast(msg,type='ok'){
-  const el=document.getElementById('toast');el.textContent=msg;el.style.display='block'
-  const c={ok:['#14532d','#22c55e','#86efac'],err:['#7f1d1d','#ef4444','#fca5a5'],info:['#1e3a5f','#3b82f6','#93c5fd']}
-  const[bg,bdr,col]=c[type]||c.ok;el.style.background=bg;el.style.border=`1px solid ${bdr}`;el.style.color=col
-  clearTimeout(window._tt);window._tt=setTimeout(()=>el.style.display='none',3500)
+// ── RUNNER INVITE CODE MODAL ──────────────────────
+function showRunnerInviteModal(){
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh" style="background:linear-gradient(135deg,rgba(6,214,160,.08),rgba(59,130,246,.06))">
+    <div>
+      <div style="font-size:15px;font-weight:700">🔒 Runner Access</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:2px">BinDash runners are invite-only during our soft launch</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div style="text-align:center;padding:10px 0 18px">
+      <div style="font-size:40px;margin-bottom:10px">🎟️</div>
+      <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:800;margin-bottom:8px">Runners are invite-only right now</div>
+      <div style="font-size:14px;color:var(--sub);line-height:1.6;max-width:360px;margin:0 auto 22px">
+        We're hand-picking our first runners to make sure every homeowner gets a great experience. Got a code from us? Enter it below.
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <label style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:6px">Invite Code</label>
+      <div style="display:flex;gap:8px">
+        <input id="runner-invite-input" placeholder="e.g. BINDASH-2026" maxlength="20"
+               style="flex:1;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;
+                      color:var(--text);font-family:'DM Mono',monospace;font-size:15px;
+                      padding:10px 14px;outline:none;letter-spacing:.08em;text-transform:uppercase"
+               oninput="this.value=this.value.toUpperCase()"
+               onkeydown="if(event.key==='Enter')checkRunnerCode()">
+        <button class="btn btn-cyan" onclick="checkRunnerCode()">Verify →</button>
+      </div>
+      <div id="runner-code-error" style="display:none;margin-top:8px;font-size:12px;color:#ef4444;padding:8px 12px;background:rgba(239,68,68,.08);border-radius:7px;border:1px solid rgba(239,68,68,.2)">
+        ✕ That code isn't valid. Double-check it or request one below.
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:16px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">Don't have a code?</div>
+      <div style="font-size:12px;color:var(--sub);line-height:1.6;margin-bottom:14px">
+        Leave your details and we'll reach out when we're expanding to your area or have runner spots available.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div>
+          <label style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:5px">Name</label>
+          <input id="runner-interest-name" placeholder="Your name"
+                 style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Outfit',sans-serif;font-size:13px;padding:9px 12px;outline:none">
+        </div>
+        <div>
+          <label style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:5px">ZIP Code</label>
+          <input id="runner-interest-zip" placeholder="85374" maxlength="5"
+                 style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'DM Mono',monospace;font-size:13px;padding:9px 12px;outline:none">
+        </div>
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:5px">Email</label>
+        <input id="runner-interest-email" placeholder="you@email.com" type="email"
+               style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Outfit',sans-serif;font-size:13px;padding:9px 12px;outline:none">
+      </div>
+      <button class="btn btn-outline btn-full" onclick="submitRunnerInterest()" style="border-color:rgba(6,214,160,.3);color:var(--cyan)">
+        🙋 Request an Invite
+      </button>
+    </div>
+  </div>`
+  openM()
+}
+
+const VALID_RUNNER_CODES = ['BINDASH-2026','RUNNER-ALPHA','BD-LAUNCH']
+
+function checkRunnerCode(){
+  const val = (document.getElementById('runner-invite-input')?.value || '').trim().toUpperCase()
+  const errEl = document.getElementById('runner-code-error')
+  if(VALID_RUNNER_CODES.includes(val)){
+    closeM()
+    showToast('Invite code accepted — welcome to BinDash! ✅','ok')
+    setTimeout(()=>go('S-rn-ob'), 600)
+  } else {
+    if(errEl) errEl.style.display = 'block'
+    const input = document.getElementById('runner-invite-input')
+    if(input){ input.style.borderColor='rgba(239,68,68,.5)'; setTimeout(()=>input.style.borderColor='var(--border)',1800) }
+  }
+}
+
+function submitRunnerInterest(){
+  const name  = document.getElementById('runner-interest-name')?.value.trim()
+  const zip   = document.getElementById('runner-interest-zip')?.value.trim()
+  const email = document.getElementById('runner-interest-email')?.value.trim()
+  if(!name || !email){
+    showToast('Please enter your name and email','err')
+    return
+  }
+  closeM()
+  showToast('Interest logged — we\'ll be in touch when spots open! 🎟️','ok')
+  // In production: POST to /api/runner-interest { name, email, zip }
 }
 </script>
 </body>
