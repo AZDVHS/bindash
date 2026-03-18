@@ -11,8 +11,8 @@
 //  SUPABASE CONFIG — replace with your project keys
 //  Supabase Dashboard → Settings → API
 // ══════════════════════════════════════════════════
-const SUPABASE_URL = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
-const SUPABASE_ANON_KEY = 'sb_publishable_PzQNU1g9t7nH_c8GrK37sQ_2OocnlNQ'
+const SUPABASE_URL = 'https://your-project-url.supabase.co'
+const SUPABASE_ANON_KEY = 'your-anon-key'
 const _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // ── SUPABASE HELPER — centralised error handler ──
@@ -1050,9 +1050,9 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <!-- ZONE INFO STRIP -->
           <div style="background:var(--surface2);border-radius:9px;padding:9px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px;font-size:12px;flex-wrap:wrap">
             <span style="color:var(--muted)">📍 Your zone:</span>
-            <span style="font-weight:600;color:var(--text)">Central Glendale</span>
+            <span style="font-weight:600;color:var(--text)" id="hw-zone-name">your area</span>
             <span style="color:var(--muted)">·</span>
-            <span style="color:var(--sub)">85301</span>
+            <span style="color:var(--sub)" id="hw-confirm-zip">—</span>
             <span style="color:var(--muted)">·</span>
             <span style="color:var(--sub)">Your day: <strong style="color:var(--text)">Thursday</strong></span>
             <span style="color:var(--muted)">·</span>
@@ -1225,7 +1225,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <div style="font-size:28px">💳</div>
                 <div>
                   <div style="font-weight:700;font-size:14px">Visa •••• 4242</div>
-                  <div style="font-size:11px;color:var(--sub);margin-top:2px">Expires 08/27 · Billing ZIP 85374</div>
+                  <div style="font-size:11px;color:var(--sub);margin-top:2px">Saved securely via Stripe</div>
                 </div>
               </div>
               <div style="display:flex;gap:8px;align-items:center">
@@ -1382,7 +1382,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               <div style="display:flex;gap:16px;margin-bottom:6px;flex-wrap:wrap">
                 <span><span style="color:var(--muted)">Batch:</span> <strong>OUT-NGL-048</strong></span>
                 <span><span class="vt-out">🌙 Bin Out</span> Fri Mar 15 · 6:30 PM</span>
-                <span><span class="vt-in">☀️ Bin In</span> Sat Mar 16 · ~9:00 AM (unlocks when North Glendale clears)</span>
+                <span><span class="vt-in">☀️ Bin In</span> Sat Mar 16 · ~9:00 AM (unlocks when your zone clears)</span>
               </div>
               <div style="display:flex;gap:12px;font-size:11px;color:var(--muted)">
                 <span>📍 4 stops · 1.3 mi · ~30 min each visit</span>
@@ -1771,16 +1771,13 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <div style="display:flex;align-items:center;gap:12px"><div style="font-size:22px">🏠</div><div><div style="font-weight:700;color:#fbbf24" id="ov-hw-pending-label">2 Homeowner Applications Awaiting Review</div><div style="font-size:13px;color:var(--muted)">Verify address, assign zone, then approve to activate their account</div></div><button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="adNav(null,'ad-pending-hw')">Review →</button></div>
           </div>
           <div class="card" style="border-left:4px solid var(--amber);margin-bottom:14px">
-            <div style="display:flex;align-items:center;gap:12px"><div style="font-size:22px">🚐</div><div><div style="font-weight:700;color:#fbbf24">3 Runner Applications Awaiting Review</div><div style="font-size:13px;color:var(--muted)">Check 1099, background check, assign zone, then approve</div></div><button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="adNav(null,'ad-pending')">Review →</button></div>
+            <div style="display:flex;align-items:center;gap:12px"><div style="font-size:22px">🚐</div><div><div style="font-weight:700;color:#fbbf24" id="ov-rn-pending-label">0 Runner Applications Awaiting Review</div><div style="font-size:13px;color:var(--muted)">Check 1099, background check, assign zone, then approve</div></div><button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="adNav(null,'ad-pending')">Review →</button></div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
             <div class="card">
               <div class="card-ttl">Recent Activity</div>
               <table><thead><tr><th>Event</th><th>Time</th></tr></thead><tbody>
-                <tr><td><span class="vt-in" style="font-size:9px">☀️ IN</span> Bin In complete — M. Thompson</td><td style="color:var(--muted);font-size:11px">9 min ago</td></tr>
-                <tr><td><span style="color:var(--blue)">+</span> New homeowner application — K. Mwangi</td><td style="color:var(--muted);font-size:11px">1 hr ago</td></tr>
-                <tr><td><span class="vt-out" style="font-size:9px">🌙 OUT</span> Batch OUT-047 dispatched</td><td style="color:var(--muted);font-size:11px">2 hrs ago</td></tr>
-                <tr><td><span style="color:var(--red)">🚨</span> SOS resolved — E1 area</td><td style="color:var(--muted);font-size:11px">Yesterday</td></tr>
+<tr id="activity-feed-empty"><td colspan="2" style="text-align:center;color:var(--muted);padding:18px">No activity yet</td></tr>
               </tbody></table>
             </div>
             <div class="card">
@@ -1902,15 +1899,15 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">
                   <div style="background:var(--surface2);border-radius:7px;padding:8px;text-align:center">
                     <div style="font-size:8px;color:var(--muted)">BATCHES</div>
-                    <div style="font-size:18px;font-weight:700;color:var(--amber)" id="preview-batches">7</div>
+                    <div style="font-size:18px;font-weight:700;color:var(--amber)" id="preview-batches">—</div>
                   </div>
                   <div style="background:var(--surface2);border-radius:7px;padding:8px;text-align:center">
                     <div style="font-size:8px;color:var(--muted)">AVG STOPS</div>
-                    <div style="font-size:18px;font-weight:700;color:var(--cyan)" id="preview-stops">6.7</div>
+                    <div style="font-size:18px;font-weight:700;color:var(--cyan)" id="preview-stops">—</div>
                   </div>
                   <div style="background:var(--surface2);border-radius:7px;padding:8px;text-align:center">
                     <div style="font-size:8px;color:var(--muted)">AVG MI</div>
-                    <div style="font-size:18px;font-weight:700;color:var(--green)" id="preview-km">1.1</div>
+                    <div style="font-size:18px;font-weight:700;color:var(--green)" id="preview-km">—</div>
                   </div>
                 </div>
 
@@ -1927,8 +1924,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 </div>
 
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:12px">
-                  <div style="background:var(--surface2);border-radius:7px;padding:9px;text-align:center"><div style="font-size:8px;color:var(--muted)">PENDING STOPS</div><div style="font-size:20px;font-weight:700;color:var(--amber)">47</div></div>
-                  <div style="background:var(--surface2);border-radius:7px;padding:9px;text-align:center"><div style="font-size:8px;color:var(--muted)">RUNNERS AVAIL.</div><div style="font-size:20px;font-weight:700;color:var(--green)">5</div></div>
+                  <div style="background:var(--surface2);border-radius:7px;padding:9px;text-align:center"><div style="font-size:8px;color:var(--muted)">PENDING STOPS</div><div style="font-size:20px;font-weight:700;color:var(--amber)" id="disp-pending-stops">0</div></div>
+                  <div style="background:var(--surface2);border-radius:7px;padding:9px;text-align:center"><div style="font-size:8px;color:var(--muted)">RUNNERS AVAIL.</div><div style="font-size:20px;font-weight:700;color:var(--green)" id="disp-runners-avail">0</div></div>
                 </div>
 
                 <button class="btn btn-cyan btn-full btn-sm" onclick="adGenerateBatches()" style="margin-bottom:8px">🌙 Generate Bin Out Batches</button>
@@ -2075,6 +2072,7 @@ async function initApp(){
       if(nameEl) nameEl.textContent = user?.user_metadata?.name || 'Admin'
       go('S-admin')
       setTimeout(() => adNav(null, 'ad-overview'), 80)
+      loadSignupsFromSupabase()
     } else if(role === 'rn'){
       const nameEl = document.getElementById('rn-sidebar-name')
       const avEl   = document.getElementById('rn-sidebar-avatar')
@@ -2093,8 +2091,13 @@ async function initApp(){
       if(grEl)   grEl.textContent   = 'Welcome back, ' + fn + ' 👋'
       go('S-hw-dash')
     }
+    // Always load zones regardless of session state
+    await loadZonesFromSupabase()
+
   } catch(err) {
     console.warn('[BinDash] Session restore failed:', err)
+    // Still try to load zones even if session check fails
+    try { await loadZonesFromSupabase() } catch(e){}
   }
 }
 
@@ -2567,7 +2570,7 @@ function adNav(el, pg){
 }
 
 // Admin actions
-let pc=3
+let pc=0
 // ── RUNNER DATA SYSTEM ───────────────────────────
 let nextRunnerId = 1
 const RUNNERS = [] // Populated as runners are approved
@@ -3084,7 +3087,7 @@ function showEditProperty(){
   document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit Property</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
 <div class="sec-h" style="margin-top:0">Address</div>
 <div class="field"><label>Street Address</label><input value="123 Main Street"></div>
-<div class="g3"><div class="field"><label>City</label><input value="Glendale"></div><div class="field"><label>State</label><input value="AZ"></div><div class="field"><label>ZIP</label><input value="85374"></div></div>
+<div class="g3"><div class="field"><label>City</label><input id="add-rn-city" placeholder="City"></div><div class="field"><label>State</label><input id="add-rn-state" placeholder="AZ"></div><div class="field"><label>ZIP</label><input id="add-rn-zip" placeholder="ZIP"></div></div>
 <div class="field"><label>Property Type</label><select><option selected>Single Family Home</option><option>Townhouse</option><option>Condo</option><option>Apartment</option></select></div>
 <div class="sec-h">Bin Storage &amp; Access</div>
 <div class="field"><label>Where are your bins stored?</label><select><option selected>Back yard</option><option>Side of house</option><option>Front of house</option><option>Garage</option></select></div>
@@ -4443,7 +4446,7 @@ function navSubmitRoute(){
 
   COMPLETED_ROUTES.unshift({
     id: batchId, date:'2025-03-14', label:'Today',
-    type: visitType, zone:'Central Glendale',
+    type: visitType, zone: ADMIN_ZONES[0]?.name || 'Your Zone',
     stops, earned,
     duration:'—', distance:'—',
     submittedAt: submitTime,
@@ -4636,10 +4639,11 @@ function toggleStopLog(btn){
 
 
 function updateOverviewCounts(){
-  const activeHW = HOMEOWNERS.filter(h=>h.status==='active').length
-  const activeRN = RUNNERS.filter(r=>r.status!=='INACTIVE').length
+  const activeHW  = HOMEOWNERS.filter(h=>h.status==='active').length
+  const activeRN  = RUNNERS.filter(r=>r.status!=='INACTIVE').length
   const pendingHW = PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length
-  const pendingRN = typeof pc !== 'undefined' ? pc : 3
+  const pendingRN = PENDING_RUNNERS.length   // driven by Supabase, not pc
+  pc = pendingRN                             // keep pc in sync for legacy code
   const totalPending = pendingHW + pendingRN
 
   const ovHW = document.getElementById('ov-hw-count')
@@ -4655,54 +4659,110 @@ function updateOverviewCounts(){
   if(ovPLabel) ovPLabel.textContent = pendingHW + ' Homeowner Application' + (pendingHW!==1?'s':'') + ' Awaiting Review'
   if(ovPBadge) ovPBadge.textContent = pendingHW
   if(hwBadge)  hwBadge.textContent  = pendingHW
+
+  // Update runner pending label & sidebar badge
+  const rnPendingLabel = document.getElementById('ov-rn-pending-label')
+  const rnBadge = document.getElementById('pcount')
+  if(rnPendingLabel) rnPendingLabel.textContent = pendingRN + ' Runner Application' + (pendingRN!==1?'s':'') + ' Awaiting Review'
+  if(rnBadge) rnBadge.textContent = pendingRN
+
+  // Update sidebar pending badges visibility
+  const hwPcountEl = document.getElementById('hw-pcount')
+  const rnPcountEl = document.getElementById('pcount')
+  const wlBadgeEl  = document.getElementById('waitlist-badge')
+  if(hwPcountEl){ hwPcountEl.textContent = pendingHW; hwPcountEl.style.display = pendingHW > 0 ? 'inline' : 'none' }
+  if(rnPcountEl){ rnPcountEl.textContent = pendingRN; rnPcountEl.style.display = pendingRN > 0 ? 'inline' : 'none' }
+  if(wlBadgeEl){  wlBadgeEl.textContent  = WAITLIST_SIGNUPS.length; wlBadgeEl.style.display = WAITLIST_SIGNUPS.length > 0 ? 'inline' : 'none' }
 }
 
 
 
 // ── ZIP COVERAGE & WAITLIST SYSTEM ───────────────
 
-const WAITLIST_SIGNUPS = [
-  { name:'Maria Sandoval', initials:'MS', email:'maria.s@email.com', phone:'480-555-0099',
-    address:'3401 N 83rd Ave', city:'Phoenix', zip:'85033', service:'Recycling',
-    submittedAt:'2 hrs ago', status:'waitlist' },
-]
+const WAITLIST_SIGNUPS = [] // Populated from Supabase homeowner_signups where status='waitlisted'
 const DENSITY_THRESHOLD = 10
+
+// Returns the best matching zone for a given ZIP, or null
+function findZoneForZip(zip){
+  if(!zip || zip.length < 5) return null
+  const prefix = zip.slice(0,3)
+  // Exact match first (zone has this full ZIP in its zips array)
+  let zone = ADMIN_ZONES.find(z=>
+    z.status !== 'inactive' &&
+    (z.zips?.includes(zip) || z.zip === zip)
+  )
+  // Fallback: prefix match
+  if(!zone) zone = ADMIN_ZONES.find(z=>
+    z.status !== 'inactive' &&
+    (z.zip === prefix || z.zip?.slice(0,3) === prefix || z.zips?.some(zz=>zz.slice(0,3)===prefix))
+  )
+  return zone || null
+}
 
 function checkZipCoverage(zip){
   const el = document.getElementById('zip-coverage-result')
   if(!el) return
-  if(zip.length < 5){ el.style.display='none'; return }
-  const prefix = zip.slice(0,3)
-  const liveZone = ADMIN_ZONES.find(z=>z.zip===zip || z.zip.slice(0,3)===prefix && z.status==='live')
-  const waitZone  = ADMIN_ZONES.find(z=>(z.zip===zip || z.zip.slice(0,3)===prefix) && (z.status==='waitlist'||z.status==='pilot'))
-  if(liveZone){
-    el.style.display='block'
+  if(zip.length < 5){ el.style.display='none'; window._hwMatchedZone=null; window._hwZipHasCoverage=null; return }
+
+  const zone = findZoneForZip(zip)
+  window._hwMatchedZone = zone || null
+
+  if(zone && (zone.status==='live' || zone.pilot)){
     el.style.cssText='display:block;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
-    el.innerHTML=`<span style="color:#22c55e;font-weight:700">✅ Great news — BinDash services your area!</span><br><span style="font-size:12px;color:var(--sub)">${liveZone.name} · choose your preferred collection day below</span>`
-    window._hwZipHasCoverage=true
-  } else if(waitZone){
+    el.innerHTML=`<span style="color:#22c55e;font-weight:700">✅ Great news — BinDash services your area!</span><br><span style="font-size:12px;color:var(--sub)">${zone.name} · choose your preferred collection day below</span>`
+    window._hwZipHasCoverage = true
+  } else if(zone && zone.status==='waitlist'){
     el.style.cssText='display:block;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
-    el.innerHTML=`<span style="color:#fbbf24;font-weight:700">⏳ Your area is coming soon</span><br><span style="font-size:12px;color:var(--sub)">We're building capacity in ${waitZone.name}. Complete signup and we'll notify you when service launches.</span>`
-    window._hwZipHasCoverage=false
+    el.innerHTML=`<span style="color:#fbbf24;font-weight:700">⏳ Your area is coming soon</span><br><span style="font-size:12px;color:var(--sub)">We're building capacity in ${zone.name}. Complete signup and we'll notify you when service launches.</span>`
+    window._hwZipHasCoverage = false
   } else {
     el.style.cssText='display:block;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
-    el.innerHTML=`<span style="color:#a5b4fc;font-weight:700">📍 New area detected</span><br><span style="font-size:12px;color:var(--sub)">We don't service ZIP ${zip} yet — complete signup and you'll be first to know when we launch here.</span>`
-    window._hwZipHasCoverage=false
+    el.innerHTML=`<span style="color:#a5b4fc;font-weight:700">📍 New area detected</span><br><span style="font-size:12px;color:var(--sub)">We don't service ZIP ${zip} yet — complete signup and you'll be first to know when we expand here.</span>`
+    window._hwZipHasCoverage = false
   }
 }
 
-function routeAfterSignup(appData){
-  if(window._hwZipHasCoverage === false){
-    WAITLIST_SIGNUPS.push({...appData, status:'waitlist'})
+async function routeAfterSignup(appData){
+  const matchedZone = window._hwMatchedZone || null
+  const hasLiveCoverage = window._hwZipHasCoverage === true
+
+  if(!hasLiveCoverage){
+    // ── Waitlisted ──
+    const wlEntry = {...appData, status:'waitlist', zoneId: matchedZone?.id || null}
+    WAITLIST_SIGNUPS.push(wlEntry)
     updateWaitlistBadge()
     const zipDisplay = document.getElementById('waitlist-zip-display')
     if(zipDisplay) zipDisplay.textContent = 'ZIP '+(appData.zip||'your area')
+
+    // Update Supabase record to waitlisted + attach zone if one exists
+    try {
+      await _supa.from('homeowner_signups').update({
+        status:  'waitlisted',
+        zone_id: matchedZone?.id || null,
+        updated_at: new Date().toISOString(),
+      }).eq('email', appData.email)
+      console.log('[BinDash] Homeowner waitlisted in Supabase ✅')
+    } catch(err){ console.warn('[BinDash] Waitlist update failed:', err) }
+
     go('S-hw-waitlist')
   } else {
-    PENDING_HOMEOWNERS.push(appData)
+    // ── Pending review ──
+    const pendingEntry = {...appData, status:'pending', zoneId: matchedZone?.id || null}
+    PENDING_HOMEOWNERS.push(pendingEntry)
     updateOverviewCounts()
     const badge = document.getElementById('hw-pcount')
     if(badge) badge.textContent = PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length
+
+    // Update Supabase record with matched zone
+    try {
+      await _supa.from('homeowner_signups').update({
+        status:  'pending_review',
+        zone_id: matchedZone?.id || null,
+        updated_at: new Date().toISOString(),
+      }).eq('email', appData.email)
+      console.log('[BinDash] Homeowner pending with zone_id:', matchedZone?.id || 'none')
+    } catch(err){ console.warn('[BinDash] Pending update failed:', err) }
+
     go('S-hw-pending')
   }
 }
@@ -4908,17 +4968,30 @@ function createZoneFromWaitlist(zip){
   openM()
 }
 
-function confirmCreateZoneFromWaitlist(zip){
+async function confirmCreateZoneFromWaitlist(zip){
   const name=document.getElementById('wl-zone-name')?.value?.trim()||suggestZoneName(zip)
   const cap=parseInt(document.getElementById('wl-cap')?.value)||8
   const days=['Mon','Tue','Wed','Thu','Fri'].filter(d=>document.getElementById('wlz-day-'+d)?.checked)
-  ADMIN_ZONES.push({id:'z-wl-'+Date.now(),name,city:zip+' area',zip:zip.slice(0,3),
+  const newZone = {id:'z-wl-'+Date.now(),name,city:zip+' area',
+    zip:zip.slice(0,3), zips:[zip],
     status:'pilot',pilot:true,overridden:true,runners:0,capacity:cap,homeowners:0,
-    threshold:cap,collection:days,assignedRunner:null,notes:'Created from waitlist ZIP '+zip})
+    threshold:cap,collection:days,assignedRunner:null,stopOrder:[],notes:'Created from waitlist ZIP '+zip}
+  ADMIN_ZONES.push(newZone)
   syncZoneData(); renderAdminZones()
-  WAITLIST_SIGNUPS.filter(s=>s.zip===zip&&s.status==='waitlist').forEach(s=>s.status='notified')
+  dbSaveZone(newZone)
+  // Move waitlisted signups to pending_review now that zone exists
+  const waiting = WAITLIST_SIGNUPS.filter(s=>s.zip===zip&&s.status==='waitlist')
+  waiting.forEach(s=>{ s.status='notified'; s.zoneId=newZone.id })
+  try {
+    for(const s of waiting){
+      await _supa.from('homeowner_signups').update({
+        status:'pending_review', zone_id:newZone.id, updated_at:new Date().toISOString()
+      }).eq('email', s.email)
+    }
+    console.log('[BinDash] Waitlist updated to pending_review for ZIP', zip)
+  } catch(err){ console.warn('[BinDash] Waitlist move failed:', err) }
   updateWaitlistBadge(); renderWaitlistPage(); closeM()
-  showToast('Zone "'+name+'" created · waitlist notified ✅','ok')
+  showToast('Zone "'+name+'" created · '+waiting.length+' waitlist homeowner'+(waiting.length!==1?'s':'')+' moved to pending review ✅','ok')
 }
 
 // ── AUTO-ZONE NAME SUGGESTION ON APPROVAL ─────────
@@ -4957,18 +5030,130 @@ function createZoneAndApproveHW(appId){
   const days=['Mon','Tue','Wed','Thu','Fri'].filter(d=>document.getElementById('nz-day-'+d)?.checked)
   const prefix=app.zip.slice(0,3)
   const newZoneId='z-new-'+Date.now()
-  ADMIN_ZONES.push({id:newZoneId,name,city:app.zip+' area',zip:prefix,
+  const newZone={id:newZoneId,name,city:app.city||app.zip+' area',
+    zip:prefix, zips:[app.zip],
     status:'pilot',pilot:true,overridden:true,runners:0,capacity:cap,
-    homeowners:0,threshold:cap,collection:days,assignedRunner:null,
-    notes:'Auto-created on approval · ZIP '+app.zip})
+    homeowners:0,threshold:cap,collection:days,assignedRunner:null,stopOrder:[],
+    notes:'Auto-created on approval · ZIP '+app.zip}
+  ADMIN_ZONES.push(newZone)
   syncZoneData()
+  dbSaveZone(newZone)
   closeM()
   approveHW(appId, newZoneId)
   showToast(`Zone "${name}" created as Pilot ✅ — promote to Live when ready`,'info')
 }
 
+// ── PENDING RUNNER APPROVAL SYSTEM ──────────────
+function renderPendingRunnerList(){
+  const el = document.getElementById('pending-runner-list')
+  if(!el) return
+  const badge = document.getElementById('pcount')
+  if(badge){ badge.textContent = PENDING_RUNNERS.length; badge.style.display = PENDING_RUNNERS.length > 0 ? 'inline' : 'none' }
+
+  if(!PENDING_RUNNERS.length){
+    el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No pending runner applications.</div>'
+    return
+  }
+  el.innerHTML = PENDING_RUNNERS.map(app => {
+    const vpLabel = app.visitPref==='both' ? '🌙☀️ Both visits' : app.visitPref==='bin_out' ? '🌙 Bin Out only' : '☀️ Bin In only'
+    const vpColor = app.visitPref==='bin_in' ? '#6ee7b7' : '#a5b4fc'
+    const zoneOptions = ADMIN_ZONES.filter(z=>z.status!=='inactive')
+      .map(z=>`<option value="${z.id}">${z.name} (ZIP ${z.zip})</option>`).join('')
+    return `
+    <div class="pc" id="rnpc-${app.id}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="avatar" style="width:44px;height:44px;font-size:16px;background:linear-gradient(135deg,#8b5cf6,#3b82f6)">${app.initials}</div>
+          <div>
+            <div style="font-size:15px;font-weight:700">${app.name}</div>
+            <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">${app.id.slice(0,8)} · ${app.submittedAt}</div>
+          </div>
+        </div>
+        <span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending</span>
+      </div>
+      <div class="cc-grid" style="margin-bottom:12px">
+        <div class="dl"><div class="dl-l">Email</div><div>${app.email}</div></div>
+        <div class="dl"><div class="dl-l">Phone</div><div>${app.phone}</div></div>
+        <div class="dl"><div class="dl-l">ZIP</div><div>${app.zip}</div></div>
+        <div class="dl"><div class="dl-l">Vehicle</div><div>${app.vehicle}</div></div>
+        <div class="dl"><div class="dl-l">Visit Pref.</div><div style="color:${vpColor}">${vpLabel}</div></div>
+        <div class="dl"><div class="dl-l">BGC Consent</div><div>${app.bgcConsent ? '✅ Consented' : '<span style="color:#f59e0b">⚠️ Not consented</span>'}</div></div>
+      </div>
+      <div class="field" style="margin-bottom:10px">
+        <label style="font-size:11px">Assign Service Zone</label>
+        <select id="rnpc-zone-${app.id}" style="font-size:12px">
+          <option value="">— Select zone —</option>
+          ${zoneOptions}
+        </select>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-green btn-sm" onclick="approveRunner('${app.id}')">✅ Approve</button>
+        <button class="btn btn-outline btn-sm" onclick="showToast('Email sent to ${app.name}','info')">📧 Request Info</button>
+        <button class="btn btn-red btn-sm" onclick="rejectRunner('${app.id}','${app.name}')">✕ Reject</button>
+      </div>
+    </div>`
+  }).join('')
+}
+
+async function approveRunner(appId){
+  const app = PENDING_RUNNERS.find(x=>x.id===appId); if(!app) return
+  const zoneId = document.getElementById('rnpc-zone-'+appId)?.value || ''
+  if(!zoneId){ showToast('Please assign a zone before approving','err'); return }
+  const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+
+  // Add to RUNNERS in memory
+  const colors = ['linear-gradient(135deg,#8b5cf6,#3b82f6)','linear-gradient(135deg,#ec4899,#8b5cf6)','linear-gradient(135deg,#22c55e,#06b6d4)','linear-gradient(135deg,#f59e0b,var(--red))']
+  RUNNERS.push({
+    id: 'R'+String(++nextRunnerId).padStart(3,'0'),
+    name: app.name, initials: app.initials, email: app.email, phone: app.phone,
+    area: zone?.name || app.zip, radius: '5mi', vehicle: app.vehicle,
+    status: 'AVAILABLE',
+    visitType: app.visitPref==='both'?'BOTH': app.visitPref==='bin_out'?'BIN_OUT':'BIN_IN',
+    rating: 0, visits: 0, zoneId, coverageZones: [zoneId],
+    color: colors[RUNNERS.length % colors.length],
+  })
+  if(zone) zone.runners++
+
+  // Remove from pending
+  const idx = PENDING_RUNNERS.findIndex(x=>x.id===appId)
+  if(idx>=0) PENDING_RUNNERS.splice(idx,1)
+  pc = PENDING_RUNNERS.length
+
+  renderPendingRunnerList(); renderRunnerList(); syncZoneData(); updateOverviewCounts()
+
+  // Persist to Supabase
+  try {
+    await _supa.from('runner_applications').update({
+      status: 'approved',
+      zone_id: zoneId,
+      reviewed_at: new Date().toISOString(),
+      updated_at:  new Date().toISOString(),
+    }).eq('id', appId)
+    if(zone) dbSaveZone(zone)
+    console.log('[BinDash] Runner approved ✅')
+  } catch(err){ console.warn('[BinDash] Runner approval save failed:', String(err?.message||err)) }
+
+  showToast(app.name + ' approved ✅ — added to runner pool', 'ok')
+}
+
+async function rejectRunner(appId, name){
+  const idx = PENDING_RUNNERS.findIndex(x=>x.id===appId)
+  if(idx>=0) PENDING_RUNNERS.splice(idx,1)
+  pc = PENDING_RUNNERS.length
+  renderPendingRunnerList(); updateOverviewCounts()
+  try {
+    await _supa.from('runner_applications').update({
+      status: 'rejected',
+      reviewed_at: new Date().toISOString(),
+      updated_at:  new Date().toISOString(),
+    }).eq('id', appId)
+  } catch(err){ console.warn('[BinDash] Runner reject failed:', String(err?.message||err)) }
+  showToast(name + "'s application rejected", 'err')
+}
+
 // ── PENDING HOMEOWNER APPROVAL SYSTEM ────────────
 const PENDING_HOMEOWNERS = [] // Populated from Supabase homeowner_signups
+const PENDING_RUNNERS    = [] // Populated from Supabase runner_applications
 
 function renderPendingHWList(){
   const el = document.getElementById('pending-hw-list')
@@ -5064,14 +5249,38 @@ function approveHW(appId, directZoneId){
   const badge=document.getElementById('hw-pcount')
   if(badge) badge.textContent=PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length
   const runnerNote=autoRunner?` · assigned to ${autoRunner.name}`:'· no runner in zone yet — assign in Homeowners'
+
+  // Persist approval to Supabase
+  ;(async()=>{
+    try {
+      await _supa.from('homeowner_signups').update({
+        status:          'approved',
+        zone_id:         zoneId,
+        assigned_runner: autoRunner?.id || null,
+        reviewed_at:     new Date().toISOString(),
+        updated_at:      new Date().toISOString(),
+      }).eq('email', app.email)
+      // Also save zone homeowner count
+      if(zone) await dbSaveZone(zone)
+      console.log('[BinDash] Homeowner approval saved to Supabase ✅')
+    } catch(err){ console.warn('[BinDash] Approval save failed:', err) }
+  })()
+
   showToast(app.name+' approved ✅ '+runnerNote,'ok')
 }
 
-function rejectHW(appId, name){
+async function rejectHW(appId, name){
   const app = PENDING_HOMEOWNERS.find(x=>x.id===appId); if(!app) return
   app.status='rejected'
   renderPendingHWList()
   updateOverviewCounts()
+  try {
+    await _supa.from('homeowner_signups').update({
+      status: 'rejected',
+      reviewed_at: new Date().toISOString(),
+      updated_at:  new Date().toISOString(),
+    }).eq('email', app.email)
+  } catch(err){ console.warn('[BinDash] Reject save failed:', err) }
   showToast(name+"'s application rejected",'err')
 }
 
@@ -5386,19 +5595,7 @@ function initDispatchPage(){
 
 // Seed data — simulated historical confirmations per zone
 // Each entry: { zoneId, date, dayOfWeek, confirmedAt (HH:MM), source ('sms'|'app'|'runner') }
-const CONFIRMATION_LOG = [
-  { zoneId:'z-gl-c', date:'2025-03-06', day:'Thu', time:'07:22', source:'sms' },
-  { zoneId:'z-gl-c', date:'2025-02-27', day:'Thu', time:'07:35', source:'app' },
-  { zoneId:'z-gl-c', date:'2025-02-20', day:'Thu', time:'07:18', source:'sms' },
-  { zoneId:'z-gl-c', date:'2025-02-13', day:'Thu', time:'07:41', source:'runner' },
-  { zoneId:'z-gl-c', date:'2025-02-06', day:'Thu', time:'07:28', source:'sms' },
-  { zoneId:'z-gl-c', date:'2025-01-30', day:'Thu', time:'07:15', source:'sms' },
-  { zoneId:'z-gl-n', date:'2025-03-07', day:'Fri', time:'08:52', source:'app' },
-  { zoneId:'z-gl-n', date:'2025-02-28', day:'Fri', time:'08:44', source:'sms' },
-  { zoneId:'z-gl-n', date:'2025-02-21', day:'Fri', time:'09:01', source:'sms' },
-  { zoneId:'z-sur-w', date:'2025-03-05', day:'Wed', time:'10:08', source:'runner' },
-  { zoneId:'z-sur-w', date:'2025-02-26', day:'Wed', time:'10:15', source:'app' },
-]
+const CONFIRMATION_LOG = [] // Populated from homeowner confirmations
 
 const MIN_DATAPOINTS = 5 // minimum confirmations before learned average is used
 
@@ -5489,7 +5686,7 @@ function confirmTruckPassed(){
   const now = new Date()
   const time = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')
   // Log confirmation (in real app this goes to backend)
-  CONFIRMATION_LOG.push({ zoneId:'z-gl-c', date:'2025-03-13', day:'Thu', time, source:'app' })
+  // CONFIRMATION_LOG.push — real confirmations logged here in production
   const card = document.getElementById('hw-truck-confirm-card')
   if(card){
     card.style.borderColor = 'rgba(34,197,94,.4)'
@@ -5543,14 +5740,7 @@ function toggleTruckOptin(){
 
 
 // Master zone list — single source of truth shared with runner lookup
-const ADMIN_ZONES = [
-  { id:'z-gl-n',  name:'North Glendale',  city:'Glendale, AZ', zip:'85304', status:'live',     pilot:false, overridden:false, runners:4, capacity:8, homeowners:31, threshold:15, collection:['Thu','Fri'], assignedRunner:null, stopOrder:[], notes:'' },
-  { id:'z-gl-c',  name:'Central Glendale',city:'Glendale, AZ', zip:'85301', status:'live',     pilot:false, overridden:false, runners:2, capacity:6, homeowners:22, threshold:15, collection:['Thu'],       assignedRunner:null, stopOrder:[], notes:'' },
-  { id:'z-sur-w', name:'Surprise West',   city:'Surprise, AZ', zip:'85374', status:'waitlist', pilot:false, overridden:false, runners:1, capacity:5, homeowners:9,  threshold:15, collection:['Wed','Fri'], assignedRunner:null, stopOrder:[], notes:'' },
-  { id:'z-sur-e', name:'Surprise East',   city:'Surprise, AZ', zip:'85379', status:'waitlist', pilot:false, overridden:false, runners:0, capacity:4, homeowners:6,  threshold:15, collection:['Thu'],       assignedRunner:null, stopOrder:[], notes:'' },
-  { id:'z-phx-c', name:'Phoenix Central', city:'Phoenix, AZ',  zip:'85033', status:'waitlist', pilot:false, overridden:false, runners:1, capacity:6, homeowners:11, threshold:15, collection:['Mon','Thu'], assignedRunner:null, stopOrder:[], notes:'' },
-  { id:'z-phx-e', name:'Phoenix East',    city:'Phoenix, AZ',  zip:'85032', status:'inactive', pilot:false, overridden:false, runners:0, capacity:0, homeowners:3,  threshold:15, collection:[],            assignedRunner:null, stopOrder:[], notes:'' },
-]
+const ADMIN_ZONES = [] // Zones created by admin via Zone Management
 
 const AZ_STATUS = {
   live:     { dot:'#22c55e', bg:'rgba(34,197,94,.06)',   border:'rgba(34,197,94,.3)',   label:'Live',     badgeBg:'#22c55e22', badgeColor:'#22c55e' },
@@ -5592,6 +5782,15 @@ function getZoneCoverageRunners(zoneId){
 function renderAdminZones(){
   const el = document.getElementById('admin-zone-list')
   if(!el) return
+  if(!ADMIN_ZONES.length){
+    el.innerHTML = `<div style="text-align:center;padding:48px 20px;color:var(--muted)">
+      <div style="font-size:36px;margin-bottom:12px">📍</div>
+      <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No zones yet</div>
+      <div style="font-size:13px;margin-bottom:16px">Create your first zone to start enrolling homeowners and runners.</div>
+      <button class="btn btn-cyan btn-sm" onclick="showAddZone()">+ Create First Zone</button>
+    </div>`
+    return
+  }
   el.innerHTML = ADMIN_ZONES.map(z => {
     const ds = getZoneDisplayStatus(z)
     const cfg = AZ_STATUS[ds]
@@ -5902,12 +6101,14 @@ function confirmActivateZone(zId){
   z.assignedRunner = document.getElementById('az-runner-assign')?.value || null
   z.notes = document.getElementById('az-notes')?.value || ''
   closeM(); renderAdminZones(); syncZoneData()
+  dbSaveZone(z)
   showToast(`${z.name} activated as ${z.pilot?'Pilot (unlisted)':'Live'} ✅${z.assignedRunner?' · '+z.assignedRunner+' assigned':''}`, 'ok')
 }
 
 function promoteToLive(zId){
   const z = ADMIN_ZONES.find(x=>x.id===zId); if(!z) return
   z.pilot = false; renderAdminZones(); syncZoneData()
+  dbSaveZone(z)
   showToast(`${z.name} is now publicly Live 🌍`, 'ok')
 }
 
@@ -5922,7 +6123,7 @@ function showEditZone(zId){
       <div class="field"><label>City</label><input id="ez-city" value="${z.city}"></div>
     </div>
     <div class="g2">
-      <div class="field"><label>ZIP prefix</label><input id="ez-zip" value="${z.zip}"></div>
+      <div class="field"><label>ZIP Code(s)</label><input id="ez-zip" value="${z.zips?.join(',')||z.zip}" title="Comma-separated ZIPs e.g. 85374,85375"></div>
       <div class="field"><label>Launch threshold</label><input type="number" id="ez-thresh" value="${z.threshold}" min="0"></div>
     </div>
     <div class="g2">
@@ -5950,11 +6151,16 @@ function showEditZone(zId){
 function saveEditZone(zId){
   const z = ADMIN_ZONES.find(x=>x.id===zId); if(!z) return
   z.name=document.getElementById('ez-name').value; z.city=document.getElementById('ez-city').value
-  z.zip=document.getElementById('ez-zip').value; z.threshold=parseInt(document.getElementById('ez-thresh').value)||15
+  const zipRaw=document.getElementById('ez-zip').value.trim()
+  z.zips = zipRaw.split(',').map(x=>x.trim()).filter(Boolean)
+  z.zip  = z.zips[0]?.slice(0,3) || z.zip
+  z.threshold=parseInt(document.getElementById('ez-thresh').value)||15
   z.capacity=parseInt(document.getElementById('ez-cap').value)||0; z.status=document.getElementById('ez-status').value
   z.pilot=document.getElementById('ez-pilot').checked; z.notes=document.getElementById('ez-notes').value
   z.collection=[...document.querySelectorAll('#ez-days .r-opt.on')].map(el=>el.getAttribute('data-day'))
-  closeM(); renderAdminZones(); syncZoneData(); showToast(`${z.name} updated ✅`,'ok')
+  closeM(); renderAdminZones(); syncZoneData()
+  dbSaveZone(z)
+  showToast(`${z.name} updated ✅`,'ok')
 }
 
 function showCreateZone(){
@@ -5971,7 +6177,7 @@ function showCreateZone(){
       <div class="field"><label>City *</label><input id="cz-city" placeholder="e.g. Austin, TX"></div>
     </div>
     <div class="g2">
-      <div class="field"><label>ZIP prefix *</label><input id="cz-zip" placeholder="e.g. 787"></div>
+      <div class="field"><label>ZIP Code(s) *</label><input id="cz-zip" placeholder="e.g. 85374 or 85374,85375" title="Enter one or more full ZIP codes separated by commas"></div>
       <div class="field"><label>Launch threshold</label><input type="number" id="cz-thresh" value="15" min="0"></div>
     </div>
     <div class="g2">
@@ -5996,20 +6202,31 @@ function showCreateZone(){
 }
 
 function saveCreateZone(){
-  const name=document.getElementById('cz-name').value.trim(), city=document.getElementById('cz-city').value.trim(), zip=document.getElementById('cz-zip').value.trim()
-  if(!name||!city||!zip){showToast('Name, city and ZIP are required','err');return}
+  const name=document.getElementById('cz-name').value.trim()
+  const city=document.getElementById('cz-city').value.trim()
+  const zipRaw=document.getElementById('cz-zip').value.trim()
+  if(!name||!city||!zipRaw){showToast('Name, city and ZIP are required','err');return}
+
+  // Support comma-separated ZIP list e.g. "85374,85375"
+  const zips = zipRaw.split(',').map(z=>z.trim()).filter(Boolean)
+  const zip  = zips[0].slice(0,3) // primary prefix for legacy matching
+
   const statusRaw=document.getElementById('cz-status').value, isPilot=(statusRaw==='pilot')
-  ADMIN_ZONES.push({
-    id:'z-'+Date.now(), name, city, zip,
+  const newZone = {
+    id:'z-'+Date.now(), name, city,
+    zip,          // 3-digit prefix — used for legacy lookup
+    zips,         // full ZIP list — used for exact matching
     status: isPilot?'live':statusRaw, pilot:isPilot, overridden:isPilot||statusRaw==='live',
     runners: document.getElementById('cz-runner').value?1:0,
     capacity:parseInt(document.getElementById('cz-cap').value)||4,
     homeowners:0, threshold:parseInt(document.getElementById('cz-thresh').value)||15,
     collection:[...document.querySelectorAll('#cz-days .r-opt.on')].map(el=>el.getAttribute('data-day')),
     assignedRunner:document.getElementById('cz-runner').value||null,
-    notes:document.getElementById('cz-notes').value,
-  })
+    stopOrder:[], notes:document.getElementById('cz-notes').value,
+  }
+  ADMIN_ZONES.push(newZone)
   closeM(); renderAdminZones(); syncZoneData()
+  dbSaveZone(newZone)
   showToast(`${name} created${isPilot?' as Pilot':statusRaw==='live'?' — Live':''} ✅`,'ok')
 }
 
@@ -6018,8 +6235,8 @@ function confirmDeleteZone(zId, name){
   openM()
 }
 
-function deactivateZone(zId){const z=ADMIN_ZONES.find(x=>x.id===zId);if(z){z.status='inactive';z.pilot=false;renderAdminZones();syncZoneData();showToast(z.name+' deactivated','info')}}
-function deleteZone(zId){const idx=ADMIN_ZONES.findIndex(x=>x.id===zId);const name=idx>=0?ADMIN_ZONES[idx].name:zId;if(idx>=0)ADMIN_ZONES.splice(idx,1);renderAdminZones();syncZoneData();showToast(name+' deleted','err')}
+function deactivateZone(zId){const z=ADMIN_ZONES.find(x=>x.id===zId);if(z){z.status='inactive';z.pilot=false;renderAdminZones();syncZoneData();dbSaveZone(z);showToast(z.name+' deactivated','info')}}
+function deleteZone(zId){const idx=ADMIN_ZONES.findIndex(x=>x.id===zId);const name=idx>=0?ADMIN_ZONES[idx].name:zId;if(idx>=0)ADMIN_ZONES.splice(idx,1);renderAdminZones();syncZoneData();dbDeleteZone(zId);showToast(name+' deleted','err')}
 
 function showPilotConvert(zId){
   const z = ADMIN_ZONES.find(x=>x.id===zId); if(!z) return
@@ -6039,8 +6256,181 @@ function showPilotConvert(zId){
 }
 function convertToPilot(zId){
   const z = ADMIN_ZONES.find(x=>x.id===zId); if(!z) return
-  z.pilot = true; renderAdminZones(); syncZoneData()
+  z.pilot = true; renderAdminZones(); syncZoneData(); dbSaveZone(z)
   showToast(z.name+' converted to Pilot (unlisted) ✅','ok')
+}
+
+// ── SUPABASE ZONE PERSISTENCE ────────────────────
+// Converts an in-memory ADMIN_ZONES entry to a Supabase-ready row
+function zoneToRow(z){
+  return {
+    id:              z.id,
+    name:            z.name,
+    city:            z.city,
+    zip_prefix:      z.zip,
+    zip_codes:       z.zips || [z.zip],
+    status:          z.status,
+    pilot:           z.pilot || false,
+    overridden:      z.overridden || false,
+    capacity:        z.capacity || 0,
+    threshold:       z.threshold || 15,
+    collection_days: z.collection || [],
+    assigned_runner: z.assignedRunner || null,
+    notes:           z.notes || '',
+    updated_at:      new Date().toISOString(),
+  }
+}
+
+// Load all zones from Supabase on page load (called from initApp)
+async function loadZonesFromSupabase(){
+  try {
+    const res   = await _supa
+      .from('zones')
+      .select('*')
+      .order('created_at', { ascending: true })
+
+    const data  = res?.data  || []
+    const error = res?.error || null
+    if(error){ console.warn('[BinDash] Could not load zones:', String(error.message || error)); return }
+    if(!data.length) return
+
+    // Rebuild ADMIN_ZONES from DB rows
+    ADMIN_ZONES.length = 0
+    data.forEach(row => {
+      ADMIN_ZONES.push({
+        id:              row.id,
+        name:            row.name,
+        city:            row.city || '',
+        zip:             row.zip_prefix || '',
+        zips:            row.zip_codes || (row.zip_prefix ? [row.zip_prefix] : []),
+        status:          row.status || 'waitlist',
+        pilot:           row.pilot || false,
+        overridden:      row.overridden || false,
+        runners:         row.runners || 0,
+        capacity:        row.capacity || 0,
+        homeowners:      row.homeowners || 0,
+        threshold:       row.threshold || 15,
+        collection:      row.collection_days || [],
+        assignedRunner:  row.assigned_runner || null,
+        stopOrder:       row.stop_order || [],
+        notes:           row.notes || '',
+      })
+    })
+    syncZoneData()
+    renderAdminZones()
+    updateOverviewCounts()
+    console.log('[BinDash] Zones loaded from Supabase ✅', ADMIN_ZONES.length, 'zones')
+  } catch(err){
+    console.warn('[BinDash] Zone load failed:', err)
+  }
+}
+
+// Load homeowner signups from Supabase into in-memory arrays
+async function loadSignupsFromSupabase(){
+  try {
+    const res = await _supa
+      .from('homeowner_signups')
+      .select('*')
+      .in('status', ['pending_review','waitlisted'])
+      .order('created_at', { ascending: false })
+
+    const data  = res?.data  || []
+    const error = res?.error || null
+    if(error){ console.warn('[BinDash] Could not load signups:', String(error.message || error)); return }
+    if(!data.length) return
+
+    // Clear then repopulate in-memory arrays
+    PENDING_HOMEOWNERS.length = 0
+    WAITLIST_SIGNUPS.length   = 0
+
+    data.forEach(row => {
+      const initials = ((row.first_name?.[0]||'') + (row.last_name?.[0]||'')).toUpperCase() || '?'
+      const entry = {
+        id:          row.id,
+        name:        (row.first_name + ' ' + row.last_name).trim(),
+        initials,
+        email:       row.email,
+        phone:       row.phone || '—',
+        address:     row.street_address || '—',
+        city:        row.city || '—',
+        zip:         row.zip_code || '',
+        service:     row.service_type || 'Recycling',
+        freq:        row.frequency || 'weekly',
+        plan:        row.plan_id || 'w1',
+        day:         row.collection_day || '—',
+        svcNotes:    row.service_notes || '',
+        cardLast4:   row.card_last4 || '——',
+        zoneId:      row.zone_id || null,
+        submittedAt: new Date(row.created_at).toLocaleString(),
+        status:      row.status === 'waitlisted' ? 'waitlist' : 'pending',
+      }
+      if(row.status === 'waitlisted'){
+        WAITLIST_SIGNUPS.push(entry)
+      } else {
+        PENDING_HOMEOWNERS.push(entry)
+      }
+    })
+
+    updateOverviewCounts()
+    updateWaitlistBadge()
+    console.log('[BinDash] Signups loaded:', PENDING_HOMEOWNERS.length, 'pending,', WAITLIST_SIGNUPS.length, 'waitlisted')
+  } catch(err){
+    console.warn('[BinDash] Signup load failed:', String(err?.message || err))
+  }
+}
+
+async function loadRunnerApplicationsFromSupabase(){
+  try {
+    const res = await _supa
+      .from('runner_applications')
+      .select('*')
+      .eq('status', 'pending_review')
+      .order('created_at', { ascending: false })
+
+    const data  = res?.data  || []
+    const error = res?.error || null
+    if(error){ console.warn('[BinDash] Could not load runner apps:', String(error.message || error)); return }
+
+    PENDING_RUNNERS.length = 0
+    data.forEach(row => {
+      PENDING_RUNNERS.push({
+        id:          row.id,
+        name:        (row.first_name + ' ' + row.last_name).trim(),
+        initials:    ((row.first_name?.[0]||'') + (row.last_name?.[0]||'')).toUpperCase() || '?',
+        email:       row.email,
+        phone:       row.phone || '—',
+        zip:         row.zip_code || '—',
+        vehicle:     row.vehicle_type || '—',
+        visitPref:   row.visit_preference || 'both',
+        bgcConsent:  row.bgc_consent || false,
+        submittedAt: new Date(row.created_at).toLocaleString(),
+        status:      'pending',
+      })
+    })
+
+    pc = PENDING_RUNNERS.length
+    updateOverviewCounts()
+    renderPendingRunnerList()
+    console.log('[BinDash] Runner applications loaded:', PENDING_RUNNERS.length, 'pending')
+  } catch(err){
+    console.warn('[BinDash] Runner app load failed:', String(err?.message || err))
+  }
+}
+
+// Persist a single zone to Supabase (upsert by id)
+async function dbSaveZone(z){
+  try {
+    const { error } = await _supa.from('zones').upsert([zoneToRow(z)], { onConflict: 'id' })
+    if(error) console.warn('[BinDash] Zone save failed:', error.message)
+  } catch(err){ console.warn('[BinDash] Zone save error:', err) }
+}
+
+// Delete a zone from Supabase
+async function dbDeleteZone(id){
+  try {
+    const { error } = await _supa.from('zones').delete().eq('id', id)
+    if(error) console.warn('[BinDash] Zone delete failed:', error.message)
+  } catch(err){ console.warn('[BinDash] Zone delete error:', err) }
 }
 
 function syncZoneData(){
@@ -6055,19 +6445,8 @@ function syncZoneData(){
 
 // ── RUNNER ZONE & REFERRAL SYSTEM ────────────────
 
-// Demo zone data keyed by ZIP prefix
-let ZONE_DATA = {
-  '853': [
-    { id:'z-gl-n', name:'North Glendale — North Glendale', status:'live',     runners:4, capacity:8,  homeowners:31, needed:0,  collection:'Thu/Fri' },
-    { id:'z-gl-c', name:'Central Glendale — East Glendale',  status:'live',     runners:2, capacity:6,  homeowners:22, needed:0,  collection:'Thu' },
-    { id:'z-sur-w', name:'Surprise West — South Glendale', status:'waitlist', runners:1, capacity:5,  homeowners:9,  needed:4,  collection:'Wed/Fri' },
-    { id:'z-sur-e', name:'Surprise East — West Glendale',  status:'waitlist', runners:0, capacity:4,  homeowners:6,  needed:9,  collection:'Thu' },
-  ],
-  '853': [
-    { id:'z-phx-c',  name:'Phoenix Central',    status:'waitlist', runners:1, capacity:6,  homeowners:11, needed:4,  collection:'Mon/Thu' },
-    { id:'z-phx-e',  name:'Phoenix East',       status:'coming',   runners:0, capacity:0,  homeowners:3,  needed:12, collection:'TBD' },
-  ],
-}
+// Zone data for runner signup lookup — built dynamically from ADMIN_ZONES via syncZoneData()
+let ZONE_DATA = {}
 
 const ZONE_STATUS_CONFIG = {
   live:     { dot:'#22c55e', label:'Live — accepting runners', badge:'background:#22c55e22;color:#22c55e' },
@@ -6223,6 +6602,8 @@ async function doAdminLogin(){
     if(btn){ btn.disabled=false; btn.textContent='Sign In to Staff Portal →' }
     go('S-admin')
     setTimeout(() => adNav(null, 'ad-overview'), 80)
+    loadSignupsFromSupabase()
+    loadRunnerApplicationsFromSupabase()
     showToast('Welcome back, Admin ✅', 'ok')
     return
   }
@@ -6320,35 +6701,41 @@ function verifyOtp(){
 
 
 let unlockDelay = 30
-const ZONES = [
-  { id:'z1', name:'Central Glendale', label:'Glendale 85301',  time:'07:30', days:['Mon','Tue','Wed','Thu','Fri'] },
-  { id:'z2', name:'North Glendale',   label:'Glendale 85304',  time:'08:45', days:['Mon','Tue','Wed','Thu','Fri'] },
-  { id:'z3', name:'Surprise West',    label:'Surprise 85374',  time:'10:00', days:['Mon','Wed','Fri'] },
-  { id:'z4', name:'Surprise East',    label:'Surprise 85379',  time:'11:15', days:['Tue','Thu'] },
-]
+const ZONES = [] // Populated from ADMIN_ZONES via syncZoneData()
 
 function renderZoneList(){
   const el = document.getElementById('zone-list')
   if(!el) return
-  el.innerHTML = ZONES.map(z=>`
+  // Source from ADMIN_ZONES (live data) — ZONES is now derived
+  const source = ADMIN_ZONES.filter(z=>z.status!=='inactive')
+  if(!source.length){
+    el.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 4px">No active zones — create zones in Zone Management first.</div>'
+    return
+  }
+  el.innerHTML = source.map(z=>`
     <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--surface2);border-radius:7px">
       <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:600">${z.name} <span style="color:var(--muted);font-weight:400">(${z.label})</span></div>
-        <div style="font-size:10px;color:var(--muted)">${z.days.join(', ')}</div>
+        <div style="font-size:12px;font-weight:600">${z.name} <span style="color:var(--muted);font-weight:400">(ZIP ${z.zip})</span></div>
+        <div style="font-size:10px;color:var(--muted)">${z.collection?.join(', ') || 'No days set'}</div>
       </div>
-      <input type="time" value="${z.time}" style="font-size:11px;padding:3px 6px;width:80px;background:var(--surface3);border:1px solid var(--border);border-radius:5px;color:var(--text)" onchange="updateZoneTime('${z.id}',this.value)">
+      <input type="time" value="${z.truckTime||'12:00'}" style="font-size:11px;padding:3px 6px;width:80px;background:var(--surface3);border:1px solid var(--border);border-radius:5px;color:var(--text)" onchange="updateZoneTime('${z.id}',this.value)">
       <button style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;padding:2px 4px;flex-shrink:0" onclick="removeZone('${z.id}')">✕</button>
     </div>`).join('')
 }
 
 function updateZoneTime(zId, time){
-  const z = ZONES.find(x=>x.id===zId)
-  if(z){ z.time=time; showToast(`${z.name} window updated to ${formatTime(time)} ✅`,'ok') }
+  const z = ADMIN_ZONES.find(x=>x.id===zId)
+  if(z){
+    z.truckTime = time
+    dbSaveZone(z)
+    showToast(`${z.name} truck window updated to ${formatTime(time)} ✅`,'ok')
+  }
 }
 
 function removeZone(zId){
-  const idx = ZONES.findIndex(x=>x.id===zId)
-  if(idx>=0){ const name=ZONES[idx].name; ZONES.splice(idx,1); renderZoneList(); showToast(name+' removed','info') }
+  // removeZone in dispatch panel just deactivates, not hard-deletes
+  deactivateZone(zId)
+  renderZoneList()
 }
 
 function saveUnlockDelay(v){
@@ -6441,8 +6828,8 @@ setInterval(updateOfferCountdown, 1000)
 function acceptOffer(){
   offerActive = false
   document.getElementById('offer-banner').style.display = 'none'
-  showToast('OUT-NGL-048 accepted ✅ — both visits locked in. You\'ll be notified when North Glendale unlocks for Bin In.','ok')
-  NOTIFS.rn.unshift({ id:'rn_acc', read:false, time:'Just now', icon:'✅', accent:'#22c55e', title:'Paired batch confirmed — Fri/Sat', body:'OUT-NGL-048 accepted. Bin Out: Fri Mar 15 6:30 PM · Bin In: Sat ~9 AM, unlocks when North Glendale clears. 4 stops, $32.50 total.', actions:[] })
+  showToast('Batch accepted ✅ — both visits locked in. You\'ll be notified when your zone unlocks for Bin In.','ok')
+  NOTIFS.rn.unshift({ id:'rn_acc', read:false, time:'Just now', icon:'✅', accent:'#22c55e', title:'Batch confirmed', body:'Batch accepted. Bin Out and Bin In are locked in — you\'ll be notified when Bin In unlocks.', actions:[] })
 }
 
 function declineOffer(){
@@ -6502,6 +6889,15 @@ function showOfferDetail(){
 }
 
 // Admin dispatch actions
+function updateDispatchLiveStats(){
+  const pending = HOMEOWNERS.filter(h=>h.status==='active').length
+  const avail   = RUNNERS.filter(r=>r.status==='AVAILABLE' || r.status==='ON_ROUTE').length
+  const pdEl = document.getElementById('disp-pending-stops')
+  const rnEl = document.getElementById('disp-runners-avail')
+  if(pdEl) pdEl.textContent = pending
+  if(rnEl) rnEl.textContent = avail
+}
+
 function updateClusterPreview(rawVal){
   const mi = (rawVal / 16.09).toFixed(1)
   const rvEl = document.getElementById('radius-val')
