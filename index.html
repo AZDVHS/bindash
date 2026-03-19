@@ -1413,6 +1413,44 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 </div>
 
 <!-- ══════════ RUNNER DASHBOARD ══════════ -->
+
+<!-- ══════════ RUNNER APPLICATION SUBMITTED ══════════ -->
+<div id="S-rn-submitted" class="screen">
+  <div style="min-height:100vh;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:36px 20px">
+    <div style="max-width:520px;width:100%;text-align:center">
+      <div style="font-size:72px;margin-bottom:16px">🎉</div>
+      <div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:800;margin-bottom:10px">Application Submitted!</div>
+      <div style="font-size:16px;color:var(--sub);line-height:1.7;margin-bottom:28px">
+        Thanks for applying to become a BinDash runner. We'll review your application and get back to you within <strong style="color:var(--cyan)">24–48 hours</strong>.
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:22px;margin-bottom:24px;text-align:left">
+        <div style="font-size:13px;font-weight:700;margin-bottom:14px">What happens next</div>
+        <div style="display:flex;flex-direction:column;gap:12px;font-size:13px;color:var(--sub)">
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <span style="width:24px;height:24px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">1</span>
+            <span>Our team reviews your details, background check consent, and service area</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <span style="width:24px;height:24px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</span>
+            <span>You're assigned to a service zone and added to the dispatch pool</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <span style="width:24px;height:24px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">3</span>
+            <span>You'll receive an email with your login details and first batch offer</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:rgba(6,214,160,.07);border:1px solid rgba(6,214,160,.2);border-radius:10px;padding:14px 18px;font-size:13px;color:var(--sub);margin-bottom:24px">
+        📧 We'll email you at the address you provided. Check your spam folder if you don't hear from us within 48 hours.
+      </div>
+
+      <button class="btn btn-cyan btn-lg" onclick="go('S-land')">← Back to BinDash</button>
+    </div>
+  </div>
+</div>
+
 <div id="S-rn-dash" class="screen">
   <div class="dash-wrap">
     <div class="sidebar">
@@ -2852,6 +2890,7 @@ async function rSubmit(){
   const ph   = document.getElementById('r-ph')?.value?.trim() || ''
   const zip  = document.getElementById('r-zip')?.value?.trim() || ''
   const veh  = document.getElementById('r-vehicle')?.value || ''
+  const pw   = document.getElementById('r-pw')?.value || ''
   const vp   = document.querySelector('#vp-both.on') ? 'both'
                : document.querySelector('#vp-out.on') ? 'bin_out'
                : 'bin_in'
@@ -2860,28 +2899,29 @@ async function rSubmit(){
   const submitBtn = document.querySelector('#r-s5 .btn-cyan')
   if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Submitting...' }
 
+  let authUserId = null
+  let saveErr = null
+
   try {
-    // 1. Create auth account
-    const pw = document.getElementById('r-pw')?.value || ''
-    const { data: authData, error: authErr } = await _supa.auth.signUp({
+    // 1. Create Supabase auth account
+    const authRes = await _supa.auth.signUp({
       email: em,
       password: pw,
-      options: {
-        data: {
-          role: 'rn',
-          first_name: fn,
-          last_name: ln,
-          status: 'pending_review',
-        }
-      }
+      options: { data: { role:'rn', first_name:fn, last_name:ln, status:'pending_review' } }
     })
-    if(authErr && authErr.message !== 'User already registered'){
-      console.warn('[BinDash] Auth signup warning:', authErr.message)
+    authUserId = authRes?.data?.user?.id || null
+    const authErrMsg = authRes?.error?.message || null
+    if(authErrMsg && authErrMsg !== 'User already registered'){
+      console.warn('[BinDash] Auth signup issue:', authErrMsg)
     }
+  } catch(e){
+    console.warn('[BinDash] Auth signup exception:', String(e?.message||e))
+  }
 
-    // 2. Save full application record
-    await dbInsert('runner_applications', {
-      auth_user_id:     authData?.user?.id || null,
+  try {
+    // 2. Save application record — direct supa call, no dbInsert wrapper
+    const res = await _supa.from('runner_applications').insert({
+      auth_user_id:     authUserId,
       first_name:       fn,
       last_name:        ln,
       email:            em,
@@ -2892,16 +2932,23 @@ async function rSubmit(){
       bgc_consent:      bgc,
       status:           'pending_review',
       created_at:       new Date().toISOString(),
-    })
-    console.log('[BinDash] Runner application saved to Supabase ✅')
-  } catch(err) {
-    console.warn('[BinDash] DB write failed (check Supabase config):', err.message)
-  } finally {
-    if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Submit Application' }
+    }).select()
+    saveErr = res?.error?.message || null
+    if(saveErr){
+      console.warn('[BinDash] Runner application save error:', saveErr)
+    } else {
+      console.log('[BinDash] Runner application saved ✅', res?.data)
+    }
+  } catch(e){
+    saveErr = String(e?.message||e)
+    console.warn('[BinDash] Runner application exception:', saveErr)
   }
 
-  showToast("Application submitted! We'll review within 24–48 hrs 📧",'ok')
-  setTimeout(()=>go('S-land'),2000)
+  if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Submit Application' }
+
+  // Show confirmation screen regardless of DB result
+  // (DB errors are logged but don't block the UX)
+  go('S-rn-submitted')
 }
 
 // Nav
