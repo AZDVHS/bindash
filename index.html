@@ -6309,72 +6309,82 @@ function renderAdminZones(){
     el.innerHTML = `<div style="text-align:center;padding:48px 20px;color:var(--muted)">
       <div style="font-size:36px;margin-bottom:12px">📍</div>
       <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No zones yet</div>
-      <div style="font-size:13px;margin-bottom:16px">Create your first zone to start enrolling homeowners and runners.</div>
-      <button class="btn btn-cyan btn-sm" onclick="showAddZone()">+ Create First Zone</button>
+      <div style="font-size:13px;margin-bottom:16px">Create your first zone to start matching homeowners and runners by ZIP code.</div>
+      <button class="btn btn-cyan btn-sm" onclick="showCreateZone()">+ Create First Zone</button>
     </div>`
     return
   }
   el.innerHTML = ADMIN_ZONES.map(z => {
-    const ds = getZoneDisplayStatus(z)
-    const cfg = AZ_STATUS[ds]
-    const pct = z.threshold > 0 ? Math.min(100, Math.round((z.homeowners/z.threshold)*100)) : 100
-    const isLive = z.status==='live' || z.pilot
-    // Derive collection days from actual homeowners
-    const derivedDays = getZoneDerivedDays(z.id)
-    const daysLabel = derivedDays.length ? derivedDays.join(', ') : (z.collection.length ? z.collection.join(', ') : 'No homeowners yet')
-    // Runners covering this zone
-    const coverRunners = getZoneCoverageRunners(z.id)
-    const hwCount = HOMEOWNERS.filter(h=>h.zoneId===z.id && h.status==='active').length
-    return `<div style="border:1px solid ${cfg.border};border-left:4px solid ${cfg.dot};border-radius:10px;overflow:hidden;background:${cfg.bg}">
-      <div style="display:flex;align-items:flex-start;gap:12px;padding:12px 16px">
+    const sc = z.status==='live'&&!z.pilot?'#22c55e':z.pilot?'#a5b4fc':z.status==='waitlist'?'#f59e0b':'#6b7280'
+    const sl = z.status==='live'&&!z.pilot?'Live':z.pilot?'Pilot':z.status==='waitlist'?'Waitlist':'Inactive'
+    const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
+    const hwCount = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip)||zips.some(zp=>h.zip?.slice(0,3)===zp.slice(0,3)))).length
+    const rnList  = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id)||zips.includes(r.zip)||zips.some(zp=>r.zip?.slice(0,3)===zp.slice(0,3)))
+    const wlCount = WAITLIST_SIGNUPS.filter(s=>s.status==='waitlist'&&zips.some(z2=>s.zip===z2||s.zip?.slice(0,3)===z2.slice(0,3))).length
+    const days    = [...new Set(HOMEOWNERS.filter(h=>h.zoneId===z.id||zips.includes(h.zip)).map(h=>h.day).filter(d=>d&&d!=='—'))].join(', ')
+    const pct     = z.threshold>0 ? Math.min(100,Math.round((hwCount/z.threshold)*100)) : 0
+    const zipTags = zips.map(zip=>`<span style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.25);border-radius:6px;padding:2px 8px;font-family:'DM Mono',monospace;font-size:12px;font-weight:600;color:#a5b4fc">${zip}</span>`).join('')
+
+    return `<div style="border:1px solid rgba(255,255,255,.06);border-left:4px solid ${sc};border-radius:10px;background:var(--surface);padding:14px 16px;margin-bottom:0">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span style="font-size:14px;font-weight:700">${z.name}</span>
-            <span style="font-size:11px;color:var(--muted)">${z.city} · ZIP ${z.zip}</span>
-            <span class="badge" style="background:${cfg.badgeBg};color:${cfg.badgeColor};font-size:10px">
-              <span style="width:5px;height:5px;background:${cfg.dot};border-radius:50%;display:inline-block;margin-right:4px"></span>${cfg.label}${z.pilot?' · unlisted':''}
-            </span>
+
+          <!-- Name + status -->
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+            <span style="font-size:15px;font-weight:700">${z.name}</span>
+            <span style="background:${sc}22;color:${sc};border-radius:99px;padding:2px 8px;font-size:10px;font-weight:700">${sl}</span>
+            ${z.city ? `<span style="font-size:11px;color:var(--muted)">${z.city}</span>` : ''}
           </div>
 
-          <!-- Derived stats row -->
-          <div style="display:flex;gap:14px;margin-top:7px;font-size:12px;color:var(--sub);flex-wrap:wrap">
+          <!-- ZIPs -->
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+            <span style="font-size:11px;color:var(--muted)">ZIP codes:</span>
+            ${zipTags}
+          </div>
+
+          <!-- Stats -->
+          <div style="display:flex;gap:16px;font-size:12px;color:var(--sub);flex-wrap:wrap;margin-bottom:8px">
             <span>🏠 <strong style="color:var(--text)">${hwCount}</strong> homeowners</span>
-            <span>📅 <strong style="color:var(--text)">${daysLabel || '—'}</strong></span>
-            <span>🎯 Cap: ${z.capacity}</span>
+            <span>🚐 <strong style="color:var(--text)">${rnList.length}</strong> runner${rnList.length!==1?'s':''}</span>
+            ${wlCount ? `<span>⏳ <strong style="color:#f59e0b">${wlCount}</strong> waitlisted</span>` : ''}
+            ${days ? `<span>📅 <strong style="color:var(--text)">${days}</strong></span>` : ''}
+            <span style="color:var(--muted)">Cap: ${hwCount}/${z.capacity}</span>
           </div>
 
-          <!-- Coverage runners -->
-          <div style="margin-top:7px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <span style="font-size:11px;color:var(--muted)">Covered by:</span>
-            ${coverRunners.length ? coverRunners.map(r=>`
-              <span style="background:${r.color.includes('amber')?'rgba(245,158,11,.12)':'rgba(99,102,241,.12)'};border:1px solid rgba(255,255,255,.08);border-radius:99px;padding:2px 8px;font-size:11px;display:flex;align-items:center;gap:4px">
-                <span style="width:14px;height:14px;border-radius:50%;background:${r.color};display:inline-flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#fff;flex-shrink:0">${r.initials}</span>
-                ${r.name.split(' ')[0]} · ${r.visitType}
-              </span>`).join('') : `<span style="font-size:11px;color:#ef4444">⚠️ No runner assigned</span>`}
+          ${z.status==='waitlist'&&pct<100 ? `<div style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px"><span>Interest</span><span>${hwCount}/${z.threshold}</span></div>
+            <div style="background:rgba(0,0,0,.2);border-radius:99px;height:4px"><div style="width:${pct}%;height:100%;background:#f59e0b;border-radius:99px"></div></div>
+          </div>` : ''}
+
+          <!-- Runners -->
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span style="font-size:11px;color:var(--muted)">Runners:</span>
+            ${rnList.length ? rnList.map(r=>`<span style="background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.2);border-radius:99px;padding:2px 8px;font-size:11px;color:#a5b4fc">${r.name.split(' ')[0]} · ZIP ${r.zip||'—'}</span>`).join('') : '<span style="font-size:11px;color:var(--muted)">None assigned</span>'}
             <button onclick="showZoneCoverageEdit('${z.id}')" style="background:none;border:1px dashed var(--border2);border-radius:99px;padding:2px 8px;font-size:10px;color:var(--muted);cursor:pointer">+ Assign runner</button>
           </div>
 
-          ${z.status==='waitlist' && !z.overridden ? `<div style="margin-top:8px">
-            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px"><span>Homeowner progress</span><span>${z.homeowners}/${z.threshold}</span></div>
-            <div style="background:rgba(0,0,0,.2);border-radius:99px;height:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:#f59e0b;border-radius:99px"></div></div>
-          </div>` : ''}
-          ${z.notes ? `<div style="margin-top:5px;font-size:11px;color:var(--muted);font-style:italic">${z.notes}</div>` : ''}
+          ${z.notes ? `<div style="margin-top:6px;font-size:11px;color:var(--muted);font-style:italic">${z.notes}</div>` : ''}
         </div>
 
-        <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;align-items:flex-end">
-          <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
-            ${!isLive ? `<button class="btn btn-sm" style="background:rgba(6,214,160,.12);color:var(--cyan);border:1px solid rgba(6,214,160,.3);font-size:11px" onclick="showActivateZone('${z.id}')">⚡ Activate</button>` : ''}
-            ${z.pilot ? `<button class="btn btn-sm" style="background:#22c55e22;color:#22c55e;border:1px solid rgba(34,197,94,.3);font-size:11px" onclick="promoteToLive('${z.id}')">↑ Go Live</button>` : ''}
-            ${isLive && !z.pilot ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;color:#f59e0b" onclick="showPilotConvert('${z.id}')">→ Pilot</button>` : ''}
-            <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="showEditZone('${z.id}')">✏️ Edit</button>
-            ${z.status==='inactive' ? `<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#ef4444" onclick="confirmDeleteZone('${z.id}','${z.name}')">🗑</button>` : ''}
-          </div>
-          ${hwCount > 0 ? `<button class="btn btn-outline btn-sm" style="font-size:11px;width:100%" onclick="showZoneDetail('${z.id}')">📋 View Route</button>` : ''}
+        <!-- Action buttons -->
+        <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;flex-shrink:0">
+          ${z.status==='waitlist' ? `<button class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3);font-size:11px" onclick="activateZone('${z.id}')">⚡ Activate</button>` : ''}
+          ${z.pilot ? `<button class="btn btn-sm" style="background:#22c55e22;color:#22c55e;border:1px solid rgba(34,197,94,.3);font-size:11px" onclick="promoteToLive('${z.id}')">↑ Go Live</button>` : ''}
+          <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="showEditZone('${z.id}')">✏️ Edit</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#ef4444" onclick="confirmDeleteZone('${z.id}','${z.name}')">🗑</button>
         </div>
       </div>
     </div>`
   }).join('')
 }
+
+function activateZone(zId){
+  const z = ADMIN_ZONES.find(x=>x.id===zId); if(!z) return
+  z.status = 'pilot'; z.pilot = true; z.overridden = true
+  dbSaveZone(z); renderAdminZones(); syncZoneData()
+  showToast(z.name+' activated ✅ — homeowners in these ZIPs will now see service available','ok')
+}
+
 
 function showZoneDetail(zoneId){
   const z = ADMIN_ZONES.find(x=>x.id===zoneId); if(!z) return
@@ -6637,85 +6647,99 @@ function promoteToLive(zId){
 
 function showEditZone(zId){
   const z = ADMIN_ZONES.find(x=>x.id===zId); if(!z) return
-  const allDays = ['Mon','Tue','Wed','Thu','Fri','Sat']
-  document.getElementById('modal-box').innerHTML = `
-  <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit — ${z.name}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
-  <div class="mb">
+  const zipVal = (z.zips?.length ? z.zips : [z.zip]).join(', ')
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh">
+    <div style="font-size:15px;font-weight:700">✏️ Edit Zone — ${z.name}</div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb" style="display:flex;flex-direction:column;gap:12px">
+    <div class="field"><label>Zone Name</label><input id="ez-name" value="${z.name}" style="font-weight:600"></div>
     <div class="g2">
-      <div class="field"><label>Zone Name</label><input id="ez-name" value="${z.name}"></div>
-      <div class="field"><label>City</label><input id="ez-city" value="${z.city}"></div>
-    </div>
-    <div class="g2">
-      <div class="field"><label>ZIP Code(s)</label><input id="ez-zip" value="${z.zips?.join(',')||z.zip}" title="Comma-separated ZIPs e.g. 85374,85375"></div>
-      <div class="field"><label>Launch threshold</label><input type="number" id="ez-thresh" value="${z.threshold}" min="0"></div>
-    </div>
-    <div class="g2">
-      <div class="field"><label>Runner capacity</label><input type="number" id="ez-cap" value="${z.capacity}" min="0"></div>
-      <div class="field"><label>Status</label>
-        <select id="ez-status"><option value="live" ${z.status==='live'?'selected':''}>Live</option><option value="waitlist" ${z.status==='waitlist'?'selected':''}>Waitlist</option><option value="inactive" ${z.status==='inactive'?'selected':''}>Inactive</option></select>
+      <div class="field">
+        <label>ZIP Code(s) <span style="color:var(--muted);font-weight:400;font-size:10px">comma-separate multiple</span></label>
+        <input id="ez-zip" value="${zipVal}" placeholder="85301, 85302">
       </div>
+      <div class="field"><label>City / Area</label><input id="ez-city" value="${z.city||''}"></div>
     </div>
-    <div class="field"><label>Collection days</label>
-      <div style="display:flex;gap:6px;flex-wrap:wrap" id="ez-days">${allDays.map(d=>`<div class="r-opt${z.collection.includes(d)?' on':''}" onclick="this.classList.toggle('on')" data-day="${d}" style="padding:5px 10px;font-size:12px">${d}</div>`).join('')}</div>
+    <div class="g2">
+      <div class="field">
+        <label>Status</label>
+        <select id="ez-status">
+          <option value="live" ${z.status==='live'&&!z.pilot?'selected':''}>Live (public)</option>
+          <option value="pilot" ${z.pilot?'selected':''}>Pilot (active, unlisted)</option>
+          <option value="waitlist" ${z.status==='waitlist'?'selected':''}>Waitlist</option>
+          <option value="inactive" ${z.status==='inactive'?'selected':''}>Inactive</option>
+        </select>
+      </div>
+      <div class="field"><label>Capacity</label><input id="ez-cap" type="number" value="${z.capacity||20}" min="1"></div>
     </div>
-    <div class="field" style="display:flex;align-items:center;gap:10px">
-      <input type="checkbox" id="ez-pilot" ${z.pilot?'checked':''} style="width:auto;margin:0">
-      <label for="ez-pilot" style="margin:0;font-size:13px;cursor:pointer">Pilot mode (unlisted)</label>
-    </div>
-    <div class="field"><label>Internal notes</label><input id="ez-notes" value="${z.notes}"></div>
+    <div class="field"><label>Notes</label><input id="ez-notes" value="${z.notes||''}"></div>
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
-    <button class="btn btn-cyan" onclick="saveEditZone('${zId}')">Save</button>
+    <button class="btn btn-cyan" onclick="saveEditZone('${z.id}')">Save</button>
   </div>`
   openM()
 }
 
 function saveEditZone(zId){
   const z = ADMIN_ZONES.find(x=>x.id===zId); if(!z) return
-  z.name=document.getElementById('ez-name').value; z.city=document.getElementById('ez-city').value
-  const zipRaw=document.getElementById('ez-zip').value.trim()
-  z.zips = zipRaw.split(',').map(x=>x.trim()).filter(Boolean)
-  z.zip  = z.zips[0]?.slice(0,3) || z.zip
-  z.threshold=parseInt(document.getElementById('ez-thresh').value)||15
-  z.capacity=parseInt(document.getElementById('ez-cap').value)||0; z.status=document.getElementById('ez-status').value
-  z.pilot=document.getElementById('ez-pilot').checked; z.notes=document.getElementById('ez-notes').value
-  z.collection=[...document.querySelectorAll('#ez-days .r-opt.on')].map(el=>el.getAttribute('data-day'))
+  z.name  = document.getElementById('ez-name')?.value.trim() || z.name
+  z.city  = document.getElementById('ez-city')?.value.trim() || z.city
+  const zipRaw = document.getElementById('ez-zip')?.value.trim() || ''
+  if(zipRaw){
+    z.zips = zipRaw.split(',').map(x=>x.trim()).filter(Boolean)
+    z.zip  = z.zips[0]?.slice(0,3) || z.zip
+  }
+  z.capacity = parseInt(document.getElementById('ez-cap')?.value) || z.capacity
+  const statusRaw = document.getElementById('ez-status')?.value || z.status
+  z.pilot  = statusRaw === 'pilot'
+  z.status = z.pilot ? 'live' : statusRaw
+  z.notes  = document.getElementById('ez-notes')?.value || ''
   closeM(); renderAdminZones(); syncZoneData()
   dbSaveZone(z)
-  showToast(`${z.name} updated ✅`,'ok')
+  showToast(z.name+' updated ✅','ok')
 }
 
 function showCreateZone(){
-  const allDays = ['Mon','Tue','Wed','Thu','Fri','Sat']
-  const runnersAvail = RUNNERS.filter(r=>r.status!=='INACTIVE')
-  document.getElementById('modal-box').innerHTML = `
-  <div class="mh"><div style="font-size:15px;font-weight:700">+ Create Zone</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
-  <div class="mb">
-    <div style="background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--sub);margin-bottom:14px;line-height:1.6">
-      💡 <strong style="color:var(--text)">Early stage tip:</strong> Set status to Pilot, assign your runner friend directly, and set a low threshold. You handle homeowner recruitment, then promote to Live when ready.
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh">
+    <div style="font-size:15px;font-weight:700">📍 Create Service Zone</div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb" style="display:flex;flex-direction:column;gap:14px">
+    <div class="field">
+      <label>Zone Name *</label>
+      <input id="cz-name" placeholder="e.g. Glendale West" style="font-size:14px;font-weight:600">
     </div>
     <div class="g2">
-      <div class="field"><label>Zone Name *</label><input id="cz-name" placeholder="e.g. Old Town Glendale Austin"></div>
-      <div class="field"><label>City *</label><input id="cz-city" placeholder="e.g. Austin, TX"></div>
+      <div class="field">
+        <label>ZIP Code(s) * <span style="color:var(--muted);font-weight:400;font-size:10px">comma-separate multiple</span></label>
+        <input id="cz-zip" placeholder="85301 or 85301, 85302, 85303">
+        <div id="cz-zip-preview" style="font-size:11px;color:var(--cyan);margin-top:4px"></div>
+      </div>
+      <div class="field"><label>City / Area</label><input id="cz-city" placeholder="Glendale"></div>
     </div>
     <div class="g2">
-      <div class="field"><label>ZIP Code(s) *</label><input id="cz-zip" placeholder="e.g. 85374 or 85374,85375" title="Enter one or more full ZIP codes separated by commas"></div>
-      <div class="field"><label>Launch threshold</label><input type="number" id="cz-thresh" value="15" min="0"></div>
-    </div>
-    <div class="g2">
-      <div class="field"><label>Runner capacity</label><input type="number" id="cz-cap" value="4" min="1"></div>
-      <div class="field"><label>Initial status</label>
-        <select id="cz-status"><option value="pilot">Pilot (unlisted)</option><option value="live">Live (public)</option><option value="waitlist">Waitlist</option></select>
+      <div class="field">
+        <label>Status</label>
+        <select id="cz-status">
+          <option value="pilot">Pilot (active, unlisted)</option>
+          <option value="live">Live (public)</option>
+          <option value="waitlist">Waitlist (building interest)</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Capacity <span style="color:var(--muted);font-weight:400;font-size:10px">max homeowners</span></label>
+        <input id="cz-cap" type="number" value="20" min="1" max="200">
       </div>
     </div>
-    <div class="field"><label>Collection days</label>
-      <div style="display:flex;gap:6px;flex-wrap:wrap" id="cz-days">${allDays.map(d=>`<div class="r-opt" onclick="this.classList.toggle('on')" data-day="${d}" style="padding:5px 10px;font-size:12px">${d}</div>`).join('')}</div>
+    <div class="field"><label>Notes</label><input id="cz-notes" placeholder="Optional"></div>
+    <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.15);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--sub)">
+      💡 Homeowners auto-match to this zone by ZIP on signup. Collection days come from their onboarding preferences — no need to set them here.
     </div>
-    <div class="field"><label>Assign runner directly <span style="color:var(--muted);font-size:10px">(optional)</span></label>
-      <select id="cz-runner"><option value="">— Assign later —</option>${runnersAvail.map(r=>`<option value="${r.name}">${r.name} · ${r.visitType}</option>`).join('')}</select>
-    </div>
-    <div class="field"><label>Internal notes</label><input id="cz-notes" placeholder="e.g. Friend referral pilot — 6 stops to start"></div>
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
@@ -6725,32 +6749,29 @@ function showCreateZone(){
 }
 
 function saveCreateZone(){
-  const name=document.getElementById('cz-name').value.trim()
-  const city=document.getElementById('cz-city').value.trim()
-  const zipRaw=document.getElementById('cz-zip').value.trim()
-  if(!name||!city||!zipRaw){showToast('Name, city and ZIP are required','err');return}
-
-  // Support comma-separated ZIP list e.g. "85374,85375"
-  const zips = zipRaw.split(',').map(z=>z.trim()).filter(Boolean)
-  const zip  = zips[0].slice(0,3) // primary prefix for legacy matching
-
-  const statusRaw=document.getElementById('cz-status').value, isPilot=(statusRaw==='pilot')
+  const name   = document.getElementById('cz-name')?.value.trim() || ''
+  const zipRaw = document.getElementById('cz-zip')?.value.trim()  || ''
+  const city   = document.getElementById('cz-city')?.value.trim() || ''
+  if(!name || !zipRaw){ showToast('Zone name and ZIP code(s) are required','err'); return }
+  const zips = zipRaw.split(',').map(z=>z.trim()).filter(z=>z.length>=3)
+  const zip  = zips[0].slice(0,3)
+  const statusRaw = document.getElementById('cz-status')?.value || 'pilot'
+  const isPilot   = statusRaw === 'pilot'
   const newZone = {
-    id:'z-'+Date.now(), name, city,
-    zip,          // 3-digit prefix — used for legacy lookup
-    zips,         // full ZIP list — used for exact matching
-    status: isPilot?'live':statusRaw, pilot:isPilot, overridden:isPilot||statusRaw==='live',
-    runners: document.getElementById('cz-runner').value?1:0,
-    capacity:parseInt(document.getElementById('cz-cap').value)||4,
-    homeowners:0, threshold:parseInt(document.getElementById('cz-thresh').value)||15,
-    collection:[...document.querySelectorAll('#cz-days .r-opt.on')].map(el=>el.getAttribute('data-day')),
-    assignedRunner:document.getElementById('cz-runner').value||null,
-    stopOrder:[], notes:document.getElementById('cz-notes').value,
+    id:'z-'+Date.now(), name,
+    city: city || zips[0]+' area',
+    zip, zips,
+    status: isPilot ? 'live' : statusRaw,
+    pilot: isPilot, overridden: isPilot || statusRaw==='live',
+    runners:0, capacity: parseInt(document.getElementById('cz-cap')?.value)||20,
+    homeowners:0, threshold: parseInt(document.getElementById('cz-thresh')?.value)||10,
+    collection:[], assignedRunner:null, stopOrder:[],
+    notes: document.getElementById('cz-notes')?.value || '',
   }
   ADMIN_ZONES.push(newZone)
   closeM(); renderAdminZones(); syncZoneData()
   dbSaveZone(newZone)
-  showToast(`${name} created${isPilot?' as Pilot':statusRaw==='live'?' — Live':''} ✅`,'ok')
+  showToast(name+' created ✅','ok')
 }
 
 function confirmDeleteZone(zId, name){
