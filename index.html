@@ -7423,18 +7423,29 @@ async function loadRunnerRequests(){
   const el = document.getElementById('runner-request-list')
   if(!el) return
 
+  el.innerHTML = '<div style="padding:20px;color:var(--muted);font-size:13px">⏳ Loading...</div>'
+
   try {
-    let data = [], loadErr = null
+    let data = [], loadErr = null, httpStatus = null
     try {
       const res = await _supa
         .from('runner_interest')
         .select('*')
         .order('created_at', { ascending: false })
-      data    = res?.data    || []
-      loadErr = res?.error?.message || null
+      data       = res?.data    || []
+      loadErr    = res?.error?.message || null
+      httpStatus = res?.status  || null
     } catch(e){ loadErr = String(e?.message||e) }
 
-    if(loadErr){ console.warn('[BinDash] Runner requests load:', loadErr) }
+    console.log('[BinDash] runner_interest — status:', httpStatus, 'rows:', data.length, 'err:', loadErr)
+
+    if(loadErr){
+      el.innerHTML = `<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:16px;font-size:13px;color:#fca5a5">
+        <strong>⚠️ Load error:</strong> ${loadErr}<br>
+        <span style="font-size:11px;color:var(--muted);margin-top:6px;display:block">Run supabase_runner_invites.sql to fix RLS policies, then refresh.</span>
+      </div>`
+      return
+    }
 
     // Update badge
     const pending = data.filter(r=>!r.invite_code)
@@ -7445,7 +7456,15 @@ async function loadRunnerRequests(){
     }
 
     if(!data.length){
-      el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No runner requests yet.</div>'
+      el.innerHTML = `<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">
+        No runner requests yet.<br>
+        <span style="font-size:11px;margin-top:6px;display:block">
+          If you submitted a request and it is not showing, check the
+          <strong style="color:var(--text)">Supabase Table Editor → runner_interest</strong>
+          to confirm the row exists, and that you have run
+          <strong style="color:var(--text)">supabase_runner_invites.sql</strong> to fix RLS.
+        </span>
+      </div>`
       return
     }
 
@@ -7664,33 +7683,29 @@ async function submitRunnerInterest(){
   const btn = document.querySelector('#modal-box .btn-outline.btn-full')
   if(btn){ btn.disabled=true; btn.textContent='Saving...' }
 
-  let saved = false
-  let saveErr = null
   try {
-    const res = await _supa.from('runner_interest').upsert([{
+    // Plain INSERT — no upsert, no conflict dependency
+    const res = await _supa.from('runner_interest').insert({
       full_name:  name,
       email:      email,
       zip_code:   zip || null,
       created_at: new Date().toISOString(),
-    }], { onConflict: 'email' }).select()
-    saveErr = res?.error?.message || null
-    saved = !saveErr
-    if(saved) console.log('[BinDash] Runner interest saved ✅')
-    else console.warn('[BinDash] Runner interest save error:', saveErr)
+    }).select()
+
+    const saveErr = res?.error?.message || null
+    if(saveErr){
+      console.warn('[BinDash] Runner interest insert error:', saveErr)
+      console.warn('Check: 1) Supabase URL/key set? 2) runner_interest table exists? 3) RLS has anon INSERT policy?')
+    } else {
+      console.log('[BinDash] Runner interest saved ✅', res?.data)
+    }
   } catch(err){
-    saveErr = String(err?.message || err)
-    console.warn('[BinDash] Runner interest save failed:', saveErr)
+    console.warn('[BinDash] Runner interest exception:', String(err?.message||err))
   }
 
   if(btn){ btn.disabled=false; btn.textContent='🙋 Request an Invite' }
   closeM()
-
-  if(saved){
-    showToast('Request submitted — we\'ll be in touch soon! 🎟️','ok')
-  } else {
-    // Still show success to user — don\'t expose DB errors
-    showToast('Request received — we\'ll be in touch! 🎟️','ok')
-  }
+  showToast('Request submitted — we\'ll be in touch! 🎟️','ok')
 }
 </script>
 </body>
