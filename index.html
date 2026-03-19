@@ -2502,7 +2502,12 @@ async function initApp(){
       if(nameEl) nameEl.textContent = user?.user_metadata?.name || 'Admin'
       go('S-admin')
       setTimeout(() => adNav(null, 'ad-overview'), 80)
+      await loadZonesFromSupabase()
       loadSignupsFromSupabase()
+      loadRunnerApplicationsFromSupabase()
+      loadRunnerRequestsBadge()
+      loadHomeownersFromSupabase()
+      loadRunnersFromSupabase()
     } else if(role === 'rn'){
       setCurrentUser(user)
       go('S-rn-dash')
@@ -2985,6 +2990,7 @@ function adNav(el, pg){
   if(pg === 'ad-dispatch')   setTimeout(initDispatchPage, 50)
   if(pg === 'ad-homeowners') setTimeout(renderHomeownerList, 50)
   if(pg === 'ad-pending-hw') setTimeout(renderPendingHWList, 50)
+  if(pg === 'ad-pending')    setTimeout(renderPendingRunnerList, 50)
   if(pg === 'ad-waitlist')   setTimeout(renderWaitlistPage, 50)
   if(pg === 'ad-runner-requests') setTimeout(loadRunnerRequests, 50)
 }
@@ -5506,8 +5512,15 @@ function renderPendingRunnerList(){
   el.innerHTML = PENDING_RUNNERS.map(app => {
     const vpLabel = app.visitPref==='both' ? '🌙☀️ Both visits' : app.visitPref==='bin_out' ? '🌙 Bin Out only' : '☀️ Bin In only'
     const vpColor = app.visitPref==='bin_in' ? '#6ee7b7' : '#a5b4fc'
-    const zoneOptions = ADMIN_ZONES.filter(z=>z.status!=='inactive')
-      .map(z=>`<option value="${z.id}">${z.name} (ZIP ${z.zip})</option>`).join('')
+    // Re-read ADMIN_ZONES each render so zones loaded async are included
+    const activeZones = ADMIN_ZONES.filter(z=>z.status!=='inactive')
+    if(!activeZones.length){
+      // Zones not loaded yet — wait and retry
+      setTimeout(renderPendingRunnerList, 500)
+      return
+    }
+    const zoneOptions = activeZones
+      .map(z=>`<option value="${z.id}">${z.name} (ZIP ${z.zips?.join(', ')||z.zip})</option>`).join('')
     return `
     <div class="pc" id="rnpc-${app.id}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
@@ -5547,43 +5560,66 @@ function renderPendingRunnerList(){
 async function approveRunner(appId){
   const app = PENDING_RUNNERS.find(x=>x.id===appId); if(!app) return
   const zoneId = document.getElementById('rnpc-zone-'+appId)?.value || ''
-  if(!zoneId){ showToast('Please assign a zone before approving','err'); return }
+  if(!zoneId){ showToast('Select a zone first — if none appear, create one in Zones','err'); return }
   const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
 
-  // Add to RUNNERS in memory
-  const colors = ['linear-gradient(135deg,#8b5cf6,#3b82f6)','linear-gradient(135deg,#ec4899,#8b5cf6)','linear-gradient(135deg,#22c55e,#06b6d4)','linear-gradient(135deg,#f59e0b,var(--red))']
-  RUNNERS.push({
-    id: 'R'+String(++nextRunnerId).padStart(3,'0'),
-    name: app.name, initials: app.initials, email: app.email, phone: app.phone,
-    area: zone?.name || app.zip, radius: '5mi', vehicle: app.vehicle,
-    status: 'AVAILABLE',
-    visitType: app.visitPref==='both'?'BOTH': app.visitPref==='bin_out'?'BIN_OUT':'BIN_IN',
-    rating: 0, visits: 0, zoneId, coverageZones: [zoneId],
-    color: colors[RUNNERS.length % colors.length],
-  })
-  if(zone) zone.runners++
+  const btn = document.querySelector('#rnpc-'+appId+' .btn-green')
+  if(btn){ btn.disabled=true; btn.textContent='Approving...' }
 
-  // Remove from pending
-  const idx = PENDING_RUNNERS.findIndex(x=>x.id===appId)
-  if(idx>=0) PENDING_RUNNERS.splice(idx,1)
+  // 1. Update runner_applications status
+  try {
+    const res = await _supa.from('runner_applications').update({
+      status:'approved', zone_id:zoneId,
+      reviewed_at:new Date().toISOString(), updated_at:new Date().toISOString(),
+    }).eq('id', appId)
+    if(res?.error?.message) console.warn('[BinDash] runner_applications update:', res.error.message)
+  } catch(e){ console.warn('[BinDash] runner_applications update exception:', String(e?.message||e)) }
+
+  // 2. Insert into runners table
+  try {
+    const nameParts = (app.name||'').split(' ')
+    const res = await _supa.from('runners').insert({
+      application_id:   appId,
+      auth_user_id:     app.auth_user_id || null,
+      first_name:       nameParts[0] || '',
+      last_name:        nameParts.slice(1).join(' ') || '',
+      email:            app.email,
+      phone:            app.phone || '',
+      zip_code:         app.zip || '',
+      vehicle_type:     app.vehicle || '',
+      visit_preference: app.visitPref || 'both',
+      zone_id:          zoneId,
+      status:           'active',
+      created_at:       new Date().toISOString(),
+    })
+    if(res?.error?.message) console.warn('[BinDash] runners insert:', res.error.message)
+    else console.log('[BinDash] Runner added to runners table ✅')
+  } catch(e){ console.warn('[BinDash] runners insert exception:', String(e?.message||e)) }
+
+  // 3. Update zone count
+  if(zone){ zone.runners=(zone.runners||0)+1; dbSaveZone(zone) }
+
+  // 4. Add to in-memory RUNNERS
+  const colors=['linear-gradient(135deg,#8b5cf6,#3b82f6)','linear-gradient(135deg,#ec4899,#8b5cf6)','linear-gradient(135deg,#22c55e,#06b6d4)','linear-gradient(135deg,#f59e0b,var(--red))']
+  RUNNERS.push({
+    id:appId, name:app.name, initials:app.initials, email:app.email, phone:app.phone,
+    area:zone?.name||app.zip, zip:app.zip, radius:'5mi', vehicle:app.vehicle,
+    status:'AVAILABLE',
+    visitType:app.visitPref==='both'?'BOTH':app.visitPref==='bin_out'?'BIN_OUT':'BIN_IN',
+    rating:0, visits:0, zoneId, coverageZones:[zoneId],
+    color:colors[RUNNERS.length%colors.length],
+  })
+
+  // 5. Remove from pending
+  const idx2 = PENDING_RUNNERS.findIndex(x=>x.id===appId)
+  if(idx2>=0) PENDING_RUNNERS.splice(idx2,1)
   pc = PENDING_RUNNERS.length
 
+  if(btn){ btn.disabled=false; btn.textContent='✅ Approve' }
   renderPendingRunnerList(); renderRunnerList(); syncZoneData(); updateOverviewCounts()
-
-  // Persist to Supabase
-  try {
-    await _supa.from('runner_applications').update({
-      status: 'approved',
-      zone_id: zoneId,
-      reviewed_at: new Date().toISOString(),
-      updated_at:  new Date().toISOString(),
-    }).eq('id', appId)
-    if(zone) dbSaveZone(zone)
-    console.log('[BinDash] Runner approved ✅')
-  } catch(err){ console.warn('[BinDash] Runner approval save failed:', String(err?.message||err)) }
-
-  showToast(app.name + ' approved ✅ — added to runner pool', 'ok')
+  showToast(app.name+' approved ✅ — added to runner pool','ok')
 }
+
 
 async function rejectRunner(appId, name){
   const idx = PENDING_RUNNERS.findIndex(x=>x.id===appId)
@@ -5707,11 +5743,12 @@ function approveHW(appId, directZoneId){
   renderPendingHWList(); renderHomeownerList(); syncZoneData(); updateOverviewCounts()
   const badge=document.getElementById('hw-pcount')
   if(badge) badge.textContent=PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length
-  const runnerNote=autoRunner?` · assigned to ${autoRunner.name}`:'· no runner in zone yet — assign in Homeowners'
+  const runnerNote=autoRunner?' · assigned to '+autoRunner.name:'· no runner assigned yet'
 
-  // Persist approval to Supabase
+  // Persist to Supabase — both homeowner_signups (status) and homeowners (active record)
   ;(async()=>{
     try {
+      // Update homeowner_signups status
       await _supa.from('homeowner_signups').update({
         status:          'approved',
         zone_id:         zoneId,
@@ -5719,10 +5756,31 @@ function approveHW(appId, directZoneId){
         reviewed_at:     new Date().toISOString(),
         updated_at:      new Date().toISOString(),
       }).eq('email', app.email)
-      // Also save zone homeowner count
-      if(zone) await dbSaveZone(zone)
-      console.log('[BinDash] Homeowner approval saved to Supabase ✅')
-    } catch(err){ console.warn('[BinDash] Approval save failed:', err) }
+
+      // Insert into homeowners table (permanent active record)
+      const res = await _supa.from('homeowners').insert({
+        signup_id:        app.id,
+        first_name:       app.name.split(' ')[0] || app.name,
+        last_name:        app.name.split(' ').slice(1).join(' ') || '',
+        email:            app.email,
+        phone:            app.phone || '',
+        street_address:   app.address || '',
+        city:             app.city || '',
+        zip_code:         app.zip || '',
+        zone_id:          zoneId,
+        service_type:     app.service || 'Recycling',
+        frequency:        app.freq || 'weekly',
+        collection_day:   app.day || '',
+        plan_id:          app.plan || '',
+        assigned_runner:  autoRunner?.id || null,
+        status:           'active',
+        created_at:       new Date().toISOString(),
+      })
+      if(res?.error?.message) console.warn('[BinDash] homeowners insert:', res.error.message)
+      else console.log('[BinDash] Homeowner approved + saved to homeowners table ✅')
+
+      if(zone) dbSaveZone(zone)
+    } catch(err){ console.warn('[BinDash] Approval save failed:', String(err?.message||err)) }
   })()
 
   showToast(app.name+' approved ✅ '+runnerNote,'ok')
@@ -6868,8 +6926,9 @@ async function loadRunnerApplicationsFromSupabase(){
         vehicle:     row.vehicle_type || '—',
         visitPref:   row.visit_preference || 'both',
         bgcConsent:  row.bgc_consent || false,
-        submittedAt: new Date(row.created_at).toLocaleString(),
-        status:      'pending',
+        submittedAt:   new Date(row.created_at).toLocaleString(),
+        status:        'pending',
+        auth_user_id:  row.auth_user_id || null,
       })
     })
 
@@ -6880,6 +6939,87 @@ async function loadRunnerApplicationsFromSupabase(){
   } catch(err){
     console.warn('[BinDash] Runner app load failed:', String(err?.message || err))
   }
+}
+
+
+// ── LOAD ACTIVE HOMEOWNERS from Supabase ──────────────────────
+async function loadHomeownersFromSupabase(){
+  try {
+    let data = [], err = null
+    try {
+      const res = await _supa.from('homeowners').select('*').eq('status','active').order('created_at',{ascending:false})
+      data = res?.data || []
+      err  = res?.error?.message || null
+    } catch(e){ err = String(e?.message||e) }
+    if(err){ console.warn('[BinDash] homeowners load:', err); return }
+
+    HOMEOWNERS.length = 0
+    data.forEach(row => {
+      const initials = ((row.first_name?.[0]||'')+(row.last_name?.[0]||'')).toUpperCase()||'?'
+      HOMEOWNERS.push({
+        id:             row.id,
+        signupId:       row.signup_id,
+        name:           (row.first_name+' '+row.last_name).trim(),
+        initials,
+        email:          row.email,
+        phone:          row.phone||'—',
+        address:        row.street_address||'—',
+        city:           row.city||'—',
+        zip:            row.zip_code||'',
+        zoneId:         row.zone_id||null,
+        service:        row.service_type==='General Waste'?'GENERAL':'RECYCLING',
+        freq:           row.frequency||'weekly',
+        day:            row.collection_day||'—',
+        plan:           row.plan_id||'',
+        assignedRunner: row.assigned_runner||null,
+        status:         'active',
+        bins:           1, storage:'—', gate:'—', pets:'None', curb:'—',
+        color:          'linear-gradient(135deg,var(--cyan),var(--blue))',
+        initials,
+      })
+    })
+    console.log('[BinDash] Homeowners loaded:', HOMEOWNERS.length)
+    updateOverviewCounts()
+  } catch(e){ console.warn('[BinDash] loadHomeowners exception:', String(e?.message||e)) }
+}
+
+// ── LOAD ACTIVE RUNNERS from Supabase ─────────────────────────
+async function loadRunnersFromSupabase(){
+  try {
+    let data = [], err = null
+    try {
+      const res = await _supa.from('runners').select('*').eq('status','active').order('created_at',{ascending:false})
+      data = res?.data || []
+      err  = res?.error?.message || null
+    } catch(e){ err = String(e?.message||e) }
+    if(err){ console.warn('[BinDash] runners load:', err); return }
+
+    RUNNERS.length = 0
+    const colors=['linear-gradient(135deg,#8b5cf6,#3b82f6)','linear-gradient(135deg,#ec4899,#8b5cf6)','linear-gradient(135deg,#22c55e,#06b6d4)','linear-gradient(135deg,#f59e0b,var(--red))']
+    data.forEach((row,i) => {
+      const initials = ((row.first_name?.[0]||'')+(row.last_name?.[0]||'')).toUpperCase()||'?'
+      RUNNERS.push({
+        id:            row.id,
+        name:          (row.first_name+' '+row.last_name).trim(),
+        initials,
+        email:         row.email,
+        phone:         row.phone||'—',
+        zip:           row.zip_code||'',
+        area:          row.zone_id||'',
+        vehicle:       row.vehicle_type||'—',
+        visitType:     row.visit_preference==='both'?'BOTH':row.visit_preference==='bin_out'?'BIN_OUT':'BIN_IN',
+        visitPref:     row.visit_preference||'both',
+        status:        'AVAILABLE',
+        rating:        parseFloat(row.rating)||0,
+        visits:        row.total_visits||0,
+        zoneId:        row.zone_id||null,
+        coverageZones: row.zone_id?[row.zone_id]:[],
+        color:         colors[i%colors.length],
+      })
+    })
+    console.log('[BinDash] Runners loaded:', RUNNERS.length)
+    updateOverviewCounts()
+  } catch(e){ console.warn('[BinDash] loadRunners exception:', String(e?.message||e)) }
 }
 
 // Persist a single zone to Supabase (upsert by id)
@@ -7081,9 +7221,12 @@ async function doAdminLogin(){
     if(btn){ btn.disabled=false; btn.textContent='Sign In to Staff Portal →' }
     go('S-admin')
     setTimeout(() => adNav(null, 'ad-overview'), 80)
+    await loadZonesFromSupabase()
     loadSignupsFromSupabase()
     loadRunnerApplicationsFromSupabase()
     loadRunnerRequestsBadge()
+    loadHomeownersFromSupabase()
+    loadRunnersFromSupabase()
     showToast('Welcome back, Admin ✅', 'ok')
     return
   }
