@@ -2134,7 +2134,19 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
 
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
-function go(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0)}
+function go(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'))
+  document.getElementById(id).classList.add('active')
+  window.scrollTo(0,0)
+  // Pre-fill runner name from invite if coming from code validation
+  if(id === 'S-rn-ob' && window._runnerInviteName){
+    const parts = (window._runnerInviteName || '').split(' ')
+    const fnEl = document.getElementById('r-fn')
+    const lnEl = document.getElementById('r-ln')
+    if(fnEl && parts[0]) fnEl.value = parts[0]
+    if(lnEl && parts[1]) lnEl.value = parts.slice(1).join(' ')
+  }
+}
 
 // ── CURRENT USER STATE ────────────────────────────
 // Set on login/session restore, cleared on logout
@@ -7634,9 +7646,13 @@ async function checkRunnerCode(){
 
   // 1. Check hardcoded bypass codes first (instant, no network)
   if(VALID_RUNNER_CODES.includes(val)){
+    window._runnerInviteCode = val
+    window._runnerInviteName = null
     closeM()
     showToast('Invite code accepted ✅','ok')
-    setTimeout(()=>go('S-rn-ob'), 600)
+    // Sign out any existing session so onboarding works cleanly
+    try { await _supa.auth.signOut() } catch(e){}
+    setTimeout(()=>go('S-rn-ob'), 400)
     return
   }
 
@@ -7656,12 +7672,16 @@ async function checkRunnerCode(){
     console.log('[BinDash] Code check — val:', val, '— rows:', rows.length, '— err:', err)
 
     if(rows.length > 0){
-      // Valid code — go to runner onboarding
+      // Valid Supabase code found
       if(btn){ btn.disabled=false; btn.textContent='Verify →' }
+      window._runnerInviteCode = val
+      window._runnerInviteName = rows[0].full_name || null
       closeM()
       const firstName = rows[0].full_name?.split(' ')[0] || 'Runner'
       showToast('Invite code accepted — welcome, ' + firstName + '! ✅','ok')
-      setTimeout(()=>go('S-rn-ob'), 600)
+      // Sign out any existing session so onboarding screen loads cleanly
+      try { await _supa.auth.signOut() } catch(e){}
+      setTimeout(()=>go('S-rn-ob'), 400)
       return
     }
   } catch(err){
