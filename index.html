@@ -3143,21 +3143,35 @@ function rejectR(id, name){
 function showRnEdit(rId){
   const r = RUNNERS.find(x=>x.id===rId)
   if(!r) return
+  const activeZones = ADMIN_ZONES.filter(z=>z.status!=='inactive')
+  const coverage = r.coverageZones?.length ? r.coverageZones : (r.zoneId ? [r.zoneId] : [])
+
+  // Build zone rows — one dropdown per zone + remove btn, plus an Add button
+  const zoneRowsHtml = coverage.map((zId,i)=>{
+    const opts = activeZones.map(z=>`<option value="${z.id}" ${z.id===zId?'selected':''}>${zoneLabel(z)} — ${z.name}</option>`).join('')
+    return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px" id="re-zone-row-${i}">
+      <select id="re-zone-${i}" style="flex:1;font-size:12px">
+        <option value="">— Select zone —</option>${opts}
+      </select>
+      <button onclick="document.getElementById('re-zone-row-${i}').remove()" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer">✕</button>
+    </div>`
+  }).join('')
+
+  const zoneOpts = activeZones.map(z=>`<option value="${z.id}">${zoneLabel(z)} — ${z.name}</option>`).join('')
+
   document.getElementById('modal-box').innerHTML=`
   <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit Runner — ${r.name}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
   <div class="mb">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div class="g2">
       <div class="field"><label>Full Name</label><input id="re-name" value="${r.name}"></div>
       <div class="field"><label>Email</label><input id="re-email" value="${r.email}"></div>
       <div class="field"><label>Phone</label><input id="re-phone" value="${r.phone}"></div>
-      <div class="field"><label>Service Area</label><input id="re-area" value="${r.area}"></div>
-      <div class="field"><label>Radius</label><input id="re-radius" value="${r.radius}"></div>
       <div class="field"><label>Vehicle</label>
         <select id="re-vehicle">
-          <option ${r.vehicle==='CAR'||r.vehicle==='Car'?'selected':''}>Car</option>
-          <option ${r.vehicle==='VAN'||r.vehicle==='Van'?'selected':''}>Van</option>
-          <option ${r.vehicle==='TRUCK'||r.vehicle==='Truck'?'selected':''}>Truck</option>
-          <option ${r.vehicle.includes('bike')?'selected':''}>Cargo bike</option>
+          <option ${(r.vehicle||'').toUpperCase().includes('CAR')?'selected':''}>Car</option>
+          <option ${(r.vehicle||'').toUpperCase().includes('VAN')?'selected':''}>Van</option>
+          <option ${(r.vehicle||'').toUpperCase().includes('TRUCK')?'selected':''}>Truck</option>
+          <option ${(r.vehicle||'').toLowerCase().includes('bike')?'selected':''}>Cargo bike</option>
         </select>
       </div>
     </div>
@@ -3176,15 +3190,13 @@ function showRnEdit(rId){
         <option value="INACTIVE" ${r.status==='INACTIVE'?'selected':''}>Inactive</option>
       </select>
     </div>
-    <div class="field"><label>Coverage Zones <span style="color:var(--muted);font-size:10px">(can cover multiple zones)</span></label>
-      <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px" id="re-zones-list">
-        ${ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>`
-          <label style="display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:6px;padding:7px 10px;cursor:pointer;font-size:12px">
-            <input type="checkbox" id="re-zone-${z.id}" ${(r.coverageZones||[r.zoneId]).includes(z.id)?'checked':''} style="width:auto">
-            <span style="font-weight:600">${z.name}</span>
-            <span style="color:var(--muted)">${z.city} · ${getZoneDerivedDays(z.id).join(', ')||'—'}</span>
-          </label>`).join('')}
+    <div class="field">
+      <label>Coverage Zones <span style="color:var(--muted);font-size:10px">runner is available for all assigned zones</span></label>
+      <div id="re-zones-container" style="margin-top:6px">
+        ${zoneRowsHtml || '<div style="font-size:12px;color:var(--muted);padding:6px 0">No zones assigned yet</div>'}
       </div>
+      <button onclick="addRunnerZoneRow('${r.id}')" style="margin-top:6px;background:none;border:1px dashed rgba(6,214,160,.4);color:var(--cyan);border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer;width:100%">+ Add Zone</button>
+      <div style="font-size:11px;color:var(--sub);margin-top:6px">Homeowners in any of these zones will be offered this runner's routes based on matching day and service type.</div>
     </div>
   </div>
   <div class="mf">
@@ -3195,28 +3207,59 @@ function showRnEdit(rId){
   openM()
 }
 
-function saveRnEdit(rId){
+function addRunnerZoneRow(rId){
+  const container = document.getElementById('re-zones-container')
+  if(!container) return
+  const activeZones = ADMIN_ZONES.filter(z=>z.status!=='inactive')
+  const opts = activeZones.map(z=>`<option value="${z.id}">${zoneLabel(z)} — ${z.name}</option>`).join('')
+  const idx = container.children.length
+  const div = document.createElement('div')
+  div.id = 're-zone-row-'+idx
+  div.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px'
+  div.innerHTML = `<select id="re-zone-${idx}" style="flex:1;font-size:12px"><option value="">— Select zone —</option>${opts}</select>
+    <button onclick="this.parentElement.remove()" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer">✕</button>`
+  container.appendChild(div)
+}
+
+async function saveRnEdit(rId){
   const r = RUNNERS.find(x=>x.id===rId)
   if(!r) return
-  r.name = document.getElementById('re-name').value
-  r.email = document.getElementById('re-email').value
-  r.phone = document.getElementById('re-phone').value
-  r.area = document.getElementById('re-area').value
-  r.radius = document.getElementById('re-radius').value
-  r.vehicle = document.getElementById('re-vehicle').value.toUpperCase()
-  r.status = document.getElementById('re-status').value
-  r.zoneId = document.getElementById('re-zone')?.value || null
-  // Save multi-zone coverage
-  const newCoverage = ADMIN_ZONES.filter(z=>z.status!=='inactive')
-    .filter(z=>document.getElementById('re-zone-'+z.id)?.checked)
-    .map(z=>z.id)
-  r.coverageZones = newCoverage
-  if(newCoverage.length) r.zoneId = newCoverage[0]
+  r.name    = document.getElementById('re-name')?.value.trim()  || r.name
+  r.email   = document.getElementById('re-email')?.value.trim() || r.email
+  r.phone   = document.getElementById('re-phone')?.value.trim() || r.phone
+  r.vehicle = (document.getElementById('re-vehicle')?.value||r.vehicle).toUpperCase()
+  r.status  = document.getElementById('re-status')?.value || r.status
+  r.initials = r.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
+
+  // Read all zone rows dynamically
+  const container = document.getElementById('re-zones-container')
+  const newCoverage = []
+  if(container){
+    container.querySelectorAll('select[id^="re-zone-"]').forEach(sel=>{
+      if(sel.value) newCoverage.push(sel.value)
+    })
+  }
+  r.coverageZones = [...new Set(newCoverage)]
+  r.zoneId = r.coverageZones[0] || null
+  r.area   = r.coverageZones.map(zId=>ADMIN_ZONES.find(z=>z.id===zId)?.name||zId).join(', ')
+
   const vtOn = document.querySelector('#modal-box .r-opt.on')
   if(vtOn) r.visitType = vtOn.getAttribute('data-val') || r.visitType
-  r.initials = r.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
+
   closeM()
   renderRunnerList()
+  syncZoneData()
+
+  // Persist to Supabase runners table
+  try {
+    await _supa.from('runners').update({
+      zone_id:    r.zoneId,
+      status:     r.status.toLowerCase(),
+      vehicle_type: r.vehicle,
+      updated_at: new Date().toISOString(),
+    }).eq('id', rId)
+  } catch(e){ console.warn('[BinDash] Runner update:', String(e?.message||e)) }
+
   showToast(r.name + ' updated ✅', 'ok')
 }
 
@@ -5110,18 +5153,28 @@ const DENSITY_THRESHOLD = 10
 
 // Returns the best matching zone for a given ZIP, or null
 function findZoneForZip(zip){
-  if(!zip || zip.length < 5) return null
+  if(!zip || zip.length < 3) return null
   const prefix = zip.slice(0,3)
-  // Exact match first (zone has this full ZIP in its zips array)
+  // 1. Exact ZIP match
   let zone = ADMIN_ZONES.find(z=>
     z.status !== 'inactive' &&
     (z.zips?.includes(zip) || z.zip === zip)
   )
-  // Fallback: prefix match
+  // 2. Prefix match
   if(!zone) zone = ADMIN_ZONES.find(z=>
     z.status !== 'inactive' &&
     (z.zip === prefix || z.zip?.slice(0,3) === prefix || z.zips?.some(zz=>zz.slice(0,3)===prefix))
   )
+  // 3. Zone is valid only if at least one AVAILABLE runner covers it
+  //    (otherwise homeowner goes to waitlist even if zone exists)
+  if(zone){
+    const hasRunner = RUNNERS.some(r=>
+      r.status !== 'INACTIVE' && r.status !== 'OFF_DUTY' &&
+      (r.coverageZones?.includes(zone.id) || r.zoneId===zone.id ||
+       r.zip===zip || r.zip?.slice(0,3)===prefix)
+    )
+    if(!hasRunner && zone.status !== 'live') zone = null
+  }
   return zone || null
 }
 
@@ -5965,7 +6018,43 @@ function adGenerateBatches(){
     byZone[key].push(hw)
   })
 
-  // Create batches (group into batches of max-stops)
+  // ── RUNNER MATCHING LOGIC ───────────────────────────────────
+  // Match runners to homeowners based on:
+  //   1. Zone coverage (runner covers the zone or ZIP)
+  //   2. Day preference (runner's collection day matches)
+  //   3. Visit type (bin_out, bin_in, or both)
+  //   4. Availability status
+  // Loyalty: if HW has assignedRunner, that runner gets 25min first offer
+  function findBestRunner(hw, visitType){
+    const hwZip = hw.zip || ''
+    const hwZone = hw.zoneId || ''
+    const hwDay  = hw.day || dayFil
+
+    // All eligible runners for this homeowner
+    const eligible = RUNNERS.filter(r=>{
+      if(r.status === 'INACTIVE' || r.status === 'OFF_DUTY') return false
+      // Visit type match: runner must do this visit type
+      const vtMatch = r.visitType==='BOTH' ||
+        (visitType==='BIN_OUT' && (r.visitType==='BIN_OUT'||r.visitType==='BOTH')) ||
+        (visitType==='BIN_IN'  && (r.visitType==='BIN_IN' ||r.visitType==='BOTH'))
+      if(!vtMatch) return false
+      // Zone/ZIP match
+      const inZone = r.coverageZones?.includes(hwZone) || r.zoneId===hwZone ||
+        r.zip===hwZip || r.zip?.slice(0,3)===hwZip?.slice(0,3)
+      return inZone
+    })
+
+    if(!eligible.length) return null
+
+    // Loyalty: assigned runner gets first priority (25min window in real dispatch)
+    if(hw.assignedRunner){
+      const loyal = eligible.find(r=>r.id===hw.assignedRunner)
+      if(loyal) return loyal
+    }
+    // Otherwise pick first available in zone
+    return eligible.find(r=>r.status==='AVAILABLE') || eligible[0]
+  }
+
   const maxStops = parseInt(document.getElementById('max-stops')?.value)||10
   generatedBatches = []
   let batchNum = 1
@@ -5974,20 +6063,24 @@ function adGenerateBatches(){
     const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
     const zoneName = zone?.name || 'Unzoned'
 
-    // Split into batches
     for(let i=0; i<hws.length; i+=maxStops){
       const chunk = hws.slice(i, i+maxStops)
-      const assignedRunner = RUNNERS.find(r=>r.id===chunk[0].assignedRunner)
+      // Determine visit type for this batch (bin_out = evening, bin_in = morning)
+      const batchVisitType = 'BIN_OUT' // Bin Out batches first
+      const bestRunner = findBestRunner(chunk[0], batchVisitType)
       const unlock = getUnlockTime(zoneId)
       const hasSplit = chunk.some(h=>h.service==='SPLIT')
       const earn = (chunk.length * 3.25).toFixed(2)
+      const isLoyal = bestRunner && bestRunner.id === chunk[0].assignedRunner
 
       generatedBatches.push({
         id: 'BATCH-'+String(batchNum++).padStart(3,'0'),
         zoneId, zoneName, day: dayFil,
         stops: chunk,
-        runner: assignedRunner || null,
-        status: assignedRunner ? 'offered' : 'unassigned',
+        runner: bestRunner || null,
+        status: bestRunner ? 'offered' : 'unassigned',
+        isLoyalOffer: isLoyal,           // flags 25min loyalty window
+        loyaltyExpiry: isLoyal ? Date.now() + 25*60*1000 : null,
         earnOut: earn, earnIn: earn, earnTotal: (chunk.length*6.50).toFixed(2),
         binInUnlock: unlock.time, unlockMethod: unlock.method,
         hasSplit,
@@ -6052,7 +6145,8 @@ function renderDispatchPipeline(){
     const unassigned = !b.runner
     const borderCol = b.status==='accepted'?'#22c55e': b.status==='offered'?'#f59e0b': b.status==='broadcast'?'#3b82f6':'#ef4444'
     const bgCol     = b.status==='accepted'?'rgba(34,197,94,.04)': b.status==='offered'?'rgba(245,158,11,.04)': b.status==='broadcast'?'rgba(59,130,246,.04)':'rgba(239,68,68,.05)'
-    const badgeTxt  = b.status==='accepted'?'✓ Accepted': b.status==='offered'?'⏳ Offer sent': b.status==='broadcast'?'📡 Broadcast':'🚨 Unassigned'
+    const loyalTag  = b.isLoyalOffer && b.status==='offered' ? ' · 🔒 25min loyalty window' : ''
+    const badgeTxt  = b.status==='accepted'?'✓ Accepted': b.status==='offered'?'⏳ Offer sent'+loyalTag: b.status==='broadcast'?'📡 Broadcast':'🚨 Unassigned'
     const badgeStyle= b.status==='accepted'?'background:#22c55e22;color:#22c55e': b.status==='offered'?'background:rgba(245,158,11,.15);color:#f59e0b': b.status==='broadcast'?'background:rgba(59,130,246,.15);color:#3b82f6':'background:rgba(239,68,68,.15);color:#ef4444'
 
     const stopList = b.stops.map(h=>{
@@ -6332,8 +6426,8 @@ function renderAdminZones(){
           <!-- Name + status -->
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
             <span style="font-size:15px;font-weight:700">${z.name}</span>
+            <span style="background:rgba(99,102,241,.12);color:#a5b4fc;border-radius:6px;padding:2px 7px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.04em">${zoneLabel(z)}</span>
             <span style="background:${sc}22;color:${sc};border-radius:99px;padding:2px 8px;font-size:10px;font-weight:700">${sl}</span>
-            ${z.city ? `<span style="font-size:11px;color:var(--muted)">${z.city}</span>` : ''}
           </div>
 
           <!-- ZIPs -->
@@ -6371,6 +6465,7 @@ function renderAdminZones(){
           ${z.status==='waitlist' ? `<button class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3);font-size:11px" onclick="activateZone('${z.id}')">⚡ Activate</button>` : ''}
           ${z.pilot ? `<button class="btn btn-sm" style="background:#22c55e22;color:#22c55e;border:1px solid rgba(34,197,94,.3);font-size:11px" onclick="promoteToLive('${z.id}')">↑ Go Live</button>` : ''}
           <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="showEditZone('${z.id}')">✏️ Edit</button>
+          <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="showSplitZone('${z.id}')">✂️ Split</button>
           <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#ef4444" onclick="confirmDeleteZone('${z.id}','${z.name}')">🗑</button>
         </div>
       </div>
@@ -6806,6 +6901,90 @@ function convertToPilot(zId){
 
 // ── SUPABASE ZONE PERSISTENCE ────────────────────
 // Converts an in-memory ADMIN_ZONES entry to a Supabase-ready row
+
+// ── ZONE LABEL HELPERS ─────────────────────────────────────────
+// Generate short label: GLD-85301 or SRP-853 style
+function zoneLabel(z){
+  if(!z) return '—'
+  const city = (z.city||z.name||'').toUpperCase()
+  const abbr = city.slice(0,3) // first 3 chars of city
+  const zip  = (z.zips?.[0] || z.zip || '').slice(0,5)
+  return abbr + (zip ? '-'+zip : '')
+}
+
+// Split a zone's ZIP codes into two zones
+function showSplitZone(zId){
+  const z = ADMIN_ZONES.find(x=>x.id===zId)
+  if(!z) return
+  const zips = z.zips?.length ? z.zips : [z.zip]
+  if(zips.length < 2){
+    showToast('Add more ZIPs to this zone before splitting','info')
+    showEditZone(zId)
+    return
+  }
+  const half = Math.ceil(zips.length/2)
+  const zipOpts = zips.map((zip,i)=>`
+    <label style="display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:6px;padding:7px 10px;cursor:pointer;font-size:13px">
+      <input type="checkbox" id="split-zip-${i}" ${i<half?'checked':''} style="width:auto">
+      <span style="font-family:'DM Mono',monospace;font-weight:600;color:#a5b4fc">${zip}</span>
+    </label>`).join('')
+
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh">
+    <div>
+      <div style="font-size:15px;font-weight:700">✂️ Split Zone — ${z.name}</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:2px">Check ZIPs for Zone A. Remaining ZIPs go to Zone B.</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+      <div class="field"><label>Zone A Name</label><input id="split-name-a" value="${z.name} A" style="font-weight:600"></div>
+      <div class="field"><label>Zone B Name</label><input id="split-name-b" value="${z.name} B" style="font-weight:600"></div>
+    </div>
+    <div class="field">
+      <label>Assign ZIPs to Zone A <span style="color:var(--muted);font-weight:400;font-size:10px">unchecked go to Zone B</span></label>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px" id="split-zip-list">
+        ${zipOpts}
+      </div>
+    </div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan" onclick="confirmSplitZone('${zId}')">✂️ Split Zone</button>
+  </div>`
+  openM()
+}
+
+async function confirmSplitZone(zId){
+  const z = ADMIN_ZONES.find(x=>x.id===zId)
+  if(!z) return
+  const zips = z.zips?.length ? z.zips : [z.zip]
+  const nameA = document.getElementById('split-name-a')?.value.trim() || z.name+' A'
+  const nameB = document.getElementById('split-name-b')?.value.trim() || z.name+' B'
+  const zipsA = zips.filter((_,i)=>document.getElementById('split-zip-'+i)?.checked)
+  const zipsB = zips.filter((_,i)=>!document.getElementById('split-zip-'+i)?.checked)
+  if(!zipsA.length || !zipsB.length){ showToast('Each zone needs at least one ZIP','err'); return }
+
+  // Update zone A (the original)
+  z.name = nameA; z.zips = zipsA; z.zip = zipsA[0].slice(0,3)
+  dbSaveZone(z)
+
+  // Create zone B
+  const zoneB = {
+    id:'z-split-'+Date.now(), name:nameB,
+    city: z.city, zip: zipsB[0].slice(0,3), zips: zipsB,
+    status: z.status, pilot: z.pilot, overridden: z.overridden,
+    runners:0, capacity:z.capacity, homeowners:0, threshold:z.threshold,
+    collection:[], assignedRunner:null, stopOrder:[], notes:'Split from '+nameA,
+  }
+  ADMIN_ZONES.push(zoneB)
+  dbSaveZone(zoneB)
+
+  closeM(); renderAdminZones(); syncZoneData()
+  showToast(nameA+' and '+nameB+' created ✅','ok')
+}
+
 function zoneToRow(z){
   return {
     id:              z.id,
