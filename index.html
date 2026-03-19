@@ -11,8 +11,8 @@
 //  SUPABASE CONFIG — replace with your project keys
 //  Supabase Dashboard → Settings → API
 // ══════════════════════════════════════════════════
-const SUPABASE_URL = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
-const SUPABASE_ANON_KEY = 'sb_publishable_PzQNU1g9t7nH_c8GrK37sQ_2OocnlNQ'
+const SUPABASE_URL = 'https://your-project-url.supabase.co'
+const SUPABASE_ANON_KEY = 'your-anon-key'
 const _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // ── SUPABASE HELPER — centralised error handler ──
@@ -7612,6 +7612,7 @@ function showRunnerInviteModal(){
         <input id="runner-interest-email" placeholder="you@email.com" type="email"
                style="width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Outfit',sans-serif;font-size:13px;padding:9px 12px;outline:none">
       </div>
+      <div id="runner-interest-err" style="display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px 12px;font-size:12px;color:#fca5a5;margin-bottom:10px"></div>
       <button class="btn btn-outline btn-full" onclick="submitRunnerInterest()" style="border-color:rgba(6,214,160,.3);color:var(--cyan)">
         🙋 Request an Invite
       </button>
@@ -7681,10 +7682,12 @@ async function submitRunnerInterest(){
   }
 
   const btn = document.querySelector('#modal-box .btn-outline.btn-full')
+  const errDiv = document.getElementById('runner-interest-err')
   if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+  if(errDiv) errDiv.style.display='none'
 
+  let saveErr = null
   try {
-    // Plain INSERT — no upsert, no conflict dependency
     const res = await _supa.from('runner_interest').insert({
       full_name:  name,
       email:      email,
@@ -7692,20 +7695,26 @@ async function submitRunnerInterest(){
       created_at: new Date().toISOString(),
     }).select()
 
-    const saveErr = res?.error?.message || null
-    if(saveErr){
-      console.warn('[BinDash] Runner interest insert error:', saveErr)
-      console.warn('Check: 1) Supabase URL/key set? 2) runner_interest table exists? 3) RLS has anon INSERT policy?')
-    } else {
-      console.log('[BinDash] Runner interest saved ✅', res?.data)
+    saveErr = res?.error?.message || null
+    if(!saveErr){
+      console.log('[BinDash] Runner interest saved ✅')
+      if(btn){ btn.disabled=false; btn.textContent='🙋 Request an Invite' }
+      closeM()
+      showToast('Request submitted — we\'ll be in touch! 🎟️','ok')
+      return
     }
   } catch(err){
-    console.warn('[BinDash] Runner interest exception:', String(err?.message||err))
+    saveErr = String(err?.message||err)
   }
 
+  // Show error inside the modal so it's visible
   if(btn){ btn.disabled=false; btn.textContent='🙋 Request an Invite' }
-  closeM()
-  showToast('Request submitted — we\'ll be in touch! 🎟️','ok')
+  if(errDiv){
+    errDiv.style.display = 'block'
+    errDiv.textContent = '⚠️ Could not save: ' + saveErr
+  }
+  console.warn('[BinDash] Runner interest error:', saveErr)
+  showToast('Could not submit — see error above','err')
 }
 </script>
 </body>
