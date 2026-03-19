@@ -2136,7 +2136,9 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 function go(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'))
-  document.getElementById(id).classList.add('active')
+  const target = document.getElementById(id)
+  if(!target){ console.error('[BinDash] go() — screen not found:', id); return }
+  target.classList.add('active')
   window.scrollTo(0,0)
   // Pre-fill runner name from invite if coming from code validation
   if(id === 'S-rn-ob' && window._runnerInviteName){
@@ -7649,10 +7651,8 @@ async function checkRunnerCode(){
     window._runnerInviteCode = val
     window._runnerInviteName = null
     closeM()
-    showToast('Invite code accepted ✅','ok')
-    // Sign out any existing session so onboarding works cleanly
-    try { await _supa.auth.signOut() } catch(e){}
-    setTimeout(()=>go('S-rn-ob'), 400)
+    go('S-rn-ob')
+    showToast('Invite code accepted — complete your application below ✅','ok')
     return
   }
 
@@ -7672,16 +7672,14 @@ async function checkRunnerCode(){
     console.log('[BinDash] Code check — val:', val, '— rows:', rows.length, '— err:', err)
 
     if(rows.length > 0){
-      // Valid Supabase code found
+      // Valid Supabase code found — go to onboarding immediately
       if(btn){ btn.disabled=false; btn.textContent='Verify →' }
       window._runnerInviteCode = val
       window._runnerInviteName = rows[0].full_name || null
-      closeM()
       const firstName = rows[0].full_name?.split(' ')[0] || 'Runner'
-      showToast('Invite code accepted — welcome, ' + firstName + '! ✅','ok')
-      // Sign out any existing session so onboarding screen loads cleanly
-      try { await _supa.auth.signOut() } catch(e){}
-      setTimeout(()=>go('S-rn-ob'), 400)
+      closeM()
+      go('S-rn-ob')
+      showToast('Welcome, ' + firstName + '! Complete your runner application below ✅','ok')
       return
     }
   } catch(err){
