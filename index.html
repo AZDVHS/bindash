@@ -5933,7 +5933,8 @@ let generatedBatches = []
 function adGenerateBatches(){
   const radiusEl = document.getElementById('cluster-radius')
   const km = radiusEl ? (radiusEl.value / 10).toFixed(1) : '1.0'
-  const dayFil = document.getElementById('dispatch-day-filter')?.value || 'Thu'
+  const today = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date().getDay()]
+  const dayFil = document.getElementById('dispatch-day-filter')?.value || today
 
   // Get active HOs scheduled for this day
   const scheduled = HOMEOWNERS.filter(hw=>{
@@ -6907,7 +6908,7 @@ async function loadRunnerApplicationsFromSupabase(){
       const res = await _supa
         .from('runner_applications')
         .select('*')
-        .eq('status', 'pending_review')
+        .eq('status', 'pending_review')  // only truly pending — not approved/rejected
         .order('created_at', { ascending: false })
       data    = res?.data    || []
       loadErr = res?.error?.message || null
@@ -6943,23 +6944,40 @@ async function loadRunnerApplicationsFromSupabase(){
 
 
 // ── LOAD ACTIVE HOMEOWNERS from Supabase ──────────────────────
+// Reads from homeowners table first, then falls back to homeowner_signups
+// for backwards compatibility with homeowners approved before homeowners table existed
 async function loadHomeownersFromSupabase(){
   try {
-    let data = [], err = null
+    HOMEOWNERS.length = 0
+
+    // Primary: homeowners table (new approvals)
+    let hwData = [], hwErr = null
     try {
       const res = await _supa.from('homeowners').select('*').eq('status','active').order('created_at',{ascending:false})
-      data = res?.data || []
-      err  = res?.error?.message || null
-    } catch(e){ err = String(e?.message||e) }
-    if(err){ console.warn('[BinDash] homeowners load:', err); return }
+      hwData = res?.data || []
+      hwErr  = res?.error?.message || null
+    } catch(e){ hwErr = String(e?.message||e) }
 
-    HOMEOWNERS.length = 0
-    data.forEach(row => {
-      const initials = ((row.first_name?.[0]||'')+(row.last_name?.[0]||'')).toUpperCase()||'?'
-      HOMEOWNERS.push({
+    // Fallback: homeowner_signups with status=approved (existing approvals)
+    let signupData = [], signupErr = null
+    try {
+      const res = await _supa.from('homeowner_signups').select('*').eq('status','approved').order('created_at',{ascending:false})
+      signupData = res?.data || []
+      signupErr  = res?.error?.message || null
+    } catch(e){ signupErr = String(e?.message||e) }
+
+    // Merge — prefer homeowners table, use signups as fallback for any not already there
+    const hwEmails = new Set(hwData.map(r=>r.email))
+
+    const toRow = (row, fromSignup=false) => {
+      const fn = fromSignup ? (row.first_name||row.full_name?.split(' ')[0]||'') : (row.first_name||'')
+      const ln = fromSignup ? (row.last_name||row.full_name?.split(' ').slice(1).join(' ')||'') : (row.last_name||'')
+      const initials = ((fn[0]||'')+(ln[0]||'')).toUpperCase()||'?'
+      const day = row.collection_day || '—'
+      return {
         id:             row.id,
-        signupId:       row.signup_id,
-        name:           (row.first_name+' '+row.last_name).trim(),
+        signupId:       fromSignup ? row.id : row.signup_id,
+        name:           (fn+' '+ln).trim()||row.email,
         initials,
         email:          row.email,
         phone:          row.phone||'—',
@@ -6967,40 +6985,58 @@ async function loadHomeownersFromSupabase(){
         city:           row.city||'—',
         zip:            row.zip_code||'',
         zoneId:         row.zone_id||null,
-        service:        row.service_type==='General Waste'?'GENERAL':'RECYCLING',
+        service:        (row.service_type||'').includes('General')?'GENERAL':'RECYCLING',
         freq:           row.frequency||'weekly',
-        day:            row.collection_day||'—',
+        day,
         plan:           row.plan_id||'',
         assignedRunner: row.assigned_runner||null,
         status:         'active',
-        bins:           1, storage:'—', gate:'—', pets:'None', curb:'—',
-        color:          'linear-gradient(135deg,var(--cyan),var(--blue))',
-        initials,
-      })
-    })
-    console.log('[BinDash] Homeowners loaded:', HOMEOWNERS.length)
+        bins:1, storage:'—', gate:'—', pets:'None', curb:'—',
+        color:'linear-gradient(135deg,var(--cyan),var(--blue))',
+      }
+    }
+
+    hwData.forEach(row => HOMEOWNERS.push(toRow(row, false)))
+    signupData.filter(row => !hwEmails.has(row.email)).forEach(row => HOMEOWNERS.push(toRow(row, true)))
+
+    console.log('[BinDash] Homeowners loaded:', HOMEOWNERS.length, '(', hwData.length, 'from homeowners +', signupData.filter(r=>!hwEmails.has(r.email)).length, 'from signups)')
     updateOverviewCounts()
+    renderHomeownerList()
   } catch(e){ console.warn('[BinDash] loadHomeowners exception:', String(e?.message||e)) }
 }
 
 // ── LOAD ACTIVE RUNNERS from Supabase ─────────────────────────
+// Reads runners table first, falls back to runner_applications status=approved
 async function loadRunnersFromSupabase(){
   try {
-    let data = [], err = null
-    try {
-      const res = await _supa.from('runners').select('*').eq('status','active').order('created_at',{ascending:false})
-      data = res?.data || []
-      err  = res?.error?.message || null
-    } catch(e){ err = String(e?.message||e) }
-    if(err){ console.warn('[BinDash] runners load:', err); return }
-
     RUNNERS.length = 0
     const colors=['linear-gradient(135deg,#8b5cf6,#3b82f6)','linear-gradient(135deg,#ec4899,#8b5cf6)','linear-gradient(135deg,#22c55e,#06b6d4)','linear-gradient(135deg,#f59e0b,var(--red))']
-    data.forEach((row,i) => {
-      const initials = ((row.first_name?.[0]||'')+(row.last_name?.[0]||'')).toUpperCase()||'?'
-      RUNNERS.push({
+
+    // Primary: runners table
+    let rnData = [], rnErr = null
+    try {
+      const res = await _supa.from('runners').select('*').eq('status','active').order('created_at',{ascending:false})
+      rnData = res?.data || []
+      rnErr  = res?.error?.message || null
+    } catch(e){ rnErr = String(e?.message||e) }
+
+    // Fallback: runner_applications with status=approved
+    let appData = [], appErr = null
+    try {
+      const res = await _supa.from('runner_applications').select('*').eq('status','approved').order('created_at',{ascending:false})
+      appData = res?.data || []
+      appErr  = res?.error?.message || null
+    } catch(e){ appErr = String(e?.message||e) }
+
+    const rnEmails = new Set(rnData.map(r=>r.email))
+
+    const toRunner = (row, i, fromApp=false) => {
+      const fn = row.first_name || ''
+      const ln = row.last_name  || ''
+      const initials = ((fn[0]||'')+(ln[0]||'')).toUpperCase()||'?'
+      return {
         id:            row.id,
-        name:          (row.first_name+' '+row.last_name).trim(),
+        name:          (fn+' '+ln).trim()||row.email,
         initials,
         email:         row.email,
         phone:         row.phone||'—',
@@ -7015,10 +7051,15 @@ async function loadRunnersFromSupabase(){
         zoneId:        row.zone_id||null,
         coverageZones: row.zone_id?[row.zone_id]:[],
         color:         colors[i%colors.length],
-      })
-    })
-    console.log('[BinDash] Runners loaded:', RUNNERS.length)
+      }
+    }
+
+    rnData.forEach((row,i)  => RUNNERS.push(toRunner(row, i, false)))
+    appData.filter(row => !rnEmails.has(row.email)).forEach((row,i) => RUNNERS.push(toRunner(row, rnData.length+i, true)))
+
+    console.log('[BinDash] Runners loaded:', RUNNERS.length, '(', rnData.length, 'from runners +', appData.filter(r=>!rnEmails.has(r.email)).length, 'from applications)')
     updateOverviewCounts()
+    renderRunnerList()
   } catch(e){ console.warn('[BinDash] loadRunners exception:', String(e?.message||e)) }
 }
 
@@ -7519,7 +7560,9 @@ function showOfferDetail(){
 
 // Admin dispatch actions
 function updateDispatchLiveStats(){
-  const pending = HOMEOWNERS.filter(h=>h.status==='active').length
+  const today2  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date().getDay()]
+  const dayFil2 = document.getElementById('dispatch-day-filter')?.value || today2
+  const pending = HOMEOWNERS.filter(h=>h.status==='active' && (h.day===dayFil2||h.day==='—'||!h.day)).length
   const avail   = RUNNERS.filter(r=>r.status==='AVAILABLE' || r.status==='ON_ROUTE').length
   const pdEl = document.getElementById('disp-pending-stops')
   const rnEl = document.getElementById('disp-runners-avail')
