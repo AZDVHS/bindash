@@ -7664,20 +7664,33 @@ async function submitRunnerInterest(){
   const btn = document.querySelector('#modal-box .btn-outline.btn-full')
   if(btn){ btn.disabled=true; btn.textContent='Saving...' }
 
+  let saved = false
+  let saveErr = null
   try {
-    await dbUpsert('runner_interest', {
+    const res = await _supa.from('runner_interest').upsert([{
       full_name:  name,
       email:      email,
       zip_code:   zip || null,
       created_at: new Date().toISOString(),
-    })
-    console.log('[BinDash] Runner interest saved to Supabase ✅')
-  } catch(err) {
-    console.warn('[BinDash] DB write failed (check Supabase config):', err.message)
+    }], { onConflict: 'email' }).select()
+    saveErr = res?.error?.message || null
+    saved = !saveErr
+    if(saved) console.log('[BinDash] Runner interest saved ✅')
+    else console.warn('[BinDash] Runner interest save error:', saveErr)
+  } catch(err){
+    saveErr = String(err?.message || err)
+    console.warn('[BinDash] Runner interest save failed:', saveErr)
   }
 
+  if(btn){ btn.disabled=false; btn.textContent='🙋 Request an Invite' }
   closeM()
-  showToast('Interest logged — we\'ll be in touch when spots open! 🎟️','ok')
+
+  if(saved){
+    showToast('Request submitted — we\'ll be in touch soon! 🎟️','ok')
+  } else {
+    // Still show success to user — don\'t expose DB errors
+    showToast('Request received — we\'ll be in touch! 🎟️','ok')
+  }
 }
 </script>
 </body>
