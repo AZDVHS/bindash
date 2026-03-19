@@ -5618,6 +5618,8 @@ async function approveRunner(appId){
   if(btn){ btn.disabled=false; btn.textContent='✅ Approve' }
   renderPendingRunnerList(); renderRunnerList(); syncZoneData(); updateOverviewCounts()
   showToast(app.name+' approved ✅ — added to runner pool','ok')
+  // Reload from Supabase to confirm status synced and clear pending badge
+  setTimeout(()=>{ loadRunnersFromSupabase(); loadRunnerApplicationsFromSupabase() }, 800)
 }
 
 
@@ -5784,6 +5786,9 @@ function approveHW(appId, directZoneId){
   })()
 
   showToast(app.name+' approved ✅ '+runnerNote,'ok')
+
+  // Reload from Supabase to sync and remove from pending
+  setTimeout(()=>{ loadHomeownersFromSupabase(); loadSignupsFromSupabase() }, 1000)
 }
 
 async function rejectHW(appId, name){
@@ -6794,6 +6799,8 @@ function zoneToRow(z){
     threshold:       z.threshold || 15,
     collection_days: z.collection || [],
     assigned_runner: z.assignedRunner || null,
+    homeowners:      z.homeowners || 0,
+    runners:         z.runners || 0,
     notes:           z.notes || '',
     updated_at:      new Date().toISOString(),
   }
@@ -6812,10 +6819,14 @@ async function loadZonesFromSupabase(){
       loadErr = res?.error?.message || null
     } catch(fetchErr){ loadErr = String(fetchErr?.message || fetchErr) }
     if(loadErr){ console.warn('[BinDash] Could not load zones:', loadErr); return }
-    if(!data.length) return
 
-    // Rebuild ADMIN_ZONES from DB rows
+    // Rebuild ADMIN_ZONES from DB rows (always clear and rebuild)
     ADMIN_ZONES.length = 0
+    if(!data.length){
+      console.log('[BinDash] No zones in DB yet')
+      syncZoneData(); renderAdminZones()
+      return
+    }
     data.forEach(row => {
       ADMIN_ZONES.push({
         id:              row.id,
@@ -6966,7 +6977,9 @@ async function loadHomeownersFromSupabase(){
       signupErr  = res?.error?.message || null
     } catch(e){ signupErr = String(e?.message||e) }
 
-    // Merge — prefer homeowners table, use signups as fallback for any not already there
+    // If homeowners table has records, use it exclusively (avoids duplicates)
+    // Only fall back to signups if homeowners table is empty
+    const useSignupFallback = hwData.length === 0
     const hwEmails = new Set(hwData.map(r=>r.email))
 
     const toRow = (row, fromSignup=false) => {
@@ -6997,9 +7010,10 @@ async function loadHomeownersFromSupabase(){
     }
 
     hwData.forEach(row => HOMEOWNERS.push(toRow(row, false)))
-    signupData.filter(row => !hwEmails.has(row.email)).forEach(row => HOMEOWNERS.push(toRow(row, true)))
-
-    console.log('[BinDash] Homeowners loaded:', HOMEOWNERS.length, '(', hwData.length, 'from homeowners +', signupData.filter(r=>!hwEmails.has(r.email)).length, 'from signups)')
+    if(useSignupFallback){
+      signupData.forEach(row => HOMEOWNERS.push(toRow(row, true)))
+    }
+    console.log('[BinDash] Homeowners loaded:', HOMEOWNERS.length, '— source:', useSignupFallback ? 'signups fallback' : 'homeowners table')
     updateOverviewCounts()
     renderHomeownerList()
   } catch(e){ console.warn('[BinDash] loadHomeowners exception:', String(e?.message||e)) }
@@ -7028,12 +7042,14 @@ async function loadRunnersFromSupabase(){
       appErr  = res?.error?.message || null
     } catch(e){ appErr = String(e?.message||e) }
 
+    const useAppFallback = rnData.length === 0
     const rnEmails = new Set(rnData.map(r=>r.email))
 
     const toRunner = (row, i, fromApp=false) => {
       const fn = row.first_name || ''
       const ln = row.last_name  || ''
       const initials = ((fn[0]||'')+(ln[0]||'')).toUpperCase()||'?'
+      const zoneName = ADMIN_ZONES.find(z=>z.id===row.zone_id)?.name || row.zone_id || '—'
       return {
         id:            row.id,
         name:          (fn+' '+ln).trim()||row.email,
@@ -7041,7 +7057,7 @@ async function loadRunnersFromSupabase(){
         email:         row.email,
         phone:         row.phone||'—',
         zip:           row.zip_code||'',
-        area:          row.zone_id||'',
+        area:          zoneName,
         vehicle:       row.vehicle_type||'—',
         visitType:     row.visit_preference==='both'?'BOTH':row.visit_preference==='bin_out'?'BIN_OUT':'BIN_IN',
         visitPref:     row.visit_preference||'both',
@@ -7054,10 +7070,11 @@ async function loadRunnersFromSupabase(){
       }
     }
 
-    rnData.forEach((row,i)  => RUNNERS.push(toRunner(row, i, false)))
-    appData.filter(row => !rnEmails.has(row.email)).forEach((row,i) => RUNNERS.push(toRunner(row, rnData.length+i, true)))
-
-    console.log('[BinDash] Runners loaded:', RUNNERS.length, '(', rnData.length, 'from runners +', appData.filter(r=>!rnEmails.has(r.email)).length, 'from applications)')
+    rnData.forEach((row,i) => RUNNERS.push(toRunner(row, i, false)))
+    if(useAppFallback){
+      appData.forEach((row,i) => RUNNERS.push(toRunner(row, i, true)))
+    }
+    console.log('[BinDash] Runners loaded:', RUNNERS.length, '— source:', useAppFallback ? 'applications fallback' : 'runners table')
     updateOverviewCounts()
     renderRunnerList()
   } catch(e){ console.warn('[BinDash] loadRunners exception:', String(e?.message||e)) }
