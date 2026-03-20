@@ -273,7 +273,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--cyan));display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#07090f;flex-shrink:0}
 .u-name{font-size:12px;font-weight:600}.u-role{font-size:10px;color:var(--muted)}
 .main{flex:1;overflow-y:auto;background:var(--bg)}
-.topbar{padding:13px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg);position:sticky;top:0;z-index:10}
+.topbar{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg);position:sticky;top:0;z-index:20}
 .pg-title{font-family:'Syne',sans-serif;font-size:19px;font-weight:800}
 .body{padding:22px}.pg{display:none}.pg.on{display:block;animation:fadeUp .3s ease}
 
@@ -339,6 +339,195 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .vs-time{font-size:13px;font-weight:600;margin-top:2px}
 .vs-pay{font-size:20px;font-weight:800;font-family:'Syne',sans-serif}
 .vs-sub{font-size:11px;color:var(--sub);line-height:1.5}
+
+/* ═══════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE — works down to 360px
+   Mobile-first: sidebar becomes bottom nav on small screens
+═══════════════════════════════════════════════════════════ */
+
+/* ── Sidebar: hidden on mobile, shown on desktop ── */
+@media (max-width: 700px) {
+
+  /* Admin/HW/Runner dash layout */
+  .dash-wrap {
+    flex-direction: column !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  /* Sidebar becomes bottom tab bar on mobile */
+  .sidebar {
+    width: 100% !important;
+    height: auto !important;
+    flex-direction: row !important;
+    border-right: none !important;
+    border-top: 1px solid var(--border) !important;
+    order: 2 !important;
+    padding: 0 !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    flex-shrink: 0 !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  /* Hide sidebar elements that don't work as bottom nav */
+  .s-logo, .s-sect, .s-bot { display: none !important; }
+
+  /* Nav items become horizontal tabs */
+  .nav-i {
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 3px !important;
+    padding: 8px 10px !important;
+    font-size: 9px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    min-width: 60px !important;
+    border-radius: 0 !important;
+    border-left: none !important;
+    border-bottom: 2px solid transparent !important;
+  }
+  .nav-i.on {
+    border-bottom: 2px solid var(--cyan) !important;
+    border-left: none !important;
+    background: rgba(6,214,160,.06) !important;
+  }
+  .nav-i .ic {
+    font-size: 18px !important;
+    margin: 0 !important;
+  }
+  /* Hide long badge text in nav, keep badge dot */
+  .nav-i span[style*="background:var(--amber)"] {
+    font-size: 8px !important;
+    padding: 1px 4px !important;
+  }
+
+  /* Main content area scrolls */
+  .main {
+    flex: 1 !important;
+    overflow-y: auto !important;
+    order: 1 !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  /* Topbar */
+  .topbar {
+    padding: 10px 14px !important;
+    font-size: 13px !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 10 !important;
+  }
+  .pg-title { font-size: 16px !important; }
+
+  /* Page content padding */
+  .pg { padding: 12px 14px 80px 14px !important; }
+
+  /* Grid columns collapse to single column */
+  .g2, .g3 { grid-template-columns: 1fr !important; gap: 8px !important; }
+
+  /* Cards full width */
+  .card { padding: 14px !important; border-radius: 10px !important; }
+
+  /* Pending cards */
+  .pc { padding: 12px 14px !important; border-radius: 10px !important; margin-bottom: 10px !important; }
+
+  /* Modal full screen on mobile */
+  .modal-bg { padding: 0 !important; align-items: flex-end !important; }
+  .modal {
+    max-width: 100% !important;
+    width: 100% !important;
+    border-radius: 18px 18px 0 0 !important;
+    max-height: 92dvh !important;
+  }
+  .mb { padding: 14px 16px !important; }
+  .mh { padding: 14px 16px !important; }
+  .mf { padding: 12px 16px !important; flex-wrap: wrap !important; gap: 8px !important; }
+  .mf .btn { flex: 1 !important; min-width: 100px !important; }
+
+  /* Fields and forms */
+  .field { margin-bottom: 12px !important; }
+  .field input, .field select, .field textarea {
+    font-size: 16px !important; /* prevents iOS zoom */
+  }
+
+  /* Radio/option rows wrap */
+  .radio-row, .r-opt { flex-wrap: wrap !important; }
+
+  /* Steps bar */
+  .steps-bar { gap: 0 !important; margin-bottom: 20px !important; }
+  .sc { width: 28px !important; height: 28px !important; font-size: 11px !important; }
+
+  /* Buttons */
+  .btn-lg { padding: 13px 20px !important; font-size: 15px !important; }
+  .btn-full { width: 100% !important; }
+
+  /* Tables/lists that overflow */
+  table { display: block !important; overflow-x: auto !important; }
+
+  /* Dispatch pipeline cards */
+  .dispatch-card { flex-direction: column !important; }
+
+  /* Zone/runner cards action buttons stack */
+  [style*="flex-direction:column;gap:5px;align-items:flex-end"] {
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    justify-content: flex-start !important;
+    margin-top: 8px !important;
+  }
+
+  /* Fire SOS button — always visible */
+  [style*="Fire SOS"] { 
+    font-size: 11px !important;
+    padding: 6px 10px !important;
+  }
+
+  /* Page header row */
+  [style*="display:flex;align-items:center;justify-content:space-between;margin-bottom"] {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  /* Homeowner/runner cards horizontal layout becomes vertical */
+  .hw-card-inner, .rn-card-inner {
+    flex-direction: column !important;
+  }
+
+  /* Stats rows wrap */
+  [style*="display:flex;gap:16px;font-size:12px"] {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  /* Hide non-essential columns in tight layouts */
+  .hide-mobile { display: none !important; }
+}
+
+/* Tablet: sidebar narrows but stays */
+@media (min-width: 701px) and (max-width: 1024px) {
+  .sidebar { width: 180px !important; }
+  .nav-i { font-size: 12px !important; padding: 8px 10px !important; }
+  .g3 { grid-template-columns: 1fr 1fr !important; }
+  .pg { padding: 16px !important; }
+}
+
+/* Desktop: full layout */
+@media (min-width: 1025px) {
+  .sidebar { width: 220px; }
+}
+
+/* Touch targets — minimum 44px for all clickable items */
+@media (max-width: 700px) {
+  button, .btn, .nav-i, .r-opt, input[type="checkbox"], input[type="radio"] {
+    min-height: 36px !important;
+  }
+  /* Prevent text select on tap */
+  .nav-i, .btn, .r-opt {
+    -webkit-tap-highlight-color: transparent !important;
+    user-select: none !important;
+  }
+}
 </style>
 </head>
 <body onload="initApp()">
@@ -4889,7 +5078,7 @@ function showReassignRunner(hwId){
             <span style="color:var(--muted);font-size:11px"> · ${r.visitType} · ${r.area} · ${r.rating}★</span>
             <span class="badge" style="background:${r.status==='AVAILABLE'?'#22c55e22':'rgba(59,130,246,.15)'};color:${r.status==='AVAILABLE'?'#22c55e':'#3b82f6'};font-size:9px;margin-left:4px">${r.status}</span>
           </div>
-          ${hw.assignedRunner===r.id ? '<span style="color:var(--cyan);font-size:11px">Current</span>' : `<button class="btn btn-outline btn-sm" style="font-size:10px" onclick="assignHWRunner('${hwId}','${r.id}');closeM()">Assign</button>`}
+          ${hw.assignedRunner===r.id ? '<span style="color:var(--cyan);font-size:11px">Current</span>' : `<button class="btn btn-cyan btn-sm" style="font-size:11px;padding:5px 14px" onclick="assignHWRunner('${hwId}','${r.id}').then(()=>closeM())">Assign</button>`}
         </div>`).join('')}
     </div>
   </div>
@@ -4897,11 +5086,20 @@ function showReassignRunner(hwId){
   openM()
 }
 
-function assignHWRunner(hwId, runnerId){
+async function assignHWRunner(hwId, runnerId){
   const hw=HOMEOWNERS.find(x=>x.id===hwId); if(!hw) return
-  hw.assignedRunner=runnerId; renderHomeownerList()
+  hw.assignedRunner=runnerId
+  renderHomeownerList()
   const rn=RUNNERS.find(r=>r.id===runnerId)
-  showToast(hw.name+' reassigned to '+(rn?.name||runnerId)+' ✅','ok')
+  showToast(hw.name+' assigned to '+(rn?.name||runnerId)+' ✅','ok')
+  // Persist to Supabase — try homeowners table first, then homeowner_signups
+  try {
+    const r1 = await _supa.from('homeowners').update({assigned_runner:runnerId,updated_at:new Date().toISOString()}).eq('id',hwId)
+    if(r1?.error){
+      // fallback: might be signup id
+      await _supa.from('homeowner_signups').update({assigned_runner:runnerId,updated_at:new Date().toISOString()}).eq('id',hwId)
+    }
+  } catch(e){ console.warn('[BinDash] assignHWRunner save:', String(e?.message||e)) }
 }
 
 function confirmRemoveHW(hwId, name){
