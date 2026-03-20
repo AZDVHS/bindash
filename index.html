@@ -5654,8 +5654,16 @@ function renderPendingRunnerList(){
 
 async function approveRunner(appId){
   const app = PENDING_RUNNERS.find(x=>x.id===appId); if(!app) return
-  const zoneId = document.getElementById('rnpc-zone-'+appId)?.value || ''
-  if(!zoneId){ showToast('Select a zone first — if none appear, create one in Zones','err'); return }
+  let zoneId = document.getElementById('rnpc-zone-'+appId)?.value || ''
+  // If no zone selected, try to auto-match from runner's ZIP
+  if(!zoneId && app.zip){
+    const autoZone = findZoneForZip(app.zip) || ADMIN_ZONES.find(z=>z.status!=='inactive')
+    if(autoZone) zoneId = autoZone.id
+  }
+  if(!zoneId){
+    showToast('Please select a zone — go to Zones and create one for ZIP '+app.zip+' first','err')
+    return
+  }
   const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
 
   const btn = document.querySelector('#rnpc-'+appId+' .btn-green')
@@ -7177,8 +7185,15 @@ async function loadRunnerApplicationsFromSupabase(){
     } catch(fetchErr){ loadErr = String(fetchErr?.message || fetchErr) }
     if(loadErr){ console.warn('[BinDash] Could not load runner apps:', loadErr); return }
 
+    // Get emails of already-approved runners to exclude duplicates
+    let approvedEmails = new Set()
+    try {
+      const rRes = await _supa.from('runners').select('email')
+      approvedEmails = new Set((rRes?.data||[]).map(r=>r.email))
+    } catch(e){}
+
     PENDING_RUNNERS.length = 0
-    data.forEach(row => {
+    data.filter(row => !approvedEmails.has(row.email)).forEach(row => {
       PENDING_RUNNERS.push({
         id:          row.id,
         name:        (row.first_name + ' ' + row.last_name).trim(),
@@ -7300,7 +7315,6 @@ async function loadRunnersFromSupabase(){
       const fn = row.first_name || ''
       const ln = row.last_name  || ''
       const initials = ((fn[0]||'')+(ln[0]||'')).toUpperCase()||'?'
-      const zoneName = ADMIN_ZONES.find(z=>z.id===row.zone_id)?.name || row.zone_id || '—'
       return {
         id:            row.id,
         name:          (fn+' '+ln).trim()||row.email,
@@ -7308,7 +7322,8 @@ async function loadRunnersFromSupabase(){
         email:         row.email,
         phone:         row.phone||'—',
         zip:           row.zip_code||'',
-        area:          zoneName,
+        zoneId:        row.zone_id||null,
+        get area(){ return ADMIN_ZONES.find(z=>z.id===this.zoneId)?.name || this.zip || '—' },
         vehicle:       row.vehicle_type||'—',
         visitType:     row.visit_preference==='both'?'BOTH':row.visit_preference==='bin_out'?'BIN_OUT':'BIN_IN',
         visitPref:     row.visit_preference||'both',
@@ -7989,13 +8004,22 @@ async function renderZoneWaitlist(){
             const contact = row.is_lead
               ? (row.phone||row.email||'contact unknown')
               : row.email
-            const tag = row.is_lead
-              ? '<span style="background:rgba(245,158,11,.1);color:#f59e0b;border-radius:4px;padding:1px 5px;font-size:9px;margin-left:4px">lead</span>'
-              : ''
-            return `<div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:12px">
-              <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
-              <div style="flex:1"><strong>${row.first_name} ${row.last_name||''}</strong>${tag} · ${contact}</div>
-              <span style="color:var(--muted);font-size:10px">${new Date(row.created_at).toLocaleDateString()}</span>
+            const tag = row.is_lead ? '<span style="background:rgba(245,158,11,.1);color:#f59e0b;border-radius:4px;padding:1px 5px;font-size:9px;margin-left:4px">lead</span>' : ''
+            const isNotified = row.status === 'zone_assigned'
+            const notifiedTag = isNotified ? '<span style="background:rgba(6,214,160,.1);color:var(--cyan);border-radius:4px;padding:1px 5px;font-size:9px;margin-left:4px">notified</span>' : ''
+            const daysSince = Math.floor((Date.now() - new Date(row.updated_at||row.created_at).getTime()) / 86400000)
+            const sinceLabel = isNotified
+              ? `<span style="color:var(--muted);font-size:10px">notified ${daysSince}d ago</span>`
+              : `<span style="color:var(--muted);font-size:10px">${new Date(row.created_at).toLocaleDateString()}</span>`
+            const rowContact = row.phone || row.email || '—'
+            return `<div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:12px">
+              <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${ini}</div>
+              <div style="flex:1"><strong>${row.first_name||''} ${row.last_name||''}</strong>${tag}${notifiedTag} · ${rowContact}</div>
+              ${sinceLabel}
+              <div style="display:flex;gap:4px;margin-left:6px">
+                ${isNotified ? `<button onclick="sendWaitlistReminder('${row.id}','${rowContact}')" style="background:none;border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer">📧 Remind</button>` : ''}
+                <button onclick="deleteWaitlistEntry('${row.id}')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer">✕</button>
+              </div>
             </div>`
           }).join('')}
           ${group.length>5?`<div style="font-size:11px;color:var(--muted);text-align:center;padding:4px">+${group.length-5} more</div>`:''}
@@ -8100,6 +8124,27 @@ async function loadRunnerZoneRequestsBadge(){
     const badge = document.getElementById('rzr-badge')
     if(badge){ badge.textContent=count; badge.style.display=count?'inline':'none' }
   } catch(e){}
+}
+
+
+async function deleteWaitlistEntry(id){
+  if(!confirm('Remove this lead from the waitlist?')) return
+  try {
+    await _supa.from('homeowner_signups').delete().eq('id', id)
+    renderZoneWaitlist()
+    loadZoneWaitlistBadge()
+    showToast('Entry removed','info')
+  } catch(e){ showToast('Could not remove entry','err') }
+}
+
+async function sendWaitlistReminder(id, contact){
+  try {
+    await _supa.from('homeowner_signups').update({
+      updated_at: new Date().toISOString()
+    }).eq('id', id)
+    showToast('Reminder logged for '+contact+' ✅ (connect email service to send automatically)','ok')
+    renderZoneWaitlist()
+  } catch(e){ showToast('Could not log reminder','err') }
 }
 
 // Just updates the badge count — full load happens when page is visited
