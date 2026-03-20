@@ -20,16 +20,20 @@ const _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 // EMAIL SERVICE — calls Supabase Edge Function → Resend API
 // ─────────────────────────────────────────────────────────────
 async function sendEmail(to, subject, html, type){
-  if(!to || to.includes('@lead.bindash')) return
-  // Use the actual Supabase project URL — works even if SUPABASE_URL placeholder not replaced
+  if(!to || to.includes('@lead.bindash')){
+    console.log('[BinDash] sendEmail SKIPPED — bad address:', to)
+    return
+  }
   const _supaUrl = (SUPABASE_URL && !SUPABASE_URL.includes('your-project'))
     ? SUPABASE_URL
     : 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
   const _supaKey = (SUPABASE_ANON_KEY && !SUPABASE_ANON_KEY.includes('your-anon'))
     ? SUPABASE_ANON_KEY
     : ''
+  const _url = _supaUrl+'/functions/v1/send-email'
+  console.log('[BinDash] sendEmail CALLING:', _url, 'type:', type, 'to:', to)
   try {
-    const res = await fetch(_supaUrl+'/functions/v1/send-email', {
+    const res = await fetch(_url, {
       method:'POST',
       headers:{
         'Content-Type':'application/json',
@@ -38,9 +42,12 @@ async function sendEmail(to, subject, html, type){
       body: JSON.stringify({to, subject, html, type:type||'general'}),
     })
     const d = await res.json()
+    console.log('[BinDash] sendEmail RESPONSE:', res.status, JSON.stringify(d))
     if(d.error) console.warn('[BinDash] Email error:', d.error)
-    else console.log('[BinDash] Email sent:', type, to)
-  } catch(e){ console.warn('[BinDash] Email failed:', String(e?.message||e)) }
+    else console.log('[BinDash] Email sent OK:', type, to)
+  } catch(e){
+    console.warn('[BinDash] sendEmail EXCEPTION:', String(e?.message||e))
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
