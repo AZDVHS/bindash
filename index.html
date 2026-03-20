@@ -835,6 +835,18 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <div class="field"><label>Home Address</label><input id="r-addr" placeholder="123 Main Street"></div>
         <div class="g3"><div class="field"><label>City</label><input id="r-city" placeholder="Glendale"></div><div class="field"><label>State</label><input id="r-state" placeholder="AZ"></div><div class="field"><label>ZIP / Postcode</label><input id="r-zip" placeholder="85374" oninput="lookupRunnerZones(this.value)"></div></div>
 
+        <!-- Zone request for unavailable ZIPs -->
+        <div id="r-zip-request" style="display:none;margin-bottom:12px">
+          <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 13px;font-size:12px">
+            <div style="font-weight:700;color:#fbbf24;margin-bottom:4px">📍 No active zone for this ZIP yet</div>
+            <div style="color:var(--sub);margin-bottom:8px">You can still enroll — check below to request we open this area.</div>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="r-zip-request-check" style="width:auto">
+              <span>Request BinDash launches service in my ZIP — I want to be a runner here</span>
+            </label>
+          </div>
+        </div>
+
         <!-- ZONE PICKER — shown after ZIP entered -->
         <div id="r-zone-picker" style="display:none;margin-bottom:18px">
           <div class="sec-h">Available zones near you</div>
@@ -1834,6 +1846,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div class="nav-i" onclick="adNav(this,'ad-pending-hw')"><span class="ic">🏠</span> Pending Homeowners <span id="hw-pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
       <div class="nav-i" onclick="adNav(this,'ad-pending')"><span class="ic">🚐</span> Pending Runners <span id="pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
       <div class="nav-i" onclick="adNav(this,'ad-runner-requests')"><span class="ic">🎟️</span> Runner Requests <span id="rr-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
+      <div class="nav-i" onclick="adNav(this,'ad-zone-waitlist')"><span class="ic">🗺️</span> Zone Waitlist <span id="zone-wl-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;display:none">0</span></div>
+      <div class="nav-i" onclick="adNav(this,'ad-runner-zone-requests')"><span class="ic">📍</span> Runner Zone Requests <span id="rzr-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;display:none">0</span></div>
       <div class="nav-i" onclick="adNav(this,'ad-waitlist')"><span class="ic">📋</span> Interest List <span id="waitlist-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
       <div class="s-sect">Management</div>
       <div class="nav-i" onclick="adNav(this,'ad-homeowners')"><span class="ic">🏠</span> Homeowners</div>
@@ -1904,6 +1918,26 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         </div>
 
         <!-- AD PENDING -->
+        <!-- AD ZONE WAITLIST -->
+        <div class="pg" id="ad-zone-waitlist">
+          <div style="color:var(--sub);font-size:13px;margin-bottom:16px">
+            ZIP codes where homeowners signed up but no zone exists yet. Review demand and decide whether to open a zone.
+          </div>
+          <div id="zone-wl-list" style="display:flex;flex-direction:column;gap:10px">
+            <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No waitlisted zones yet.</div>
+          </div>
+        </div>
+
+        <!-- AD RUNNER ZONE REQUESTS -->
+        <div class="pg" id="ad-runner-zone-requests">
+          <div style="color:var(--sub);font-size:13px;margin-bottom:16px">
+            Runners who want to service a ZIP code that doesn't have a zone yet. Use this to gauge runner supply before opening new zones.
+          </div>
+          <div id="rzr-list" style="display:flex;flex-direction:column;gap:10px">
+            <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No runner zone requests yet.</div>
+          </div>
+        </div>
+
         <!-- AD INTEREST LIST -->
         <div class="pg" id="ad-waitlist">
           <div style="color:var(--sub);font-size:13px;margin-bottom:14px">Homeowners who signed up in areas BinDash doesn't yet service. When a runner activates in their ZIP, notify them to complete enrollment.</div>
@@ -2506,6 +2540,8 @@ async function initApp(){
       loadSignupsFromSupabase()
       loadRunnerApplicationsFromSupabase()
       loadRunnerRequestsBadge()
+      loadZoneWaitlistBadge()
+      loadRunnerZoneRequestsBadge()
       loadHomeownersFromSupabase()
       loadRunnersFromSupabase()
     } else if(role === 'rn'){
@@ -2951,8 +2987,21 @@ async function rSubmit(){
 
   if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Submit Application' }
 
-  // Show confirmation screen regardless of DB result
-  // (DB errors are logged but don't block the UX)
+  // If runner requested a new zone for their ZIP, save it
+  const zipRequestCheck = document.getElementById('r-zip-request-check')
+  if(zipRequestCheck?.checked && zip){
+    try {
+      await _supa.from('runner_zone_requests').insert({
+        runner_name: fn + ' ' + ln,
+        runner_email: em,
+        zip_code: zip,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      })
+      console.log('[BinDash] Runner zone request saved for ZIP', zip)
+    } catch(e){ console.warn('[BinDash] Zone request save:', String(e?.message||e)) }
+  }
+
   go('S-rn-submitted')
 }
 
@@ -2974,7 +3023,9 @@ function adNav(el, pg){
     'ad-overview':   'Overview',
     'ad-pending-hw': 'Pending Homeowners',
     'ad-pending':    'Pending Runners',
-    'ad-waitlist':   'Interest List',
+    'ad-waitlist':            'Interest List',
+    'ad-zone-waitlist':        'Zone Waitlist',
+    'ad-runner-zone-requests':  'Runner Zone Requests',
     'ad-runner-requests': 'Runner Requests',
     'ad-homeowners': 'Homeowner Management',
     'ad-runners':    'Runner Management',
@@ -2991,7 +3042,9 @@ function adNav(el, pg){
   if(pg === 'ad-homeowners') setTimeout(renderHomeownerList, 50)
   if(pg === 'ad-pending-hw') setTimeout(renderPendingHWList, 50)
   if(pg === 'ad-pending')    setTimeout(renderPendingRunnerList, 50)
-  if(pg === 'ad-waitlist')   setTimeout(renderWaitlistPage, 50)
+  if(pg === 'ad-waitlist')         setTimeout(renderWaitlistPage, 50)
+  if(pg === 'ad-zone-waitlist')       setTimeout(renderZoneWaitlist, 50)
+  if(pg === 'ad-runner-zone-requests') setTimeout(renderRunnerZoneRequests, 50)
   if(pg === 'ad-runner-requests') setTimeout(loadRunnerRequests, 50)
 }
 
@@ -6986,17 +7039,19 @@ async function confirmSplitZone(zId){
 }
 
 function zoneToRow(z){
+  // Only include columns that exist in the zones table
+  // NO 'city' column - it doesn't exist in Supabase zones table
   return {
     id:              z.id,
     name:            z.name,
-    city:            z.city,
-    zip_prefix:      z.zip,
-    zip_codes:       z.zips || [z.zip],
-    status:          z.status,
+    label:           zoneLabel(z),          // GLD-85301 style abbreviation
+    zip_prefix:      (z.zip||'').slice(0,3),
+    zip_codes:       z.zips?.length ? z.zips : (z.zip ? [z.zip] : []),
+    status:          z.status || 'waitlist',
     pilot:           z.pilot || false,
     overridden:      z.overridden || false,
-    capacity:        z.capacity || 0,
-    threshold:       z.threshold || 15,
+    capacity:        z.capacity || 20,
+    threshold:       z.threshold || 10,
     collection_days: z.collection || [],
     assigned_runner: z.assignedRunner || null,
     homeowners:      z.homeowners || 0,
@@ -7031,7 +7086,8 @@ async function loadZonesFromSupabase(){
       ADMIN_ZONES.push({
         id:              row.id,
         name:            row.name,
-        city:            row.city || '',
+        label:           row.label || '',
+        city:            row.label || '',   // use label as city fallback for display
         zip:             row.zip_prefix || '',
         zips:            row.zip_codes || (row.zip_prefix ? [row.zip_prefix] : []),
         status:          row.status || 'waitlist',
@@ -7283,9 +7339,16 @@ async function loadRunnersFromSupabase(){
 // Persist a single zone to Supabase (upsert by id)
 async function dbSaveZone(z){
   try {
-    const { error } = await _supa.from('zones').upsert([zoneToRow(z)], { onConflict: 'id' })
-    if(error) console.warn('[BinDash] Zone save failed:', error.message)
-  } catch(err){ console.warn('[BinDash] Zone save error:', err) }
+    const row = zoneToRow(z)
+    const res = await _supa.from('zones').upsert([row], { onConflict: 'id' })
+    const err = res?.error?.message || null
+    if(err){
+      console.warn('[BinDash] Zone save failed:', err)
+      console.warn('[BinDash] Row attempted:', JSON.stringify(row))
+    } else {
+      console.log('[BinDash] Zone saved ✅', z.name, zoneLabel(z))
+    }
+  } catch(err){ console.warn('[BinDash] Zone save exception:', String(err?.message||err)) }
 }
 
 // Delete a zone from Supabase
@@ -7312,16 +7375,29 @@ function syncZoneData(){
 let ZONE_DATA = {}
 
 function checkRunnerZipCoverage(zip){
-  if(zip.length < 5) return
-  const zone = findZoneForZip(zip)
-  const el = document.getElementById('r-zip-coverage')
+  const el  = document.getElementById('r-zip-coverage')
+  const reqEl = document.getElementById('r-zip-request')
   if(!el) return
+  if(zip.length < 5){
+    el.style.display='none'
+    if(reqEl) reqEl.style.display='none'
+    return
+  }
+  // Use raw zone lookup without runner check (runner is enrolling)
+  const prefix = zip.slice(0,3)
+  const zone = ADMIN_ZONES.find(z=>
+    z.status!=='inactive' &&
+    (z.zips?.includes(zip) || z.zip===zip || z.zip===prefix ||
+     z.zips?.some(zz=>zz.slice(0,3)===prefix))
+  )
   if(zone){
-    el.style.cssText = 'display:block;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:8px;padding:8px 12px;font-size:12px;margin-top:6px'
-    el.innerHTML = `<span style="color:#22c55e;font-weight:700">✅ Zone available: ${zone.name}</span><br><span style="color:var(--sub)">Your route will be built in this area</span>`
+    el.style.cssText='display:block;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:8px;padding:8px 12px;font-size:12px;margin-top:6px'
+    el.innerHTML=`<span style="color:#22c55e;font-weight:700">✅ Zone available: ${zone.name} (${zoneLabel(zone)})</span><br><span style="color:var(--sub)">Enroll and you'll be matched to homeowners in this zone</span>`
+    if(reqEl) reqEl.style.display='none'
   } else {
-    el.style.cssText = 'display:block;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:8px 12px;font-size:12px;margin-top:6px'
-    el.innerHTML = `<span style="color:#a5b4fc;font-weight:700">📍 No zone yet for ZIP ${zip}</span><br><span style="color:var(--sub)">We'll add you to the interest list — you'll be first contacted when we launch here</span>`
+    el.style.cssText='display:block;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:8px 12px;font-size:12px;margin-top:6px'
+    el.innerHTML=`<span style="color:#a5b4fc;font-weight:700">📍 No active zone for ZIP ${zip}</span><br><span style="color:var(--sub)">Complete enrollment and request this area below</span>`
+    if(reqEl) reqEl.style.display='block'
   }
 }
 
@@ -7342,13 +7418,17 @@ function lookupRunnerZones(zip){
   if(!picker || !list) return
 
   if(!zones){
-    picker.style.display = 'block'
-    list.innerHTML = `<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:12px 14px;font-size:13px;color:var(--sub)">
-      No zones found near <strong style="color:var(--text)">${zip}</strong> yet. Your application will register interest for this area — we'll contact you when BinDash expands there.
-    </div>`
+    picker.style.display = 'none'
+    list.innerHTML = ''
     selectedZoneId = null
+    // Show the zone request option
+    const reqDiv = document.getElementById('r-zip-request')
+    if(reqDiv) reqDiv.style.display = 'block'
     return
   }
+  // Zone found - hide request div
+  const reqDiv2 = document.getElementById('r-zip-request')
+  if(reqDiv2) reqDiv2.style.display = 'none'
 
   picker.style.display = 'block'
   list.innerHTML = zones.map(z => {
@@ -7483,6 +7563,8 @@ async function doAdminLogin(){
     loadSignupsFromSupabase()
     loadRunnerApplicationsFromSupabase()
     loadRunnerRequestsBadge()
+    loadZoneWaitlistBadge()
+    loadRunnerZoneRequestsBadge()
     loadHomeownersFromSupabase()
     loadRunnersFromSupabase()
     showToast('Welcome back, Admin ✅', 'ok')
@@ -7854,6 +7936,164 @@ function adManualAssign(batchId){
 }
 
 
+
+
+// ── ZONE WAITLIST (homeowners waiting for a zone) ─────────────
+async function renderZoneWaitlist(){
+  const el = document.getElementById('zone-wl-list')
+  if(!el) return
+  el.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px">Loading...</div>'
+
+  try {
+    let data = [], err = null
+    try {
+      const res = await _supa.from('homeowner_signups').select('*').eq('status','waitlisted').order('created_at',{ascending:false})
+      data = res?.data || []
+      err  = res?.error?.message || null
+    } catch(e){ err = String(e?.message||e) }
+
+    // Update badge
+    const badge = document.getElementById('zone-wl-badge')
+    if(badge){ badge.textContent=data.length; badge.style.display=data.length?'inline':'none' }
+
+    if(!data.length){
+      el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No waitlisted homeowners — all signups have active zones.</div>'
+      return
+    }
+
+    // Group by ZIP
+    const byZip = {}
+    data.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
+
+    el.innerHTML = Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
+      const existingZone = ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip.slice(0,3))
+      const runnerInterest = RUNNERS.filter(r=>r.zip===zip||r.zip?.slice(0,3)===zip.slice(0,3)).length
+      return `<div class="card" style="margin-bottom:0">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:15px;font-weight:700">ZIP ${zip}
+              <span style="font-size:12px;color:var(--muted);font-weight:400;margin-left:8px">${group.length} homeowner${group.length!==1?'s':''} waiting</span>
+            </div>
+            <div style="font-size:12px;color:var(--sub);margin-top:3px">
+              ${existingZone ? `<span style="color:#f59e0b">Zone exists: ${existingZone.name} (${existingZone.status})</span>` : '<span style="color:var(--muted)">No zone yet</span>'}
+              ${runnerInterest ? ` · <span style="color:#a5b4fc">${runnerInterest} runner${runnerInterest>1?'s':''} nearby</span>` : ''}
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${existingZone ? `<button class="btn btn-outline btn-sm" style="font-size:11px" onclick="activateZone('${existingZone.id}')">⚡ Activate Zone</button>` :
+              `<button class="btn btn-cyan btn-sm" style="font-size:11px" onclick="createZoneFromWaitlist('${zip}')">+ Create Zone</button>`}
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          ${group.slice(0,5).map(row=>`
+            <div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:12px">
+              <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${((row.first_name?.[0]||'')+(row.last_name?.[0]||'')).toUpperCase()||'?'}</div>
+              <div style="flex:1"><strong>${row.first_name} ${row.last_name}</strong> · ${row.email}</div>
+              <span style="color:var(--muted);font-size:10px">${new Date(row.created_at).toLocaleDateString()}</span>
+            </div>`).join('')}
+          ${group.length>5?`<div style="font-size:11px;color:var(--muted);text-align:center;padding:4px">+${group.length-5} more</div>`:''}
+        </div>
+      </div>`
+    }).join('')
+  } catch(e){ el.innerHTML='<div style="padding:20px;color:#ef4444">Error loading: '+String(e?.message||e)+'</div>' }
+}
+
+// ── RUNNER ZONE REQUESTS ──────────────────────────────────────
+async function renderRunnerZoneRequests(){
+  const el = document.getElementById('rzr-list')
+  if(!el) return
+  el.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px">Loading...</div>'
+
+  try {
+    let data = [], err = null
+    try {
+      const res = await _supa.from('runner_zone_requests').select('*').eq('status','pending').order('created_at',{ascending:false})
+      data = res?.data || []
+      err  = res?.error?.message || null
+    } catch(e){ err = String(e?.message||e) }
+
+    // Update badge
+    const badge = document.getElementById('rzr-badge')
+    if(badge){ badge.textContent=data.length; badge.style.display=data.length?'inline':'none' }
+
+    if(!data.length){
+      el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No runner zone requests yet.</div>'
+      return
+    }
+
+    // Group by ZIP
+    const byZip = {}
+    data.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
+
+    el.innerHTML = Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
+      const existingZone = ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip.slice(0,3))
+      const hwInterest = WAITLIST_SIGNUPS.filter(s=>s.zip===zip||s.zip?.slice(0,3)===zip.slice(0,3)).length
+      return `<div class="card" style="margin-bottom:0">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:15px;font-weight:700">ZIP ${zip}
+              <span style="font-size:12px;color:var(--muted);font-weight:400;margin-left:8px">${group.length} runner${group.length!==1?'s':''} want to service this area</span>
+            </div>
+            <div style="font-size:12px;color:var(--sub);margin-top:3px">
+              ${existingZone ? `<span style="color:#f59e0b">Zone exists: ${existingZone.name} (${existingZone.status})</span>` : '<span style="color:var(--muted)">No zone yet</span>'}
+              ${hwInterest ? ` · <span style="color:#22c55e">${hwInterest} homeowner${hwInterest>1?'s':''} also waiting</span>` : ''}
+            </div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-cyan btn-sm" style="font-size:11px" onclick="createZoneFromRunnerRequest('${zip}')">+ Create Zone</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--muted)" onclick="dismissRunnerZoneRequests('${zip}')">Dismiss</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          ${group.map(row=>`
+            <div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:12px">
+              <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#8b5cf6,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">🚐</div>
+              <div style="flex:1"><strong>${row.runner_name}</strong> · ${row.runner_email}</div>
+              <span style="color:var(--muted);font-size:10px">${new Date(row.created_at).toLocaleDateString()}</span>
+            </div>`).join('')}
+        </div>
+      </div>`
+    }).join('')
+  } catch(e){ el.innerHTML='<div style="padding:20px;color:#ef4444">Error: '+String(e?.message||e)+'</div>' }
+}
+
+async function createZoneFromRunnerRequest(zip){
+  // Pre-fill the create zone modal with this ZIP
+  showCreateZone()
+  setTimeout(()=>{
+    const zipEl = document.getElementById('cz-zip')
+    if(zipEl) zipEl.value = zip
+    const nameEl = document.getElementById('cz-name')
+    if(nameEl) nameEl.value = suggestZoneName(zip)
+  }, 100)
+}
+
+async function dismissRunnerZoneRequests(zip){
+  try {
+    await _supa.from('runner_zone_requests').update({status:'dismissed',updated_at:new Date().toISOString()}).eq('zip_code',zip)
+    renderRunnerZoneRequests()
+    showToast('Requests for ZIP '+zip+' dismissed','info')
+  } catch(e){ showToast('Could not dismiss','err') }
+}
+
+// Load zone waitlist badge on admin login
+async function loadZoneWaitlistBadge(){
+  try {
+    const res = await _supa.from('homeowner_signups').select('id',{count:'exact'}).eq('status','waitlisted')
+    const count = res?.count || res?.data?.length || 0
+    const badge = document.getElementById('zone-wl-badge')
+    if(badge){ badge.textContent=count; badge.style.display=count?'inline':'none' }
+  } catch(e){}
+}
+
+async function loadRunnerZoneRequestsBadge(){
+  try {
+    const res = await _supa.from('runner_zone_requests').select('id',{count:'exact'}).eq('status','pending')
+    const count = res?.count || res?.data?.length || 0
+    const badge = document.getElementById('rzr-badge')
+    if(badge){ badge.textContent=count; badge.style.display=count?'inline':'none' }
+  } catch(e){}
+}
 
 // Just updates the badge count — full load happens when page is visited
 async function loadRunnerRequestsBadge(){
