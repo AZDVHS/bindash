@@ -340,6 +340,66 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .vs-pay{font-size:20px;font-weight:800;font-family:'Syne',sans-serif}
 .vs-sub{font-size:11px;color:var(--sub);line-height:1.5}
 
+
+/* ── Landing page mobile ── */
+@media (max-width: 600px) {
+  .land-content { overflow-x: hidden !important; }
+  
+  /* Feature grid — single column */
+  .land-features-grid,
+  [style*="display:grid;grid-template-columns:repeat(3"] {
+    grid-template-columns: 1fr !important;
+  }
+  [style*="display:grid;grid-template-columns:repeat(2"] {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* Step cards */
+  [style*="display:flex;gap:16px;align-items:flex-start"] {
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  /* Hero subtext */
+  .a3 { font-size: 16px !important; }
+
+  /* CTA buttons stack */
+  .a4 { flex-direction: column !important; align-items: center !important; }
+  .a4 .btn { width: 100% !important; max-width: 320px !important; }
+
+  /* Stats row wraps */
+  [style*="display:flex;gap:48px"] { gap: 24px !important; flex-wrap: wrap !important; justify-content: center !important; }
+  [style*="display:flex;gap:40px"] { gap: 20px !important; flex-wrap: wrap !important; justify-content: center !important; }
+  [style*="display:flex;gap:32px"] { gap: 16px !important; flex-wrap: wrap !important; }
+
+  /* Footer */
+  [style*="display:flex;justify-content:space-between"] { 
+    flex-direction: column !important; 
+    gap: 12px !important;
+    align-items: flex-start !important;
+  }
+  
+  /* How it works section */
+  [style*="display:grid;grid-template-columns:1fr 1fr 1fr"] { 
+    grid-template-columns: 1fr !important; 
+  }
+  [style*="display:grid;grid-template-columns:repeat(3,1fr)"] { 
+    grid-template-columns: 1fr !important; 
+  }
+
+  /* Pricing cards */
+  [style*="display:grid;grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Section headings */
+  [style*="font-size:48px"] { font-size: clamp(26px, 7vw, 48px) !important; }
+  [style*="font-size:42px"] { font-size: clamp(24px, 6vw, 42px) !important; }
+  [style*="font-size:38px"] { font-size: clamp(22px, 6vw, 38px) !important; }
+  [style*="font-size:36px"] { font-size: clamp(22px, 5vw, 36px) !important; }
+  [style*="font-size:32px"] { font-size: clamp(20px, 5vw, 32px) !important; }
+}
+
 /* ═══════════════════════════════════════════════════════════
    MOBILE RESPONSIVE — works down to 360px
    Mobile-first: sidebar becomes bottom nav on small screens
@@ -536,17 +596,17 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 <div id="S-land" class="screen active">
   <div class="land-bg"></div>
   <div class="land-content">
-    <nav style="display:flex;align-items:center;justify-content:space-between;padding:18px 56px;border-bottom:1px solid rgba(30,40,64,.8)">
+    <nav style="display:flex;align-items:center;justify-content:space-between;padding:14px clamp(16px,4vw,56px);border-bottom:1px solid rgba(30,40,64,.8);flex-wrap:wrap;gap:8px">
       <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:853;letter-spacing:-.02em">🗑️ BIN<em style="color:var(--cyan);font-style:normal">DASH</em></div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button class="btn btn-ghost" onclick="openDemoModal()">View Demo</button>
-        <button class="btn btn-outline" onclick="go('S-login')">Log In</button>
-        <button class="btn btn-cyan" onclick="go('S-hw-ob')">Get Started Free →</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-ghost" onclick="openDemoModal()" style="display:none" id="nav-demo-btn">View Demo</button>
+        <button class="btn btn-outline" onclick="go('S-login')" style="font-size:13px;padding:7px 14px">Log In</button>
+        <button class="btn btn-cyan" onclick="go('S-hw-ob')" style="font-size:13px;padding:7px 14px">Get Started →</button>
       </div>
     </nav>
-    <div style="max-width:853px;margin:0 auto;padding:90px 56px 60px;text-align:center">
+    <div style="max-width:853px;margin:0 auto;padding:clamp(40px,8vw,90px) clamp(16px,5vw,56px) 60px;text-align:center">
       <div class="a1" style="display:inline-flex;align-items:center;gap:8px;font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--cyan);margin-bottom:18px"><span style="width:28px;height:1px;background:var(--cyan);display:block"></span>Smart Bin Collection Platform<span style="width:28px;height:1px;background:var(--cyan);display:block"></span></div>
-      <h1 class="a2" style="font-family:'Syne',sans-serif;font-size:64px;font-weight:853;line-height:1.0;letter-spacing:-.03em;margin-bottom:22px">Bin Collection<br><span style="color:var(--cyan)">Reinvented</span> &amp;<br><span style="color:var(--blue)">Optimised</span></h1>
+      <h1 class="a2" style="font-family:'Syne',sans-serif;font-size:clamp(32px,9vw,64px);font-weight:853;line-height:1.05;letter-spacing:-.03em;margin-bottom:22px">Bin Collection<br><span style="color:var(--cyan)">Reinvented</span> &amp;<br><span style="color:var(--blue)">Optimised</span></h1>
       <p class="a3" style="font-size:19px;color:var(--sub);font-weight:300;max-width:520px;margin:0 auto 38px;line-height:1.65">Connect homeowners with trusted local runners. Bins out the night before, back in the same day — handled.</p>
       <div class="a4" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:22px">
         <button class="btn btn-cyan btn-lg" onclick="go('S-hw-ob')">🚀 Get Started Free</button>
@@ -622,7 +682,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
   <div class="land-content">
 
     <!-- Nav -->
-    <nav style="display:flex;align-items:center;justify-content:space-between;padding:18px 56px;border-bottom:1px solid rgba(30,40,64,.8)">
+    <nav style="display:flex;align-items:center;justify-content:space-between;padding:14px clamp(16px,4vw,56px);border-bottom:1px solid rgba(30,40,64,.8);flex-wrap:wrap;gap:8px">
       <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:853;letter-spacing:-.02em">🗑️ BIN<em style="color:var(--cyan);font-style:normal">DASH</em></div>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="btn btn-ghost" onclick="go('S-land')">← Back</button>
