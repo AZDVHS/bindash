@@ -524,288 +524,181 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <button class="btn btn-ghost btn-sm" onclick="go('S-land')">✕</button>
         </div>
       </div>
-      <div class="steps-bar"><div class="sc active" id="h-sc1">1</div><div class="sl" id="h-sl1"></div><div class="sc" id="h-sc2">2</div><div class="sl" id="h-sl2"></div><div class="sc" id="h-sc3">3</div><div class="sl" id="h-sl3"></div><div class="sc" id="h-sc4">4</div><div class="sl" id="h-sl4"></div><div class="sc" id="h-sc5">✓</div></div>
+
+      <!-- ── STEP 1: Address + ZIP detection (always shown first) ── -->
       <div id="h-s1">
-        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Welcome to BinDash 🏠</div>
-        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Set up your homeowner account — about 3 minutes.</div>
-        <div class="sec-h">Account Details</div>
-        <div class="g2"><div class="field"><label>First Name</label><input id="h-fn" placeholder="Jane"></div><div class="field"><label>Last Name</label><input id="h-ln" placeholder="Smith"></div></div>
-        <div class="field"><label>Email Address</label><input type="email" id="h-em" placeholder="jane@example.com"></div>
-        <div class="g2"><div class="field"><label>Phone</label><input id="h-ph" placeholder="(555) 000-0000"></div><div class="field"><label>Password</label><input type="password" id="h-pw" placeholder="Min. 8 characters"></div></div>
-        <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="btn btn-cyan" onclick="hNext(1)">Next: Property →</button></div>
-      </div>
-      <div id="h-s2" style="display:none">
-        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Your Property 🏡</div>
-        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Help your runner find and access your bins both times they visit.</div>
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Let's check your area 📍</div>
+        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Enter your address to see if BinDash is available near you.</div>
 
-        <div class="sec-h">Address</div>
         <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street"></div>
-        <div class="g3"><div class="field"><label>City</label><input id="h-city" placeholder="Glendale"></div><div class="field"><label>State</label><input id="h-state" placeholder="AZ"></div><div class="field"><label>ZIP</label><input id="h-zip" placeholder="85374" maxlength="5" oninput="checkZipCoverage(this.value)"></div></div>
-        <div id="zip-coverage-result" style="display:none;border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px"></div>
-        <div class="field"><label>Property Type</label><select><option>Single Family Home</option><option>Townhouse</option><option>Condo</option><option>Apartment</option></select></div>
-
-        <!-- BIN STORAGE -->
-        <div class="sec-h" style="margin-top:8px">Bin Storage</div>
-        <div class="field"><label>Where are your bins normally stored?</label>
-          <div class="radio-row" id="bin-storage-opts">
-            <div class="r-opt on" onclick="rOpt(this);toggleOtherStorage(false)">Back yard</div>
-            <div class="r-opt" onclick="rOpt(this);toggleOtherStorage(false)">Side of house</div>
-            <div class="r-opt" onclick="rOpt(this);toggleOtherStorage(false)">Front yard</div>
-            <div class="r-opt" onclick="rOpt(this);toggleOtherStorage(false)">Garage</div>
-            <div class="r-opt" onclick="rOpt(this);toggleOtherStorage(true)">Other</div>
-          </div>
+        <div class="g3">
+          <div class="field"><label>City</label><input id="h-city" placeholder="Glendale"></div>
+          <div class="field"><label>State</label><input id="h-state" placeholder="AZ"></div>
+          <div class="field"><label>ZIP *</label><input id="h-zip" placeholder="85301" maxlength="5" oninput="checkZipCoverage(this.value)"></div>
         </div>
-        <div id="h-storage-other-wrap" style="display:none" class="field">
-          <label>Describe bin storage location</label>
-          <input id="h-storage-other" placeholder="e.g. Under the front porch steps">
+        <div id="zip-coverage-result" style="display:none;border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:8px"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:6px">
+          <button class="btn btn-cyan" onclick="hNext(1)">Continue →</button>
         </div>
-        <div class="field"><label>Additional details for the runner <span style="color:var(--muted);font-weight:400">(bin colours, landmarks, etc.)</span></label>
-          <textarea id="h-bin-desc" placeholder="e.g. Green lid = recycling, red lid = general waste. Both bins lined up along the left fence." style="min-height:60px"></textarea>
-        </div>
-        <div class="field">
-          <label>Bin storage photos <span style="color:var(--muted);font-size:10px;font-weight:400">up to 3 — helps the runner find them first visit</span></label>
-          <div id="storage-photo-previews" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
-          <label id="storage-upload-btn" style="display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1.5px dashed var(--border2);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:12px;color:var(--sub);font-weight:400">
-            📷 Add photo
-            <input type="file" accept="image/*" multiple style="display:none" onchange="addPropertyPhotos(this,'storage','storage-photo-previews','storage-upload-btn',3)">
-          </label>
-        </div>
-
-        <!-- CURB PLACEMENT -->
-        <div class="sec-h" style="margin-top:4px">Curb Placement</div>
-        <div style="background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.15);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--sub);margin-bottom:10px;display:flex;gap:8px;align-items:flex-start">
-          <span style="flex-shrink:0">📸</span>
-          <span>Your runner will photograph the curb placement after your <strong style="color:var(--text)">first collection</strong> — that becomes the permanent reference. Just tell us roughly where below.</span>
-        </div>
-        <div class="field"><label>Where should bins go at the curb?</label>
-          <textarea id="h-curb" placeholder="e.g. Outside front gate, to the left of the driveway. Handles facing the road."></textarea>
-        </div>
-
-        <!-- GATE & ACCESS -->
-        <div class="sec-h" style="margin-top:4px">Gate &amp; Access</div>
-        <div class="field"><label>Gate access</label>
-          <div class="radio-row" id="gate-opts">
-            <div class="r-opt on" onclick="rOpt(this);toggleGateOther(false)">No gate</div>
-            <div class="r-opt" onclick="rOpt(this);toggleGateOther(false)">Unlocked gate</div>
-            <div class="r-opt" onclick="rOpt(this);toggleGateOther(false)">Locked — code below</div>
-            <div class="r-opt" onclick="rOpt(this);toggleGateOther(true)">Other</div>
-          </div>
-        </div>
-        <div id="h-gate-other-wrap" style="display:none" class="field">
-          <label>Describe gate / access arrangement</label>
-          <input id="h-gate-other" placeholder="e.g. Keypad on side fence, code shared separately">
-        </div>
-        <div class="field"><label>Gate code / access notes <span style="color:var(--muted);font-size:10px;font-weight:400">(optional)</span></label>
-          <textarea id="h-access" placeholder="Gate code 1234, enter from the alley on Oak Lane side..."></textarea>
-        </div>
-        <div class="field">
-          <label>Gate / access photos <span style="color:var(--muted);font-size:10px;font-weight:400">up to 3 — helps runner identify the entry point</span></label>
-          <div id="gate-photo-previews" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
-          <label id="gate-upload-btn" style="display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1.5px dashed var(--border2);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:12px;color:var(--sub);font-weight:400">
-            📷 Add photo
-            <input type="file" accept="image/*" multiple style="display:none" onchange="addPropertyPhotos(this,'gate','gate-photo-previews','gate-upload-btn',3)">
-          </label>
-        </div>
-
-        <!-- PETS -->
-        <div class="sec-h" style="margin-top:4px">Pets</div>
-        <div class="field">
-          <div class="radio-row" id="pets-opts">
-            <div class="r-opt on" onclick="rOpt(this);togglePetsOther(false)">No pets</div>
-            <div class="r-opt" onclick="rOpt(this);togglePetsOther(false)">Dog — friendly</div>
-            <div class="r-opt" onclick="rOpt(this);togglePetsOther(false)">Dog — keep gate closed</div>
-            <div class="r-opt" onclick="rOpt(this);togglePetsOther(true)">Other pets</div>
-          </div>
-        </div>
-        <div id="h-pets-other-wrap" style="display:none" class="field">
-          <label>Describe your pets / any notes for the runner</label>
-          <input id="h-pets-other" placeholder="e.g. Two cats — indoor only, no issues">
-        </div>
-
-        <div style="display:flex;justify-content:space-between;margin-top:14px"><button class="btn btn-outline" onclick="hBack(2)">← Back</button><button class="btn btn-cyan" onclick="hNext(2)">Next: Service →</button></div>
       </div>
+
+      <!-- ══════════════════════════════════════════════════════════ -->
+      <!-- PATH A: Active zone — full signup with payment            -->
+      <!-- ══════════════════════════════════════════════════════════ -->
+
+      <!-- STEP 2A: Account details (active zone) -->
+      <div id="h-s2" style="display:none">
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Create your account 🏠</div>
+        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">BinDash services your area! Set up your account to get started.</div>
+        <div class="g2">
+          <div class="field"><label>First Name *</label><input id="h-fn" placeholder="Jane"></div>
+          <div class="field"><label>Last Name</label><input id="h-ln" placeholder="Smith"></div>
+        </div>
+        <div class="field"><label>Email Address *</label><input type="email" id="h-em" placeholder="jane@example.com"></div>
+        <div class="g2">
+          <div class="field"><label>Phone</label><input id="h-ph" placeholder="(555) 000-0000"></div>
+          <div class="field"><label>Password *</label><input type="password" id="h-pw" placeholder="Min. 8 characters"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px">
+          <button class="btn btn-outline" onclick="hBack(2)">← Back</button>
+          <button class="btn btn-cyan" onclick="hNext(2)">Next: Service →</button>
+        </div>
+      </div>
+
+      <!-- STEP 3: Service preferences (active zone) -->
       <div id="h-s3" style="display:none">
-        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Service Preferences ♻️</div>
-        <div style="color:var(--sub);font-size:14px;margin-bottom:18px">Choose how often you need us, then pick your plan.</div>
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Your Service 🗑️</div>
+        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Choose what service you need and when.</div>
 
-        <div class="info-box" style="margin-bottom:14px">ℹ️ Every BinDash subscription collection is <strong>two runner visits</strong> — bins out the evening before, back in after the truck. Your plan covers both. <span style="color:var(--muted)">As Needed bookings are charged per single visit — book Bin Out, Bin In, or both separately.</span></div>
+        <div class="sec-h">Service Type</div>
+        <div class="radio-row" style="margin-bottom:14px" id="svc-type-opts">
+          <div class="r-opt on" id="svc-recycling" onclick="rOpt(this);window._obSvcLabel='Recycling'">♻️ Recycling</div>
+          <div class="r-opt" id="svc-waste" onclick="rOpt(this);window._obSvcLabel='General Waste'">🗑️ General Waste</div>
+          <div class="r-opt" id="svc-both" onclick="rOpt(this);window._obSvcLabel='Recycling + General Waste'">♻️+🗑️ Both</div>
+        </div>
 
-        <div class="field">
-          <label style="margin-bottom:10px;display:block">How often do you need collection?</label>
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
-            <div class="r-opt on" id="freq-weekly" onclick="selectFreq('weekly')" style="text-align:center;padding:12px 6px;border-radius:10px">
-              <div style="font-size:20px;margin-bottom:4px">⚡</div>
-              <div style="font-size:12px;font-weight:700">Weekly</div>
-              <div style="font-size:10px;color:var(--muted);margin-top:3px">4× per month</div>
-            </div>
-            <div class="r-opt" id="freq-biweekly" onclick="selectFreq('biweekly')" style="text-align:center;padding:12px 6px;border-radius:10px">
-              <div style="font-size:20px;margin-bottom:4px">🗓️</div>
-              <div style="font-size:12px;font-weight:700">Bi-weekly</div>
-              <div style="font-size:10px;color:var(--muted);margin-top:3px">2× per month</div>
-            </div>
-            <div class="r-opt" id="freq-monthly" onclick="selectFreq('monthly')" style="text-align:center;padding:12px 6px;border-radius:10px">
-              <div style="font-size:20px;margin-bottom:4px">📅</div>
-              <div style="font-size:12px;font-weight:700">Monthly</div>
-              <div style="font-size:10px;color:var(--muted);margin-top:3px">1× per month</div>
-            </div>
-            <div class="r-opt" id="freq-asneeded" onclick="selectFreq('asneeded')" style="text-align:center;padding:12px 6px;border-radius:10px">
-              <div style="font-size:20px;margin-bottom:4px">📦</div>
-              <div style="font-size:12px;font-weight:700">As Needed</div>
-              <div style="font-size:10px;color:var(--muted);margin-top:3px">No commitment</div>
-            </div>
+        <div class="sec-h">Frequency</div>
+        <div class="radio-row" style="margin-bottom:14px">
+          <div class="r-opt" onclick="selectFreq('asneeded')">As Needed</div>
+          <div class="r-opt" onclick="selectFreq('monthly')">Monthly</div>
+          <div class="r-opt" onclick="selectFreq('biweekly')">Bi-weekly</div>
+          <div class="r-opt on" onclick="selectFreq('weekly')">Weekly</div>
+        </div>
+
+        <div class="sec-h">Collection Day</div>
+        <div id="ob-day-wrap">
+          <div class="field">
+            <label>Preferred day</label>
+            <select id="h-day">
+              <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+              <option selected>Thursday</option><option>Friday</option>
+            </select>
           </div>
         </div>
 
-        <div id="ob-plan-section" style="margin-bottom:14px">
-          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Choose your plan</div>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px" id="ob-plan-cards"></div>
-
-          <!-- 1-bin service selector — shown only when a 1-bin plan is selected -->
-          <div id="ob-1bin-svc" style="display:none;margin-top:14px">
-            <div style="font-size:12px;color:var(--sub);margin-bottom:8px">Which bin service do you need?</div>
-            <div class="radio-row">
-              <div class="r-opt on" id="svc-recycling" onclick="selectBinSvc('recycling')">♻️ Recycling</div>
-              <div class="r-opt" id="svc-general" onclick="selectBinSvc('general')">🗑️ General Waste</div>
-            </div>
-            <div style="font-size:11px;color:var(--muted);margin-top:6px">Choosing 2 bins includes both recycling and general waste automatically.</div>
-          </div>
-
-          <div id="ob-plan-note" style="font-size:11px;color:var(--muted);margin-top:10px;text-align:center"></div>
-          <div class="info-box" style="margin-top:10px;font-size:11px">🚀 Garden waste &amp; bulk items coming soon.</div>
+        <div class="field"><label>Special Instructions <span style="color:var(--muted);font-size:10px;font-weight:400">optional</span></label>
+          <textarea id="h-svc-notes" placeholder="e.g. Recycling bin lid is broken — handle with care." style="min-height:52px"></textarea>
         </div>
 
-        <div id="ob-asneeded-box" style="display:none;background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:10px;padding:14px 16px;font-size:13px;color:var(--sub);line-height:1.7;margin-bottom:14px">
-          <strong style="color:var(--text)">Ordering as needed</strong> — pay <strong style="color:var(--cyan)">$12.99 per callout visit</strong>. No subscription, no commitment. Book a Bin Out, Bin In, or both from your dashboard whenever you need it. Upgrade to a subscription any time to save on regular collections.
+        <div style="display:flex;justify-content:space-between;margin-top:6px">
+          <button class="btn btn-outline" onclick="hBack(3)">← Back</button>
+          <button class="btn btn-cyan" onclick="hNext(3)">Next: Payment →</button>
         </div>
-
-        <!-- TRUCK CONFIRMATION OPT-IN -->
-        <div style="border:1.5px solid var(--border2);border-radius:12px;padding:16px;margin-bottom:14px">
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
-            <div style="flex:1">
-              <div style="font-size:13px;font-weight:700;margin-bottom:4px">Help us time your Bin In service ⏱️</div>
-              <div style="font-size:12px;color:var(--sub);line-height:1.6;margin-bottom:8px">On your collection day, we can send you a single text message asking if your bins have been emptied. One tap to reply — that's it. Your response helps BinDash dispatch the Bin In runner at exactly the right time, meaning your bins get returned sooner.</div>
-              <div style="background:var(--surface2);border-radius:7px;padding:8px 11px;font-size:11px;color:var(--muted);line-height:1.5">
-                📋 <strong style="color:var(--text)">Completely optional.</strong> Opting in or out has no effect on your service. We use responses anonymously alongside other homeowners in your zone to learn typical collection times — not to track you individually. You can change this any time in Account Settings.
-              </div>
-            </div>
-            <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:6px">
-              <div id="ob-truck-toggle-wrap" onclick="toggleTruckOptin()" style="position:relative;display:inline-block;width:44px;height:24px;cursor:pointer">
-                <div id="ob-truck-track" style="position:absolute;inset:0;background:var(--cyan);border-radius:99px;transition:.2s"></div>
-                <div id="ob-truck-knob" style="position:absolute;left:23px;top:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>
-              </div>
-              <span style="font-size:10px;color:var(--muted)" id="ob-truck-label">Opted in</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- COLLECTION DAY — single or split depending on plan -->
-        <div id="ob-day-single" class="field">
-          <label>Preferred Collection Day
-            <span style="color:var(--muted);font-size:11px;font-weight:400"> — we'll confirm this matches your zone schedule during signup review</span>
-          </label>
-          <select id="h-day"><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option><option>No preference</option></select>
-        </div>
-        <div id="ob-day-split" style="display:none">
-          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px">Collection Days</div>
-          <div style="background:rgba(6,214,160,.05);border:1px solid rgba(6,214,160,.15);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--sub);margin-bottom:12px">
-            Your two bins will be collected on separate days. Choose your preferred days — admin will confirm these match availability in your area during signup review.
-          </div>
-          <div class="g2">
-            <div class="field">
-              <label>♻️ Preferred recycling day</label>
-              <select id="h-day-recycling">
-                <option>Monday</option><option>Tuesday</option><option>Wednesday</option><option selected>Thursday</option><option>Friday</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>🗑️ Preferred waste day</label>
-              <select id="h-day-waste">
-                <option selected>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option>
-              </select>
-            </div>
-          </div>
-          <div id="ob-same-day-warn" style="display:none;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:7px;padding:8px 12px;font-size:12px;color:#fbbf24;margin-top:-4px">
-            ⚠️ Both days are the same — for split plans each bin should have its own collection day. Switch to the <strong>Same Day</strong> plan if you prefer one day for both.
-          </div>
-        </div>
-        <div class="field"><label>Special Instructions <span style="color:var(--muted);font-size:10px;font-weight:400">(optional)</span></label>
-          <textarea id="h-svc-notes" placeholder="e.g. —. Recycling bin lid is broken — handle with care."></textarea>
-        </div>
-
-        <div style="display:flex;justify-content:space-between;margin-top:6px"><button class="btn btn-outline" onclick="hBack(3)">← Back</button><button class="btn btn-cyan" onclick="hNext(3)">Next: Payment →</button></div>
       </div>
 
-      <!-- STEP 4: PAYMENT -->
+      <!-- STEP 4: Payment (active zone only) -->
       <div id="h-s4" style="display:none">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Payment 💳</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Add a card to activate your subscription. You won't be charged until your first collection is confirmed.</div>
 
-        <!-- Card visual preview -->
-        <div id="card-preview" style="background:linear-gradient(135deg,#1a1f35,#0f1322);border:1px solid rgba(99,102,241,.3);border-radius:16px;padding:22px 24px;max-width:360px;margin-bottom:22px;font-family:'DM Mono',monospace;position:relative;overflow:hidden">
-          <div style="position:absolute;top:-30px;right:-30px;width:140px;height:140px;background:radial-gradient(circle,rgba(6,214,160,.15),transparent 70%);border-radius:50%"></div>
-          <div style="position:absolute;bottom:-40px;left:-20px;width:160px;height:160px;background:radial-gradient(circle,rgba(99,102,241,.1),transparent 70%);border-radius:50%"></div>
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px">
-            <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:800;letter-spacing:.05em;color:var(--cyan)">BINDASH</div>
-            <div id="card-network" style="font-size:22px">💳</div>
-          </div>
-          <div id="card-number-display" style="font-size:17px;letter-spacing:.18em;color:rgba(255,255,255,.9);margin-bottom:20px">•••• •••• •••• ••••</div>
-          <div style="display:flex;justify-content:space-between;align-items:flex-end">
-            <div><div style="font-size:9px;color:rgba(255,255,255,.4);letter-spacing:.1em;margin-bottom:3px">CARDHOLDER</div><div id="card-name-display" style="font-size:12px;color:rgba(255,255,255,.85);letter-spacing:.06em">YOUR NAME</div></div>
-            <div><div style="font-size:9px;color:rgba(255,255,255,.4);letter-spacing:.1em;margin-bottom:3px">EXPIRES</div><div id="card-exp-display" style="font-size:12px;color:rgba(255,255,255,.85)">MM/YY</div></div>
-          </div>
-        </div>
-
-        <!-- Card form -->
-        <div class="card" style="max-width:420px;padding:20px">
+        <div class="card" style="max-width:420px;padding:20px;margin-bottom:16px">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)">
             <span style="font-size:16px">🔒</span>
-            <span style="font-size:12px;color:var(--sub)">Secured with 256-bit SSL encryption · Powered by Stripe</span>
+            <span style="font-size:12px;color:var(--sub)">Secured with 256-bit SSL · Powered by Stripe</span>
           </div>
-          <div class="field">
-            <label>Cardholder Name</label>
-            <input id="cc-name" placeholder="Jane Smith" oninput="document.getElementById('card-name-display').textContent=this.value.toUpperCase()||'YOUR NAME'">
+          <div class="field"><label>Cardholder Name</label>
+            <input id="cc-name" placeholder="Jane Smith" oninput="document.getElementById('card-name-display')&&(document.getElementById('card-name-display').textContent=this.value.toUpperCase()||'YOUR NAME')">
           </div>
-          <div class="field">
-            <label>Card Number</label>
-            <div style="position:relative">
-              <input id="cc-num" placeholder="1234 5678 9012 3456" maxlength="19" oninput="formatCardNum(this)" style="padding-right:44px;font-family:'DM Mono',monospace;letter-spacing:.05em">
-              <span id="cc-brand-icon" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:18px">💳</span>
-            </div>
+          <div class="field"><label>Card Number</label>
+            <input id="cc-num" placeholder="1234 5678 9012 3456" maxlength="19" oninput="formatCardNum(this)" style="font-family:'DM Mono',monospace;letter-spacing:.05em">
           </div>
           <div class="g2">
-            <div class="field">
-              <label>Expiry Date</label>
-              <input id="cc-exp" placeholder="MM/YY" maxlength="5" oninput="formatExpiry(this)" style="font-family:'DM Mono',monospace">
-            </div>
-            <div class="field">
-              <label>CVV</label>
-              <input id="cc-cvv" placeholder="•••" maxlength="4" type="password" style="font-family:'DM Mono',monospace">
-            </div>
+            <div class="field"><label>Expiry</label><input id="cc-exp" placeholder="MM/YY" maxlength="5" oninput="formatExpiry(this)" style="font-family:'DM Mono',monospace"></div>
+            <div class="field"><label>CVV</label><input id="cc-cvv" placeholder="•••" maxlength="4" type="password" style="font-family:'DM Mono',monospace"></div>
           </div>
-          <div class="field">
-            <label>Billing ZIP Code</label>
-            <input id="cc-zip" placeholder="85374" maxlength="5" style="font-family:'DM Mono',monospace;width:120px">
-          </div>
-          <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:9px;padding:12px;font-size:12px;color:var(--sub);line-height:1.6">
-            <strong style="color:var(--cyan)">No charge today.</strong> Your card is saved securely. Billing starts after your first confirmed collection. Cancel or pause any time from your account.
+          <div class="field"><label>Billing ZIP</label><input id="cc-zip" placeholder="85301" maxlength="5" style="font-family:'DM Mono',monospace;width:120px"></div>
+          <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:9px;padding:12px;font-size:12px;color:var(--sub);line-height:1.6;margin-top:8px">
+            <strong style="color:var(--cyan)">No charge today.</strong> Billing starts after your first confirmed collection. Cancel any time.
           </div>
         </div>
 
-        <div style="display:flex;justify-content:space-between;margin-top:16px"><button class="btn btn-outline" onclick="hBack(4)">← Back</button><button class="btn btn-cyan" onclick="hNext(4)">Next: Review →</button></div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px">
+          <button class="btn btn-outline" onclick="hBack(4)">← Back</button>
+          <button class="btn btn-cyan" onclick="hNext(4)">Review →</button>
+        </div>
       </div>
 
-      <!-- STEP 5: REVIEW -->
+      <!-- STEP 5: Review + submit (active zone) -->
       <div id="h-s5" style="display:none">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Almost Done! 🎉</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Review your details and activate your account.</div>
-        <div class="info-box">✅ Account active immediately. Your first billing date will be confirmed by email after your first collection.</div>
         <div class="card" style="margin-bottom:14px" id="h-review"></div>
         <div class="field">
           <div class="chk-row"><input type="checkbox" id="h-terms"><div><div style="font-size:13px">I agree to the <a style="color:var(--cyan);cursor:pointer">Terms of Service</a> and <a style="color:var(--cyan);cursor:pointer">Privacy Policy</a></div></div></div>
-          <div class="chk-row"><input type="checkbox" checked><div><div style="font-size:13px">Send me collection reminders and updates by email</div></div></div>
+          <div class="chk-row"><input type="checkbox" checked id="h-comms"><div><div style="font-size:13px">Send me collection reminders and updates by email</div></div></div>
         </div>
-        <div style="display:flex;justify-content:space-between;margin-top:6px"><button class="btn btn-outline" onclick="hBack(5)">← Back</button><button class="btn btn-cyan" onclick="hSubmit()">🚀 Activate My Account</button></div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px">
+          <button class="btn btn-outline" onclick="hBack(5)">← Back</button>
+          <button class="btn btn-cyan" onclick="hSubmit()">🚀 Activate My Account</button>
+        </div>
       </div>
+
+      <!-- ══════════════════════════════════════════════════════════ -->
+      <!-- PATH B: No zone — lean lead capture, no payment/property  -->
+      <!-- ══════════════════════════════════════════════════════════ -->
+      <div id="h-lead" style="display:none">
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:8px">Be first in your area 🚀</div>
+        <div style="background:rgba(6,214,160,.07);border:1.5px solid rgba(6,214,160,.25);border-radius:12px;padding:16px 18px;margin-bottom:20px">
+          <div style="font-size:14px;font-weight:700;color:var(--cyan);margin-bottom:6px">BinDash is coming to your ZIP!</div>
+          <div style="font-size:13px;color:var(--sub);line-height:1.6">We're not in <strong id="lead-zip-display" style="color:var(--text)">your area</strong> yet but you're on the list. As soon as a runner signs up nearby, you'll be the first to know. No payment needed — we'll reach out when you're ready to book.</div>
+        </div>
+
+        <div class="field">
+          <label>Your Name *</label>
+          <div class="g2">
+            <input id="lead-fn" placeholder="First name">
+            <input id="lead-ln" placeholder="Last name">
+          </div>
+        </div>
+
+        <div style="font-size:12px;color:var(--sub);margin-bottom:6px">How should we reach you? <span style="color:var(--muted)">(at least one required)</span></div>
+        <div class="field"><label>Email</label><input type="email" id="lead-em" placeholder="jane@example.com"></div>
+        <div class="field"><label>Phone</label><input id="lead-ph" placeholder="(555) 000-0000"></div>
+
+        <div class="sec-h" style="margin-top:4px">Service Preference</div>
+        <div class="radio-row" style="margin-bottom:12px">
+          <div class="r-opt on" onclick="rOpt(this)">♻️ Recycling</div>
+          <div class="r-opt" onclick="rOpt(this)">🗑️ General Waste</div>
+          <div class="r-opt" onclick="rOpt(this)">♻️+🗑️ Both</div>
+        </div>
+
+        <div class="field">
+          <label>Preferred collection day</label>
+          <select id="lead-day">
+            <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+            <option selected>Thursday</option><option>Friday</option>
+          </select>
+        </div>
+
+        <div class="chk-row" style="margin-top:8px">
+          <input type="checkbox" id="lead-comms" checked>
+          <div style="font-size:13px;color:var(--sub)">Notify me by email/text when BinDash launches in my area</div>
+        </div>
+
+        <button class="btn btn-cyan btn-full btn-lg" style="margin-top:16px" onclick="submitLead()">✅ Save My Spot — Notify Me</button>
+        <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:10px">No payment required · Cancel anytime · We'll only contact you about service availability</div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -2778,39 +2671,57 @@ function requireCard(){
 // ── HOMEOWNER ONBOARDING ──────────────────────────
 function hNext(s){
   if(s===1){
-    if(!document.getElementById('h-fn').value.trim()){showToast('Please enter your first name','err');return}
-    if(!document.getElementById('h-em').value.trim()){showToast('Please enter your email address','err');return}
-    if(!document.getElementById('h-pw').value||document.getElementById('h-pw').value.length<8){showToast('Password must be at least 8 characters','err');return}
+    // Step 1: ZIP check — decide which path
+    const zip = document.getElementById('h-zip')?.value.trim() || ''
+    if(!zip || zip.length < 5){ showToast('Please enter your ZIP code','err'); return }
+
+    const hasZone = window._hwZipHasCoverage === true
+    document.getElementById('h-s1').style.display = 'none'
+    window.scrollTo(0,0)
+
+    if(!hasZone){
+      // PATH B — lead capture only
+      const zipDisplay = document.getElementById('lead-zip-display')
+      if(zipDisplay) zipDisplay.textContent = 'ZIP ' + zip
+      document.getElementById('h-lead').style.display = 'block'
+    } else {
+      // PATH A — full signup
+      document.getElementById('h-s2').style.display = 'block'
+    }
+    return
   }
-  if(s===4){if(!validateCardStep())return}
+  if(s===2){
+    if(!document.getElementById('h-fn')?.value.trim()){ showToast('Please enter your first name','err'); return }
+    if(!document.getElementById('h-em')?.value.trim()){ showToast('Please enter your email address','err'); return }
+    if(!document.getElementById('h-pw')?.value || document.getElementById('h-pw').value.length < 8){ showToast('Password must be at least 8 characters','err'); return }
+  }
+  if(s===4){ if(!validateCardStep()) return }
+
   document.getElementById('h-s'+s).style.display='none'
   document.getElementById('h-s'+(s+1)).style.display='block'
-  const sc=document.getElementById('h-sc'+s);sc.classList.remove('active');sc.classList.add('done');sc.textContent='✓'
-  const sl=document.getElementById('h-sl'+s);if(sl)sl.classList.add('done')
-  const nsc=document.getElementById('h-sc'+(s+1));if(nsc)nsc.classList.add('active')
-  // Init plan picker when reaching step 3
+  const sc=document.getElementById('h-sc'+s); if(sc){ sc.classList.remove('active'); sc.classList.add('done'); sc.textContent='✓' }
+  const sl=document.getElementById('h-sl'+s); if(sl) sl.classList.add('done')
+  const nsc=document.getElementById('h-sc'+(s+1)); if(nsc) nsc.classList.add('active')
+
   if(s===2){ selectFreq('weekly') }
+
   if(s===4){
-    const fn=document.getElementById('h-fn').value,ln=document.getElementById('h-ln').value
-    const last4=document.getElementById('cc-num').value.replace(/\s/g,'').slice(-4)||'––'
-    const exp=document.getElementById('cc-exp').value||'––'
+    const fn=document.getElementById('h-fn')?.value||''
+    const ln=document.getElementById('h-ln')?.value||''
+    const last4=(document.getElementById('cc-num')?.value||'').replace(/\s/g,'').slice(-4)||'——'
+    const exp=document.getElementById('cc-exp')?.value||'——'
     const freqLabel = {asneeded:'As Needed',monthly:'Monthly',biweekly:'Bi-weekly',weekly:'Weekly'}[obSelectedFreq]||obSelectedFreq
-    const isSplitPlan = obSelectedPlan.endsWith('3')
-    const dayLabel = isSplitPlan
-      ? `♻️ ${document.getElementById('h-day-recycling')?.value||'—'} · 🗑️ ${document.getElementById('h-day-waste')?.value||'—'}`
-      : (document.getElementById('h-day')?.value||'—')
-    const planPrices = {m1:'$16.99',m2:'$22.99',m3:'$27.99',b1:'$26.99',b2:'$34.99',b3:'$42.99',w1:'$34.99',w2:'$44.99',w3:'$54.99',asneeded:'$12.99/visit'}
-    const planLabels = {m1:'1 Bin',m2:'2 Bins Same Day',m3:'2 Bins Split',b1:'1 Bin',b2:'2 Bins Same Day',b3:'2 Bins Split',w1:'1 Bin',w2:'2 Bins Same Day',w3:'2 Bins Split',asneeded:'As Needed'}
+    const dayVal = document.getElementById('h-day')?.value||'—'
+    const svc = window._obSvcLabel || 'Recycling'
     document.getElementById('h-review').innerHTML=`
       <div class="card-ttl">Account Summary</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:13px;line-height:2.1;color:var(--sub)">
         <div><strong style="color:var(--text)">Name:</strong> ${fn} ${ln}</div>
-        <div><strong style="color:var(--text)">Email:</strong> ${document.getElementById('h-em').value||'—'}</div>
-        <div><strong style="color:var(--text)">Address:</strong> ${document.getElementById('h-addr').value||'—'}</div>
-        <div><strong style="color:var(--text)">Service:</strong> ${window._obSvcLabel || 'Recycling + General Waste'}</div>
+        <div><strong style="color:var(--text)">Email:</strong> ${document.getElementById('h-em')?.value||'—'}</div>
+        <div><strong style="color:var(--text)">Address:</strong> ${document.getElementById('h-addr')?.value||'—'}</div>
+        <div><strong style="color:var(--text)">Service:</strong> ${svc}</div>
         <div><strong style="color:var(--text)">Frequency:</strong> ${freqLabel}</div>
-        <div><strong style="color:var(--text)">Plan:</strong> ${planLabels[obSelectedPlan]||'—'} · ${planPrices[obSelectedPlan]||'—'}</div>
-        <div><strong style="color:var(--text)">Collection day${isSplitPlan?'s':''}:</strong> ${dayLabel}</div>
+        <div><strong style="color:var(--text)">Collection day:</strong> ${dayVal}</div>
         <div><strong style="color:var(--text)">Payment:</strong> Card •••• ${last4} · exp ${exp}</div>
         <div><strong style="color:var(--text)">First charge:</strong> After first confirmed collection</div>
       </div>`
@@ -2819,24 +2730,85 @@ function hNext(s){
 }
 function hBack(s){
   document.getElementById('h-s'+s).style.display='none'
-  document.getElementById('h-s'+(s-1)).style.display='block'
-  const sc=document.getElementById('h-sc'+(s-1));sc.classList.remove('done');sc.classList.add('active');sc.textContent=s-1
-  const sl=document.getElementById('h-sl'+(s-1));if(sl)sl.classList.remove('done')
-  const csc=document.getElementById('h-sc'+s);if(csc)csc.classList.remove('active')
+  const prev = s===2 ? 'h-s1' : 'h-s'+(s-1)
+  document.getElementById(prev).style.display='block'
+  const sc=document.getElementById('h-sc'+(s-1)); if(sc){ sc.classList.remove('done'); sc.classList.add('active'); sc.textContent=s-1 }
+  const sl=document.getElementById('h-sl'+(s-1)); if(sl) sl.classList.remove('done')
+  const csc=document.getElementById('h-sc'+s); if(csc) csc.classList.remove('active')
+  window.scrollTo(0,0)
 }
+
+// ── LEAD CAPTURE SUBMIT (no-zone path) ──────────────────────────
+async function submitLead(){
+  const fn    = document.getElementById('lead-fn')?.value.trim() || ''
+  const ln    = document.getElementById('lead-ln')?.value.trim() || ''
+  const em    = document.getElementById('lead-em')?.value.trim() || ''
+  const ph    = document.getElementById('lead-ph')?.value.trim() || ''
+  const zip   = document.getElementById('h-zip')?.value.trim()   || ''
+  const city  = document.getElementById('h-city')?.value.trim()  || ''
+  const addr  = document.getElementById('h-addr')?.value.trim()  || ''
+  const day   = document.getElementById('lead-day')?.value       || ''
+  const svc   = document.querySelector('#h-lead .r-opt.on')?.textContent?.trim() || 'Recycling'
+
+  if(!fn){ showToast('Please enter your name','err'); return }
+  if(!em && !ph){ showToast('Please enter at least an email or phone number','err'); return }
+
+  const btn = document.querySelector('#h-lead .btn-cyan')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+
+  let saveErr = null
+  try {
+    const res = await _supa.from('homeowner_signups').insert({
+      first_name:     fn,
+      last_name:      ln || '',
+      email:          em || (fn.toLowerCase().replace(/\s/g,'') + '+' + zip + '@lead.bindash'),
+      phone:          ph || null,
+      street_address: addr || null,
+      city:           city || null,
+      zip_code:       zip,
+      service_type:   svc,
+      collection_day: day,
+      status:         'waitlisted',
+      is_lead:        true,         // marks as lean lead, not full signup
+      created_at:     new Date().toISOString(),
+    })
+    saveErr = res?.error?.message || null
+    if(saveErr) console.warn('[BinDash] Lead save error:', saveErr)
+    else console.log('[BinDash] Lead saved ✅ ZIP', zip)
+  } catch(e){
+    saveErr = String(e?.message||e)
+    console.warn('[BinDash] Lead exception:', saveErr)
+  }
+
+  if(btn){ btn.disabled=false; btn.textContent='✅ Save My Spot — Notify Me' }
+
+  // Always go to waitlist screen — success or not
+  const zipDisplay = document.getElementById('waitlist-zip-display')
+  if(zipDisplay) zipDisplay.textContent = 'ZIP ' + zip
+  go('S-hw-waitlist')
+
+  if(!saveErr) showToast('You\'re on the list! We\'ll notify you when BinDash launches in ZIP ' + zip + ' \uD83C\uDF89','ok')
+}
+
 async function hSubmit(){
   if(!document.getElementById('h-terms').checked){showToast('Please agree to the Terms of Service','err');return}
+  const _fn = document.getElementById('h-fn')?.value.trim()
+  const _em = document.getElementById('h-em')?.value.trim()
+  if(!_fn){ showToast('Please enter your name','err'); return }
+  if(!_em){ showToast('Please enter your email','err'); return }
 
-  const fn   = document.getElementById('h-fn')?.value || 'New'
-  const ln   = document.getElementById('h-ln')?.value || 'Homeowner'
-  const em   = document.getElementById('h-em')?.value || ''
-  const ph   = document.getElementById('h-ph')?.value || ''
-  const addr = document.getElementById('h-addr')?.value || ''
-  const city = document.getElementById('h-city')?.value || ''
-  const zip  = document.getElementById('h-zip')?.value || ''
-  const last4= document.getElementById('cc-num')?.value?.replace(/\s/g,'')?.slice(-4)||'––'
+  const fn   = document.getElementById('h-fn')?.value.trim() || ''
+  const ln   = document.getElementById('h-ln')?.value.trim() || ''
+  const em   = document.getElementById('h-em')?.value.trim() || ''
+  const ph   = document.getElementById('h-ph')?.value.trim() || ''
+  const addr = document.getElementById('h-addr')?.value.trim() || ''
+  const city = document.getElementById('h-city')?.value.trim() || ''
+  const zip  = document.getElementById('h-zip')?.value.trim()  || ''
+  const last4= (document.getElementById('cc-num')?.value||'').replace(/\s/g,'').slice(-4)||'——'
   const cardName = document.getElementById('cc-name')?.value || ''
-  const cardExp  = document.getElementById('cc-exp')?.value || ''
+  const cardExp  = document.getElementById('cc-exp')?.value  || ''
+  if(!fn){ showToast('Please enter your name','err'); return }
+  if(!em){ showToast('Please enter your email','err'); return }
 
   const newApp = {
     id: 'HW-APP-'+String(Date.now()).slice(-4),
@@ -7985,12 +7957,20 @@ async function renderZoneWaitlist(){
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:5px">
-          ${group.slice(0,5).map(row=>`
-            <div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:12px">
-              <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${((row.first_name?.[0]||'')+(row.last_name?.[0]||'')).toUpperCase()||'?'}</div>
-              <div style="flex:1"><strong>${row.first_name} ${row.last_name}</strong> · ${row.email}</div>
+          ${group.slice(0,5).map(row=>{
+            const initials = ((row.first_name?.[0]||'')+(row.last_name?.[0]||'')).toUpperCase()||'?'
+            const contact = row.is_lead
+              ? (row.phone||row.email||'contact unknown')
+              : row.email
+            const tag = row.is_lead
+              ? '<span style="background:rgba(245,158,11,.1);color:#f59e0b;border-radius:4px;padding:1px 5px;font-size:9px;margin-left:4px">lead</span>'
+              : ''
+            return `<div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:12px">
+              <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
+              <div style="flex:1"><strong>${row.first_name} ${row.last_name||''}</strong>${tag} · ${contact}</div>
               <span style="color:var(--muted);font-size:10px">${new Date(row.created_at).toLocaleDateString()}</span>
-            </div>`).join('')}
+            </div>`
+          }).join('')}
           ${group.length>5?`<div style="font-size:11px;color:var(--muted);text-align:center;padding:4px">+${group.length-5} more</div>`:''}
         </div>
       </div>`
