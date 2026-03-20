@@ -3412,6 +3412,9 @@ async function hSubmit(){
     if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='🚀 Activate My Account' }
   }
 
+  // Send confirmation email
+  sendEmail(em, 'Your BinDash application is under review', EMAIL.signupPending(fn, document.getElementById('h-day')?.value||'Tuesday', window._hwMatchedZone?.name||'Pending assignment'), 'signup_pending')
+
   // Route to waitlist screen if ZIP has no live coverage, otherwise pending approval
   routeAfterSignup(newApp)
 }
