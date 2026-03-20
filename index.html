@@ -2188,16 +2188,30 @@ async function populateHWDashboard(){
       const colCount = document.getElementById('hw-collections-count')
       if(colCount) colCount.textContent = row.collections_done || 0
 
+    } else if(status === 'zone_assigned'){
+      // ── ZONE ASSIGNED: HW was notified, needs to confirm service ──
+      const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id) || findZoneForZip(row.zip_code||'')
+      if(zone){
+        populateConfirmScreen(row, zone)
+        go('S-hw-confirm')
+      } else {
+        go('S-hw-waitlist')
+      }
+
+    } else if(status === 'zone_assigned'){
+      // ── ZONE ASSIGNED: notified, needs to confirm service ──
+      const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id) || findZoneForZip(row.zip_code||'')
+      if(zone){ populateConfirmScreen(row, zone); go('S-hw-confirm') }
+      else { go('S-hw-waitlist') }
+
     } else if(status === 'waitlisted'){
       // ── WAITLISTED: check if a zone now exists for their ZIP ──
       const zip = row.zip_code || ''
       const zone = findZoneForZip(zip)
       if(zone && (zone.status === 'live' || zone.pilot)){
-        // Zone has been activated — prompt homeowner to confirm service
         populateConfirmScreen(row, zone)
         go('S-hw-confirm')
       } else {
-        // Still no zone — show updated waitlist screen
         const zipDisplay = document.getElementById('waitlist-zip-display')
         if(zipDisplay) zipDisplay.textContent = 'ZIP ' + zip
         go('S-hw-waitlist')
@@ -2269,8 +2283,9 @@ async function submitServiceConfirmation(){
     await _supa.from('homeowner_signups').update({
       status:          'pending_review',
       zone_id:         window._confirmZoneId || null,
-      collection_day:  day,
+      collection_day:  day || 'Tuesday',
       service_notes:   notes || null,
+      is_lead:         false,   // no longer just a lead — they confirmed
       updated_at:      new Date().toISOString(),
     }).eq('email', window._confirmEmail || currentUser?.email)
 
@@ -2817,7 +2832,7 @@ async function hSubmit(){
     email: em, phone: ph, address: addr, city, zip,
     service: document.getElementById('h-svc')?.value || 'Recycling',
     freq: obSelectedFreq, plan: obSelectedPlan,
-    day: document.getElementById('h-day')?.value || '—',
+    day: document.getElementById('h-day')?.value || 'Tuesday',
     svcNotes: document.getElementById('h-svc-notes')?.value || '',
     cardLast4: last4,
     submittedAt: 'Just now',
@@ -5487,45 +5502,31 @@ async function confirmCreateZoneFromWaitlist(zip){
   syncZoneData(); renderAdminZones()
   dbSaveZone(newZone)
 
-  // ── Assign zone_id to waitlisted homeowners but keep status as 'waitlisted'
-  // They will see the zone on next login and confirm service themselves
-  // THEN it goes to admin Pending Homeowners for final approval
-  let notifiedCount = 0
+  // Move waitlisted signups to zone_assigned (notified but not yet enrolled)
+  let movedCount = 0
   try {
-    const res = await _supa
-      .from('homeowner_signups')
-      .select('id, email')
-      .eq('zip_code', zip)
-      .eq('status', 'waitlisted')
-
+    const res = await _supa.from('homeowner_signups').select('id,email,first_name').eq('zip_code',zip).in('status',['waitlisted'])
     const rows = res?.data || []
-    notifiedCount = rows.length
-
+    movedCount = rows.length
     for(const row of rows){
-      // Assign zone but keep status = 'waitlisted'
-      // Next time they log in, populateHWDashboard detects zone exists
-      // and routes them to S-hw-confirm to confirm their service
       await _supa.from('homeowner_signups').update({
-        zone_id:    newZone.id,
-        updated_at: new Date().toISOString()
+        status: 'zone_assigned',
+        zone_id: newZone.id,
+        updated_at: new Date().toISOString(),
       }).eq('id', row.id)
     }
+    // Remove from in-memory waitlist
+    WAITLIST_SIGNUPS.forEach(s=>{ if(s.zip===zip && s.status==='waitlist') s.status='zone_assigned' })
+    console.log('[BinDash] Moved', movedCount, 'to zone_assigned for ZIP', zip)
+  } catch(e){ console.warn('[BinDash] Zone assign failed:', String(e?.message||e)) }
 
-    // Update in-memory waitlist entries too
-    WAITLIST_SIGNUPS.forEach(s=>{
-      if(s.zip===zip && s.status==='waitlist') s.zoneId = newZone.id
-    })
+  updateWaitlistBadge(); renderWaitlistPage(); closeM()
+  showToast('Zone "'+name+'" created · '+movedCount+' homeowner'+(movedCount!==1?'s':'')+' notified to complete signup ✅','ok')
 
-    console.log('[BinDash] Zone assigned to', notifiedCount, 'waitlisted homeowners for ZIP', zip)
-  } catch(err){
-    console.warn('[BinDash] Zone assignment failed:', String(err?.message||err))
-  }
-
-  updateWaitlistBadge()
-  renderWaitlistPage()
-  closeM()
-  showToast('Zone "'+name+'" created ✅ · '+notifiedCount+' homeowner'+(notifiedCount!==1?'s':'')+' will be prompted to confirm service on next login','ok')
+  // Refresh zone waitlist to remove these entries
+  setTimeout(renderZoneWaitlist, 500)
 }
+
 
 // ── AUTO-ZONE NAME SUGGESTION ON APPROVAL ─────────
 
@@ -5580,8 +5581,24 @@ function createZoneAndApproveHW(appId){
 function renderPendingRunnerList(){
   const el = document.getElementById('pending-runner-list')
   if(!el) return
+
+  if(!PENDING_RUNNERS.length){
+    const b = document.getElementById('pcount')
+    if(b){ b.textContent='0'; b.style.display='none' }
+    el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No pending runner applications.</div>'
+    return
+  }
+
+  // Wait for zones to load
+  const activeZones = ADMIN_ZONES.filter(z=>z.status!=='inactive')
+  if(!activeZones.length){
+    el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">⏳ Loading zones...</div>'
+    setTimeout(renderPendingRunnerList, 600)
+    return
+  }
+
   const badge = document.getElementById('pcount')
-  if(badge){ badge.textContent = PENDING_RUNNERS.length; badge.style.display = PENDING_RUNNERS.length > 0 ? 'inline' : 'none' }
+  if(badge){ badge.textContent = PENDING_RUNNERS.length; badge.style.display = 'inline' }
 
   if(!PENDING_RUNNERS.length){
     el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No pending runner applications.</div>'
@@ -5820,9 +5837,15 @@ function approveHW(appId, directZoneId){
   })
   if(zone) zone.homeowners++
   app.status='approved'
-  renderPendingHWList(); renderHomeownerList(); syncZoneData(); updateOverviewCounts()
+  // Remove from PENDING_HOMEOWNERS
+  const pendingIdx = PENDING_HOMEOWNERS.findIndex(x=>x.id===appId)
+  if(pendingIdx>=0) PENDING_HOMEOWNERS.splice(pendingIdx,1)
+  // Remove from WAITLIST_SIGNUPS  
+  const wlIdx = WAITLIST_SIGNUPS.findIndex(x=>x.email===app.email)
+  if(wlIdx>=0) WAITLIST_SIGNUPS.splice(wlIdx,1)
+  renderPendingHWList(); renderHomeownerList(); syncZoneData(); updateOverviewCounts(); updateWaitlistBadge()
   const badge=document.getElementById('hw-pcount')
-  if(badge) badge.textContent=PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length
+  if(badge){ badge.textContent=PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length; badge.style.display=PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length>0?'inline':'none' }
   const runnerNote=autoRunner?' · assigned to '+autoRunner.name:'· no runner assigned yet'
 
   // Persist to Supabase — both homeowner_signups (status) and homeowners (active record)
@@ -7919,7 +7942,7 @@ async function renderZoneWaitlist(){
   try {
     let data = [], err = null
     try {
-      const res = await _supa.from('homeowner_signups').select('*').eq('status','waitlisted').order('created_at',{ascending:false})
+      const res = await _supa.from('homeowner_signups').select('*').in('status',['waitlisted','zone_assigned']).order('created_at',{ascending:false})
       data = res?.data || []
       err  = res?.error?.message || null
     } catch(e){ err = String(e?.message||e) }
@@ -7940,20 +7963,24 @@ async function renderZoneWaitlist(){
     el.innerHTML = Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
       const existingZone = ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip.slice(0,3))
       const runnerInterest = RUNNERS.filter(r=>r.zip===zip||r.zip?.slice(0,3)===zip.slice(0,3)).length
+      const waitingList = group.filter(r=>r.status==='waitlisted')
+      const notifiedList = group.filter(r=>r.status==='zone_assigned')
+      const statusLabel = notifiedList.length && existingZone
+        ? `<span style="color:#22c55e;font-size:11px;font-weight:600">✅ Zone active — ${notifiedList.length} notified, awaiting confirmation</span>`
+        : `<span style="color:var(--muted);font-size:11px">${waitingList.length} waiting · no zone yet</span>`
       return `<div class="card" style="margin-bottom:0">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
           <div>
             <div style="font-size:15px;font-weight:700">ZIP ${zip}
-              <span style="font-size:12px;color:var(--muted);font-weight:400;margin-left:8px">${group.length} homeowner${group.length!==1?'s':''} waiting</span>
+              <span style="font-size:12px;color:var(--muted);font-weight:400;margin-left:8px">${group.length} homeowner${group.length!==1?'s':''}</span>
             </div>
-            <div style="font-size:12px;color:var(--sub);margin-top:3px">
-              ${existingZone ? `<span style="color:#f59e0b">Zone exists: ${existingZone.name} (${existingZone.status})</span>` : '<span style="color:var(--muted)">No zone yet</span>'}
-              ${runnerInterest ? ` · <span style="color:#a5b4fc">${runnerInterest} runner${runnerInterest>1?'s':''} nearby</span>` : ''}
-            </div>
+            <div style="margin-top:3px">${statusLabel}</div>
+            ${runnerInterest ? `<div style="font-size:11px;color:#a5b4fc;margin-top:2px">${runnerInterest} runner${runnerInterest>1?'s':''} available nearby</div>` : ''}
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            ${existingZone ? `<button class="btn btn-outline btn-sm" style="font-size:11px" onclick="activateZone('${existingZone.id}')">⚡ Activate Zone</button>` :
-              `<button class="btn btn-cyan btn-sm" style="font-size:11px" onclick="createZoneFromWaitlist('${zip}')">+ Create Zone</button>`}
+            ${existingZone
+              ? `<button class="btn btn-outline btn-sm" style="font-size:11px" onclick="adNav(null,'ad-zones')">View Zone →</button>`
+              : `<button class="btn btn-cyan btn-sm" style="font-size:11px" onclick="createZoneFromWaitlist('${zip}')">+ Create Zone</button>`}
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:5px">
@@ -8059,7 +8086,7 @@ async function dismissRunnerZoneRequests(zip){
 // Load zone waitlist badge on admin login
 async function loadZoneWaitlistBadge(){
   try {
-    const res = await _supa.from('homeowner_signups').select('id',{count:'exact'}).eq('status','waitlisted')
+    const res = await _supa.from('homeowner_signups').select('id',{count:'exact'}).in('status',['waitlisted','zone_assigned'])
     const count = res?.count || res?.data?.length || 0
     const badge = document.getElementById('zone-wl-badge')
     if(badge){ badge.textContent=count; badge.style.display=count?'inline':'none' }
