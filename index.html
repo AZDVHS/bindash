@@ -53,6 +53,22 @@ async function sendEmail(to, subject, html, type){
 // ─────────────────────────────────────────────────────────────
 // EMAIL TEMPLATES
 // ─────────────────────────────────────────────────────────────
+
+function renderEmailStopList(stopList){
+  const rows = stopList.slice(0,5).map((s,i)=>{
+    const border = i < Math.min(stopList.length,5)-1 ? 'border-bottom:1px solid #e2e8f0' : ''
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;'+border+'">' +
+      '<div style="width:22px;height:22px;border-radius:50%;background:#06d6a0;color:#07090f;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0">'+(i+1)+'</div>' +
+      '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:#0f172a">'+(s.name||'Homeowner')+'</div>' +
+      '<div style="font-size:11px;color:#64748b">'+(s.address||s.zip||'')+'</div></div>' +
+      '<div style="font-size:11px;color:#94a3b8">'+(s.service||'Recycling')+'</div></div>'
+  }).join('')
+  const more = stopList.length > 5 ? '<div style="font-size:12px;color:#94a3b8;text-align:center;padding-top:8px">+'+(stopList.length-5)+' more stops</div>' : ''
+  return '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:20px">' +
+    '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-weight:700;margin-bottom:10px">Stop Preview</div>' +
+    rows + more + '</div>'
+}
+
 const BRAND = {
   bg:'#07090f', surface:'#0f1420', border:'#1e2840',
   cyan:'#06d6a0', indigo:'#a5b4fc', text:'#f8fafc', sub:'#94a3b8',
@@ -74,7 +90,7 @@ function emailBase(body){
   .row{margin-bottom:12px}
   .row:last-child{margin-bottom:0}
   .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-weight:700;margin-bottom:3px}
-  .val{font-size:15px;font-weight:600;color:#f1f5f9}
+  .val{font-size:15px;font-weight:600;color:#0f172a}
   .btn{display:inline-block;background:${BRAND.cyan};color:#07090f!important;font-weight:800;font-size:15px;padding:14px 32px;border-radius:10px;text-decoration:none;margin:8px 0 24px;letter-spacing:-.01em}
   .code{font-family:'Courier New',monospace;font-size:30px;font-weight:900;color:${BRAND.cyan};letter-spacing:.12em;text-align:center;padding:12px 0 4px}
   hr{border:none;border-top:1px solid #e2e8f0;margin:28px 0}
@@ -168,17 +184,52 @@ const EMAIL = {
     <p>We'll email you once you're approved and added to the dispatch pool.</p>
   `),
 
-  batchOffer: (name, stops, earn, day, zone) => emailBase(`
-    <h1>New route offer, ${name}! 🌙</h1>
-    <p>A Bin Out batch is ready in your zone. You have <strong style="color:#f59e0b">25 minutes</strong> to accept before it's offered to other runners.</p>
-    <div class="card">
-      <div class="row"><div class="lbl">Zone</div><div class="val">${zone}</div></div>
-      <div class="row"><div class="lbl">Collection Day</div><div class="val">${day}</div></div>
-      <div class="row"><div class="lbl">Stops</div><div class="val">${stops} homeowners</div></div>
-      <div class="row"><div class="lbl">Estimated Earnings</div><div class="val" style="color:${BRAND.cyan};font-size:22px;font-weight:900">$${earn}</div></div>
+  batchOffer: (name, stops, earn, day, zone, stopList) => emailBase(`
+    <div style="background:#fffbeb;border:2px solid #f59e0b;border-radius:12px;padding:16px 20px;margin-bottom:24px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <span style="font-size:24px">🌙</span>
+        <div>
+          <div style="font-size:18px;font-weight:800;color:#92400e">New Route Offer, ${name}!</div>
+          <div style="font-size:13px;color:#b45309">You have <strong>25 minutes</strong> to accept before it goes to the next runner</div>
+        </div>
+      </div>
     </div>
-    <a href="${BRAND.url}" class="btn">Accept Route →</a>
-    <p style="font-size:13px;color:#475569">Offer expires in 25 minutes. If you don't accept it will be offered to the next available runner in your zone.</p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px;text-align:center">
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px 10px">
+        <div style="font-size:22px;font-weight:900;color:#15803d">$${earn}</div>
+        <div style="font-size:11px;color:#166534;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Earnings</div>
+      </div>
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 10px">
+        <div style="font-size:22px;font-weight:900;color:#1d4ed8">${stops}</div>
+        <div style="font-size:11px;color:#1e40af;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Stops</div>
+      </div>
+      <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:10px;padding:14px 10px">
+        <div style="font-size:22px;font-weight:900;color:#7e22ce">${day}</div>
+        <div style="font-size:11px;color:#6b21a8;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Day</div>
+      </div>
+    </div>
+
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:20px">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-weight:700;margin-bottom:10px">Route Details</div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:13px;color:#475569">Zone</span>
+        <span style="font-size:13px;font-weight:700;color:#0f172a">${zone}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:13px;color:#475569">Estimated miles</span>
+        <span style="font-size:13px;font-weight:700;color:#0f172a">~${Math.max(1,(stops*0.4)).toFixed(1)} mi</span>
+      </div>
+      <div style="display:flex;justify-content:space-between">
+        <span style="font-size:13px;color:#475569">Est. time</span>
+        <span style="font-size:13px;font-weight:700;color:#0f172a">~${Math.max(20,stops*12)} min</span>
+      </div>
+    </div>
+
+    ${stopList && stopList.length ? renderEmailStopList(stopList) : ''}}
+
+    <a href="https://bindash-eight.vercel.app" style="display:block;background:#06d6a0;color:#07090f;font-weight:800;font-size:16px;padding:16px 32px;border-radius:12px;text-decoration:none;text-align:center;margin-bottom:12px">✅ Accept Route →</a>
+    <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0">Offer expires in 25 minutes · Log in to accept or decline</p>
   `),
 
   waitlistReminder: (name, zip, zone) => emailBase(`
@@ -6714,7 +6765,7 @@ function adGenerateBatches(){
         binInUnlock: unlock.time, unlockMethod: unlock.method,
         hasSplit,
       })
-      if(_nb_runner?.email) sendEmail(_nb_runner.email, 'New route: '+_nb_stops+' stops · $'+_nb_earn+' available', EMAIL.batchOffer(_nb_runner.name.split(' ')[0], _nb_stops, _nb_earn, dayFil, zoneName), 'batch_offer')
+      if(_nb_runner?.email) sendEmail(_nb_runner.email, 'New route: '+_nb_stops+' stops · $'+_nb_earn+' available', EMAIL.batchOffer(_nb_runner.name.split(' ')[0], _nb_stops, _nb_earn, dayFil, zoneName, chunk.map(h=>({name:h.name,address:h.address||h.zip,service:h.service||'Recycling'}))), 'batch_offer')
     }
   })
 
