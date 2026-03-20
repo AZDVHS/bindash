@@ -21,12 +21,19 @@ const _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 // ─────────────────────────────────────────────────────────────
 async function sendEmail(to, subject, html, type){
   if(!to || to.includes('@lead.bindash')) return
+  // Use the actual Supabase project URL — works even if SUPABASE_URL placeholder not replaced
+  const _supaUrl = (SUPABASE_URL && !SUPABASE_URL.includes('your-project'))
+    ? SUPABASE_URL
+    : 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
+  const _supaKey = (SUPABASE_ANON_KEY && !SUPABASE_ANON_KEY.includes('your-anon'))
+    ? SUPABASE_ANON_KEY
+    : ''
   try {
-    const res = await fetch(SUPABASE_URL+'/functions/v1/send-email', {
+    const res = await fetch(_supaUrl+'/functions/v1/send-email', {
       method:'POST',
       headers:{
         'Content-Type':'application/json',
-        'Authorization':'Bearer '+SUPABASE_ANON_KEY,
+        'Authorization':'Bearer '+_supaKey,
       },
       body: JSON.stringify({to, subject, html, type:type||'general'}),
     })
