@@ -7521,6 +7521,7 @@ function saveCreateZone(){
     id:'z-'+Date.now(), name,
     city: city || zips[0]+' area',
     zip, zips,
+    area: 'A1',   // default area suffix — becomes A2, A3 on splits
     status: isPilot ? 'live' : statusRaw,
     pilot: isPilot, overridden: isPilot || statusRaw==='live',
     runners:0, capacity: parseInt(document.getElementById('cz-cap')?.value)||20,
@@ -7573,10 +7574,14 @@ function convertToPilot(zId){
 // Generate short label: GLD-85301 or SRP-853 style
 function zoneLabel(z){
   if(!z) return '—'
-  const city = (z.city||z.name||'').toUpperCase()
-  const abbr = city.slice(0,3) // first 3 chars of city
-  const zip  = (z.zips?.[0] || z.zip || '').slice(0,5)
-  return abbr + (zip ? '-'+zip : '')
+  // Format: GLE-85301-A1 (city abbrev + ZIP + area suffix)
+  const cityStr = (z.city||z.name||'').replace(/[^a-zA-Z ]/g,'').trim().toUpperCase()
+  const words   = cityStr.split(' ').filter(Boolean)
+  // 3-letter city abbreviation: first 3 letters of first word
+  const abbr    = words[0]?.slice(0,3) || 'ZZZ'
+  const zip     = (z.zips?.[0] || z.zip || '').slice(0,5)
+  const area    = z.area || 'A1'  // default area suffix
+  return abbr + (zip ? '-'+zip : '') + '-' + area
 }
 
 // Split a zone's ZIP codes into two zones
@@ -7584,11 +7589,8 @@ function showSplitZone(zId){
   const z = ADMIN_ZONES.find(x=>x.id===zId)
   if(!z) return
   const zips = z.zips?.length ? z.zips : [z.zip]
-  if(zips.length < 2){
-    showToast('Add more ZIPs to this zone before splitting','info')
-    showEditZone(zId)
-    return
-  }
+  // Allow splitting even with single ZIP — creates two area zones (A1 + A2)
+  // with the same ZIP but different area suffixes for route management
   const half = Math.ceil(zips.length/2)
   const zipOpts = zips.map((zip,i)=>`
     <label style="display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:6px;padding:7px 10px;cursor:pointer;font-size:13px">
@@ -7638,9 +7640,16 @@ async function confirmSplitZone(zId){
   dbSaveZone(z)
 
   // Create zone B
+  // Determine next area suffix (A1→A2, A2→A3, etc)
+  const currentArea = z.area || 'A1'
+  const areaNum     = parseInt(currentArea.replace(/[^0-9]/g,'')) || 1
+  const nextArea    = 'A' + (areaNum + 1)
+  // Keep existing zone as A1 (or current), new zone gets next suffix
+  z.area = currentArea
   const zoneB = {
     id:'z-split-'+Date.now(), name:nameB,
     city: z.city, zip: zipsB[0].slice(0,3), zips: zipsB,
+    area: nextArea,
     status: z.status, pilot: z.pilot, overridden: z.overridden,
     runners:0, capacity:z.capacity, homeowners:0, threshold:z.threshold,
     collection:[], assignedRunner:null, stopOrder:[], notes:'Split from '+nameA,
@@ -7671,6 +7680,7 @@ function zoneToRow(z){
     homeowners:      z.homeowners || 0,
     runners:         z.runners || 0,
     notes:           z.notes || '',
+    area:            z.area || 'A1',
     updated_at:      new Date().toISOString(),
   }
 }
@@ -7704,6 +7714,7 @@ async function loadZonesFromSupabase(){
         city:            row.label || '',   // use label as city fallback for display
         zip:             row.zip_prefix || '',
         zips:            row.zip_codes || (row.zip_prefix ? [row.zip_prefix] : []),
+        area:            row.area || 'A1',
         status:          row.status || 'waitlist',
         pilot:           row.pilot || false,
         overridden:      row.overridden || false,
@@ -8587,12 +8598,19 @@ async function renderZoneWaitlist(){
     data.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
 
     el.innerHTML = Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
-      const existingZone = ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip.slice(0,3))
+      const existingZone = ADMIN_ZONES.find(z=>
+        z.zips?.includes(zip) ||
+        z.zips?.some(zz=>zz.slice(0,3)===zip.slice(0,3)) ||
+        z.zip===zip ||
+        z.zip===zip.slice(0,3)
+      )
       const runnerInterest = RUNNERS.filter(r=>r.zip===zip||r.zip?.slice(0,3)===zip.slice(0,3)).length
       const waitingList = group.filter(r=>r.status==='waitlisted')
       const notifiedList = group.filter(r=>r.status==='zone_assigned')
-      const statusLabel = notifiedList.length && existingZone
-        ? `<span style="color:#22c55e;font-size:11px;font-weight:600">✅ Zone active — ${notifiedList.length} notified, awaiting confirmation</span>`
+      const statusLabel = existingZone
+        ? (notifiedList.length
+            ? `<span style="color:#22c55e;font-size:11px;font-weight:600">✅ Zone ${existingZone.name} (${zoneLabel(existingZone)}) active — ${notifiedList.length} notified, awaiting confirmation</span>`
+            : `<span style="color:#f59e0b;font-size:11px;font-weight:600">⚠️ Zone ${existingZone.name} exists — click to notify waitlisted homeowners</span>`)
         : `<span style="color:var(--muted);font-size:11px">${waitingList.length} waiting · no zone yet</span>`
       return `<div class="card" style="margin-bottom:0">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
@@ -8668,7 +8686,12 @@ async function renderRunnerZoneRequests(){
     data.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
 
     el.innerHTML = Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
-      const existingZone = ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip.slice(0,3))
+      const existingZone = ADMIN_ZONES.find(z=>
+        z.zips?.includes(zip) ||
+        z.zips?.some(zz=>zz.slice(0,3)===zip.slice(0,3)) ||
+        z.zip===zip ||
+        z.zip===zip.slice(0,3)
+      )
       const hwInterest = WAITLIST_SIGNUPS.filter(s=>s.zip===zip||s.zip?.slice(0,3)===zip.slice(0,3)).length
       return `<div class="card" style="margin-bottom:0">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
