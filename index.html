@@ -6697,7 +6697,13 @@ function adGenerateBatches(){
       const _nb_stops = chunk.length
       const _nb_earn = earn
       generatedBatches.push({
-        id: 'BATCH-'+String(batchNum++).padStart(3,'0'),
+        id: (()=>{
+          const _zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+          const _abbr = zoneLabel(_zone).split('-').slice(0,2).join('-') // e.g. GLE-85305
+          const _now  = new Date()
+          const _mmdd = String(_now.getMonth()+1).padStart(2,'0') + String(_now.getDate()).padStart(2,'0')
+          return _abbr + '-' + _mmdd + '-' + String(batchNum++).padStart(3,'0')
+        })(),
         zoneId, zoneName, day: dayFil,
         stops: chunk,
         runner: bestRunner || null,
@@ -7477,6 +7483,17 @@ function showCreateZone(){
 
 
 // ── NOTIFY ALL WAITLISTED HWs FOR A ZIP when zone is created ──
+
+async function notifyZipFromWaitlist(zip, zoneId){
+  const zone = ADMIN_ZONES.find(z=>z.id===zoneId) || ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip.slice(0,3))
+  if(!zone){ showToast('Zone not found','err'); return }
+  showToast('Notifying homeowners in ZIP '+zip+'...','info')
+  const count = await notifyWaitlistForZip(zip, zone)
+  showToast(count+' homeowner'+(count!==1?'s':'')+' notified for ZIP '+zip+' ✅','ok')
+  renderZoneWaitlist()
+  loadZoneWaitlistBadge()
+}
+
 async function notifyWaitlistForZip(zip, zone){
   try {
     // 1. Update homeowner_signups: waitlisted → zone_assigned
@@ -8630,7 +8647,8 @@ async function renderZoneWaitlist(){
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${existingZone
-              ? `<button class="btn btn-outline btn-sm" style="font-size:11px" onclick="adNav(null,'ad-zones')">View Zone →</button>`
+              ? `<button class="btn btn-cyan btn-sm" style="font-size:11px" onclick="notifyZipFromWaitlist('${zip}','${existingZone?.id}')">📧 Notify Waitlist</button>
+                <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="adNav(null,'ad-zones')">View Zone →</button>`
               : `<button class="btn btn-cyan btn-sm" style="font-size:11px" onclick="createZoneFromWaitlist('${zip}')">+ Create Zone</button>`}
           </div>
         </div>
