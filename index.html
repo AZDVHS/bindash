@@ -8013,7 +8013,7 @@ async function renderZoneWaitlist(){
               : `<span style="color:var(--muted);font-size:10px">${new Date(row.created_at).toLocaleDateString()}</span>`
             const rowContact = row.phone || row.email || '—'
             return `<div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:12px">
-              <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${ini}</div>
+              <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
               <div style="flex:1"><strong>${row.first_name||''} ${row.last_name||''}</strong>${tag}${notifiedTag} · ${rowContact}</div>
               ${sinceLabel}
               <div style="display:flex;gap:4px;margin-left:6px">
