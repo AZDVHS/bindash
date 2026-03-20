@@ -15,6 +15,170 @@ const SUPABASE_URL = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
 const SUPABASE_ANON_KEY = 'sb_publishable_PzQNU1g9t7nH_c8GrK37sQ_2OocnlNQ'
 const _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+
+// ─────────────────────────────────────────────────────────────
+// EMAIL SERVICE — calls Supabase Edge Function → Resend API
+// ─────────────────────────────────────────────────────────────
+async function sendEmail(to, subject, html, type){
+  if(!to || to.includes('@lead.bindash')) return
+  try {
+    const res = await fetch(SUPABASE_URL+'/functions/v1/send-email', {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':'Bearer '+SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({to, subject, html, type:type||'general'}),
+    })
+    const d = await res.json()
+    if(d.error) console.warn('[BinDash] Email error:', d.error)
+    else console.log('[BinDash] Email sent:', type, to)
+  } catch(e){ console.warn('[BinDash] Email failed:', String(e?.message||e)) }
+}
+
+// ─────────────────────────────────────────────────────────────
+// EMAIL TEMPLATES
+// ─────────────────────────────────────────────────────────────
+const BRAND = {
+  bg:'#07090f', surface:'#0f1420', border:'#1e2840',
+  cyan:'#06d6a0', indigo:'#a5b4fc', text:'#f8fafc', sub:'#94a3b8',
+  url:'https://bindash-eight.vercel.app',
+}
+
+function emailBase(body){
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;padding:0;background:${BRAND.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,sans-serif}
+  .wrap{max-width:560px;margin:0 auto;padding:36px 24px}
+  .logo{font-size:20px;font-weight:900;color:${BRAND.cyan};letter-spacing:-.02em;margin-bottom:32px}
+  .logo span{color:${BRAND.indigo}}
+  h1{font-size:22px;font-weight:800;color:${BRAND.text};margin:0 0 14px;line-height:1.3}
+  p{font-size:15px;line-height:1.7;color:${BRAND.sub};margin:0 0 16px}
+  .card{background:${BRAND.surface};border:1px solid ${BRAND.border};border-radius:12px;padding:18px 22px;margin:18px 0}
+  .row{margin-bottom:12px}
+  .row:last-child{margin-bottom:0}
+  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#475569;font-weight:700;margin-bottom:3px}
+  .val{font-size:15px;font-weight:600;color:${BRAND.text}}
+  .btn{display:inline-block;background:${BRAND.cyan};color:#07090f!important;font-weight:800;font-size:15px;padding:14px 32px;border-radius:10px;text-decoration:none;margin:8px 0 24px;letter-spacing:-.01em}
+  .code{font-family:'Courier New',monospace;font-size:30px;font-weight:900;color:${BRAND.cyan};letter-spacing:.12em;text-align:center;padding:12px 0 4px}
+  hr{border:none;border-top:1px solid ${BRAND.border};margin:28px 0}
+  .foot{font-size:12px;color:#475569;line-height:1.8}
+  .tag{display:inline-block;background:rgba(6,214,160,.1);color:${BRAND.cyan};border-radius:6px;padding:3px 10px;font-size:12px;font-weight:700}
+</style></head>
+<body><div class="wrap">
+  <div class="logo">BIN<span>DASH</span></div>
+  ${body}
+  <hr>
+  <p class="foot">BinDash &middot; Smart Bin Collection &middot; Phoenix Metro Area<br>
+  You received this because you signed up for BinDash. &copy; 2026 BinDash.</p>
+</div></body></html>`
+}
+
+const EMAIL = {
+
+  leadConfirm: (name, zip) => emailBase(`
+    <h1>You're on the list for ZIP ${zip}! 🎉</h1>
+    <p>Hi ${name}, we've saved your spot. As soon as a runner signs up in your area and we launch service, you'll be the first to know — no payment needed.</p>
+    <div class="card"><div class="row"><div class="lbl">Your ZIP</div><div class="val">${zip}</div></div>
+    <div class="row"><div class="lbl">Status</div><div class="val"><span class="tag">Waitlisted</span></div></div></div>
+    <p>We'll reach out the moment service is available in your neighborhood.</p>
+  `),
+
+  signupPending: (name, day, zone) => emailBase(`
+    <h1>Application received, ${name}! ⏳</h1>
+    <p>Thanks for signing up for BinDash. Our team will review your details and get back to you within <strong style="color:${BRAND.text}">24–48 hours</strong>.</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Collection Day</div><div class="val">${day||'To be confirmed'}</div></div>
+      <div class="row"><div class="lbl">Zone</div><div class="val">${zone||'Pending assignment'}</div></div>
+      <div class="row"><div class="lbl">Status</div><div class="val"><span class="tag">Pending Review</span></div></div>
+    </div>
+    <p>We'll email you once you're approved and your first collection is scheduled.</p>
+  `),
+
+  hwApproved: (name, day, zone, runner) => emailBase(`
+    <h1>You're all set, ${name}! ✅</h1>
+    <p>Your BinDash account is <strong style="color:${BRAND.cyan}">active</strong>. Your bins will be handled automatically on your collection day — just put them out the night before.</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Collection Day</div><div class="val">${day}</div></div>
+      <div class="row"><div class="lbl">Service Zone</div><div class="val">${zone}</div></div>
+      ${runner ? '<div class="row"><div class="lbl">Your Runner</div><div class="val">'+runner+'</div></div>' : ''}
+    </div>
+    <a href="${BRAND.url}" class="btn">View My Dashboard →</a>
+    <p>Your runner will move your bins to the curb before pickup and return them afterward. First charge occurs after your first confirmed collection.</p>
+  `),
+
+  hwRejected: (name) => emailBase(`
+    <h1>Update on your application</h1>
+    <p>Hi ${name}, unfortunately we weren't able to approve your BinDash application at this time. This may be due to service availability in your area or account verification.</p>
+    <p>If you believe this is an error or have questions, please reply to this email and we'll take another look.</p>
+  `),
+
+  zoneActivated: (name, zip, zone) => emailBase(`
+    <h1>BinDash is now in your area! 🚀</h1>
+    <p>Hi ${name}, great news — we've just launched service in <strong style="color:${BRAND.text}">ZIP ${zip}</strong>. Log back in to confirm your service details and get started.</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Your Zone</div><div class="val">${zone}</div></div>
+      <div class="row"><div class="lbl">Next Step</div><div class="val">Log in and confirm your service</div></div>
+    </div>
+    <a href="${BRAND.url}" class="btn">Confirm My Service →</a>
+    <p style="font-size:13px;color:#475569">Takes 2 minutes. No payment until your first collection is confirmed.</p>
+  `),
+
+  runnerInvite: (name, code) => emailBase(`
+    <h1>Your BinDash invite code is ready 🎟️</h1>
+    <p>Hi ${name}, your interest in becoming a BinDash runner has been reviewed. Use your personal invite code below to complete enrollment.</p>
+    <div class="card" style="text-align:center">
+      <div class="lbl" style="text-align:center">Your Invite Code</div>
+      <div class="code">${code}</div>
+    </div>
+    <a href="${BRAND.url}" class="btn">Enter My Code →</a>
+    <p style="font-size:13px;color:#475569">This code is unique to you — please don't share it.</p>
+  `),
+
+  runnerApproved: (name, zone) => emailBase(`
+    <h1>Welcome to BinDash, ${name}! 🚐</h1>
+    <p>Your runner application has been approved. You're now active in the dispatch pool and will start receiving route offers for your zone.</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Service Zone</div><div class="val">${zone||'Assigned zone'}</div></div>
+      <div class="row"><div class="lbl">Status</div><div class="val"><span class="tag">Active</span></div></div>
+    </div>
+    <a href="${BRAND.url}" class="btn">Go to My Dashboard →</a>
+    <p>When a route is ready, you'll receive a batch offer with stop details and estimated earnings. You'll have <strong style="color:${BRAND.text}">25 minutes</strong> to accept before it goes to other runners.</p>
+  `),
+
+  runnerAppReceived: (name) => emailBase(`
+    <h1>Application received, ${name}! 🚐</h1>
+    <p>Thanks for applying to become a BinDash runner. We'll review your application — including your service area and background check consent — within <strong style="color:${BRAND.text}">24–48 hours</strong>.</p>
+    <p>We'll email you once you're approved and added to the dispatch pool.</p>
+  `),
+
+  batchOffer: (name, stops, earn, day, zone) => emailBase(`
+    <h1>New route offer, ${name}! 🌙</h1>
+    <p>A Bin Out batch is ready in your zone. You have <strong style="color:#f59e0b">25 minutes</strong> to accept before it's offered to other runners.</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Zone</div><div class="val">${zone}</div></div>
+      <div class="row"><div class="lbl">Collection Day</div><div class="val">${day}</div></div>
+      <div class="row"><div class="lbl">Stops</div><div class="val">${stops} homeowners</div></div>
+      <div class="row"><div class="lbl">Estimated Earnings</div><div class="val" style="color:${BRAND.cyan};font-size:22px;font-weight:900">$${earn}</div></div>
+    </div>
+    <a href="${BRAND.url}" class="btn">Accept Route →</a>
+    <p style="font-size:13px;color:#475569">Offer expires in 25 minutes. If you don't accept it will be offered to the next available runner in your zone.</p>
+  `),
+
+  waitlistReminder: (name, zip, zone) => emailBase(`
+    <h1>Still interested in BinDash? 👋</h1>
+    <p>Hi ${name}, we launched service in <strong style="color:${BRAND.text}">ZIP ${zip}</strong> a little while ago but haven't heard back from you yet.</p>
+    <div class="card"><div class="row"><div class="lbl">Zone Ready</div><div class="val">${zone}</div></div></div>
+    <a href="${BRAND.url}" class="btn">Complete My Signup →</a>
+    <p style="font-size:13px;color:#475569">Takes 2 minutes. No payment until your first collection is confirmed. If you're no longer interested, just ignore this email.</p>
+  `),
+
+}
+// END EMAIL TEMPLATES
+
+
 // ── SUPABASE HELPER — centralised error handler ──
 async function dbInsert(table, payload){
   const { data, error } = await _supa.from(table).insert([payload]).select()
@@ -2290,6 +2454,10 @@ async function submitServiceConfirmation(){
     }).eq('email', window._confirmEmail || currentUser?.email)
 
     console.log('[BinDash] Service confirmation submitted ✅')
+
+    const _sc_day = document.getElementById('confirm-day')?.value||'Tuesday'
+    const _sc_zone = ADMIN_ZONES.find(z=>z.id===window._confirmZoneId)?.name||'your zone'
+    sendEmail(window._confirmEmail||currentUser?.email, 'Your BinDash service request is under review', EMAIL.signupPending(currentUser?.first_name||'there', _sc_day, _sc_zone), 'confirm_pending')
     if(btn){ btn.disabled=false; btn.textContent='✅ Confirm & Request Service' }
     go('S-hw-pending')
   } catch(err){
@@ -2802,7 +2970,10 @@ async function submitLead(){
   if(zipDisplay) zipDisplay.textContent = 'ZIP ' + zip
   go('S-hw-waitlist')
 
-  if(!saveErr) showToast('You\'re on the list! We\'ll notify you when BinDash launches in ZIP ' + zip + ' \uD83C\uDF89','ok')
+  if(!saveErr){
+    showToast('You\'re on the list for ZIP '+zip+' \uD83C\uDF89','ok')
+    if(em && !em.includes('@lead.bindash')) sendEmail(em, 'You\'re on the BinDash list for ZIP '+zip, EMAIL.leadConfirm(fn||'there', zip), 'lead_confirm')
+  }
 }
 
 async function hSubmit(){
@@ -2973,6 +3144,11 @@ async function rSubmit(){
   }
 
   if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Submit Application' }
+
+  // Email confirmation
+  const _rn_em = document.getElementById('r-em')?.value?.trim()
+  const _rn_fn = document.getElementById('r-fn')?.value?.trim()||'there'
+  if(_rn_em) sendEmail(_rn_em, 'BinDash runner application received', EMAIL.runnerAppReceived(_rn_fn), 'runner_app_received')
 
   // If runner requested a new zone for their ZIP, save it
   const zipRequestCheck = document.getElementById('r-zip-request-check')
@@ -5282,6 +5458,7 @@ async function routeAfterSignup(appData){
       console.log('[BinDash] Homeowner pending with zone_id:', matchedZone?.id || 'none')
     } catch(err){ console.warn('[BinDash] Pending update failed:', err) }
 
+    sendEmail(em, 'Your BinDash application is under review', EMAIL.signupPending(fn, document.getElementById('h-day')?.value||'Tuesday', window._hwMatchedZone?.name||'Pending assignment'), 'signup_pending')
     go('S-hw-pending')
   }
 }
@@ -5518,6 +5695,11 @@ async function confirmCreateZoneFromWaitlist(zip){
     // Remove from in-memory waitlist
     WAITLIST_SIGNUPS.forEach(s=>{ if(s.zip===zip && s.status==='waitlist') s.status='zone_assigned' })
     console.log('[BinDash] Moved', movedCount, 'to zone_assigned for ZIP', zip)
+
+    for(const row of rows){
+      const _cemail = row.email && !row.email.includes('@lead.bindash') ? row.email : null
+      if(_cemail) sendEmail(_cemail, 'BinDash is now in your area! Launch in ZIP '+zip, EMAIL.zoneActivated(row.first_name||'there', zip, newZone.name), 'zone_activated')
+    }
   } catch(e){ console.warn('[BinDash] Zone assign failed:', String(e?.message||e)) }
 
   updateWaitlistBadge(); renderWaitlistPage(); closeM()
@@ -5721,6 +5903,8 @@ async function approveRunner(appId){
   if(btn){ btn.disabled=false; btn.textContent='✅ Approve' }
   renderPendingRunnerList(); renderRunnerList(); syncZoneData(); updateOverviewCounts()
   showToast(app.name+' approved ✅ — added to runner pool','ok')
+  const _rnZoneName = ADMIN_ZONES.find(z=>z.id===zoneId)?.name||'Your zone'
+  sendEmail(app.email, 'Welcome to BinDash! Your runner account is active', EMAIL.runnerApproved(app.name.split(' ')[0], _rnZoneName), 'runner_approved')
   // Reload from Supabase to confirm status synced and clear pending badge
   setTimeout(()=>{ loadRunnersFromSupabase(); loadRunnerApplicationsFromSupabase() }, 800)
 }
@@ -5895,6 +6079,8 @@ function approveHW(appId, directZoneId){
   })()
 
   showToast(app.name+' approved ✅ '+runnerNote,'ok')
+  const _approveZoneName = ADMIN_ZONES.find(z=>z.id===app.zoneId)?.name||'Your zone'
+  sendEmail(app.email, 'Your BinDash account is active! ✅', EMAIL.hwApproved(app.name.split(' ')[0], app.day||'Tuesday', _approveZoneName, autoRunner?.name||null), 'hw_approved')
 
   // Reload from Supabase to sync and remove from pending
   setTimeout(()=>{ loadHomeownersFromSupabase(); loadSignupsFromSupabase() }, 1000)
@@ -5913,6 +6099,8 @@ async function rejectHW(appId, name){
     }).eq('email', app.email)
   } catch(err){ console.warn('[BinDash] Reject save failed:', err) }
   showToast(name+"'s application rejected",'err')
+  const _rejApp = PENDING_HOMEOWNERS.find(x=>x.id===appId)||PENDING_HOMEOWNERS.find(x=>x.name===name)
+  if(_rejApp?.email) sendEmail(_rejApp.email, 'Update on your BinDash application', EMAIL.hwRejected(_rejApp.name?.split(' ')[0]||name), 'hw_rejected')
 }
 
 function editPendingHW(appId){
@@ -6129,6 +6317,9 @@ function adGenerateBatches(){
       const earn = (chunk.length * 3.25).toFixed(2)
       const isLoyal = bestRunner && bestRunner.id === chunk[0].assignedRunner
 
+      const _nb_runner = bestRunner
+      const _nb_stops = chunk.length
+      const _nb_earn = earn
       generatedBatches.push({
         id: 'BATCH-'+String(batchNum++).padStart(3,'0'),
         zoneId, zoneName, day: dayFil,
@@ -6141,6 +6332,7 @@ function adGenerateBatches(){
         binInUnlock: unlock.time, unlockMethod: unlock.method,
         hasSplit,
       })
+      if(_nb_runner?.email) sendEmail(_nb_runner.email, 'New route: '+_nb_stops+' stops · $'+_nb_earn+' available', EMAIL.batchOffer(_nb_runner.name.split(' ')[0], _nb_stops, _nb_earn, dayFil, zoneName), 'batch_offer')
     }
   })
 
@@ -8142,7 +8334,15 @@ async function sendWaitlistReminder(id, contact){
     await _supa.from('homeowner_signups').update({
       updated_at: new Date().toISOString()
     }).eq('id', id)
-    showToast('Reminder logged for '+contact+' ✅ (connect email service to send automatically)','ok')
+    showToast('Reminder sent to '+contact+' ✅','ok')
+    try {
+      const _rr = await _supa.from('homeowner_signups').select('first_name,email,zip_code,zone_id').eq('id',id).single()
+      const _rd = _rr?.data
+      if(_rd?.email && !_rd.email.includes('@lead.bindash')){
+        const _rzn = ADMIN_ZONES.find(z=>z.id===_rd.zone_id)?.name||'your area'
+        sendEmail(_rd.email, 'Reminder: Complete your BinDash signup', EMAIL.waitlistReminder(_rd.first_name||'there', _rd.zip_code, _rzn), 'waitlist_reminder')
+      }
+    } catch(e){}
     renderZoneWaitlist()
   } catch(e){ showToast('Could not log reminder','err') }
 }
@@ -8289,6 +8489,8 @@ async function approveRunnerRequest(id, email, name){
     // Reload the list to show the code
     await loadRunnerRequests()
     showToast('Code generated for ' + (name||'runner') + ' ✅', 'ok')
+
+    if(email) sendEmail(email, 'Your BinDash runner invite code', EMAIL.runnerInvite(name?.split(' ')[0]||'there', code), 'runner_invite')
     // In production: also send email via your email service
     // e.g. POST to /api/send-invite { email, name, code }
   } catch(err){
