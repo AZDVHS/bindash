@@ -3587,7 +3587,7 @@ function renderRunnerCard(r){
     <div class="cc-head">
       <div style="display:flex;align-items:center;gap:10px">
         <div class="cc-av" style="background:${r.color}">${r.initials}</div>
-        <div><div class="cc-nm">${r.name}</div><div class="cc-id">${r.id} · ${r.email}</div></div>
+        <div><div class="cc-nm">${r.name}</div><div class="cc-id">${r.email}${r.zip ? " · ZIP " + r.zip : ""}</div></div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <span class="badge" style="background:${bg};color:${col}">${lbl}</span>
@@ -7036,9 +7036,11 @@ function renderAdminZones(){
     const sc = z.status==='live'&&!z.pilot?'#22c55e':z.pilot?'#a5b4fc':z.status==='waitlist'?'#f59e0b':'#6b7280'
     const sl = z.status==='live'&&!z.pilot?'Live':z.pilot?'Pilot':z.status==='waitlist'?'Waitlist':'Inactive'
     const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
-    const hwCount = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip)||zips.some(zp=>h.zip?.slice(0,3)===zp.slice(0,3)))).length
-    const rnList  = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id)||zips.includes(r.zip)||zips.some(zp=>r.zip?.slice(0,3)===zp.slice(0,3)))
-    const wlCount = WAITLIST_SIGNUPS.filter(s=>s.status==='waitlist'&&zips.some(z2=>s.zip===z2||s.zip?.slice(0,3)===z2.slice(0,3))).length
+    const hwCount = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))).length
+    const rnList  = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id)||zips.includes(r.zip))
+    const rnAssigned = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))&&h.assignedRunner).map(h=>h.assignedRunner)
+    const uniqueAssigned = [...new Set(rnAssigned)]
+    const wlCount = WAITLIST_SIGNUPS.filter(s=>s.status==='waitlist'&&zips.some(z2=>s.zip===z2)).length
     const days    = [...new Set(HOMEOWNERS.filter(h=>h.zoneId===z.id||zips.includes(h.zip)).map(h=>h.day).filter(d=>d&&d!=='—'))].join(', ')
     const pct     = z.threshold>0 ? Math.min(100,Math.round((hwCount/z.threshold)*100)) : 0
     const zipTags = zips.map(zip=>`<span style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.25);border-radius:6px;padding:2px 8px;font-family:'DM Mono',monospace;font-size:12px;font-weight:600;color:#a5b4fc">${zip}</span>`).join('')
@@ -7063,7 +7065,7 @@ function renderAdminZones(){
           <!-- Stats -->
           <div style="display:flex;gap:16px;font-size:12px;color:var(--sub);flex-wrap:wrap;margin-bottom:8px">
             <span>🏠 <strong style="color:var(--text)">${hwCount}</strong> homeowners</span>
-            <span>🚐 <strong style="color:var(--text)">${rnList.length}</strong> runner${rnList.length!==1?'s':''}</span>
+            <span>🚐 <strong style="color:var(--text)">${rnList.length}</strong> enrolled${uniqueAssigned.length ? ' · <strong style="color:#22c55e">'+uniqueAssigned.length+' assigned</strong>' : ''}</span>
             ${wlCount ? `<span>⏳ <strong style="color:#f59e0b">${wlCount}</strong> waitlisted</span>` : ''}
             ${days ? `<span>📅 <strong style="color:var(--text)">${days}</strong></span>` : ''}
             <span style="color:var(--muted)">Cap: ${hwCount}/${z.capacity}</span>
@@ -7574,13 +7576,18 @@ function convertToPilot(zId){
 // Generate short label: GLD-85301 or SRP-853 style
 function zoneLabel(z){
   if(!z) return '—'
-  // Format: GLE-85301-A1 (city abbrev + ZIP + area suffix)
-  const cityStr = (z.city||z.name||'').replace(/[^a-zA-Z ]/g,'').trim().toUpperCase()
-  const words   = cityStr.split(' ').filter(Boolean)
-  // 3-letter city abbreviation: first 3 letters of first word
-  const abbr    = words[0]?.slice(0,3) || 'ZZZ'
-  const zip     = (z.zips?.[0] || z.zip || '').slice(0,5)
-  const area    = z.area || 'A1'  // default area suffix
+  // Format: GLE-85301-A1 (city 3-letter abbrev + ZIP + area suffix)
+  // Use zone name for abbrev — skip generic words like 'area', 'zone', 'old', 'new', 'east', 'west', 'north', 'south'
+  const skipWords = new Set(['AREA','ZONE','OLD','NEW','THE','AND','OF'])
+  const nameStr  = (z.name||z.city||'').replace(/[^a-zA-Z ]/g,'').trim().toUpperCase()
+  const cityStr  = (z.city||'').replace(/[^a-zA-Z ]/g,'').trim().toUpperCase()
+  // Prefer city field; fall back to zone name words, skip generic words
+  const nameWords = nameStr.split(' ').filter(w=>w.length>1&&!skipWords.has(w))
+  const cityWords = cityStr.split(' ').filter(w=>w.length>1&&!skipWords.has(w))
+  const words = cityWords.length ? cityWords : nameWords
+  const abbr  = (words[0]?.slice(0,3) || nameStr.slice(0,3) || 'ZZZ')
+  const zip   = (z.zips?.[0] || z.zip || '').slice(0,5)
+  const area  = z.area || 'A1'
   return abbr + (zip ? '-'+zip : '') + '-' + area
 }
 
@@ -8579,7 +8586,7 @@ async function renderZoneWaitlist(){
   try {
     let data = [], err = null
     try {
-      const res = await _supa.from('homeowner_signups').select('*').in('status',['waitlisted','zone_assigned']).order('created_at',{ascending:false})
+      const res = await _supa.from('homeowner_signups').select('*').eq('status','waitlisted').order('created_at',{ascending:false})
       data = res?.data || []
       err  = res?.error?.message || null
     } catch(e){ err = String(e?.message||e) }
@@ -8744,7 +8751,7 @@ async function dismissRunnerZoneRequests(zip){
 // Load zone waitlist badge on admin login
 async function loadZoneWaitlistBadge(){
   try {
-    const res = await _supa.from('homeowner_signups').select('id',{count:'exact'}).in('status',['waitlisted','zone_assigned'])
+    const res = await _supa.from('homeowner_signups').select('id',{count:'exact'}).eq('status','waitlisted')
     const count = res?.count || res?.data?.length || 0
     const badge = document.getElementById('zone-wl-badge')
     if(badge){ badge.textContent=count; badge.style.display=count?'inline':'none' }
