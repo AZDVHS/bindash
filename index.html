@@ -175,6 +175,69 @@ const EMAIL = {
     <p style="font-size:13px;color:#475569">Takes 2 minutes. No payment until your first collection is confirmed. If you're no longer interested, just ignore this email.</p>
   `),
 
+  // ── Collection / route notifications ──────────────────────
+  binOutComplete: (name, runnerName, stopCount, day) => emailBase(`
+    <h1>Bins are at the curb, ${name}! 🌙</h1>
+    <p>Your runner <strong style="color:${BRAND.text}">${runnerName}</strong> has placed your bins at the curb and they're ready for collection.</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Collection Day</div><div class="val">${day}</div></div>
+      <div class="row"><div class="lbl">Completed</div><div class="val">${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div></div>
+    </div>
+    <p>Your bins will be retrieved after the truck has passed. No action needed — we'll email you when they're back.</p>
+  `),
+
+  binInComplete: (name, runnerName) => emailBase(`
+    <h1>Bins are back, ${name}! ☀️</h1>
+    <p>Your runner <strong style="color:${BRAND.text}">${runnerName}</strong> has returned your bins to their storage spot.</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Status</div><div class="val" style="color:${BRAND.cyan}">✅ All done for today</div></div>
+      <div class="row"><div class="lbl">Completed</div><div class="val">${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div></div>
+    </div>
+    <p>See you next collection! Log in anytime to check your schedule or update your preferences.</p>
+    <a href="${BRAND.url}" class="btn">View My Dashboard →</a>
+  `),
+
+  routeComplete: (name, stopCount, zone, earnings) => emailBase(`
+    <h1>Route complete, ${name}! 🎉</h1>
+    <p>Great work — you've completed all stops on today's route.</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Zone</div><div class="val">${zone}</div></div>
+      <div class="row"><div class="lbl">Stops Completed</div><div class="val">${stopCount}</div></div>
+      <div class="row"><div class="lbl">Estimated Earnings</div><div class="val" style="color:${BRAND.cyan};font-size:20px;font-weight:900">$${earnings}</div></div>
+    </div>
+    <p>Payment will be processed after the route is confirmed. Thanks for keeping BinDash running!</p>
+  `),
+
+  collectionReminder: (name, day, zone) => emailBase(`
+    <h1>Collection day tomorrow, ${name}! 🗑️</h1>
+    <p>Just a reminder — your BinDash collection is scheduled for <strong style="color:${BRAND.text}">${day}</strong>. Put your bins out the night before and your runner will handle the rest.</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Collection Day</div><div class="val">${day}</div></div>
+      <div class="row"><div class="lbl">Zone</div><div class="val">${zone}</div></div>
+    </div>
+    <p style="font-size:13px;color:#475569">No action needed — just make sure bins are accessible.</p>
+  `),
+
+  binInComplete: (name, runnerName) => emailBase(`
+    <h1>Bins are back, ${name}! \u2600\uFE0F</h1>
+    <p>Your runner <strong style="color:${BRAND.text}">${runnerName}</strong> has returned your bins to their storage spot. All done for today!</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Status</div><div class="val" style="color:${BRAND.cyan}">\u2705 Complete</div></div>
+      <div class="row"><div class="lbl">Completed</div><div class="val">${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div></div>
+    </div>
+    <a href="${BRAND.url}" class="btn">View My Dashboard \u2192</a>
+  `),
+
+  collectionReminder: (name, day, zone) => emailBase(`
+    <h1>Collection day tomorrow! \uD83D\uDDD1\uFE0F</h1>
+    <p>Hi ${name}, just a reminder that your BinDash collection is scheduled for <strong style="color:${BRAND.text}">${day}</strong>.</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Collection Day</div><div class="val">${day}</div></div>
+      <div class="row"><div class="lbl">Zone</div><div class="val">${zone}</div></div>
+    </div>
+    <p>Put your bins out the night before and your runner will handle the rest. No action needed.</p>
+  `),
+
 }
 // END EMAIL TEMPLATES
 
@@ -1584,7 +1647,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:8px">
                   <div>
                     <div style="font-size:13px;font-weight:600;margin-bottom:2px">Collection day check-in <span style="background:rgba(6,214,160,.15);color:var(--cyan);font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;letter-spacing:.04em;margin-left:4px">OPTIONAL</span></div>
-                    <div style="font-size:11px;color:var(--muted);line-height:1.5">A single text message on your collection day asking if your bins have been emptied. Your response helps us dispatch your Bin In runner at the right time.</div>
+                    <div style="font-size:11px;color:var(--muted);line-height:1.5">An email on your collection day when your bins have been placed at the curb, and again when they've been returned. Helps us keep your route on schedule.</div>
                   </div>
                   <input type="checkbox" id="hw-truck-sms-toggle" checked style="width:auto;flex-shrink:0;margin-top:2px" onchange="updateTruckOptIn(this.checked)">
                 </div>
@@ -4506,13 +4569,24 @@ function navComplete(){
   // Fire per-stop homeowner completion notification immediately
   if(stop){
     const now = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})
-    showToast(`✅ Stop ${navStop+1} complete — ${stop.name} notified`, 'ok')
-    // In production: POST /api/notify { homeownerId, event:'stop_complete', time:now, batchId:navBatchId }
+    showToast(`✅ Stop ${navStop+1} complete — ${stop.name} notified by email`, 'ok')
+    // Email homeowner: bin out complete notification
+    if(stop.email){
+      const runnerName = currentUser?.first_name || 'Your runner'
+      const day = new Date().toLocaleDateString([],{weekday:'long'})
+      sendEmail(stop.email, 'Your bins are at the curb! 🌙', EMAIL.binOutComplete(stop.name?.split(' ')[0]||'there', runnerName, NAV_STOPS.length, day), 'bin_out_complete')
+    }
   }
   navStop++
   if(navStop >= NAV_STOPS.length){
     navPhase = 'done'
     navRouteActive = false
+    // Email runner: route complete summary
+    const _routeEarn = (NAV_STOPS.length * 3.25).toFixed(2)
+    const _zoneName  = ADMIN_ZONES.find(z=>z.id===navBatchZoneId)?.name || 'your zone'
+    if(currentUser?.email){
+      sendEmail(currentUser.email, 'Route complete — $'+_routeEarn+' earned 🎉', EMAIL.routeComplete(currentUser.first_name||'Runner', NAV_STOPS.length, _zoneName, _routeEarn), 'route_complete')
+    }
   } else {
     navPhase = 'travelling'
   }
@@ -6730,7 +6804,7 @@ function getLearnedAverage(zoneId){
   if(entries.length < MIN_DATAPOINTS) return null
   const avg = Math.round(entries.map(e=>timeToMins(e.time)).reduce((a,b)=>a+b,0) / entries.length)
   return { avgTime: minsToTime(avg), count: entries.length, sources: {
-    sms: entries.filter(e=>e.source==='sms').length,
+    email: entries.filter(e=>e.source==='email').length,
     app: entries.filter(e=>e.source==='app').length,
     runner: entries.filter(e=>e.source==='runner').length,
   }}
@@ -6782,7 +6856,7 @@ function showZoneLearningDetail(){
       <div style="font-size:11px;color:var(--sub);margin-bottom:4px">${unlock.label}</div>
       <div style="display:flex;gap:10px;font-size:11px;color:var(--muted);margin-bottom:6px">
         <span>📊 ${entries.length} total · ${learned?'learned avg: '+learned.avgTime:'need '+(MIN_DATAPOINTS-entries.length)+' more for learned avg'}</span>
-        ${learned?`<span>SMS: ${learned.sources.sms} · App: ${learned.sources.app} · Runner: ${learned.sources.runner}</span>`:''}
+        ${learned?`<span>Email: ${learned.sources.email} · App: ${learned.sources.app} · Runner: ${learned.sources.runner}</span>`:''}
       </div>
       ${recent ? `<div style="border-top:1px solid var(--border);padding-top:6px;margin-top:4px"><div style="font-size:10px;color:var(--muted);margin-bottom:3px">Recent confirmations:</div>${recent}</div>` : ''}
     </div>`
@@ -7981,7 +8055,7 @@ function showReferralLink(){
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Close</button>
-    <button class="btn btn-cyan" onclick="showToast('Link shared ✅','ok');closeM()">Share via WhatsApp / SMS</button>
+    <button class="btn btn-cyan" onclick="showToast('Link shared ✅','ok');closeM()">Share via Email / WhatsApp</button>
   </div>`
   openM()
 }
