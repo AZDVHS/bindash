@@ -540,6 +540,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
 /* Visit type tags */
 .vt-out{background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);color:#a5b4fc;border-radius:6px;font-size:10px;font-weight:700;padding:3px 8px;letter-spacing:.04em}
+.ob-day-pill{border:1.5px solid var(--border2);border-radius:8px;padding:8px 4px;text-align:center;cursor:pointer;font-size:11px;font-weight:700;color:var(--sub);transition:all .15s}
+.ob-day-pill.on{border-color:var(--cyan);background:rgba(6,214,160,.1);color:var(--cyan)}
 .vt-in{background:rgba(6,214,160,.1);border:1px solid rgba(6,214,160,.3);color:#6ee7b7;border-radius:6px;font-size:10px;font-weight:700;padding:3px 8px;letter-spacing:.04em}
 .vt-sos{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:6px;font-size:10px;font-weight:700;padding:3px 8px;letter-spacing:.04em}
 
@@ -1170,8 +1172,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 <!-- ══════════ HOMEOWNER ONBOARDING ══════════ -->
 <div id="S-hw-ob" class="screen">
   <div style="min-height:100vh;background:var(--bg);padding:36px 20px">
-    <div style="max-width:600px;margin:0 auto">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px">
+    <div style="max-width:640px;margin:0 auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
         <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:853">🗑️ BIN<em style="color:var(--cyan);font-style:normal">DASH</em></div>
         <div style="display:flex;align-items:center;gap:10px">
           <span style="font-size:13px;color:var(--muted)">Already have an account? <a onclick="go('S-login')" style="color:var(--cyan);cursor:pointer;font-weight:600">Log in →</a></span>
@@ -1179,11 +1181,25 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         </div>
       </div>
 
-      <!-- ── STEP 1: Address + ZIP detection (always shown first) ── -->
+      <!-- Steps bar (shown for path A) -->
+      <div id="h-steps-bar" style="display:none;margin-bottom:28px">
+        <div class="steps-bar">
+          <div class="sc active" id="h-sc1">1</div><div class="sl" id="h-sl1"></div>
+          <div class="sc" id="h-sc2">2</div><div class="sl" id="h-sl2"></div>
+          <div class="sc" id="h-sc3">3</div><div class="sl" id="h-sl3"></div>
+          <div class="sc" id="h-sc4">4</div><div class="sl" id="h-sl4"></div>
+          <div class="sc" id="h-sc5">5</div><div class="sl" id="h-sl5"></div>
+          <div class="sc" id="h-sc6">✓</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px;padding:0 2px">
+          <span>Address</span><span>Account</span><span>Service</span><span>Property</span><span>Payment</span><span>Done</span>
+        </div>
+      </div>
+
+      <!-- ── STEP 1: Address + ZIP ── -->
       <div id="h-s1">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Let's check your area 📍</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Enter your address to see if BinDash is available near you.</div>
-
         <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street"></div>
         <div class="g3">
           <div class="field"><label>City</label><input id="h-city" placeholder="Glendale"></div>
@@ -1197,10 +1213,10 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       </div>
 
       <!-- ══════════════════════════════════════════════════════════ -->
-      <!-- PATH A: Active zone — full signup with payment            -->
+      <!-- PATH A: Active zone — full signup                         -->
       <!-- ══════════════════════════════════════════════════════════ -->
 
-      <!-- STEP 2A: Account details (active zone) -->
+      <!-- STEP 2: Account details -->
       <div id="h-s2" style="display:none">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Create your account 🏠</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">BinDash services your area! Set up your account to get started.</div>
@@ -1219,53 +1235,230 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         </div>
       </div>
 
-      <!-- STEP 3: Service preferences (active zone) -->
+      <!-- STEP 3: Service + Plan (rich, with plan advertising + split-day) -->
       <div id="h-s3" style="display:none">
-        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Your Service 🗑️</div>
-        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Choose what service you need and when.</div>
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:4px">Choose Your Plan 🗑️</div>
+        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Pick how often we collect and how many bins. Includes both Bin Out (evening before) and Bin In (after the truck).</div>
 
-        <div class="sec-h">Service Type</div>
-        <div class="radio-row" style="margin-bottom:14px" id="svc-type-opts">
-          <div class="r-opt on" id="svc-recycling" onclick="rOpt(this);window._obSvcLabel='Recycling'">♻️ Recycling</div>
-          <div class="r-opt" id="svc-waste" onclick="rOpt(this);window._obSvcLabel='General Waste'">🗑️ General Waste</div>
-          <div class="r-opt" id="svc-both" onclick="rOpt(this);window._obSvcLabel='Recycling + General Waste'">♻️+🗑️ Both</div>
-        </div>
-
-        <div class="sec-h">Frequency</div>
-        <div class="radio-row" style="margin-bottom:14px">
-          <div class="r-opt" onclick="selectFreq('asneeded')">As Needed</div>
-          <div class="r-opt" onclick="selectFreq('monthly')">Monthly</div>
-          <div class="r-opt" onclick="selectFreq('biweekly')">Bi-weekly</div>
-          <div class="r-opt on" onclick="selectFreq('weekly')">Weekly</div>
-        </div>
-
-        <div class="sec-h">Collection Day</div>
-        <div id="ob-day-wrap">
-          <div class="field">
-            <label>Preferred day</label>
-            <select id="h-day">
-              <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
-              <option selected>Thursday</option><option>Friday</option>
-            </select>
+        <!-- FREQUENCY SELECTOR -->
+        <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">How often?</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:22px">
+          <div id="freq-asneeded" onclick="selectFreq('asneeded')" style="border:1.5px solid var(--border2);border-radius:10px;padding:12px 8px;text-align:center;cursor:pointer;transition:all .15s">
+            <div style="font-size:18px;margin-bottom:4px">📞</div>
+            <div style="font-size:12px;font-weight:700">As Needed</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">Callouts only</div>
+          </div>
+          <div id="freq-monthly" onclick="selectFreq('monthly')" style="border:1.5px solid var(--border2);border-radius:10px;padding:12px 8px;text-align:center;cursor:pointer;transition:all .15s">
+            <div style="font-size:18px;margin-bottom:4px">📅</div>
+            <div style="font-size:12px;font-weight:700">Monthly</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">1×/month</div>
+          </div>
+          <div id="freq-biweekly" onclick="selectFreq('biweekly')" style="border:1.5px solid var(--border2);border-radius:10px;padding:12px 8px;text-align:center;cursor:pointer;transition:all .15s">
+            <div style="font-size:18px;margin-bottom:4px">🗓️</div>
+            <div style="font-size:12px;font-weight:700">Bi-weekly</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">2×/month</div>
+          </div>
+          <div id="freq-weekly" onclick="selectFreq('weekly')" style="border:1.5px solid var(--cyan);background:rgba(6,214,160,.07);border-radius:10px;padding:12px 8px;text-align:center;cursor:pointer;transition:all .15s;position:relative">
+            <div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);background:var(--cyan);color:#07090f;font-size:9px;font-weight:700;padding:1px 8px;border-radius:99px;white-space:nowrap">BEST VALUE</div>
+            <div style="font-size:18px;margin-bottom:4px;margin-top:4px">⚡</div>
+            <div style="font-size:12px;font-weight:700;color:var(--cyan)">Weekly</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">Every week</div>
           </div>
         </div>
 
-        <div class="field"><label>Special Instructions <span style="color:var(--muted);font-size:10px;font-weight:400">optional</span></label>
-          <textarea id="h-svc-notes" placeholder="e.g. Recycling bin lid is broken — handle with care." style="min-height:52px"></textarea>
+        <!-- AS-NEEDED MESSAGE -->
+        <div id="ob-asneeded-box" style="display:none;background:rgba(6,214,160,.06);border:1.5px solid rgba(6,214,160,.2);border-radius:12px;padding:18px;margin-bottom:16px">
+          <div style="font-size:14px;font-weight:700;margin-bottom:6px">Pay per visit — no subscription needed</div>
+          <div style="font-size:13px;color:var(--sub);line-height:1.6">Book one-time callouts from your dashboard whenever you need a Bin Out or Bin In. <strong style="color:var(--cyan)">$12.99 per visit</strong>, dispatched to the nearest available runner.</div>
         </div>
+
+        <!-- PLAN CARDS (shown for monthly/biweekly/weekly) -->
+        <div id="ob-plan-section">
+          <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">How many bins?</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px" id="ob-plan-cards"></div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:18px" id="ob-plan-note"></div>
+
+          <!-- WHAT'S INCLUDED EXPLAINER -->
+          <div style="background:var(--surface2);border-radius:10px;padding:12px 14px;margin-bottom:18px;font-size:12px;color:var(--sub);line-height:1.7">
+            <div style="font-weight:700;color:var(--text);margin-bottom:4px">Every plan includes:</div>
+            <div>🌙 <strong style="color:var(--text)">Bin Out</strong> — runner moves your bins to the curb the evening before collection</div>
+            <div>☀️ <strong style="color:var(--text)">Bin In</strong> — runner returns your bins to your property after the truck passes</div>
+            <div>📧 Notifications at every step · Cancel or pause any time · No lock-in</div>
+          </div>
+
+          <!-- 1-BIN SERVICE SELECTOR (shown only for 1-bin plans) -->
+          <div id="ob-1bin-svc" style="display:none">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Which bin?</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px">
+              <div id="svc-recycling" onclick="selectBinSvc('recycling')" style="border:1.5px solid var(--cyan);background:rgba(6,214,160,.06);border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:all .15s">
+                <div style="font-size:22px;margin-bottom:4px">♻️</div>
+                <div style="font-size:13px;font-weight:700">Recycling</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">Plastics, paper, glass</div>
+              </div>
+              <div id="svc-general" onclick="selectBinSvc('general')" style="border:1.5px solid var(--border2);border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:all .15s">
+                <div style="font-size:22px;margin-bottom:4px">🗑️</div>
+                <div style="font-size:13px;font-weight:700">General Waste</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">Household rubbish</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SINGLE-DAY PICKER (1-bin and 2-bin same day) -->
+          <div id="ob-day-single">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Collection day</div>
+            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:18px" id="ob-day-pills">
+              <div class="ob-day-pill on" data-day="Monday"    onclick="obPickDay(this,'single')">Mon</div>
+              <div class="ob-day-pill"    data-day="Tuesday"   onclick="obPickDay(this,'single')">Tue</div>
+              <div class="ob-day-pill"    data-day="Wednesday" onclick="obPickDay(this,'single')">Wed</div>
+              <div class="ob-day-pill"    data-day="Thursday"  onclick="obPickDay(this,'single')">Thu</div>
+              <div class="ob-day-pill"    data-day="Friday"    onclick="obPickDay(this,'single')">Fri</div>
+            </div>
+            <input type="hidden" id="h-day" value="Monday">
+          </div>
+
+          <!-- SPLIT-DAY PICKER (2-bin split plans) -->
+          <div id="ob-day-split" style="display:none">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Collection days</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px">
+              <div>
+                <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--cyan)">♻️ Recycling day</div>
+                <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px" id="ob-recycling-pills">
+                  <div class="ob-day-pill on" data-day="Monday"    onclick="obPickDay(this,'recycling')">Mon</div>
+                  <div class="ob-day-pill"    data-day="Tuesday"   onclick="obPickDay(this,'recycling')">Tue</div>
+                  <div class="ob-day-pill"    data-day="Wednesday" onclick="obPickDay(this,'recycling')">Wed</div>
+                  <div class="ob-day-pill"    data-day="Thursday"  onclick="obPickDay(this,'recycling')">Thu</div>
+                  <div class="ob-day-pill"    data-day="Friday"    onclick="obPickDay(this,'recycling')">Fri</div>
+                </div>
+                <input type="hidden" id="h-day-recycling" value="Monday">
+              </div>
+              <div>
+                <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--amber)">🗑️ General waste day</div>
+                <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px" id="ob-waste-pills">
+                  <div class="ob-day-pill"    data-day="Monday"    onclick="obPickDay(this,'waste')">Mon</div>
+                  <div class="ob-day-pill"    data-day="Tuesday"   onclick="obPickDay(this,'waste')">Tue</div>
+                  <div class="ob-day-pill on" data-day="Wednesday" onclick="obPickDay(this,'waste')">Wed</div>
+                  <div class="ob-day-pill"    data-day="Thursday"  onclick="obPickDay(this,'waste')">Thu</div>
+                  <div class="ob-day-pill"    data-day="Friday"    onclick="obPickDay(this,'waste')">Fri</div>
+                </div>
+                <input type="hidden" id="h-day-waste" value="Wednesday">
+              </div>
+            </div>
+            <div id="ob-same-day-warn" style="display:none;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:9px 12px;font-size:12px;color:#fbbf24;margin-bottom:4px">⚠️ Both days are the same — please choose different days for split-day service.</div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:18px">Each day = one full Bin Out + Bin In cycle</div>
+          </div>
+
+        </div><!-- /ob-plan-section -->
 
         <div style="display:flex;justify-content:space-between;margin-top:6px">
           <button class="btn btn-outline" onclick="hBack(3)">← Back</button>
-          <button class="btn btn-cyan" onclick="hNext(3)">Next: Payment →</button>
+          <button class="btn btn-cyan" onclick="hNext(3)">Next: Property Info →</button>
         </div>
       </div>
 
-      <!-- STEP 4: Payment (active zone only) -->
+      <!-- STEP 4: Property Info (new — runner needs this) -->
       <div id="h-s4" style="display:none">
-        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;margin-bottom:6px">Secure Payment</div>
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:4px">Your Property 🏡</div>
+        <div style="color:var(--sub);font-size:14px;margin-bottom:6px">This is what your runner sees before every collection. The more detail, the smoother the service.</div>
+        <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:9px;padding:10px 13px;font-size:12px;color:var(--sub);margin-bottom:20px;line-height:1.6">
+          🔒 This info is only shared with your assigned runner — never publicly visible.
+        </div>
+
+        <!-- BIN LOCATION -->
+        <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Where are your bins stored?</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:20px">
+          <div class="r-opt on" id="binloc-backyard" onclick="obPickBinLoc(this,'Back yard')">
+            <div style="font-size:20px;margin-bottom:4px">🌿</div>
+            <div style="font-size:12px;font-weight:700">Back Yard</div>
+          </div>
+          <div class="r-opt" id="binloc-side" onclick="obPickBinLoc(this,'Side of house')">
+            <div style="font-size:20px;margin-bottom:4px">🏠</div>
+            <div style="font-size:12px;font-weight:700">Side of House</div>
+          </div>
+          <div class="r-opt" id="binloc-front" onclick="obPickBinLoc(this,'Front of house')">
+            <div style="font-size:20px;margin-bottom:4px">🛤️</div>
+            <div style="font-size:12px;font-weight:700">Front</div>
+          </div>
+          <div class="r-opt" id="binloc-garage" onclick="obPickBinLoc(this,'Garage')">
+            <div style="font-size:20px;margin-bottom:4px">🚗</div>
+            <div style="font-size:12px;font-weight:700">Garage</div>
+          </div>
+          <div class="r-opt" id="binloc-alley" onclick="obPickBinLoc(this,'Alley / back lane')">
+            <div style="font-size:20px;margin-bottom:4px">🛣️</div>
+            <div style="font-size:12px;font-weight:700">Alley</div>
+          </div>
+          <div class="r-opt" id="binloc-other" onclick="obPickBinLoc(this,'Other')">
+            <div style="font-size:20px;margin-bottom:4px">📌</div>
+            <div style="font-size:12px;font-weight:700">Other</div>
+          </div>
+        </div>
+        <input type="hidden" id="h-bin-location" value="Back yard">
+
+        <!-- CURB PLACEMENT -->
+        <div class="field">
+          <label>Curb placement instructions <span style="color:var(--muted);font-size:10px;font-weight:400">optional</span></label>
+          <input id="h-curb-notes" placeholder="e.g. Place bins to the left of the driveway, behind the mailbox">
+        </div>
+
+        <!-- GATE ACCESS -->
+        <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px;margin-top:6px">Gate / access</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+          <div class="r-opt on" id="gate-none" onclick="obPickGate(this,'No gate')">
+            <div style="font-size:18px;margin-bottom:3px">🔓</div>
+            <div style="font-size:12px;font-weight:700">No Gate</div>
+          </div>
+          <div class="r-opt" id="gate-unlocked" onclick="obPickGate(this,'Unlocked gate')">
+            <div style="font-size:18px;margin-bottom:3px">🚪</div>
+            <div style="font-size:12px;font-weight:700">Unlocked</div>
+          </div>
+          <div class="r-opt" id="gate-code" onclick="obPickGate(this,'Gate with code')">
+            <div style="font-size:18px;margin-bottom:3px">🔢</div>
+            <div style="font-size:12px;font-weight:700">Gate Code</div>
+          </div>
+        </div>
+        <input type="hidden" id="h-gate-type" value="No gate">
+        <div id="h-gate-code-wrap" style="display:none">
+          <div class="field"><label>Gate code / access instructions</label><input id="h-gate-code" placeholder="e.g. 1234 or push green button on left panel"></div>
+        </div>
+
+        <!-- PETS -->
+        <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px;margin-top:6px">Pets on property?</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:18px">
+          <div class="r-opt on" id="pet-none" onclick="obPickPet(this,'No pets')">
+            <div style="font-size:18px;margin-bottom:3px">✅</div>
+            <div style="font-size:12px;font-weight:700">No Pets</div>
+          </div>
+          <div class="r-opt" id="pet-dog-friendly" onclick="obPickPet(this,'Dog — friendly')">
+            <div style="font-size:18px;margin-bottom:3px">🐶</div>
+            <div style="font-size:12px;font-weight:700">Dog (OK)</div>
+          </div>
+          <div class="r-opt" id="pet-dog-gate" onclick="obPickPet(this,'Dog — keep gate closed')">
+            <div style="font-size:18px;margin-bottom:3px">⚠️</div>
+            <div style="font-size:12px;font-weight:700">Dog (Gate!)</div>
+          </div>
+          <div class="r-opt" id="pet-other" onclick="obPickPet(this,'Other pets')">
+            <div style="font-size:18px;margin-bottom:3px">🐾</div>
+            <div style="font-size:12px;font-weight:700">Other</div>
+          </div>
+        </div>
+        <input type="hidden" id="h-pet-info" value="No pets">
+
+        <!-- SPECIAL INSTRUCTIONS -->
+        <div class="field">
+          <label>Special instructions for your runner <span style="color:var(--muted);font-size:10px;font-weight:400">optional</span></label>
+          <textarea id="h-svc-notes" placeholder="e.g. Recycling bin lid is broken — handle with care. Blue bin is recycling, green is general waste." style="min-height:80px"></textarea>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;margin-top:6px">
+          <button class="btn btn-outline" onclick="hBack(4)">← Back</button>
+          <button class="btn btn-cyan" onclick="hNext(4)">Next: Payment →</button>
+        </div>
+      </div>
+
+      <!-- STEP 5: Payment -->
+      <div id="h-s5" style="display:none">
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;margin-bottom:6px">Secure Payment 💳</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:28px">You'll be taken to Stripe's secure checkout. No card details stored on BinDash.</div>
 
-        <!-- Plan summary -->
         <div style="background:var(--surface2);border:1px solid var(--border2);border-radius:14px;padding:18px 20px;margin-bottom:16px" id="checkout-plan-summary">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <div style="font-weight:700;font-size:15px" id="checkout-plan-name">Loading plan...</div>
@@ -1273,31 +1466,28 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           </div>
           <div style="font-size:12px;color:var(--sub);line-height:1.7" id="checkout-plan-desc"></div>
           <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:13px;color:var(--sub)">First month + callout fee</span>
+            <span style="font-size:13px;color:var(--sub)">First month + one-time setup fee</span>
             <span style="font-size:14px;font-weight:700;color:var(--text)" id="checkout-total">—</span>
           </div>
         </div>
 
-        <!-- Callout fee notice -->
         <div style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:12px;color:var(--sub);line-height:1.6">
-          <strong style="color:var(--amber)">📋 One-time callout fee</strong> — A $15 setup fee is charged at your first booking to cover route planning and runner assignment. This is a one-time charge.
+          <strong style="color:var(--amber)">📋 One-time setup fee $15</strong> — Covers route planning and runner assignment for your address. Charged once at signup, never again.
         </div>
 
-        <!-- Stripe button -->
         <button class="btn btn-cyan btn-lg btn-full" id="stripe-checkout-btn" onclick="launchStripeCheckout()">
           🔒 Pay Securely with Stripe →
         </button>
         <div style="text-align:center;margin-top:10px;font-size:11px;color:var(--muted)">
           Redirects to Stripe · 256-bit SSL · Cancel anytime
         </div>
-
         <div style="display:flex;gap:12px;margin-top:24px">
-          <button class="btn btn-ghost btn-sm" onclick="hBack(4)">← Back</button>
+          <button class="btn btn-ghost btn-sm" onclick="hBack(5)">← Back</button>
         </div>
       </div>
 
-      <!-- STEP 5: Review + submit (active zone) -->
-      <div id="h-s5" style="display:none">
+      <!-- STEP 6: Review + submit -->
+      <div id="h-s6" style="display:none">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Almost Done! 🎉</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Review your details and activate your account.</div>
         <div class="card" style="margin-bottom:14px" id="h-review"></div>
@@ -1306,21 +1496,20 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div class="chk-row"><input type="checkbox" checked id="h-comms"><div><div style="font-size:13px">Send me collection reminders and updates by email</div></div></div>
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:6px">
-          <button class="btn btn-outline" onclick="hBack(5)">← Back</button>
+          <button class="btn btn-outline" onclick="hBack(6)">← Back</button>
           <button class="btn btn-cyan" onclick="hSubmit()">🚀 Activate My Account</button>
         </div>
       </div>
 
       <!-- ══════════════════════════════════════════════════════════ -->
-      <!-- PATH B: No zone — lean lead capture, no payment/property  -->
+      <!-- PATH B: No zone — lean lead capture                       -->
       <!-- ══════════════════════════════════════════════════════════ -->
       <div id="h-lead" style="display:none">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:8px">Be first in your area 🚀</div>
         <div style="background:rgba(6,214,160,.07);border:1.5px solid rgba(6,214,160,.25);border-radius:12px;padding:16px 18px;margin-bottom:20px">
           <div style="font-size:14px;font-weight:700;color:var(--cyan);margin-bottom:6px">BinDash is coming to your ZIP!</div>
-          <div style="font-size:13px;color:var(--sub);line-height:1.6">We're not in <strong id="lead-zip-display" style="color:var(--text)">your area</strong> yet but you're on the list. As soon as a runner signs up nearby, you'll be the first to know. No payment needed — we'll reach out when you're ready to book.</div>
+          <div style="font-size:13px;color:var(--sub);line-height:1.6">We're not in <strong id="lead-zip-display" style="color:var(--text)">your area</strong> yet but you're on the list. As soon as a runner signs up nearby, you'll be the first to know. No payment needed.</div>
         </div>
-
         <div class="field">
           <label>Your Name *</label>
           <div class="g2">
@@ -1328,18 +1517,15 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <input id="lead-ln" placeholder="Last name">
           </div>
         </div>
-
         <div style="font-size:12px;color:var(--sub);margin-bottom:6px">How should we reach you? <span style="color:var(--muted)">(at least one required)</span></div>
         <div class="field"><label>Email</label><input type="email" id="lead-em" placeholder="jane@example.com"></div>
         <div class="field"><label>Phone</label><input id="lead-ph" placeholder="(555) 000-0000"></div>
-
         <div class="sec-h" style="margin-top:4px">Service Preference</div>
         <div class="radio-row" style="margin-bottom:12px">
           <div class="r-opt on" onclick="rOpt(this)">♻️ Recycling</div>
           <div class="r-opt" onclick="rOpt(this)">🗑️ General Waste</div>
           <div class="r-opt" onclick="rOpt(this)">♻️+🗑️ Both</div>
         </div>
-
         <div class="field">
           <label>Preferred collection day</label>
           <select id="lead-day">
@@ -1347,14 +1533,12 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <option selected>Thursday</option><option>Friday</option>
           </select>
         </div>
-
         <div class="chk-row" style="margin-top:8px">
           <input type="checkbox" id="lead-comms" checked>
           <div style="font-size:13px;color:var(--sub)">Notify me by email/text when BinDash launches in my area</div>
         </div>
-
         <button class="btn btn-cyan btn-full btn-lg" style="margin-top:16px" onclick="submitLead()">✅ Save My Spot — Notify Me</button>
-        <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:10px">No payment required · Cancel anytime · We'll only contact you about service availability</div>
+        <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:10px">No payment required · Cancel anytime</div>
       </div>
 
     </div>
@@ -1649,7 +1833,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- HW HOME -->
         <div class="pg on" id="hw-home">
-          <div style="margin-bottom:18px"><div style="font-size:21px;font-weight:700" id="hw-greeting">Welcome to BinDash 👋</div><div style="color:var(--sub);font-size:14px;margin-top:3px">Next collection: <strong style="color:var(--cyan)">Thursday Mar 14</strong> — Bin Out tonight at 6pm</div></div>
+          <div style="margin-bottom:18px"><div style="font-size:21px;font-weight:700" id="hw-greeting">Welcome to BinDash 👋</div><div style="color:var(--sub);font-size:14px;margin-top:3px" id="hw-next-collection-strip">Next collection: <strong style="color:var(--cyan)">—</strong></div></div>
 
           <!-- TRUCK CONFIRMATION PROMPT — shown on collection day -->
           <div id="hw-truck-confirm-card" style="background:rgba(245,158,11,.07);border:1.5px solid rgba(245,158,11,.3);border-radius:14px;padding:16px;margin-bottom:18px">
@@ -1695,18 +1879,18 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
           <!-- NEXT COLLECTION — shows both visits -->
           <div class="card" style="margin-bottom:14px">
-            <div class="card-ttl">Next Collection — Thu Mar 14</div>
+            <div class="card-ttl" id="hw-next-col-title">Next Collection</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
               <div style="border:1.5px solid rgba(99,102,241,.3);background:rgba(99,102,241,.06);border-radius:10px;padding:14px">
                 <div class="vt-out" style="margin-bottom:8px">🌙 BIN OUT</div>
-                <div style="font-size:13px;font-weight:600;margin-bottom:3px">Wed Mar 13 · Evening</div>
+                <div style="font-size:13px;font-weight:600;margin-bottom:3px" id="hw-binout-date">— · Evening</div>
                 <div style="font-size:12px;color:var(--sub);margin-bottom:6px">Runner moves bins to curb</div>
                 <div style="font-size:11px;color:var(--muted)">Runner: TBD</div>
                 <span class="badge" style="background:#3b82f622;color:#3b82f6;margin-top:8px">Scheduled</span>
               </div>
               <div style="border:1.5px solid rgba(6,214,160,.3);background:rgba(6,214,160,.05);border-radius:10px;padding:14px">
                 <div class="vt-in" style="margin-bottom:8px">☀️ BIN IN</div>
-                <div style="font-size:13px;font-weight:600;margin-bottom:3px">Thu Mar 14 · Daytime</div>
+                <div style="font-size:13px;font-weight:600;margin-bottom:3px" id="hw-binin-date">— · Daytime</div>
                 <div style="font-size:12px;color:var(--sub);margin-bottom:6px">Runner returns bins to property</div>
                 <div style="font-size:11px;color:var(--muted)">Runner: TBD</div>
                 <span class="badge" style="background:#3b82f622;color:#3b82f6;margin-top:8px">Scheduled</span>
@@ -1754,22 +1938,23 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
             <div class="card">
               <div class="card-ttl">Property Details</div>
-              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Address</div><div>Address from your signup</div></div>
+              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Address</div><div id="prop-address">—</div></div>
+              <div class="dl" style="margin-bottom:9px"><div class="dl-l">City / ZIP</div><div id="prop-city-zip">—</div></div>
               <div class="dl" style="margin-bottom:9px"><div class="dl-l">Property Type</div><div>Single Family Home</div></div>
-              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Bin Storage</div><div>Back yard</div></div>
+              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Bin Storage</div><div id="prop-bin-storage">—</div></div>
               <div class="dl" style="margin-bottom:9px"><div class="dl-l">Curb Placement</div><div>Confirmed after first collection</div></div>
-              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Gate</div><div>From your signup form</div></div>
-              <div class="dl"><div class="dl-l">Pets</div><div>From your signup form</div></div>
+              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Gate</div><div id="prop-gate">—</div></div>
+              <div class="dl"><div class="dl-l">Pets</div><div id="prop-pets">—</div></div>
               <button class="btn btn-outline btn-sm" style="margin-top:14px" onclick="showEditProperty()">✏️ Edit Property</button>
             </div>
             <div class="card">
               <div class="card-ttl">Service Preferences</div>
-              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Primary Service</div><div>Recycling</div></div>
+              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Primary Service</div><div id="pref-service">—</div></div>
               <div class="dl" style="margin-bottom:9px"><div class="dl-l">Frequency</div><div>Weekly</div></div>
-              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Collection Day</div><div>Thursday</div></div>
-              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Bin Out night</div><div style="color:#a5b4fc">Wednesday evening</div></div>
-              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Number of Bins</div><div>2</div></div>
-              <div class="dl"><div class="dl-l">Special Instructions</div><div style="color:var(--sub);font-size:12px">—</div></div>
+              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Collection Day</div><div id="pref-day">—</div></div>
+              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Bin Out night</div><div style="color:#a5b4fc" id="pref-binout-night">—</div></div>
+              <div class="dl" style="margin-bottom:9px"><div class="dl-l">Plan</div><div id="pref-plan">—</div></div>
+              <div class="dl"><div class="dl-l">Special Instructions</div><div style="color:var(--sub);font-size:12px" id="pref-notes">—</div></div>
               <button class="btn btn-outline btn-sm" style="margin-top:14px" onclick="showEditPreferences()">✏️ Edit Preferences</button>
             </div>
           </div>
@@ -1795,13 +1980,13 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div class="sec-h" style="margin-top:0">Account Settings</div>
           <div class="card" style="max-width:480px;margin-bottom:22px">
             <div class="g2">
-              <div class="field"><label>First Name</label><input value="Jane"></div>
-              <div class="field"><label>Last Name</label><input value="Demo"></div>
+              <div class="field"><label>First Name</label><input id="acct-fn" value=""></div>
+              <div class="field"><label>Last Name</label><input id="acct-ln" value=""></div>
             </div>
-            <div class="field"><label>Email</label><input value="jane@demo.com"></div>
-            <div class="field"><label>Phone</label><input value="(555) 000-0001"></div>
-            <div class="field"><label>New Password</label><input type="password" placeholder="Leave blank to keep current"></div>
-            <button class="btn btn-cyan btn-sm" onclick="showToast('Account updated ✅','ok')">Save Changes</button>
+            <div class="field"><label>Email</label><input id="acct-em" value="" readonly style="opacity:.6;cursor:not-allowed" title="Email cannot be changed here"></div>
+            <div class="field"><label>Phone</label><input id="acct-ph" value=""></div>
+            <div class="field"><label>New Password</label><input type="password" id="acct-pw" placeholder="Leave blank to keep current"></div>
+            <button class="btn btn-cyan btn-sm" onclick="saveAccountSettings()">Save Changes</button>
           </div>
 
           <!-- NOTIFICATION PREFERENCES -->
@@ -1858,7 +2043,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               <div style="display:flex;align-items:center;gap:14px">
                 <div style="font-size:28px">💳</div>
                 <div>
-                  <div style="font-weight:700;font-size:14px">Visa •••• 4242</div>
+                  <div style="font-weight:700;font-size:14px" id="acct-card-display">No card on file</div>
                   <div style="font-size:11px;color:var(--sub);margin-top:2px">Saved securely via Stripe</div>
                 </div>
               </div>
@@ -1876,10 +2061,10 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <!-- CURRENT PLAN BANNER -->
           <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:rgba(6,214,160,.07);border:1.5px solid rgba(6,214,160,.25);border-radius:12px;margin-bottom:18px;max-width:820px">
             <div style="display:flex;align-items:center;gap:14px">
-              <div style="font-size:28px">♻️</div>
+              <div style="font-size:28px" id="acct-plan-icon">♻️</div>
               <div>
-                <div style="font-weight:700;font-size:15px">1 Can · $34.99/mo</div>
-                <div style="font-size:12px;color:var(--sub);margin-top:2px">Recycling · Thursdays · Active since Jan 2025</div>
+                <div style="font-weight:700;font-size:15px" id="acct-plan-name">—</div>
+                <div style="font-size:12px;color:var(--sub);margin-top:2px" id="acct-plan-detail">—</div>
               </div>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
@@ -2833,7 +3018,6 @@ async function populateHWDashboard(){
 
     if(loadErr || !data){
       console.warn('[BinDash] HW profile load:', loadErr)
-      // Can\'t load profile — show dashboard anyway
       go('S-hw-dash')
       return
     }
@@ -2844,29 +3028,7 @@ async function populateHWDashboard(){
     if(status === 'approved'){
       // ── FULLY ACTIVE: show dashboard ──
       go('S-hw-dash')
-      const nameEl = document.getElementById('hw-sidebar-name')
-      const avEl   = document.getElementById('hw-sidebar-avatar')
-      const grEl   = document.getElementById('hw-greeting')
-      if(nameEl) nameEl.textContent = fn + ' ' + ln
-      if(avEl)   avEl.textContent   = initials
-      if(grEl)   grEl.textContent   = 'Welcome back, ' + fn + ' \uD83D\uDC4B'
-      // Populate zone/day/runner strip
-      const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id)
-      const zoneEl = document.getElementById('hw-zone-name')
-      const zipEl  = document.getElementById('hw-confirm-zip')
-      const dayEl  = document.getElementById('hw-collection-day')
-      if(zoneEl) zoneEl.textContent = zone?.name || 'Your zone'
-      if(zipEl)  zipEl.textContent  = row.zip_code || ''
-      if(dayEl)  dayEl.textContent  = row.collection_day || '—'
-      const runnerEl = document.getElementById('hw-assigned-runner')
-      if(runnerEl){
-        const runner = RUNNERS.find(r=>r.id===row.assigned_runner)
-        runnerEl.innerHTML = runner
-          ? 'Runner: <strong style="color:var(--cyan)">' + runner.name + '</strong>'
-          : 'Runner: <strong style="color:var(--muted)">TBD — pending assignment</strong>'
-      }
-      const colCount = document.getElementById('hw-collections-count')
-      if(colCount) colCount.textContent = row.collections_done || 0
+      _populateHWDashData(row, fn, ln, initials)
 
     } else if(status === 'zone_assigned'){
       // ── ZONE ASSIGNED: HW was notified, needs to confirm service ──
@@ -2877,12 +3039,6 @@ async function populateHWDashboard(){
       } else {
         go('S-hw-waitlist')
       }
-
-    } else if(status === 'zone_assigned'){
-      // ── ZONE ASSIGNED: notified, needs to confirm service ──
-      const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id) || findZoneForZip(row.zip_code||'')
-      if(zone){ populateConfirmScreen(row, zone); go('S-hw-confirm') }
-      else { go('S-hw-waitlist') }
 
     } else if(status === 'waitlisted'){
       // ── WAITLISTED: check if a zone now exists for their ZIP ──
@@ -2915,6 +3071,114 @@ async function populateHWDashboard(){
     console.warn('[BinDash] HW profile load failed:', String(err?.message||err))
     go('S-hw-dash')
   }
+}
+
+// ── WIRE ALL HW DASHBOARD DATA from the homeowner_signups row ──
+function _populateHWDashData(row, fn, ln, initials){
+  const safe = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val }
+
+  // Sidebar + greeting
+  safe('hw-sidebar-name', fn + ' ' + ln)
+  const avEl = document.getElementById('hw-sidebar-avatar')
+  if(avEl) avEl.textContent = initials
+
+  safe('hw-greeting', 'Welcome back, ' + fn + ' 👋')
+
+  // Account settings inputs
+  const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.value = val||'' }
+  setVal('acct-fn', row.first_name || fn)
+  setVal('acct-ln', row.last_name  || ln)
+  setVal('acct-em', row.email      || '')
+  setVal('acct-ph', row.phone      || '')
+
+  // Payment card
+  const cardEl = document.getElementById('acct-card-display')
+  if(cardEl){
+    cardEl.textContent = row.card_last4
+      ? '•••• •••• •••• ' + row.card_last4
+      : 'No card on file'
+  }
+
+  // Zone / day / runner strip
+  const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id)
+  safe('hw-zone-name',      zone?.name || 'Your zone')
+  safe('hw-confirm-zip',    row.zip_code || '')
+  safe('hw-collection-day', row.collection_day || '—')
+  const runnerEl = document.getElementById('hw-assigned-runner')
+  if(runnerEl){
+    const runner = RUNNERS.find(r=>r.id===row.assigned_runner)
+    runnerEl.innerHTML = runner
+      ? 'Runner: <strong style="color:var(--cyan)">' + runner.name + '</strong>'
+      : 'Runner: <strong style="color:var(--muted)">TBD — pending assignment</strong>'
+  }
+  safe('hw-collections-count', row.collections_done || 0)
+
+  // Next collection dates computed from collection_day
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  const shortDays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+  const shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const colDay = row.collection_day || ''
+  const colDayIdx = dayNames.findIndex(d => d.toLowerCase() === colDay.toLowerCase())
+  if(colDayIdx >= 0){
+    const today = new Date()
+    let daysUntil = (colDayIdx - today.getDay() + 7) % 7
+    if(daysUntil === 0) daysUntil = 7 // next week if today is collection day
+    const collectionDate = new Date(today); collectionDate.setDate(today.getDate() + daysUntil)
+    const binOutDate = new Date(collectionDate); binOutDate.setDate(collectionDate.getDate() - 1)
+    const fmtDate = d => shortDays[d.getDay()] + ' ' + shortMonths[d.getMonth()] + ' ' + d.getDate()
+    const prevDay = dayNames[(colDayIdx + 6) % 7]
+    safe('hw-next-col-title', 'Next Collection — ' + fmtDate(collectionDate))
+    safe('hw-binout-date',    fmtDate(binOutDate) + ' · Evening')
+    safe('hw-binin-date',     fmtDate(collectionDate) + ' · Daytime')
+    const nextColStrip = document.getElementById('hw-next-collection-strip')
+    if(nextColStrip) nextColStrip.innerHTML =
+      'Next collection: <strong style="color:var(--cyan)">' + fmtDate(collectionDate) + '</strong> — Bin Out ' + prevDay + ' evening'
+  }
+
+  // Subscription banner
+  const planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split Days · $54.99/mo' }
+  const planIcons  = { plan_a:'🗑️', plan_b:'🗑️🗑️', plan_c:'♻️🗑️' }
+  const planKey = row.plan_id || 'plan_a'
+  safe('acct-plan-name', planLabels[planKey] || planLabels.plan_a)
+  safe('acct-plan-icon', planIcons[planKey]  || '🗑️')
+  const activeSince = row.created_at
+    ? new Date(row.created_at).toLocaleDateString('en-US',{month:'short',year:'numeric'})
+    : '—'
+  safe('acct-plan-detail', (colDay || '—') + 's · Active since ' + activeSince)
+
+  // Mark current plan card
+  const planLetter = (planKey || 'plan_a').replace('plan_','')
+  document.querySelectorAll('.plan-card').forEach(c => {
+    c.style.border = '2px solid var(--border2)'
+    c.style.background = 'transparent'
+    const badge = c.querySelector('.badge')
+    if(badge && badge.textContent === 'Current') badge.remove()
+  })
+  const currentPlanEl = document.getElementById('plan-' + planLetter)
+  if(currentPlanEl){
+    const colors = {a:'var(--cyan)',b:'var(--blue)',c:'var(--purple)'}
+    const bgs    = {a:'rgba(6,214,160,.06)',b:'rgba(59,130,246,.06)',c:'rgba(139,92,246,.06)'}
+    currentPlanEl.style.border = '2px solid ' + (colors[planLetter]||colors.a)
+    currentPlanEl.style.background = bgs[planLetter]||bgs.a
+    const badge = document.createElement('div')
+    badge.style.cssText = 'position:absolute;top:12px;right:12px'
+    badge.innerHTML = '<span class="badge" style="background:var(--cyan);color:#07090f">Current</span>'
+    currentPlanEl.style.position = 'relative'
+    currentPlanEl.prepend(badge)
+  }
+
+  // Property page
+  safe('prop-address',    row.street_address || '—')
+  safe('prop-city-zip',   (row.city ? row.city + ', ' : '') + (row.state||'') + ' ' + (row.zip_code||''))
+  safe('prop-bin-storage','—')
+  safe('prop-gate',       '—')
+  safe('prop-pets',       '—')
+  safe('pref-service',    row.service_type   || 'Recycling')
+  safe('pref-day',        row.collection_day || '—')
+  const prevDayName = colDayIdx >= 0 ? dayNames[(colDayIdx + 6) % 7] : '—'
+  safe('pref-binout-night', prevDayName !== '—' ? prevDayName + ' evening' : '—')
+  safe('pref-plan',       planLabels[planKey] || '—')
+  safe('pref-notes',      row.service_notes  || '—')
 }
 
 // ── POPULATE CONFIRM SCREEN with homeowner\'s existing data ──
@@ -3370,21 +3634,17 @@ function requireCard(){
 // ── HOMEOWNER ONBOARDING ──────────────────────────
 function hNext(s){
   if(s===1){
-    // Step 1: ZIP check — decide which path
     const zip = document.getElementById('h-zip')?.value.trim() || ''
     if(!zip || zip.length < 5){ showToast('Please enter your ZIP code','err'); return }
-
     const hasZone = window._hwZipHasCoverage === true
     document.getElementById('h-s1').style.display = 'none'
     window.scrollTo(0,0)
-
     if(!hasZone){
-      // PATH B — lead capture only
       const zipDisplay = document.getElementById('lead-zip-display')
       if(zipDisplay) zipDisplay.textContent = 'ZIP ' + zip
       document.getElementById('h-lead').style.display = 'block'
     } else {
-      // PATH A — full signup
+      document.getElementById('h-steps-bar').style.display = 'block'
       document.getElementById('h-s2').style.display = 'block'
     }
     return
@@ -3394,43 +3654,61 @@ function hNext(s){
     if(!document.getElementById('h-em')?.value.trim()){ showToast('Please enter your email address','err'); return }
     if(!document.getElementById('h-pw')?.value || document.getElementById('h-pw').value.length < 8){ showToast('Password must be at least 8 characters','err'); return }
   }
-  if(s===4){ updateCheckoutSummary() }
+  if(s===3){
+    // Validate split-day conflict
+    if(obSelectedPlan.endsWith('3')){
+      const r = document.getElementById('h-day-recycling')?.value
+      const w = document.getElementById('h-day-waste')?.value
+      if(r && w && r === w){ showToast('Please choose different days for split-day service','err'); return }
+    }
+  }
+  if(s===5){ updateCheckoutSummary() }
+  if(s===5){
+    // Build review
+    const fn=document.getElementById('h-fn')?.value||''
+    const ln=document.getElementById('h-ln')?.value||''
+    const freqLabel = {asneeded:'As Needed',monthly:'Monthly',biweekly:'Bi-weekly',weekly:'Weekly'}[obSelectedFreq]||obSelectedFreq
+    const isSplit = obSelectedPlan.endsWith('3')
+    const dayVal = isSplit
+      ? '♻️ ' + (document.getElementById('h-day-recycling')?.value||'—') + ' · 🗑️ ' + (document.getElementById('h-day-waste')?.value||'—')
+      : (document.getElementById('h-day')?.value||'—')
+    const svc = window._obSvcLabel || 'Recycling'
+    const binLoc = document.getElementById('h-bin-location')?.value || '—'
+    const gateType = document.getElementById('h-gate-type')?.value || 'No gate'
+    const gateCode = document.getElementById('h-gate-code')?.value || ''
+    const pets = document.getElementById('h-pet-info')?.value || '—'
+    const notes = document.getElementById('h-svc-notes')?.value || ''
+    const planLabel = (OB_PLANS[obSelectedFreq]||[]).find(p=>p.id===obSelectedPlan)?.label || obSelectedPlan
+    document.getElementById('h-review').innerHTML=`
+      <div class="card-ttl">Your BinDash Summary</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:13px;line-height:2.1;color:var(--sub)">
+        <div><strong style="color:var(--text)">Name:</strong> ${fn} ${ln}</div>
+        <div><strong style="color:var(--text)">Email:</strong> ${document.getElementById('h-em')?.value||'—'}</div>
+        <div><strong style="color:var(--text)">Address:</strong> ${document.getElementById('h-addr')?.value||'—'}, ${document.getElementById('h-zip')?.value||''}</div>
+        <div><strong style="color:var(--text)">Service:</strong> ${svc}</div>
+        <div><strong style="color:var(--text)">Plan:</strong> ${planLabel} · ${freqLabel}</div>
+        <div><strong style="color:var(--text)">Collection day:</strong> ${dayVal}</div>
+        <div><strong style="color:var(--text)">Bin location:</strong> ${binLoc}</div>
+        <div><strong style="color:var(--text)">Gate:</strong> ${gateType}${gateCode?' ('+gateCode+')':''}</div>
+        <div><strong style="color:var(--text)">Pets:</strong> ${pets}</div>
+        ${notes?'<div style="grid-column:1/-1"><strong style="color:var(--text)">Notes:</strong> '+notes+'</div>':''}
+      </div>`
+  }
 
   document.getElementById('h-s'+s).style.display='none'
   document.getElementById('h-s'+(s+1)).style.display='block'
   const sc=document.getElementById('h-sc'+s); if(sc){ sc.classList.remove('active'); sc.classList.add('done'); sc.textContent='✓' }
   const sl=document.getElementById('h-sl'+s); if(sl) sl.classList.add('done')
   const nsc=document.getElementById('h-sc'+(s+1)); if(nsc) nsc.classList.add('active')
-
   if(s===2){ selectFreq('weekly') }
-
-  if(s===4){
-    const fn=document.getElementById('h-fn')?.value||''
-    const ln=document.getElementById('h-ln')?.value||''
-    const last4=(document.getElementById('cc-num')?.value||'').replace(/\s/g,'').slice(-4)||'——'
-    const exp=document.getElementById('cc-exp')?.value||'——'
-    const freqLabel = {asneeded:'As Needed',monthly:'Monthly',biweekly:'Bi-weekly',weekly:'Weekly'}[obSelectedFreq]||obSelectedFreq
-    const dayVal = document.getElementById('h-day')?.value||'—'
-    const svc = window._obSvcLabel || 'Recycling'
-    document.getElementById('h-review').innerHTML=`
-      <div class="card-ttl">Account Summary</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:13px;line-height:2.1;color:var(--sub)">
-        <div><strong style="color:var(--text)">Name:</strong> ${fn} ${ln}</div>
-        <div><strong style="color:var(--text)">Email:</strong> ${document.getElementById('h-em')?.value||'—'}</div>
-        <div><strong style="color:var(--text)">Address:</strong> ${document.getElementById('h-addr')?.value||'—'}</div>
-        <div><strong style="color:var(--text)">Service:</strong> ${svc}</div>
-        <div><strong style="color:var(--text)">Frequency:</strong> ${freqLabel}</div>
-        <div><strong style="color:var(--text)">Collection day:</strong> ${dayVal}</div>
-        <div><strong style="color:var(--text)">Payment:</strong> Card •••• ${last4} · exp ${exp}</div>
-        <div><strong style="color:var(--text)">First charge:</strong> After first confirmed collection</div>
-      </div>`
-  }
   window.scrollTo(0,0)
 }
+
 function hBack(s){
   document.getElementById('h-s'+s).style.display='none'
   const prev = s===2 ? 'h-s1' : 'h-s'+(s-1)
   document.getElementById(prev).style.display='block'
+  if(s===2) document.getElementById('h-steps-bar').style.display='none'
   const sc=document.getElementById('h-sc'+(s-1)); if(sc){ sc.classList.remove('done'); sc.classList.add('active'); sc.textContent=s-1 }
   const sl=document.getElementById('h-sl'+(s-1)); if(sl) sl.classList.remove('done')
   const csc=document.getElementById('h-sc'+s); if(csc) csc.classList.remove('active')
@@ -3509,82 +3787,75 @@ async function hSubmit(){
   const last4= (document.getElementById('cc-num')?.value||'').replace(/\s/g,'').slice(-4)||'——'
   const cardName = document.getElementById('cc-name')?.value || ''
   const cardExp  = document.getElementById('cc-exp')?.value  || ''
+  // Property info
+  const binLocation = document.getElementById('h-bin-location')?.value || ''
+  const gateType    = document.getElementById('h-gate-type')?.value    || ''
+  const gateCode    = document.getElementById('h-gate-code')?.value    || ''
+  const petInfo     = document.getElementById('h-pet-info')?.value     || ''
+  const curbNotes   = document.getElementById('h-curb-notes')?.value   || ''
+  const svcNotes    = document.getElementById('h-svc-notes')?.value    || ''
+  // Service info
+  const isSplit = obSelectedPlan.endsWith('3')
+  const colDay  = isSplit ? null : (document.getElementById('h-day')?.value || null)
+  const colDayR = isSplit ? (document.getElementById('h-day-recycling')?.value || null) : null
+  const colDayW = isSplit ? (document.getElementById('h-day-waste')?.value    || null) : null
   if(!fn){ showToast('Please enter your name','err'); return }
   if(!em){ showToast('Please enter your email','err'); return }
 
-  const newApp = {
-    id: 'HW-APP-'+String(Date.now()).slice(-4),
-    name: fn+' '+ln,
-    initials: (fn[0]||'?')+(ln[0]||'?').toUpperCase(),
-    email: em, phone: ph, address: addr, city, zip,
-    service: document.getElementById('h-svc')?.value || 'Recycling',
-    freq: obSelectedFreq, plan: obSelectedPlan,
-    day: document.getElementById('h-day')?.value || 'Tuesday',
-    svcNotes: document.getElementById('h-svc-notes')?.value || '',
-    cardLast4: last4,
-    submittedAt: 'Just now',
-    status: 'pending',
-    zoneId: null,
-  }
-
-  // ── Save to Supabase ──
-  const submitBtn = document.querySelector('#h-s5 .btn-cyan')
+  const submitBtn = document.querySelector('#h-s6 .btn-cyan')
   if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Saving...' }
 
   try {
-    // 1. Create auth account
     const pw = document.getElementById('h-pw')?.value || ''
     const { data: authData, error: authErr } = await _supa.auth.signUp({
       email: em,
       password: pw,
       options: {
-        data: {
-          role: 'hw',
-          first_name: fn,
-          last_name: ln,
-          status: 'pending_review',
-        }
+        data: { role: 'hw', first_name: fn, last_name: ln, status: 'pending_review' }
       }
     })
     if(authErr && authErr.message !== 'User already registered'){
       console.warn('[BinDash] Auth signup warning:', authErr.message)
     }
 
-    // 2. Save full signup record
     await dbInsert('homeowner_signups', {
-      auth_user_id:    authData?.user?.id || null,
-      first_name:      fn,
-      last_name:       ln,
-      email:           em,
-      phone:           ph,
-      street_address:  addr,
-      city:            city,
-      zip_code:        zip,
-      service_type:    document.getElementById('h-svc')?.value || 'Recycling',
-      frequency:       obSelectedFreq,
-      plan_id:         obSelectedPlan,
-      collection_day:  document.getElementById('h-day')?.value || null,
-      service_notes:   document.getElementById('h-svc-notes')?.value || null,
-      card_last4:      last4,
-      card_holder:     cardName,
-      card_expiry:     cardExp,
-      status:          'pending_review',
-      created_at:      new Date().toISOString(),
+      auth_user_id:      authData?.user?.id || null,
+      first_name:        fn,
+      last_name:         ln,
+      email:             em,
+      phone:             ph,
+      street_address:    addr,
+      city:              city,
+      zip_code:          zip,
+      service_type:      window._obSvcLabel || 'Recycling',
+      frequency:         obSelectedFreq,
+      plan_id:           obSelectedPlan,
+      collection_day:    colDay,
+      collection_day_2:  colDayW,
+      bin_location:      binLocation || null,
+      gate_type:         gateType    || null,
+      gate_code:         gateCode    || null,
+      pet_info:          petInfo     || null,
+      curb_notes:        curbNotes   || null,
+      service_notes:     svcNotes    || null,
+      card_last4:        last4,
+      card_holder:       cardName,
+      card_expiry:       cardExp,
+      status:            'pending_review',
+      created_at:        new Date().toISOString(),
     })
     console.log('[BinDash] Homeowner signup saved to Supabase ✅')
   } catch(err) {
-    // Non-blocking — still route the user forward even if DB write fails
-    // so a Supabase config error doesn't break the demo
     console.warn('[BinDash] DB write failed (check Supabase config):', err.message)
   } finally {
     if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='🚀 Activate My Account' }
   }
 
-  // Send confirmation email
-  sendEmail(em, 'Your BinDash application is under review', EMAIL.signupPending(fn, document.getElementById('h-day')?.value||'Tuesday', window._hwMatchedZone?.name||'Pending assignment'), 'signup_pending')
-
-  // Route to waitlist screen if ZIP has no live coverage, otherwise pending approval
-  routeAfterSignup(newApp)
+  const dayForEmail = isSplit
+    ? (document.getElementById('h-day-recycling')?.value||'Tuesday')
+    : (document.getElementById('h-day')?.value||'Tuesday')
+  sendEmail(em, 'Your BinDash application is under review', EMAIL.signupPending(fn, dayForEmail, window._hwMatchedZone?.name||'Pending assignment'), 'signup_pending')
+  routeAfterSignup({ email:em, zip })
 }
 
 // Runner onboarding
@@ -4130,8 +4401,58 @@ function showAddHW(){
   document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">Add Homeowner</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb"><div class="g2"><div class="field"><label>First Name</label><input placeholder="Jane"></div><div class="field"><label>Last Name</label><input placeholder="Smith"></div></div><div class="field"><label>Email</label><input type="email" placeholder="jane@example.com"></div><div class="g2"><div class="field"><label>Phone</label><input placeholder="555-000-0000"></div><div class="field"><label>ZIP</label><input placeholder="85374"></div></div><div class="field"><label>Address</label><input placeholder="123 Main Street, Glendale"></div><div class="g2"><div class="field"><label>Service</label><select><option>RECYCLING</option><option>GENERAL_WASTE</option></select></div><div class="field"><label>Schedule</label><select><option>WEEKLY</option><option>FORTNIGHTLY</option><option>MONTHLY</option></select></div></div><div class="field"><label>Bin Storage</label><input placeholder="Back yard, side of house..."></div><div class="field"><label>Curb Placement</label><input placeholder="Confirmed after first collection..."></div><div class="field"><label>Gate / Access</label><textarea placeholder="Gate code, access details..."></textarea></div></div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Homeowner added ✅','ok')">Add</button></div>`
   openM()
 }
+// ── SAVE ACCOUNT SETTINGS → writes to homeowner_signups + auth ──
+async function saveAccountSettings(){
+  if(!currentUser) return
+  const fn  = document.getElementById('acct-fn')?.value.trim() || ''
+  const ln  = document.getElementById('acct-ln')?.value.trim() || ''
+  const ph  = document.getElementById('acct-ph')?.value.trim() || ''
+  const pw  = document.getElementById('acct-pw')?.value || ''
+  if(!fn){ showToast('First name is required','err'); return }
+
+  const btn = document.querySelector('#hw-account .btn-cyan')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+
+  try {
+    // Update homeowner_signups row
+    const { error: dbErr } = await _supa
+      .from('homeowner_signups')
+      .update({ first_name: fn, last_name: ln, phone: ph, updated_at: new Date().toISOString() })
+      .eq('email', currentUser.email)
+    if(dbErr) throw new Error(dbErr.message)
+
+    // Update password if provided
+    if(pw.length >= 8){
+      const { error: pwErr } = await _supa.auth.updateUser({ password: pw })
+      if(pwErr) throw new Error(pwErr.message)
+      document.getElementById('acct-pw').value = ''
+    } else if(pw.length > 0 && pw.length < 8){
+      showToast('Password must be at least 8 characters','err')
+      if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
+      return
+    }
+
+    // Update local currentUser cache
+    currentUser.first_name = fn
+    currentUser.last_name  = ln
+    currentUser.phone      = ph
+
+    // Refresh sidebar name
+    const nameEl = document.getElementById('hw-sidebar-name')
+    if(nameEl) nameEl.textContent = fn + ' ' + ln
+    const avEl = document.getElementById('hw-sidebar-avatar')
+    if(avEl) avEl.textContent = ((fn[0]||'')+(ln[0]||'')).toUpperCase() || 'HW'
+
+    showToast('Account updated ✅','ok')
+  } catch(err){
+    console.warn('[BinDash] saveAccountSettings:', String(err?.message||err))
+    showToast('Could not save — please try again','err')
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
+  }
+}
+
 function showCallout(){
-  if(!requireCard()) return
   document.getElementById('modal-box').innerHTML=`<div class="mh" style="background:linear-gradient(135deg,rgba(6,214,160,.08),rgba(59,130,246,.06))"><div style="font-size:15px;font-weight:700">📦 One-Time Callout — $12.99</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb"><div class="info-box">A runner visits your property for a single bin service. Choose which visit you need.</div>
 <div class="field"><label>Service Type</label><div class="radio-row"><div class="r-opt on" id="co-r1" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">♻️ Recycling</div><div class="r-opt" id="co-r2" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">🗑️ General Waste</div></div></div>
 <div class="field"><label>Which visit do you need?</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="r-opt on" id="co-out" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')" style="text-align:center;padding:16px 10px"><div style="font-size:24px;margin-bottom:6px">🌙</div><div style="font-size:13px;font-weight:700">Bin Out</div><div style="font-size:11px;color:var(--sub);margin-top:3px;line-height:1.4">Move bins to curb<br>Evening before collection</div></div><div class="r-opt" id="co-in" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')" style="text-align:center;padding:16px 10px"><div style="font-size:24px;margin-bottom:6px">☀️</div><div style="font-size:13px;font-weight:700">Bin In</div><div style="font-size:11px;color:var(--sub);margin-top:3px;line-height:1.4">Return bins to property<br>After truck has passed</div></div></div>
@@ -4861,10 +5182,11 @@ function updateRnDashboard(){
 }
 
 function showUpdatePaymentModal(){
+  const cardDisplay = document.getElementById('acct-card-display')?.textContent || 'No card on file'
   document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">💳 Update Payment Method</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
 <div style="background:var(--surface2);border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;margin-bottom:16px">
   <span style="font-size:22px">💳</span>
-  <div><div style="font-weight:600;font-size:13px">Current card: Visa •••• 4242</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Expires 08/27 · Will be replaced on save</div></div>
+  <div><div style="font-weight:600;font-size:13px">Current card: ${cardDisplay}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Will be replaced on save</div></div>
 </div>
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">
   <span style="font-size:14px">🔒</span><span style="font-size:11px;color:var(--sub)">Secured with 256-bit SSL · Powered by Stripe · BinDash never stores full card numbers</span>
@@ -5131,7 +5453,12 @@ function selectFreq(freq){
   obSelectedFreq = freq
   ;['asneeded','monthly','biweekly','weekly'].forEach(f=>{
     const el = document.getElementById('freq-'+f)
-    if(el) el.classList.toggle('on', f===freq)
+    if(!el) return
+    const isOn = f===freq
+    el.style.borderColor = isOn ? 'var(--cyan)' : 'var(--border2)'
+    el.style.background  = isOn ? 'rgba(6,214,160,.07)' : 'transparent'
+    const label = el.querySelector('div:nth-child(2)')
+    if(label) label.style.color = isOn ? 'var(--cyan)' : 'var(--text)'
   })
   const planSection = document.getElementById('ob-plan-section')
   const asNeededBox = document.getElementById('ob-asneeded-box')
@@ -5151,14 +5478,24 @@ function renderObPlanCards(freq){
   const container = document.getElementById('ob-plan-cards')
   const noteEl = document.getElementById('ob-plan-note')
   if(!container) return
-  container.innerHTML = (OB_PLANS[freq]||[]).map(p=>`
-    <div id="obpc-${p.id}" onclick="selectObPlan('${p.id}')" style="border:1.5px solid var(--border2);border-radius:12px;padding:16px;cursor:pointer;transition:all .15s;position:relative;text-align:center">
+  const planFeatures = {
+    '1': ['1 bin · your choice of service','🌙 Bin Out the night before','☀️ Bin In after the truck'],
+    '2': ['2 bins · same collection day','Recycling + General Waste','🌙 Bin Out + ☀️ Bin In both bins'],
+    '3': ['2 bins · 2 different days','Recycling on one day','General waste on another day','Most flexible option'],
+  }
+  container.innerHTML = (OB_PLANS[freq]||[]).map(p=>{
+    const tier = p.id.slice(-1)
+    const feats = planFeatures[tier] || []
+    const colors = {1:'var(--cyan)',2:'var(--blue)',3:'var(--purple)'}
+    const col = colors[tier]||'var(--cyan)'
+    return `
+    <div id="obpc-${p.id}" onclick="selectObPlan('${p.id}')" style="border:1.5px solid var(--border2);border-radius:14px;padding:16px 14px;cursor:pointer;transition:all .15s;position:relative">
       ${p.popular?'<div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--cyan);color:#07090f;font-size:9px;font-weight:700;padding:2px 10px;border-radius:99px;white-space:nowrap">MOST POPULAR</div>':''}
-      <div style="font-size:12px;font-weight:700;margin-bottom:6px;margin-top:${p.popular?'4px':'0'}">${p.label}</div>
-      <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:853;color:var(--cyan)">${p.price}</div>
-      <div style="font-size:10px;color:var(--muted);margin-top:2px">/mo</div>
-      <div style="font-size:11px;color:var(--sub);margin-top:8px;line-height:1.5">${p.desc}</div>
-    </div>`).join('')
+      <div style="margin-top:${p.popular?'6px':'0'};font-size:12px;font-weight:700;color:var(--sub);margin-bottom:4px">${p.label}</div>
+      <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;color:${col};line-height:1">${p.price}</div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:10px">/mo</div>
+      <div style="font-size:11px;color:var(--sub);line-height:1.8">${feats.map(f=>'<div>✓ '+f+'</div>').join('')}</div>
+    </div>`}).join('')
   if(noteEl) noteEl.textContent = OB_FREQ_NOTE[freq] || ''
 }
 
@@ -5205,6 +5542,52 @@ function selectBinSvc(svc){
   if(r) r.classList.toggle('on', svc==='recycling')
   if(g) g.classList.toggle('on', svc==='general')
   updateObSvcValue()
+}
+
+// ── DAY PILL PICKER ────────────────────────────
+function obPickDay(el, group){
+  if(group === 'single'){
+    document.querySelectorAll('#ob-day-pills .ob-day-pill').forEach(p=>p.classList.remove('on'))
+    el.classList.add('on')
+    const inp = document.getElementById('h-day')
+    if(inp) inp.value = el.dataset.day
+  } else if(group === 'recycling'){
+    document.querySelectorAll('#ob-recycling-pills .ob-day-pill').forEach(p=>p.classList.remove('on'))
+    el.classList.add('on')
+    const inp = document.getElementById('h-day-recycling')
+    if(inp) inp.value = el.dataset.day
+    checkSplitDayConflict()
+  } else if(group === 'waste'){
+    document.querySelectorAll('#ob-waste-pills .ob-day-pill').forEach(p=>p.classList.remove('on'))
+    el.classList.add('on')
+    const inp = document.getElementById('h-day-waste')
+    if(inp) inp.value = el.dataset.day
+    checkSplitDayConflict()
+  }
+}
+
+// ── PROPERTY STEP PICKERS ──────────────────────
+function obPickBinLoc(el, val){
+  document.querySelectorAll('[id^="binloc-"]').forEach(e=>e.classList.remove('on'))
+  el.classList.add('on')
+  const inp = document.getElementById('h-bin-location')
+  if(inp) inp.value = val
+}
+
+function obPickGate(el, val){
+  document.querySelectorAll('[id^="gate-"]').forEach(e=>e.classList.remove('on'))
+  el.classList.add('on')
+  const inp = document.getElementById('h-gate-type')
+  if(inp) inp.value = val
+  const codeWrap = document.getElementById('h-gate-code-wrap')
+  if(codeWrap) codeWrap.style.display = val === 'Gate with code' ? 'block' : 'none'
+}
+
+function obPickPet(el, val){
+  document.querySelectorAll('[id^="pet-"]').forEach(e=>e.classList.remove('on'))
+  el.classList.add('on')
+  const inp = document.getElementById('h-pet-info')
+  if(inp) inp.value = val
 }
 
 function updateObSvcValue(){
