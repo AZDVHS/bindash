@@ -135,7 +135,7 @@ async function launchStripeCheckout(){
         'apikey': SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({
-        planKey:_checkoutPlanKey, priceId:plan.monthly, calloutId:plan.callout,
+        planKey:_checkoutPlanKey, priceId:plan.monthly,
         email:em, name:fn+' '+ln, zip,
         successUrl: window.location.origin+'/?checkout=success',
         cancelUrl:  window.location.origin+'/?checkout=cancel',
@@ -3997,7 +3997,13 @@ function hNext(s){
       if(r && w && r === w){ showToast('Please choose different days for split-day service','err'); return }
     }
   }
-  if(s===5){ updateCheckoutSummary() }
+  if(s===5){
+    // Sync onboarding plan selection → Stripe checkout plan key
+    const planMap = { w1:'plan_a', b1:'plan_a', m1:'plan_a', w2:'plan_b', b2:'plan_b', m2:'plan_b', w3:'plan_c', b3:'plan_c', m3:'plan_c' }
+    const mapped = planMap[obSelectedPlan]
+    if(mapped) _checkoutPlanKey = mapped
+    updateCheckoutSummary()
+  }
   if(s===5){
     // Build review
     const fn=document.getElementById('h-fn')?.value||''
