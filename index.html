@@ -59,29 +59,29 @@ async function sendEmail(to, subject, html, type){
 // STRIPE PAYMENT CONFIG
 // Replace placeholder keys after creating Stripe account
 // ═════════════════════════════════════════════════════════════
-const STRIPE_PUBLISHABLE_KEY = 'pk_test_REPLACE_WITH_YOUR_KEY'
+const STRIPE_PUBLISHABLE_KEY = 'pk_test_51TDRBfKQcgkU1rZoqeHCWLFWmytdbpnvhqhf9rMnUcmkXYkVWuEBOEij3QY8aAWizTxCk7eQPVRQKD9jGn9cnYDW009hn0XV2w'
 
 const STRIPE_PRICES = {
   plan_a: {
     name:'1 Can — Weekly',
-    monthly:'price_REPLACE_PLAN_A',
-    callout:'price_REPLACE_CALLOUT',
+    monthly:'price_1TDRNCKQcgkU1rZoZ2Fj53FW',
+    callout:'price_1TDROMKQcgkU1rZodSHTE51N',
     monthlyAmt:34.99,
     splitDays: false,
     desc:'1 bin · any type · Bin Out + Bin In · 1 collection day/week'
   },
   plan_b: {
     name:'2 Cans — Same Day',
-    monthly:'price_REPLACE_PLAN_B',
-    callout:'price_REPLACE_CALLOUT',
+    monthly:'price_1TDRNdKQcgkU1rZoNzhZLAEq',
+    callout:'price_1TDROMKQcgkU1rZodSHTE51N',
     monthlyAmt:44.99,
     splitDays: false,
     desc:'2 bins · Recycling + General Waste · same collection day · Bin Out + Bin In'
   },
   plan_c: {
     name:'2 Cans — Split Days',
-    monthly:'price_REPLACE_PLAN_C',
-    callout:'price_REPLACE_CALLOUT',
+    monthly:'price_1TDRNvKQcgkU1rZoVJQwiQ68',
+    callout:'price_1TDROMKQcgkU1rZodSHTE51N',
     monthlyAmt:54.99,
     splitDays: true,
     desc:'2 bins · separate collection days · Recycling one day + Waste another · Bin Out + Bin In both days'
