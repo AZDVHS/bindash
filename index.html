@@ -1448,6 +1448,51 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <textarea id="h-svc-notes" placeholder="e.g. Recycling bin lid is broken — handle with care. Blue bin is recycling, green is general waste." style="min-height:80px"></textarea>
         </div>
 
+        <!-- BIN PHOTOS -->
+        <div style="margin-bottom:18px">
+          <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">Photos of your bins <span style="color:var(--muted);font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">optional · up to 3</span></div>
+          <div style="font-size:12px;color:var(--sub);margin-bottom:10px;line-height:1.5">Helps your runner identify your bins quickly. Take a photo of where they're stored, the curb area, or the bins themselves.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px" id="bin-photo-slots">
+
+            <!-- Slot 1 -->
+            <div id="photo-slot-0" onclick="triggerPhotoInput(0)" style="aspect-ratio:1;border:2px dashed var(--border2);border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;transition:all .2s;background:var(--surface2);overflow:hidden;position:relative" onmouseover="if(!_binPhotos[0])this.style.borderColor='var(--cyan)'" onmouseout="if(!_binPhotos[0])this.style.borderColor='var(--border2)'">
+              <div id="photo-preview-0" style="position:absolute;inset:0;display:none"><img style="width:100%;height:100%;object-fit:cover;border-radius:10px" id="photo-img-0"></div>
+              <div id="photo-placeholder-0" style="display:flex;flex-direction:column;align-items:center;gap:5px">
+                <div style="font-size:26px">📷</div>
+                <div style="font-size:11px;font-weight:600;color:var(--sub)">Photo 1</div>
+                <div style="font-size:10px;color:var(--muted)">Tap to add</div>
+              </div>
+              <button id="photo-remove-0" onclick="event.stopPropagation();removePhoto(0)" style="display:none;position:absolute;top:5px;right:5px;width:22px;height:22px;background:rgba(0,0,0,.7);border:none;border-radius:50%;color:#fff;font-size:12px;cursor:pointer;display:none;align-items:center;justify-content:center;line-height:1">✕</button>
+            </div>
+
+            <!-- Slot 2 -->
+            <div id="photo-slot-1" onclick="triggerPhotoInput(1)" style="aspect-ratio:1;border:2px dashed var(--border2);border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;transition:all .2s;background:var(--surface2);overflow:hidden;position:relative" onmouseover="if(!_binPhotos[1])this.style.borderColor='var(--cyan)'" onmouseout="if(!_binPhotos[1])this.style.borderColor='var(--border2)'">
+              <div id="photo-preview-1" style="position:absolute;inset:0;display:none"><img style="width:100%;height:100%;object-fit:cover;border-radius:10px" id="photo-img-1"></div>
+              <div id="photo-placeholder-1" style="display:flex;flex-direction:column;align-items:center;gap:5px">
+                <div style="font-size:26px">📷</div>
+                <div style="font-size:11px;font-weight:600;color:var(--sub)">Photo 2</div>
+                <div style="font-size:10px;color:var(--muted)">Tap to add</div>
+              </div>
+              <button id="photo-remove-1" onclick="event.stopPropagation();removePhoto(1)" style="display:none;position:absolute;top:5px;right:5px;width:22px;height:22px;background:rgba(0,0,0,.7);border:none;border-radius:50%;color:#fff;font-size:12px;cursor:pointer;align-items:center;justify-content:center;line-height:1">✕</button>
+            </div>
+
+            <!-- Slot 3 -->
+            <div id="photo-slot-2" onclick="triggerPhotoInput(2)" style="aspect-ratio:1;border:2px dashed var(--border2);border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;transition:all .2s;background:var(--surface2);overflow:hidden;position:relative" onmouseover="if(!_binPhotos[2])this.style.borderColor='var(--cyan)'" onmouseout="if(!_binPhotos[2])this.style.borderColor='var(--border2)'">
+              <div id="photo-preview-2" style="position:absolute;inset:0;display:none"><img style="width:100%;height:100%;object-fit:cover;border-radius:10px" id="photo-img-2"></div>
+              <div id="photo-placeholder-2" style="display:flex;flex-direction:column;align-items:center;gap:5px">
+                <div style="font-size:26px">📷</div>
+                <div style="font-size:11px;font-weight:600;color:var(--sub)">Photo 3</div>
+                <div style="font-size:10px;color:var(--muted)">Tap to add</div>
+              </div>
+              <button id="photo-remove-2" onclick="event.stopPropagation();removePhoto(2)" style="display:none;position:absolute;top:5px;right:5px;width:22px;height:22px;background:rgba(0,0,0,.7);border:none;border-radius:50%;color:#fff;font-size:12px;cursor:pointer;align-items:center;justify-content:center;line-height:1">✕</button>
+            </div>
+
+          </div>
+          <!-- Hidden file input, reused for all slots -->
+          <input type="file" id="bin-photo-input" accept="image/*" capture="environment" style="display:none" onchange="handlePhotoSelected(this)">
+          <div style="font-size:10px;color:var(--muted);margin-top:8px;text-align:center">JPG, PNG, HEIC · Max 5MB each · Shared only with your assigned runner</div>
+        </div>
+
         <div style="display:flex;justify-content:space-between;margin-top:6px">
           <button class="btn btn-outline" onclick="hBack(4)">← Back</button>
           <button class="btn btn-cyan" onclick="hNext(4)">Next: Payment →</button>
@@ -3691,7 +3736,9 @@ function hNext(s){
         <div><strong style="color:var(--text)">Bin location:</strong> ${binLoc}</div>
         <div><strong style="color:var(--text)">Gate:</strong> ${gateType}${gateCode?' ('+gateCode+')':''}</div>
         <div><strong style="color:var(--text)">Pets:</strong> ${pets}</div>
+        const photoCount = _binPhotos.filter(Boolean).length
         ${notes?'<div style="grid-column:1/-1"><strong style="color:var(--text)">Notes:</strong> '+notes+'</div>':''}
+        ${photoCount ? '<div style="grid-column:1/-1"><strong style="color:var(--text)">Bin photos:</strong> ' + photoCount + ' photo' + (photoCount > 1 ? 's' : '') + ' attached ✅</div>' : ''}
       </div>`
   }
 
@@ -3838,6 +3885,7 @@ async function hSubmit(){
       pet_info:          petInfo     || null,
       curb_notes:        curbNotes   || null,
       service_notes:     svcNotes    || null,
+      bin_photos:        _binPhotos.filter(Boolean).length ? JSON.stringify(_binPhotos.filter(Boolean)) : null,
       card_last4:        last4,
       card_holder:       cardName,
       card_expiry:       cardExp,
@@ -4987,6 +5035,22 @@ function _renderNavModal(){
 function showStopDetail(stopIdx){
   const s = NAV_STOPS[stopIdx]
   if(!s) return
+
+  // Gather bin photos — from stop data or from HOMEOWNERS array
+  const hw = HOMEOWNERS.find(h => h.address === s.address || h.name === s.name)
+  const photos = (s.binPhotos || hw?.binPhotos || []).filter(Boolean)
+
+  const photosHTML = photos.length ? `
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Bin Photos (${photos.length})</div>
+      <div style="display:grid;grid-template-columns:repeat(${photos.length === 1 ? '1' : photos.length === 2 ? '2' : '3'},1fr);gap:8px">
+        ${photos.map(p=>`<img src="${p}" onclick="window.open('${p}')" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;border:1px solid var(--border);cursor:zoom-in" title="Tap to enlarge">`).join('')}
+      </div>
+    </div>` : `
+    <div style="background:var(--surface2);border-radius:10px;padding:14px;text-align:center;color:var(--muted);font-size:12px;margin-bottom:14px">
+      No bin photos — homeowner hasn't added any yet
+    </div>`
+
   document.getElementById('modal-box').innerHTML=`
   <div class="mh">
     <div>
@@ -4997,14 +5061,7 @@ function showStopDetail(stopIdx){
   </div>
   <div class="mb">
 
-    ${s.propertyPhoto ? `
-    <div style="margin-bottom:14px">
-      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Property Reference Photo</div>
-      <img src="${s.propertyPhoto}" style="width:100%;border-radius:10px;border:1px solid var(--border)">
-    </div>` : `
-    <div style="background:var(--surface2);border-radius:10px;padding:14px;text-align:center;color:var(--muted);font-size:12px;margin-bottom:14px">
-      No property photo yet — will be set after first completed visit
-    </div>`}
+    ${photosHTML}
 
     <div class="cc-grid" style="margin-bottom:14px">
       <div class="dl"><div class="dl-l">Address</div><div>${s.address}</div></div>
@@ -5590,6 +5647,56 @@ function obPickPet(el, val){
   if(inp) inp.value = val
 }
 
+// ── BIN PHOTO UPLOAD ───────────────────────────
+let _binPhotos   = [null, null, null]  // base64 strings
+let _photoTarget = 0                   // which slot is being filled
+
+function triggerPhotoInput(slot){
+  _photoTarget = slot
+  const inp = document.getElementById('bin-photo-input')
+  if(inp){ inp.value = ''; inp.click() }
+}
+
+function handlePhotoSelected(input){
+  const file = input.files[0]
+  if(!file) return
+  if(file.size > 5 * 1024 * 1024){
+    showToast('Photo must be under 5MB','err')
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = function(e){
+    const b64 = e.target.result
+    const slot = _photoTarget
+    _binPhotos[slot] = b64
+
+    // Show preview
+    const preview = document.getElementById('photo-preview-'+slot)
+    const img     = document.getElementById('photo-img-'+slot)
+    const pholder = document.getElementById('photo-placeholder-'+slot)
+    const rmBtn   = document.getElementById('photo-remove-'+slot)
+    const slotEl  = document.getElementById('photo-slot-'+slot)
+    if(img)     img.src = b64
+    if(preview) preview.style.display = 'block'
+    if(pholder) pholder.style.display = 'none'
+    if(rmBtn){  rmBtn.style.display = 'flex' }
+    if(slotEl){ slotEl.style.borderColor = 'var(--cyan)'; slotEl.style.borderStyle = 'solid' }
+  }
+  reader.readAsDataURL(file)
+}
+
+function removePhoto(slot){
+  _binPhotos[slot] = null
+  const preview = document.getElementById('photo-preview-'+slot)
+  const pholder = document.getElementById('photo-placeholder-'+slot)
+  const rmBtn   = document.getElementById('photo-remove-'+slot)
+  const slotEl  = document.getElementById('photo-slot-'+slot)
+  if(preview) preview.style.display = 'none'
+  if(pholder) pholder.style.display = 'flex'
+  if(rmBtn)   rmBtn.style.display   = 'none'
+  if(slotEl){ slotEl.style.borderColor = 'var(--border2)'; slotEl.style.borderStyle = 'dashed' }
+}
+
 function updateObSvcValue(){
   // Derive the service label for the review step
   const is1Bin = obSelectedPlan.endsWith('1')
@@ -5739,6 +5846,13 @@ function showHWDetail(hwId){
       </div>
     </div>
     <div class="field"><label>Internal Notes</label><input id="hwd-notes" value="${hw.notes||''}"></div>
+    ${hw.binPhotos && hw.binPhotos.length ? `
+    <div style="margin-top:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Bin Photos (${hw.binPhotos.length})</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${hw.binPhotos.map((p,i)=>`<img src="${p}" onclick="window.open('${p}')" style="width:80px;height:80px;object-fit:cover;border-radius:8px;cursor:zoom-in;border:1px solid var(--border2)" title="Click to enlarge">`).join('')}
+      </div>
+    </div>` : ''}
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
@@ -8475,12 +8589,19 @@ async function loadHomeownersFromSupabase(){
         service:        isSplit ? 'SPLIT' : ((row.service_type||'').includes('General')?'GENERAL':'RECYCLING'),
         freq:           row.frequency||'weekly',
         day,
-        dayRecycling:   isSplit ? day  : null,   // Plan C: recycling day
-        dayWaste:       isSplit ? day2 : null,   // Plan C: waste day
+        dayRecycling:   isSplit ? day  : null,
+        dayWaste:       isSplit ? day2 : null,
         plan:           row.plan_id||'plan_a',
         assignedRunner: row.assigned_runner||null,
         status:         'active',
-        bins: isSplit ? 2 : 1, storage:'—', gate:'—', pets:'None', curb:'—',
+        bins:     isSplit ? 2 : 1,
+        storage:  row.bin_location  || '—',
+        gate:     row.gate_type     || '—',
+        gateCode: row.gate_code     || '',
+        pets:     row.pet_info      || 'None',
+        curb:     row.curb_notes    || '—',
+        svcNotes: row.service_notes || '',
+        binPhotos: (() => { try { return row.bin_photos ? JSON.parse(row.bin_photos) : [] } catch(e){ return [] } })(),
         color:'linear-gradient(135deg,var(--cyan),var(--blue))',
       }
     }
