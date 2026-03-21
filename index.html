@@ -54,6 +54,93 @@ async function sendEmail(to, subject, html, type){
 // EMAIL TEMPLATES
 // ─────────────────────────────────────────────────────────────
 
+
+// ═════════════════════════════════════════════════════════════
+// STRIPE PAYMENT CONFIG
+// Replace placeholder keys after creating Stripe account
+// ═════════════════════════════════════════════════════════════
+const STRIPE_PUBLISHABLE_KEY = 'pk_test_REPLACE_WITH_YOUR_KEY'
+
+const STRIPE_PRICES = {
+  plan_a: { name:'1 Can — Weekly',        monthly:'price_REPLACE_PLAN_A', callout:'price_REPLACE_CALLOUT', monthlyAmt:34.99, desc:'1 bin · any type · Bin Out + Bin In · weekly' },
+  plan_b: { name:'2 Cans — Same Day',     monthly:'price_REPLACE_PLAN_B', callout:'price_REPLACE_CALLOUT', monthlyAmt:44.99, desc:'2 bins · Recycling + Waste · Bin Out + Bin In · weekly' },
+  plan_c: { name:'3+ Cans — Full Service',monthly:'price_REPLACE_PLAN_C', callout:'price_REPLACE_CALLOUT', monthlyAmt:52.99, desc:'3+ bins · priority scheduling · Bin Out + Bin In' },
+}
+let _checkoutPlanKey = 'plan_a'
+
+function selectPlan(p){
+  _checkoutPlanKey = 'plan_' + p
+  document.querySelectorAll('.plan-card').forEach(el=>{
+    el.style.border='2px solid var(--border2)'; el.style.background='transparent'
+    const b=el.querySelector('.badge'); if(b) b.style.display='none'
+  })
+  const el = document.getElementById('plan-'+p)
+  if(el){ el.style.border='2px solid var(--cyan)'; el.style.background='rgba(6,214,160,.06)'; const b=el.querySelector('.badge'); if(b) b.style.display='inline-flex' }
+  const extras = document.getElementById('plan-b-extras')
+  if(extras) extras.style.display = p==='b' ? 'block' : 'none'
+  updateCheckoutSummary()
+}
+
+function updateCheckoutSummary(){
+  const plan = STRIPE_PRICES[_checkoutPlanKey]; if(!plan) return
+  const safe = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v }
+  safe('checkout-plan-name',  plan.name)
+  safe('checkout-plan-price', '$'+plan.monthlyAmt.toFixed(2)+'/mo')
+  safe('checkout-plan-desc',  plan.desc)
+  safe('checkout-total',      '$'+(plan.monthlyAmt+15).toFixed(2)+' today')
+}
+
+async function launchStripeCheckout(){
+  const btn = document.getElementById('stripe-checkout-btn')
+  if(btn){ btn.disabled=true; btn.textContent='\u23F3 Opening Stripe...' }
+  const plan = STRIPE_PRICES[_checkoutPlanKey]
+  if(!plan){ showToast('Please select a plan','err'); return }
+  const em  = document.getElementById('h-em')?.value.trim()
+  const fn  = document.getElementById('h-fn')?.value.trim()
+  const ln  = document.getElementById('h-ln')?.value.trim()||''
+  const zip = document.getElementById('h-zip')?.value.trim()
+  try {
+    const _supaUrl = (SUPABASE_URL&&!SUPABASE_URL.includes('your-project')) ? SUPABASE_URL : 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
+    const res = await fetch(_supaUrl+'/functions/v1/create-checkout', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        planKey:_checkoutPlanKey, priceId:plan.monthly, calloutId:plan.callout,
+        email:em, name:fn+' '+ln, zip,
+        successUrl: window.location.origin+'/?checkout=success',
+        cancelUrl:  window.location.origin+'/?checkout=cancel',
+      })
+    })
+    const data = await res.json()
+    if(data.error||!data.url) throw new Error(data.error||'No checkout URL')
+    // Save partial signup before redirect
+    await _supa.from('homeowner_signups').upsert({
+      email:em, first_name:fn, last_name:ln, zip_code:zip,
+      plan_id:_checkoutPlanKey, status:'payment_pending',
+      stripe_session_id:data.sessionId,
+      created_at:new Date().toISOString(), updated_at:new Date().toISOString(),
+    },{ onConflict:'email' })
+    window.location.href = data.url
+  } catch(e){
+    console.error('[BinDash] Stripe error:',e)
+    showToast('Payment setup failed — '+String(e?.message||e),'err')
+    if(btn){ btn.disabled=false; btn.textContent='\uD83D\uDD12 Pay Securely with Stripe \u2192' }
+  }
+}
+
+function handleStripeReturn(){
+  const p = new URLSearchParams(window.location.search)
+  if(p.get('checkout')==='success'){
+    window.history.replaceState({},'',' ')
+    go('S-hw-pending')
+    showToast('Payment successful! Account being set up \u2705','ok')
+  } else if(p.get('checkout')==='cancel'){
+    window.history.replaceState({},'',' ')
+    showToast('Payment cancelled — try again anytime','info')
+  }
+}
+document.addEventListener('DOMContentLoaded', handleStripeReturn)
+
 function renderEmailStopList(stopList){
   const rows = stopList.slice(0,5).map((s,i)=>{
     const border = i < Math.min(stopList.length,5)-1 ? 'border-bottom:1px solid #e2e8f0' : ''
@@ -1149,33 +1236,37 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
       <!-- STEP 4: Payment (active zone only) -->
       <div id="h-s4" style="display:none">
-        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Payment 💳</div>
-        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Add a card to activate your subscription. You won't be charged until your first collection is confirmed.</div>
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;margin-bottom:6px">Secure Payment</div>
+        <div style="color:var(--sub);font-size:14px;margin-bottom:28px">You'll be taken to Stripe's secure checkout. No card details stored on BinDash.</div>
 
-        <div class="card" style="max-width:420px;padding:20px;margin-bottom:16px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)">
-            <span style="font-size:16px">🔒</span>
-            <span style="font-size:12px;color:var(--sub)">Secured with 256-bit SSL · Powered by Stripe</span>
+        <!-- Plan summary -->
+        <div style="background:var(--surface2);border:1px solid var(--border2);border-radius:14px;padding:18px 20px;margin-bottom:16px" id="checkout-plan-summary">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div style="font-weight:700;font-size:15px" id="checkout-plan-name">Loading plan...</div>
+            <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:var(--cyan)" id="checkout-plan-price">—</div>
           </div>
-          <div class="field"><label>Cardholder Name</label>
-            <input id="cc-name" placeholder="Jane Smith" oninput="document.getElementById('card-name-display')&&(document.getElementById('card-name-display').textContent=this.value.toUpperCase()||'YOUR NAME')">
-          </div>
-          <div class="field"><label>Card Number</label>
-            <input id="cc-num" placeholder="1234 5678 9012 3456" maxlength="19" oninput="formatCardNum(this)" style="font-family:'DM Mono',monospace;letter-spacing:.05em">
-          </div>
-          <div class="g2">
-            <div class="field"><label>Expiry</label><input id="cc-exp" placeholder="MM/YY" maxlength="5" oninput="formatExpiry(this)" style="font-family:'DM Mono',monospace"></div>
-            <div class="field"><label>CVV</label><input id="cc-cvv" placeholder="•••" maxlength="4" type="password" style="font-family:'DM Mono',monospace"></div>
-          </div>
-          <div class="field"><label>Billing ZIP</label><input id="cc-zip" placeholder="85301" maxlength="5" style="font-family:'DM Mono',monospace;width:120px"></div>
-          <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:9px;padding:12px;font-size:12px;color:var(--sub);line-height:1.6;margin-top:8px">
-            <strong style="color:var(--cyan)">No charge today.</strong> Billing starts after your first confirmed collection. Cancel any time.
+          <div style="font-size:12px;color:var(--sub);line-height:1.7" id="checkout-plan-desc"></div>
+          <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:13px;color:var(--sub)">First month + callout fee</span>
+            <span style="font-size:14px;font-weight:700;color:var(--text)" id="checkout-total">—</span>
           </div>
         </div>
 
-        <div style="display:flex;justify-content:space-between;margin-top:6px">
-          <button class="btn btn-outline" onclick="hBack(4)">← Back</button>
-          <button class="btn btn-cyan" onclick="hNext(4)">Review →</button>
+        <!-- Callout fee notice -->
+        <div style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:12px;color:var(--sub);line-height:1.6">
+          <strong style="color:var(--amber)">📋 One-time callout fee</strong> — A $15 setup fee is charged at your first booking to cover route planning and runner assignment. This is a one-time charge.
+        </div>
+
+        <!-- Stripe button -->
+        <button class="btn btn-cyan btn-lg btn-full" id="stripe-checkout-btn" onclick="launchStripeCheckout()">
+          🔒 Pay Securely with Stripe →
+        </button>
+        <div style="text-align:center;margin-top:10px;font-size:11px;color:var(--muted)">
+          Redirects to Stripe · 256-bit SSL · Cancel anytime
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:24px">
+          <button class="btn btn-ghost btn-sm" onclick="hBack(4)">← Back</button>
         </div>
       </div>
 
@@ -3277,7 +3368,7 @@ function hNext(s){
     if(!document.getElementById('h-em')?.value.trim()){ showToast('Please enter your email address','err'); return }
     if(!document.getElementById('h-pw')?.value || document.getElementById('h-pw').value.length < 8){ showToast('Password must be at least 8 characters','err'); return }
   }
-  if(s===4){ if(!validateCardStep()) return }
+  if(s===4){ updateCheckoutSummary() }
 
   document.getElementById('h-s'+s).style.display='none'
   document.getElementById('h-s'+(s+1)).style.display='block'
@@ -5806,20 +5897,29 @@ function findZoneForZip(zip){
   // 3. Zone is valid only if at least one AVAILABLE runner covers it
   //    (otherwise homeowner goes to waitlist even if zone exists)
   if(zone){
-    const hasRunner = RUNNERS.some(r=>
-      r.status !== 'INACTIVE' && r.status !== 'OFF_DUTY' &&
-      (r.coverageZones?.includes(zone.id) || r.zoneId===zone.id ||
-       r.zip===zip || r.zip?.slice(0,3)===prefix)
-    )
-    if(!hasRunner && zone.status !== 'live') zone = null
+    // Only block on runner check if we have runners loaded
+    // If RUNNERS is empty (not loaded yet) allow the zone to be found
+    if(RUNNERS.length > 0){
+      const hasRunner = RUNNERS.some(r=>
+        r.status !== 'INACTIVE' && r.status !== 'OFF_DUTY' &&
+        (r.coverageZones?.includes(zone.id) || r.zoneId===zone.id ||
+         r.zip===zip || r.zip?.slice(0,3)===prefix)
+      )
+      if(!hasRunner && zone.status !== 'live') zone = null
+    }
   }
   return zone || null
 }
 
-function checkZipCoverage(zip){
+async function checkZipCoverage(zip){
   const el = document.getElementById('zip-coverage-result')
   if(!el) return
   if(zip.length < 5){ el.style.display='none'; window._hwMatchedZone=null; window._hwZipHasCoverage=null; return }
+
+  // Load zones from Supabase if not loaded yet
+  if(ADMIN_ZONES.length === 0){
+    await loadZonesFromSupabase()
+  }
 
   const zone = findZoneForZip(zip)
   window._hwMatchedZone = zone || null
@@ -7588,7 +7688,7 @@ function saveCreateZone(){
   const statusRaw = document.getElementById('cz-status')?.value || 'pilot'
   const isPilot   = statusRaw === 'pilot'
   const newZone = {
-    id:'z-'+Date.now(), name,
+    id: crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+Math.random().toString(36).slice(2,8), name,
     city: city || zips[0]+' area',
     zip, zips,
     area: 'A1',   // default area suffix — becomes A2, A3 on splits
@@ -7722,7 +7822,7 @@ async function confirmSplitZone(zId){
   // Keep existing zone as A1 (or current), new zone gets next suffix
   z.area = currentArea
   const zoneB = {
-    id:'z-split-'+Date.now(), name:nameB,
+    id: crypto.randomUUID ? crypto.randomUUID() : 'z-split-'+Date.now(), name:nameB,
     city: z.city, zip: zipsB[0].slice(0,3), zips: zipsB,
     area: nextArea,
     status: z.status, pilot: z.pilot, overridden: z.overridden,
@@ -8050,8 +8150,9 @@ async function dbSaveZone(z){
     const res = await _supa.from('zones').upsert([row], { onConflict: 'id' })
     const err = res?.error?.message || null
     if(err){
-      console.warn('[BinDash] Zone save failed:', err)
-      console.warn('[BinDash] Row attempted:', JSON.stringify(row))
+      console.error('[BinDash] Zone save FAILED:', err)
+      console.error('[BinDash] Row attempted:', JSON.stringify(row))
+      showToast('Zone save failed: '+err,'err')
     } else {
       console.log('[BinDash] Zone saved ✅', z.name, zoneLabel(z))
     }
