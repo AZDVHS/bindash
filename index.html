@@ -253,6 +253,8 @@ async function launchStripeCheckout(){
 
 function handleStripeReturn(){
   const p = new URLSearchParams(window.location.search)
+  const hash = window.location.hash
+
   if(p.get('checkout')==='success'){
     window.history.replaceState({},'',' ')
     go('S-hw-pending')
@@ -260,13 +262,33 @@ function handleStripeReturn(){
   } else if(p.get('checkout')==='cancel'){
     window.history.replaceState({},'',' ')
     showToast('Payment cancelled — try again anytime','info')
-  } else if(p.get('reset')==='true' || window.location.hash.includes('type=recovery')){
-    // Supabase password reset redirect
-    window.history.replaceState({},'',' ')
-    showPasswordResetForm()
+  } else if(hash.includes('type=recovery') || hash.includes('type=signup')){
+    // Supabase password reset — parse the hash and set the session
+    window.history.replaceState({}, '', ' ')
+    _handlePasswordResetHash(hash)
   }
 }
 document.addEventListener('DOMContentLoaded', handleStripeReturn)
+
+async function _handlePasswordResetHash(hash){
+  try {
+    // Parse tokens from hash fragment
+    const params = new URLSearchParams(hash.replace('#',''))
+    const accessToken  = params.get('access_token')
+    const refreshToken = params.get('refresh_token')
+    const type         = params.get('type')
+
+    if((type === 'recovery' || type === 'signup') && accessToken){
+      // Set the session so updateUser() will work
+      await _supa.auth.setSession({ access_token: accessToken, refresh_token: refreshToken || '' })
+      showPasswordResetForm()
+    }
+  } catch(e){
+    console.warn('[BinDash] Password reset hash error:', e)
+    showToast('Reset link invalid or expired — please request a new one','err')
+    go('S-forgot')
+  }
+}
 
 function showPasswordResetForm(){
   // Show a modal to set new password
