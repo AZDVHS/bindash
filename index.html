@@ -132,7 +132,6 @@ async function launchStripeCheckout(){
   const zip  = document.getElementById('h-zip')?.value.trim()  || ''
   const isSplit   = obSelectedPlan.endsWith('3')
   const colDay    = isSplit ? null : (document.getElementById('h-day')?.value || null)
-  const colDayR   = isSplit ? (document.getElementById('h-day-recycling')?.value || null) : null
   const colDayW   = isSplit ? (document.getElementById('h-day-waste')?.value    || null) : null
   const binLoc    = document.getElementById('h-bin-location')?.value || null
   const gateType  = document.getElementById('h-gate-type')?.value    || null
@@ -142,11 +141,23 @@ async function launchStripeCheckout(){
   const svcNotes  = document.getElementById('h-svc-notes')?.value    || null
   const photos    = (_binPhotos||[]).filter(Boolean)
 
-  if(!em){ showToast('Email is required','err'); if(btn){btn.disabled=false;btn.textContent='🔒 Pay Securely with Stripe →'} return }
+  if(!em || !fn){ showToast('Missing name or email','err'); if(btn){btn.disabled=false;btn.textContent='🔒 Pay Securely with Stripe →'} return }
 
   try {
-    // 1. Save full signup record FIRST (before redirect — we won't come back)
-    const signupPayload = {
+    // 1. Create auth user first
+    const pw = document.getElementById('h-pw')?.value || ''
+    let authUserId = null
+    if(pw.length >= 8){
+      const { data: authData, error: authErr } = await _supa.auth.signUp({
+        email: em, password: pw,
+        options:{ data:{ role:'hw', first_name:fn, last_name:ln } }
+      })
+      if(!authErr) authUserId = authData?.user?.id || null
+      else if(authErr.message !== 'User already registered') console.warn('[BinDash] Auth:', authErr.message)
+    }
+
+    // 2. Save full signup record — INSERT first, then update if email exists
+    const payload = {
       first_name:       fn,
       last_name:        ln,
       email:            em,
@@ -155,7 +166,7 @@ async function launchStripeCheckout(){
       city:             city||null,
       zip_code:         zip||null,
       plan_id:          _checkoutPlanKey,
-      frequency:        obSelectedFreq,
+      frequency:        obSelectedFreq||'weekly',
       service_type:     window._obSvcLabel||'Recycling',
       collection_day:   colDay,
       collection_day_2: colDayW,
@@ -167,34 +178,46 @@ async function launchStripeCheckout(){
       service_notes:    svcNotes,
       bin_photos:       photos.length ? JSON.stringify(photos) : null,
       status:           'payment_pending',
+      zone_id:          window._hwMatchedZone?.id || null,
       updated_at:       new Date().toISOString(),
     }
 
-    // Try upsert (update if email exists, insert if not)
-    const { error: upsertErr } = await _supa
+    // Try INSERT first
+    let savedId = null
+    const { data: insertData, error: insertErr } = await _supa
       .from('homeowner_signups')
-      .upsert({ ...signupPayload, created_at: new Date().toISOString() }, { onConflict:'email' })
+      .insert({ ...payload, auth_user_id: authUserId, created_at: new Date().toISOString() })
+      .select('id')
+      .single()
 
-    if(upsertErr){
-      console.warn('[BinDash] Signup save warning:', upsertErr.message)
-      // Non-blocking — still proceed to Stripe
+    if(insertErr){
+      console.warn('[BinDash] Insert failed, trying update:', insertErr.message)
+      // Email exists — just update
+      const { data: upData } = await _supa
+        .from('homeowner_signups')
+        .update(payload)
+        .eq('email', em)
+        .select('id')
+        .single()
+      savedId = upData?.id || null
     } else {
-      console.log('[BinDash] Signup saved before Stripe redirect ✅')
+      savedId = insertData?.id || null
+      console.log('[BinDash] Signup saved ✅ id:', savedId)
     }
 
-    // 2. Create Stripe Checkout session
+    // 3. Create Stripe Checkout session
     const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/create-checkout', {
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'Authorization':'Bearer '+SUPABASE_ANON_KEY,
-        'apikey': SUPABASE_ANON_KEY,
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': 'Bearer '+SUPABASE_ANON_KEY,
+        'apikey':        SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({
-        planKey: _checkoutPlanKey,
-        priceId: plan.monthly,
-        email:   em,
-        name:    (fn+' '+ln).trim(),
+        planKey:    _checkoutPlanKey,
+        priceId:    plan.monthly,
+        email:      em,
+        name:       (fn+' '+ln).trim(),
         zip,
         successUrl: window.location.origin+'/?checkout=success',
         cancelUrl:  window.location.origin+'/?checkout=cancel',
@@ -204,19 +227,24 @@ async function launchStripeCheckout(){
     const data = await res.json()
     if(data.error || !data.url) throw new Error(data.error || 'No checkout URL returned')
 
-    // 3. Update record with Stripe session ID
-    if(data.sessionId){
+    // 4. Store Stripe session ID
+    if(data.sessionId && em){
       await _supa.from('homeowner_signups')
         .update({ stripe_session_id: data.sessionId, stripe_customer_id: data.customerId||null })
         .eq('email', em)
     }
 
-    // 4. Redirect to Stripe
+    // 5. Send pending email
+    sendEmail(em, 'Your BinDash application is under review',
+      EMAIL.signupPending(fn, colDay||'your collection day', window._hwMatchedZone?.name||'your area'),
+      'signup_pending')
+
+    // 6. Redirect to Stripe
     window.location.href = data.url
 
   } catch(e){
-    console.error('[BinDash] Checkout error:', e)
-    showToast('Payment setup failed — '+String(e?.message||e), 'err')
+    console.error('[BinDash] Checkout error:', String(e?.message||e))
+    showToast('Something went wrong — '+String(e?.message||e), 'err')
     if(btn){ btn.disabled=false; btn.textContent='🔒 Pay Securely with Stripe →' }
   }
 }
@@ -7267,17 +7295,13 @@ async function routeAfterSignup(appData){
     updateWaitlistBadge()
     const zipDisplay = document.getElementById('waitlist-zip-display')
     if(zipDisplay) zipDisplay.textContent = 'ZIP '+(appData.zip||'your area')
-
-    // Update Supabase record to waitlisted + attach zone if one exists
     try {
       await _supa.from('homeowner_signups').update({
         status:  'waitlisted',
         zone_id: matchedZone?.id || null,
         updated_at: new Date().toISOString(),
       }).eq('email', appData.email)
-      console.log('[BinDash] Homeowner waitlisted in Supabase ✅')
     } catch(err){ console.warn('[BinDash] Waitlist update failed:', err) }
-
     go('S-hw-waitlist')
   } else {
     // ── Pending review ──
@@ -7286,18 +7310,13 @@ async function routeAfterSignup(appData){
     updateOverviewCounts()
     const badge = document.getElementById('hw-pcount')
     if(badge) badge.textContent = PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length
-
-    // Update Supabase record with matched zone
     try {
       await _supa.from('homeowner_signups').update({
         status:  'pending_review',
         zone_id: matchedZone?.id || null,
         updated_at: new Date().toISOString(),
       }).eq('email', appData.email)
-      console.log('[BinDash] Homeowner pending with zone_id:', matchedZone?.id || 'none')
     } catch(err){ console.warn('[BinDash] Pending update failed:', err) }
-
-    sendEmail(em, 'Your BinDash application is under review', EMAIL.signupPending(fn, document.getElementById('h-day')?.value||'Tuesday', window._hwMatchedZone?.name||'Pending assignment'), 'signup_pending')
     go('S-hw-pending')
   }
 }
