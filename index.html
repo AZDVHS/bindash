@@ -191,9 +191,11 @@ async function launchStripeCheckout(){
 
     // Try INSERT first
     let savedId = null
+    const _insertPayload = { ...payload, created_at: new Date().toISOString() }
+    if(authUserId) _insertPayload.auth_user_id = authUserId
     const { data: insertData, error: insertErr } = await _supa
       .from('homeowner_signups')
-      .insert({ ...payload, auth_user_id: authUserId, created_at: new Date().toISOString() })
+      .insert(_insertPayload)
       .select('id')
       .single()
 
@@ -4158,8 +4160,11 @@ function hNext(s){
           updated_at:       new Date().toISOString(),
         }
 
+        const insertPayload = { ...payload, created_at: new Date().toISOString() }
+        if(authUserId) insertPayload.auth_user_id = authUserId
+
         const { error: insertErr } = await _supa.from('homeowner_signups')
-          .insert({ ...payload, auth_user_id: authUserId, created_at: new Date().toISOString() })
+          .insert(insertPayload)
 
         if(insertErr){
           console.warn('[BinDash] Pre-save insert failed:', insertErr.message)
