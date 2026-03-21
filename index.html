@@ -62,9 +62,30 @@ async function sendEmail(to, subject, html, type){
 const STRIPE_PUBLISHABLE_KEY = 'pk_test_REPLACE_WITH_YOUR_KEY'
 
 const STRIPE_PRICES = {
-  plan_a: { name:'1 Can — Weekly',        monthly:'price_REPLACE_PLAN_A', callout:'price_REPLACE_CALLOUT', monthlyAmt:34.99, desc:'1 bin · any type · Bin Out + Bin In · weekly' },
-  plan_b: { name:'2 Cans — Same Day',     monthly:'price_REPLACE_PLAN_B', callout:'price_REPLACE_CALLOUT', monthlyAmt:44.99, desc:'2 bins · Recycling + Waste · Bin Out + Bin In · weekly' },
-  plan_c: { name:'3+ Cans — Full Service',monthly:'price_REPLACE_PLAN_C', callout:'price_REPLACE_CALLOUT', monthlyAmt:52.99, desc:'3+ bins · priority scheduling · Bin Out + Bin In' },
+  plan_a: {
+    name:'1 Can — Weekly',
+    monthly:'price_REPLACE_PLAN_A',
+    callout:'price_REPLACE_CALLOUT',
+    monthlyAmt:34.99,
+    splitDays: false,
+    desc:'1 bin · any type · Bin Out + Bin In · 1 collection day/week'
+  },
+  plan_b: {
+    name:'2 Cans — Same Day',
+    monthly:'price_REPLACE_PLAN_B',
+    callout:'price_REPLACE_CALLOUT',
+    monthlyAmt:44.99,
+    splitDays: false,
+    desc:'2 bins · Recycling + General Waste · same collection day · Bin Out + Bin In'
+  },
+  plan_c: {
+    name:'2 Cans — Split Days',
+    monthly:'price_REPLACE_PLAN_C',
+    callout:'price_REPLACE_CALLOUT',
+    monthlyAmt:54.99,
+    splitDays: true,
+    desc:'2 bins · separate collection days · Recycling one day + Waste another · Bin Out + Bin In both days'
+  },
 }
 let _checkoutPlanKey = 'plan_a'
 
@@ -78,6 +99,8 @@ function selectPlan(p){
   if(el){ el.style.border='2px solid var(--cyan)'; el.style.background='rgba(6,214,160,.06)'; const b=el.querySelector('.badge'); if(b) b.style.display='inline-flex' }
   const extras = document.getElementById('plan-b-extras')
   if(extras) extras.style.display = p==='b' ? 'block' : 'none'
+  const days = document.getElementById('plan-c-days')
+  if(days) days.style.display = p==='c' ? 'block' : 'none'
   updateCheckoutSummary()
 }
 
@@ -88,6 +111,9 @@ function updateCheckoutSummary(){
   safe('checkout-plan-price', '$'+plan.monthlyAmt.toFixed(2)+'/mo')
   safe('checkout-plan-desc',  plan.desc)
   safe('checkout-total',      '$'+(plan.monthlyAmt+15).toFixed(2)+' today')
+  // Show split day selectors note in checkout
+  const splitNote = document.getElementById('checkout-split-note')
+  if(splitNote) splitNote.style.display = plan.splitDays ? 'block' : 'none'
 }
 
 async function launchStripeCheckout(){
@@ -1865,7 +1891,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <!-- PLAN PICKER -->
           <div style="max-width:820px">
             <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px">Change Plan</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px" id="plan-cards">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px" id="plan-cards">
 
               <!-- PLAN A -->
               <div class="plan-card on" id="plan-a" onclick="selectPlan('a')" style="border:2px solid var(--cyan);background:rgba(6,214,160,.06);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;position:relative">
@@ -1905,7 +1931,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               </div>
 
               <!-- PLAN C -->
-              <div class="plan-card" id="plan-c" onclick="selectPlan('c')" style="border:2px solid var(--border2);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s">
+              <div class="plan-card" id="plan-c" onclick="selectPlan('c')" style="border:2px solid var(--border2);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;grid-column:1/-1">
                 <div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--purple);text-transform:uppercase;margin-bottom:6px">Most Flexible</div>
                 <div style="font-size:24px;margin-bottom:10px">♻️🗑️</div>
                 <div style="font-size:15px;font-weight:700;margin-bottom:4px">2 Cans — Split Days</div>
@@ -8049,7 +8075,9 @@ async function loadHomeownersFromSupabase(){
       const fn = fromSignup ? (row.first_name||row.full_name?.split(' ')[0]||'') : (row.first_name||'')
       const ln = fromSignup ? (row.last_name||row.full_name?.split(' ').slice(1).join(' ')||'') : (row.last_name||'')
       const initials = ((fn[0]||'')+(ln[0]||'')).toUpperCase()||'?'
-      const day = row.collection_day || '—'
+      const day  = row.collection_day || '—'
+      const day2 = row.collection_day_2 || null
+      const isSplit = (row.plan_id === 'plan_c') || (day2 && day2 !== day)
       return {
         id:             row.id,
         signupId:       fromSignup ? row.id : row.signup_id,
@@ -8061,13 +8089,15 @@ async function loadHomeownersFromSupabase(){
         city:           row.city||'—',
         zip:            row.zip_code||'',
         zoneId:         row.zone_id||null,
-        service:        (row.service_type||'').includes('General')?'GENERAL':'RECYCLING',
+        service:        isSplit ? 'SPLIT' : ((row.service_type||'').includes('General')?'GENERAL':'RECYCLING'),
         freq:           row.frequency||'weekly',
         day,
-        plan:           row.plan_id||'',
+        dayRecycling:   isSplit ? day  : null,   // Plan C: recycling day
+        dayWaste:       isSplit ? day2 : null,   // Plan C: waste day
+        plan:           row.plan_id||'plan_a',
         assignedRunner: row.assigned_runner||null,
         status:         'active',
-        bins:1, storage:'—', gate:'—', pets:'None', curb:'—',
+        bins: isSplit ? 2 : 1, storage:'—', gate:'—', pets:'None', curb:'—',
         color:'linear-gradient(135deg,var(--cyan),var(--blue))',
       }
     }
