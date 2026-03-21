@@ -3783,7 +3783,7 @@ function approveR(id, name, zoneSelectId){
     const zipMatch = zipText.match(/\d{5}/)
     const zip = zipMatch ? zipMatch[0].slice(0,3) : '853'
     const newZone = {
-      id:'z-auto-'+Date.now(), name:'Zone '+zip+'xx', city:'', zip,
+      id: crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+Math.random().toString(36).slice(2,8), name:'Zone '+zip+'xx', city:'', zip,
       status:'live', pilot:false, overridden:true,
       runners:1, capacity:4, homeowners:0, threshold:1, collection:[], assignedRunner:null,
       notes:'Auto-created on runner approval'
@@ -6193,7 +6193,7 @@ async function confirmCreateZoneFromWaitlist(zip){
   const name=document.getElementById('wl-zone-name')?.value?.trim()||suggestZoneName(zip)
   const cap=parseInt(document.getElementById('wl-cap')?.value)||8
   const days=['Mon','Tue','Wed','Thu','Fri'].filter(d=>document.getElementById('wlz-day-'+d)?.checked)
-  const newZone = {id:'z-wl-'+Date.now(),name,city:zip+' area',
+  const newZone = {id: crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),name,city:zip+' area',
     zip:zip.slice(0,3), zips:[zip],
     status:'pilot',pilot:true,overridden:true,runners:0,capacity:cap,homeowners:0,
     threshold:cap,collection:days,assignedRunner:null,stopOrder:[],notes:'Created from waitlist ZIP '+zip}
