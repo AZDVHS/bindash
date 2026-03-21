@@ -7865,10 +7865,14 @@ const PENDING_RUNNERS    = [] // Populated from Supabase runner_applications
 function renderPendingHWList(){
   const el = document.getElementById('pending-hw-list')
   if(!el) return
-  const badge = document.getElementById('hw-pcount')
-  if(badge) badge.textContent = PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length
 
-  const pending = PENDING_HOMEOWNERS.filter(a=>a.status==='pending')
+  const pending = PENDING_HOMEOWNERS.filter(a=>a.status==='pending'||a.status==='payment_pending')
+  const badge = document.getElementById('hw-pcount')
+  if(badge){
+    badge.textContent = pending.length
+    badge.style.display = pending.length > 0 ? 'inline' : 'none'
+  }
+
   if(!pending.length){
     el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No pending homeowner applications.</div>'
     return
@@ -7879,6 +7883,9 @@ function renderPendingHWList(){
     const zoneBadge = assignedZone
       ? `<span class="badge" style="background:rgba(6,214,160,.1);color:var(--cyan);margin-left:8px">📍 ${assignedZone.name}</span>`
       : `<span class="badge" style="background:rgba(239,68,68,.1);color:#ef4444;margin-left:8px">⚠️ No zone yet</span>`
+    const payBadge = app.stripeSessionId || app.status==='payment_pending'
+      ? `<span class="badge" style="background:#22c55e22;color:#22c55e;margin-left:4px">💳 Paid</span>`
+      : ''
 
     return `
     <div class="pc" id="hwpc-${app.id}">
@@ -7886,32 +7893,33 @@ function renderPendingHWList(){
         <div style="display:flex;align-items:center;gap:10px">
           <div class="avatar" style="width:44px;height:44px;font-size:16px;background:linear-gradient(135deg,var(--cyan),var(--blue))">${app.initials}</div>
           <div>
-            <div style="font-size:15px;font-weight:700">${app.name} ${zoneBadge}</div>
+            <div style="font-size:15px;font-weight:700">${app.name} ${zoneBadge}${payBadge}</div>
             <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">${String(app.id).slice(0,8)} · ${app.submittedAt}</div>
           </div>
         </div>
-        <span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending</span>
+        <span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending Review</span>
       </div>
 
       <div class="cc-grid" style="margin-bottom:12px">
         <div class="dl"><div class="dl-l">Email</div><div>${app.email}</div></div>
         <div class="dl"><div class="dl-l">Phone</div><div>${app.phone}</div></div>
-        <div class="dl"><div class="dl-l">Address</div><div>${app.address}</div></div>
-        <div class="dl"><div class="dl-l">ZIP</div><div>${app.zip}</div></div>
+        <div class="dl"><div class="dl-l">Address</div><div>${app.address}${app.city&&app.city!=='—'?', '+app.city:''} ${app.zip}</div></div>
+        <div class="dl"><div class="dl-l">Plan</div><div>${app.plan||'—'} · ${app.freq||'weekly'}</div></div>
         <div class="dl"><div class="dl-l">Service</div><div>${app.service}</div></div>
-        <div class="dl"><div class="dl-l">Frequency</div><div>${app.freq} · ${app.day}</div></div>
-        <div class="dl"><div class="dl-l">Card on file</div><div>•••• ${app.cardLast4}</div></div>
-        <div class="dl"><div class="dl-l">Notes</div><div>${app.svcNotes||'—'}</div></div>
+        <div class="dl"><div class="dl-l">Collection day</div><div>${app.day||'—'}</div></div>
+        ${app.storage&&app.storage!=='—'?`<div class="dl"><div class="dl-l">Bin location</div><div>${app.storage}</div></div>`:''}
+        ${app.gate&&app.gate!=='—'?`<div class="dl"><div class="dl-l">Gate</div><div>${app.gate}${app.gateCode?' · Code: '+app.gateCode:''}</div></div>`:''}
+        ${app.pets&&app.pets!=='None'?`<div class="dl"><div class="dl-l">Pets</div><div>${app.pets}</div></div>`:''}
+        ${app.svcNotes?`<div class="dl" style="grid-column:1/-1"><div class="dl-l">Notes</div><div>${app.svcNotes}</div></div>`:''}
+        ${(app.binPhotos&&app.binPhotos.length) ? '<div class="dl" style="grid-column:1/-1"><div class="dl-l">Bin photos ('+app.binPhotos.length+')</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">'+app.binPhotos.map((p,pi)=>'<img src="'+p+'" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--border2);cursor:zoom-in" title="Photo '+(pi+1)+'" onclick="event.stopPropagation();window.open(this.src)">').join('')+'</div></div>' : ''}
       </div>
 
       <div class="field" style="margin-bottom:10px">
-        <label style="font-size:11px">Service Zone
-          <span style="color:var(--muted);font-weight:400">(ZIP ${app.zip})</span>
-        </label>
+        <label style="font-size:11px">Service Zone <span style="color:var(--muted);font-weight:400">(ZIP ${app.zip})</span></label>
         <select id="hwpc-zone-${app.id}" style="font-size:12px">
           <option value="">— Select zone —</option>
           ${ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>`
-            <option value="${z.id}" ${(app.zoneId===z.id || (!app.zoneId && (z.zips?.includes(app.zip) || z.zip===app.zip.slice(0,3))))?'selected':''}>
+            <option value="${z.id}" ${(app.zoneId===z.id || (!app.zoneId && (z.zips?.includes(app.zip)||z.zip===app.zip.slice(0,3))))?'selected':''}>
               ${z.name} (ZIP ${z.zips?.join(', ')||z.zip})
             </option>`).join('')}
           <option value="_new">+ Create new zone for ZIP ${app.zip}</option>
@@ -9326,7 +9334,7 @@ async function loadSignupsFromSupabase(){
       const res = await _supa
         .from('homeowner_signups')
         .select('*')
-        .in('status', ['pending_review','waitlisted'])
+        .in('status', ['pending_review', 'payment_pending', 'waitlisted'])
         .order('created_at', { ascending: false })
       data    = res?.data    || []
       loadErr = res?.error?.message || null
@@ -9341,23 +9349,33 @@ async function loadSignupsFromSupabase(){
     data.forEach(row => {
       const initials = ((row.first_name?.[0]||'') + (row.last_name?.[0]||'')).toUpperCase() || '?'
       const entry = {
-        id:          row.id,
-        name:        (row.first_name + ' ' + row.last_name).trim(),
+        id:              row.id,
+        name:            (row.first_name + ' ' + row.last_name).trim(),
         initials,
-        email:       row.email,
-        phone:       row.phone || '—',
-        address:     row.street_address || '—',
-        city:        row.city || '—',
-        zip:         row.zip_code || '',
-        service:     row.service_type || 'Recycling',
-        freq:        row.frequency || 'weekly',
-        plan:        row.plan_id || 'w1',
-        day:         row.collection_day || '—',
-        svcNotes:    row.service_notes || '',
-        cardLast4:   row.card_last4 || '——',
-        zoneId:      row.zone_id || null,
-        submittedAt: new Date(row.created_at).toLocaleString(),
-        status:      row.status === 'waitlisted' ? 'waitlist' : 'pending',
+        email:           row.email,
+        phone:           row.phone || '—',
+        address:         row.street_address || '—',
+        city:            row.city || '—',
+        zip:             row.zip_code || '',
+        service:         row.service_type || 'Recycling',
+        freq:            row.frequency || 'weekly',
+        plan:            row.plan_id || 'w1',
+        day:             row.collection_day || '—',
+        svcNotes:        row.service_notes || '',
+        cardLast4:       row.card_last4 || '——',
+        zoneId:          row.zone_id || null,
+        submittedAt:     new Date(row.created_at).toLocaleString(),
+        status:          row.status === 'waitlisted' ? 'waitlist' : 'pending',
+        // Property info
+        storage:         row.bin_location || '—',
+        gate:            row.gate_type    || '—',
+        gateCode:        row.gate_code    || '',
+        pets:            row.pet_info     || 'None',
+        curb:            row.curb_notes   || '—',
+        binPhotos:       (() => { try { return row.bin_photos ? JSON.parse(row.bin_photos) : [] } catch(e){ return [] } })(),
+        // Stripe
+        stripeSessionId: row.stripe_session_id || null,
+        stripeCustomerId:row.stripe_customer_id || null,
       }
       if(row.status === 'waitlisted'){
         WAITLIST_SIGNUPS.push(entry)
