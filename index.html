@@ -262,10 +262,10 @@ function handleStripeReturn(){
   } else if(p.get('checkout')==='cancel'){
     window.history.replaceState({},'',' ')
     showToast('Payment cancelled — try again anytime','info')
-  } else if(hash.includes('type=recovery') || hash.includes('type=signup')){
-    // Supabase password reset — parse the hash and set the session
+  } else if(hash && (hash.includes('type=recovery') || hash.includes('type=signup'))){
     window.history.replaceState({}, '', ' ')
-    _handlePasswordResetHash(hash)
+    // Delay slightly so app JS is fully initialised
+    setTimeout(()=>_handlePasswordResetHash(hash), 800)
   }
 }
 document.addEventListener('DOMContentLoaded', handleStripeReturn)
@@ -3908,6 +3908,14 @@ async function loadRunnerRoutes(runnerRow){
 
 // ── Session restore on page load ──
 async function initApp(){
+  // Listen for Supabase auth events — catches PASSWORD_RECOVERY from reset link
+  _supa.auth.onAuthStateChange((event, session) => {
+    if(event === 'PASSWORD_RECOVERY'){
+      console.log('[BinDash] PASSWORD_RECOVERY event detected')
+      setTimeout(showPasswordResetForm, 300)
+    }
+  })
+
   try {
     const { data: { session } } = await _supa.auth.getSession()
     if(!session) return // No session — stay on landing page
