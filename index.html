@@ -6420,7 +6420,8 @@ function getHWZoneName(hw){
 function getHWServiceLabel(hw){
   if(hw.service==='RECYCLING') return '♻️ Recycling'
   if(hw.service==='GENERAL')   return '🗑️ General Waste'
-  if(hw.service==='SPLIT')     return '♻️+🗑️ Split'
+  if(hw.service==='BOTH')      return '♻️🗑️ Both bins'
+  if(hw.service==='SPLIT')     return '♻️+🗑️ Split days'
   return hw.service
 }
 
@@ -8639,14 +8640,48 @@ function renderDispatchPipeline(){
     const badgeStyle= b.status==='accepted'?'background:#22c55e22;color:#22c55e': b.status==='offered'?'background:rgba(245,158,11,.15);color:#f59e0b': b.status==='broadcast'?'background:rgba(59,130,246,.15);color:#3b82f6':'background:rgba(239,68,68,.15);color:#ef4444'
     const offerChainStyle = b.offerType==='loyalty'?'background:rgba(6,214,160,.1);color:var(--cyan)': b.offerType==='zone'?'background:rgba(59,130,246,.1);color:var(--blue)': b.offerType==='broadcast'?'background:rgba(245,158,11,.1);color:var(--amber)':''
 
-    const stopList = b.stops.map(h=>{
-      const isSplitToday = h.service==='SPLIT'
-      const svcToday = isSplitToday ? (h.dayRecycling===b.day?'♻️ Recycling only':'🗑️ Waste only') : getHWServiceLabel(h)
-      return `<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center">
-        <span style="flex:1;font-weight:600">${h.name}</span>
-        <span style="color:var(--muted)">${h.address}</span>
-        <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface2)">${svcToday}</span>
-        ${isSplitToday?'<span style="background:rgba(34,197,94,.15);color:#22c55e;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px">SPLIT</span>':''}
+    const stopList = b.stops.map((h,idx)=>{
+      const isSplit = h.service==='SPLIT'
+      const plan = h.plan || ''
+
+      // Determine what service this stop needs TODAY
+      let svcLabel, svcBg
+      if(isSplit){
+        const isRecyclingDay = (h.dayRecycling||'').toLowerCase() === b.day.toLowerCase()
+        svcLabel = isRecyclingDay ? '♻️ Recycling bin' : '🗑️ General waste bin'
+        svcBg = isRecyclingDay ? 'background:rgba(6,214,160,.12);color:var(--cyan)' : 'background:rgba(239,68,68,.1);color:#fca5a5'
+      } else if(plan==='plan_b'||plan==='w2'||plan==='b2'||plan==='m2'||h.service==='BOTH'||(h.bins&&h.bins>=2)){
+        svcLabel = '♻️🗑️ Both bins (same day)'
+        svcBg = 'background:rgba(99,102,241,.12);color:#a5b4fc'
+      } else if(h.service==='GENERAL'){
+        svcLabel = '🗑️ General waste'
+        svcBg = 'background:rgba(245,158,11,.1);color:#fbbf24'
+      } else {
+        svcLabel = '♻️ Recycling'
+        svcBg = 'background:rgba(6,214,160,.1);color:var(--cyan)'
+      }
+
+      // Property alerts for runner
+      const alerts = []
+      if(h.gate && h.gate!=='No gate' && h.gate!=='—') alerts.push('🔑 '+h.gate+(h.gateCode?' · '+h.gateCode:''))
+      if(h.pets && h.pets!=='No pets' && h.pets!=='None' && h.pets!=='—') alerts.push('🐾 '+h.pets)
+      if(h.storage && h.storage!=='—') alerts.push('📦 Bins: '+h.storage)
+
+      const addr = h.address && h.address!=='—' ? h.address+(h.zip?' · '+h.zip:'') : (h.zip||'No address')
+
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--border);${idx===b.stops.length-1?'border-bottom:none':''}">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:20px;height:20px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${idx+1}</div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span style="font-size:12px;font-weight:700">${h.name}</span>
+              <span style="font-size:11px;font-weight:600;padding:1px 7px;border-radius:4px;${svcBg}">${svcLabel}</span>
+            </div>
+            <div style="font-size:11px;color:var(--sub);margin-top:1px">📍 ${addr}</div>
+            ${alerts.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:3px">${alerts.map(a=>`<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;padding:1px 6px;border-radius:4px">${a}</span>`).join('')}</div>` : ''}
+            ${h.svcNotes ? `<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic">📝 ${h.svcNotes}</div>` : ''}
+          </div>
+        </div>
       </div>`
     }).join('')
 
@@ -8672,7 +8707,7 @@ function renderDispatchPipeline(){
         </div>
       </div>
 
-      <div style="padding:8px 14px;background:var(--surface2);border-top:1px solid var(--border);max-height:120px;overflow-y:auto">
+      <div style="padding:6px 14px 2px;background:var(--surface2);border-top:1px solid var(--border);max-height:280px;overflow-y:auto">
         ${stopList}
       </div>
 
@@ -9810,7 +9845,10 @@ async function loadHomeownersFromSupabase(){
         city:           row.city||'—',
         zip:            row.zip_code||'',
         zoneId:         row.zone_id||null,
-        service:        isSplit ? 'SPLIT' : ((row.service_type||'').includes('General')?'GENERAL':'RECYCLING'),
+        service:        isSplit ? 'SPLIT' :
+                        (row.plan_id==='plan_b'||row.plan_id==='w2'||row.plan_id==='b2'||row.plan_id==='m2') ? 'BOTH' :
+                        ((row.service_type||'').toLowerCase().includes('general')||
+                         (row.service_type||'').toLowerCase().includes('waste')) ? 'GENERAL' : 'RECYCLING',
         freq:           row.frequency||'weekly',
         day,
         dayRecycling:   isSplit ? day  : null,
@@ -9818,7 +9856,7 @@ async function loadHomeownersFromSupabase(){
         plan:           row.plan_id||'plan_a',
         assignedRunner: row.assigned_runner||null,
         status:         'active',
-        bins:     isSplit ? 2 : 1,
+        bins:     isSplit ? 2 : (row.plan_id==='plan_b'||row.plan_id==='w2'||row.plan_id==='b2'||row.plan_id==='m2') ? 2 : 1,
         storage:  row.bin_location  || '—',
         gate:     row.gate_type     || '—',
         gateCode: row.gate_code     || '',
