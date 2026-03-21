@@ -118,16 +118,72 @@ function updateCheckoutSummary(){
 
 async function launchStripeCheckout(){
   const btn = document.getElementById('stripe-checkout-btn')
-  if(btn){ btn.disabled=true; btn.textContent='\u23F3 Opening Stripe...' }
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Opening Stripe...' }
   const plan = STRIPE_PRICES[_checkoutPlanKey]
-  if(!plan){ showToast('Please select a plan','err'); return }
-  const em  = document.getElementById('h-em')?.value.trim()
-  const fn  = document.getElementById('h-fn')?.value.trim()
-  const ln  = document.getElementById('h-ln')?.value.trim()||''
-  const zip = document.getElementById('h-zip')?.value.trim()
+  if(!plan){ showToast('Please select a plan','err'); if(btn){btn.disabled=false;btn.textContent='🔒 Pay Securely with Stripe →'} return }
+
+  // Gather all onboarding fields
+  const em   = document.getElementById('h-em')?.value.trim()   || ''
+  const fn   = document.getElementById('h-fn')?.value.trim()   || ''
+  const ln   = document.getElementById('h-ln')?.value.trim()   || ''
+  const ph   = document.getElementById('h-ph')?.value.trim()   || ''
+  const addr = document.getElementById('h-addr')?.value.trim() || ''
+  const city = document.getElementById('h-city')?.value.trim() || ''
+  const zip  = document.getElementById('h-zip')?.value.trim()  || ''
+  const isSplit   = obSelectedPlan.endsWith('3')
+  const colDay    = isSplit ? null : (document.getElementById('h-day')?.value || null)
+  const colDayR   = isSplit ? (document.getElementById('h-day-recycling')?.value || null) : null
+  const colDayW   = isSplit ? (document.getElementById('h-day-waste')?.value    || null) : null
+  const binLoc    = document.getElementById('h-bin-location')?.value || null
+  const gateType  = document.getElementById('h-gate-type')?.value    || null
+  const gateCode  = document.getElementById('h-gate-code')?.value    || null
+  const petInfo   = document.getElementById('h-pet-info')?.value     || null
+  const curbNotes = document.getElementById('h-curb-notes')?.value   || null
+  const svcNotes  = document.getElementById('h-svc-notes')?.value    || null
+  const photos    = (_binPhotos||[]).filter(Boolean)
+
+  if(!em){ showToast('Email is required','err'); if(btn){btn.disabled=false;btn.textContent='🔒 Pay Securely with Stripe →'} return }
+
   try {
-    const _supaUrl = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
-    const res = await fetch(_supaUrl+'/functions/v1/create-checkout', {
+    // 1. Save full signup record FIRST (before redirect — we won't come back)
+    const signupPayload = {
+      first_name:       fn,
+      last_name:        ln,
+      email:            em,
+      phone:            ph||null,
+      street_address:   addr||null,
+      city:             city||null,
+      zip_code:         zip||null,
+      plan_id:          _checkoutPlanKey,
+      frequency:        obSelectedFreq,
+      service_type:     window._obSvcLabel||'Recycling',
+      collection_day:   colDay,
+      collection_day_2: colDayW,
+      bin_location:     binLoc,
+      gate_type:        gateType,
+      gate_code:        gateCode,
+      pet_info:         petInfo,
+      curb_notes:       curbNotes,
+      service_notes:    svcNotes,
+      bin_photos:       photos.length ? JSON.stringify(photos) : null,
+      status:           'payment_pending',
+      updated_at:       new Date().toISOString(),
+    }
+
+    // Try upsert (update if email exists, insert if not)
+    const { error: upsertErr } = await _supa
+      .from('homeowner_signups')
+      .upsert({ ...signupPayload, created_at: new Date().toISOString() }, { onConflict:'email' })
+
+    if(upsertErr){
+      console.warn('[BinDash] Signup save warning:', upsertErr.message)
+      // Non-blocking — still proceed to Stripe
+    } else {
+      console.log('[BinDash] Signup saved before Stripe redirect ✅')
+    }
+
+    // 2. Create Stripe Checkout session
+    const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/create-checkout', {
       method:'POST',
       headers:{
         'Content-Type':'application/json',
@@ -135,26 +191,33 @@ async function launchStripeCheckout(){
         'apikey': SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({
-        planKey:_checkoutPlanKey, priceId:plan.monthly,
-        email:em, name:fn+' '+ln, zip,
+        planKey: _checkoutPlanKey,
+        priceId: plan.monthly,
+        email:   em,
+        name:    (fn+' '+ln).trim(),
+        zip,
         successUrl: window.location.origin+'/?checkout=success',
         cancelUrl:  window.location.origin+'/?checkout=cancel',
       })
     })
+
     const data = await res.json()
-    if(data.error||!data.url) throw new Error(data.error||'No checkout URL')
-    // Save partial signup before redirect
-    await _supa.from('homeowner_signups').upsert({
-      email:em, first_name:fn, last_name:ln, zip_code:zip,
-      plan_id:_checkoutPlanKey, status:'payment_pending',
-      stripe_session_id:data.sessionId,
-      created_at:new Date().toISOString(), updated_at:new Date().toISOString(),
-    },{ onConflict:'email' })
+    if(data.error || !data.url) throw new Error(data.error || 'No checkout URL returned')
+
+    // 3. Update record with Stripe session ID
+    if(data.sessionId){
+      await _supa.from('homeowner_signups')
+        .update({ stripe_session_id: data.sessionId, stripe_customer_id: data.customerId||null })
+        .eq('email', em)
+    }
+
+    // 4. Redirect to Stripe
     window.location.href = data.url
+
   } catch(e){
-    console.error('[BinDash] Stripe error:',e)
-    showToast('Payment setup failed — '+String(e?.message||e),'err')
-    if(btn){ btn.disabled=false; btn.textContent='\uD83D\uDD12 Pay Securely with Stripe \u2192' }
+    console.error('[BinDash] Checkout error:', e)
+    showToast('Payment setup failed — '+String(e?.message||e), 'err')
+    if(btn){ btn.disabled=false; btn.textContent='🔒 Pay Securely with Stripe →' }
   }
 }
 
