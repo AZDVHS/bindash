@@ -3005,7 +3005,7 @@ async function initApp(){
     const ln   = user?.user_metadata?.last_name  || ''
     const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || '—'
 
-    if(role === 'admin' || role === 'ops'){
+    if(role === 'admin' || role === 'super_admin' || role === 'ops'){
       adminAuthed = true
       const nameEl = document.getElementById('ad-sidebar-name')
       if(nameEl) nameEl.textContent = user?.user_metadata?.name || 'Admin'
@@ -8270,7 +8270,27 @@ async function doAdminLogin(){
 
     // Check admin role in user metadata
     const role = data.user?.user_metadata?.role
-    if(role !== 'admin' && role !== 'ops'){
+    let isAdmin = (role === 'admin' || role === 'super_admin' || role === 'ops')
+
+    if(!isAdmin){
+      // Fallback: check admins table (catches stale JWT metadata)
+      try {
+        const { data: adminRow } = await _supa.from('admins')
+          .select('role,is_active').eq('email', email).single()
+        if(adminRow?.is_active) isAdmin = true
+      } catch(e){}
+    }
+
+    if(!isAdmin){
+      // Last resort: force session refresh and recheck
+      try {
+        const { data: refreshed } = await _supa.auth.refreshSession()
+        const r2 = refreshed?.user?.user_metadata?.role
+        if(r2 === 'admin' || r2 === 'super_admin') isAdmin = true
+      } catch(e){}
+    }
+
+    if(!isAdmin){
       await _supa.auth.signOut()
       errBox.style.display = 'block'
       errBox.textContent = 'Access denied — staff accounts only.'
@@ -8288,7 +8308,19 @@ async function doAdminLogin(){
     if(btn){ btn.disabled=false; btn.textContent='Sign In to Staff Portal →' }
 
     go('S-admin')
-    setTimeout(() => adNav(null, 'ad-overview'), 80)
+    // Load all admin data
+    await loadZonesFromSupabase()
+    await Promise.all([
+      loadHomeownersFromSupabase(),
+      loadRunnersFromSupabase(),
+      loadSignupsFromSupabase(),
+      loadRunnerApplicationsFromSupabase(),
+    ])
+    loadRunnerRequestsBadge()
+    loadZoneWaitlistBadge()
+    loadRunnerZoneRequestsBadge()
+    updateWaitlistBadge()
+    setTimeout(() => adNav(null, 'ad-overview'), 100)
     showToast('Welcome back, ' + displayName + ' ✅', 'ok')
 
   } catch(err) {
