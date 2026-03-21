@@ -11,7 +11,7 @@
 //  SUPABASE CONFIG — replace with your project keys
 //  Supabase Dashboard → Settings → API
 // ══════════════════════════════════════════════════
-const SUPABASE_URL = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
+const SUPABASE_URL     = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
 const SUPABASE_ANON_KEY = 'sb_publishable_PzQNU1g9t7nH_c8GrK37sQ_2OocnlNQ'
 const _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
@@ -126,10 +126,14 @@ async function launchStripeCheckout(){
   const ln  = document.getElementById('h-ln')?.value.trim()||''
   const zip = document.getElementById('h-zip')?.value.trim()
   try {
-    const _supaUrl = (SUPABASE_URL&&!SUPABASE_URL.includes('your-project')) ? SUPABASE_URL : 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
+    const _supaUrl = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
     const res = await fetch(_supaUrl+'/functions/v1/create-checkout', {
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':'Bearer '+SUPABASE_ANON_KEY,
+        'apikey': SUPABASE_ANON_KEY,
+      },
       body: JSON.stringify({
         planKey:_checkoutPlanKey, priceId:plan.monthly, calloutId:plan.callout,
         email:em, name:fn+' '+ln, zip,
