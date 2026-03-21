@@ -189,32 +189,23 @@ async function launchStripeCheckout(){
       updated_at:       new Date().toISOString(),
     }
 
-    // Try INSERT first
-    let savedId = null
+    // Save to Supabase — upsert handles both new signups and re-attempts
     const _insertPayload = { ...payload, created_at: new Date().toISOString() }
     if(authUserId) _insertPayload.auth_user_id = authUserId
-    const { data: insertData, error: insertErr } = await _supa
+
+    const { data: savedData, error: saveErr } = await _supa
       .from('homeowner_signups')
-      .insert(_insertPayload)
+      .upsert(_insertPayload, { onConflict: 'email', ignoreDuplicates: false })
       .select('id')
       .single()
 
-    if(insertErr){
-      console.warn('[BinDash] Insert failed:', insertErr.message, insertErr.code, insertErr.details)
-      showToast('DB: '+insertErr.message, 'err')
-      // Email exists — just update
-      const { data: upData, error: upErr } = await _supa
-        .from('homeowner_signups')
-        .update(payload)
-        .eq('email', em)
-        .select('id')
-        .single()
-      if(upErr) console.warn('[BinDash] Update also failed:', upErr.message)
-      savedId = upData?.id || null
+    if(saveErr){
+      console.warn('[BinDash] Save error:', saveErr.message)
+      showToast('DB: '+saveErr.message, 'err')
     } else {
-      savedId = insertData?.id || null
-      console.log('[BinDash] Signup saved ✅ id:', savedId)
+      console.log('[BinDash] ✅ Signup saved id:', savedData?.id)
     }
+    const savedId = savedData?.id || null
 
     // 3. Create Stripe Checkout session
     const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/create-checkout', {
@@ -4163,13 +4154,11 @@ function hNext(s){
         const insertPayload = { ...payload, created_at: new Date().toISOString() }
         if(authUserId) insertPayload.auth_user_id = authUserId
 
-        const { error: insertErr } = await _supa.from('homeowner_signups')
-          .insert(insertPayload)
+        const { error: saveErr } = await _supa.from('homeowner_signups')
+          .upsert(insertPayload, { onConflict: 'email', ignoreDuplicates: false })
 
-        if(insertErr){
-          console.warn('[BinDash] Pre-save insert failed:', insertErr.message)
-          // Try update in case email exists
-          await _supa.from('homeowner_signups').update(payload).eq('email', _em)
+        if(saveErr){
+          console.warn('[BinDash] Pre-save error:', saveErr.message)
         } else {
           console.log('[BinDash] ✅ Signup pre-saved at payment step')
         }
