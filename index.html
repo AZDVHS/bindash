@@ -3997,15 +3997,15 @@ function hNext(s){
       if(r && w && r === w){ showToast('Please choose different days for split-day service','err'); return }
     }
   }
-  if(s===5){
-    // Sync onboarding plan selection → Stripe checkout plan key
+  if(s===4){
+    // Sync onboarding plan selection → Stripe checkout plan key when entering payment step
     const planMap = { w1:'plan_a', b1:'plan_a', m1:'plan_a', w2:'plan_b', b2:'plan_b', m2:'plan_b', w3:'plan_c', b3:'plan_c', m3:'plan_c' }
     const mapped = planMap[obSelectedPlan]
     if(mapped) _checkoutPlanKey = mapped
-    updateCheckoutSummary()
+    setTimeout(updateCheckoutSummary, 50)
   }
   if(s===5){
-    // Build review
+    // Build review on step 5→6
     const fn=document.getElementById('h-fn')?.value||''
     const ln=document.getElementById('h-ln')?.value||''
     const freqLabel = {asneeded:'As Needed',monthly:'Monthly',biweekly:'Bi-weekly',weekly:'Weekly'}[obSelectedFreq]||obSelectedFreq
@@ -4020,6 +4020,7 @@ function hNext(s){
     const pets = document.getElementById('h-pet-info')?.value || '—'
     const notes = document.getElementById('h-svc-notes')?.value || ''
     const planLabel = (OB_PLANS[obSelectedFreq]||[]).find(p=>p.id===obSelectedPlan)?.label || obSelectedPlan
+    const photoCount = (_binPhotos||[]).filter(Boolean).length
     document.getElementById('h-review').innerHTML=`
       <div class="card-ttl">Your BinDash Summary</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:13px;line-height:2.1;color:var(--sub)">
@@ -4032,9 +4033,8 @@ function hNext(s){
         <div><strong style="color:var(--text)">Bin location:</strong> ${binLoc}</div>
         <div><strong style="color:var(--text)">Gate:</strong> ${gateType}${gateCode?' ('+gateCode+')':''}</div>
         <div><strong style="color:var(--text)">Pets:</strong> ${pets}</div>
-        const photoCount = _binPhotos.filter(Boolean).length
         ${notes?'<div style="grid-column:1/-1"><strong style="color:var(--text)">Notes:</strong> '+notes+'</div>':''}
-        ${photoCount ? '<div style="grid-column:1/-1"><strong style="color:var(--text)">Bin photos:</strong> ' + photoCount + ' photo' + (photoCount > 1 ? 's' : '') + ' attached ✅</div>' : ''}
+        ${photoCount?'<div style="grid-column:1/-1"><strong style="color:var(--text)">Bin photos:</strong> '+photoCount+' photo'+(photoCount>1?'s':'')+' attached ✅</div>':''}
       </div>`
   }
 
