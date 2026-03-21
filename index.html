@@ -830,6 +830,13 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
     -webkit-tap-highlight-color: transparent !important;
     user-select: none !important;
   }
+  /* Landing pricing — stack to single column on mobile */
+  #land-pricing-grid {
+    grid-template-columns: 1fr !important;
+  }
+  #land-pricing-section {
+    padding: 0 16px 48px !important;
+  }
 }
 </style>
 </head>
@@ -897,6 +904,98 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <div class="card a4"><div style="font-size:28px;margin-bottom:10px">🚨</div><div style="font-size:15px;font-weight:700;margin-bottom:6px">SOS Emergency</div><div style="font-size:13px;color:var(--sub);line-height:1.6">Need bins out or in urgently? Emergency dispatch goes to the nearest available runner in minutes.</div></div>
         <div class="card a5"><div style="font-size:28px;margin-bottom:10px">🏠</div><div style="font-size:15px;font-weight:700;margin-bottom:6px">Homeowner Profiles</div><div style="font-size:13px;color:var(--sub);line-height:1.6">Gate codes, pets, bin location — runners see everything they need before arriving.</div></div>
         <div class="card a6"><div style="font-size:28px;margin-bottom:10px">📦</div><div style="font-size:15px;font-weight:700;margin-bottom:6px">One-Time Callout</div><div style="font-size:13px;color:var(--sub);line-height:1.6">Need just one collection? Book a single Bin Out, Bin In, or both from $12.99. Recycling or general waste — no subscription needed.</div></div>
+      </div>
+    </div>
+
+    <!-- PRICING SECTION -->
+    <div id="land-pricing-section" style="max-width:1040px;margin:0 auto;padding:0 56px 72px">
+      <div style="text-align:center;margin-bottom:40px">
+        <div style="display:inline-flex;align-items:center;gap:8px;font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--cyan);margin-bottom:14px"><span style="width:22px;height:1px;background:var(--cyan);display:block"></span>Simple Pricing<span style="width:22px;height:1px;background:var(--cyan);display:block"></span></div>
+        <h2 style="font-family:'Syne',sans-serif;font-size:clamp(24px,5vw,38px);font-weight:800;margin-bottom:10px">Plans for every home</h2>
+        <p style="color:var(--sub);font-size:15px;max-width:480px;margin:0 auto;line-height:1.6">Every plan includes Bin Out the evening before <em>and</em> Bin In after the truck. Cancel or pause any time.</p>
+      </div>
+
+      <!-- PLAN CARDS ROW -->
+      <div id="land-pricing-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px">
+
+        <!-- PLAN A -->
+        <div onclick="startOnboarding('a')" style="position:relative;border:2px solid var(--border2);border-radius:18px;padding:28px 24px;cursor:pointer;transition:all .25s;background:var(--surface)"
+          onmouseover="this.style.borderColor='var(--cyan)';this.style.transform='translateY(-4px)';this.style.boxShadow='0 16px 48px rgba(6,214,160,.15)'"
+          onmouseout="this.style.borderColor='var(--border2)';this.style.transform='translateY(0)';this.style.boxShadow='none'">
+          <div style="font-size:32px;margin-bottom:14px">🗑️</div>
+          <div style="font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">1 Can</div>
+          <div style="font-family:'Syne',sans-serif;font-size:42px;font-weight:853;color:var(--cyan);line-height:1;margin-bottom:4px">$34<span style="font-size:20px;font-weight:400">.99</span></div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:20px">per month · weekly</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;font-size:13px;color:var(--sub)">
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> 1 bin — recycling or waste</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> 🌙 Bin Out the night before</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> ☀️ Bin In after the truck</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> Notifications at every step</div>
+          </div>
+          <div style="background:var(--cyan);color:#07090f;font-size:13px;font-weight:700;padding:11px;border-radius:10px;text-align:center">
+            Check My Area →
+          </div>
+        </div>
+
+        <!-- PLAN B — highlighted -->
+        <div onclick="startOnboarding('b')" style="position:relative;border:2px solid var(--cyan);border-radius:18px;padding:28px 24px;cursor:pointer;transition:all .25s;background:rgba(6,214,160,.04)"
+          onmouseover="this.style.transform='translateY(-4px)';this.style.boxShadow='0 20px 56px rgba(6,214,160,.22)'"
+          onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 8px 32px rgba(6,214,160,.1)'">
+          <div style="position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:var(--cyan);color:#07090f;font-size:10px;font-weight:800;padding:3px 14px;border-radius:99px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap">Most Popular</div>
+          <div style="font-size:32px;margin-bottom:14px">🗑️🗑️</div>
+          <div style="font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">2 Cans — Same Day</div>
+          <div style="font-family:'Syne',sans-serif;font-size:42px;font-weight:853;color:var(--cyan);line-height:1;margin-bottom:4px">$44<span style="font-size:20px;font-weight:400">.99</span></div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:20px">per month · weekly</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;font-size:13px;color:var(--sub)">
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> 2 bins — recycling + waste</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> Both collected same day</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> 🌙 Bin Out + ☀️ Bin In both bins</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> Save vs. two separate plans</div>
+          </div>
+          <div style="background:var(--cyan);color:#07090f;font-size:13px;font-weight:700;padding:11px;border-radius:10px;text-align:center">
+            Check My Area →
+          </div>
+        </div>
+
+        <!-- PLAN C -->
+        <div onclick="startOnboarding('c')" style="position:relative;border:2px solid var(--border2);border-radius:18px;padding:28px 24px;cursor:pointer;transition:all .25s;background:var(--surface)"
+          onmouseover="this.style.borderColor='var(--purple)';this.style.transform='translateY(-4px)';this.style.boxShadow='0 16px 48px rgba(139,92,246,.15)'"
+          onmouseout="this.style.borderColor='var(--border2)';this.style.transform='translateY(0)';this.style.boxShadow='none'">
+          <div style="position:absolute;top:16px;right:16px;font-size:9px;font-weight:800;color:var(--purple);letter-spacing:.08em;text-transform:uppercase;border:1px solid rgba(139,92,246,.4);border-radius:99px;padding:2px 8px">Most Flexible</div>
+          <div style="font-size:32px;margin-bottom:14px">♻️🗑️</div>
+          <div style="font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">2 Cans — Split Days</div>
+          <div style="font-family:'Syne',sans-serif;font-size:42px;font-weight:853;color:#a78bfa;line-height:1;margin-bottom:4px">$54<span style="font-size:20px;font-weight:400">.99</span></div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:20px">per month · weekly</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;font-size:13px;color:var(--sub)">
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:#a78bfa;font-size:15px">✓</span> Recycling one day</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:#a78bfa;font-size:15px">✓</span> General waste another day</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:#a78bfa;font-size:15px">✓</span> You choose each pickup day</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:#a78bfa;font-size:15px">✓</span> Full Bin Out + Bin In both days</div>
+          </div>
+          <div style="background:rgba(139,92,246,.15);border:1.5px solid rgba(139,92,246,.4);color:#a78bfa;font-size:13px;font-weight:700;padding:11px;border-radius:10px;text-align:center">
+            Check My Area →
+          </div>
+        </div>
+
+      </div>
+
+      <!-- CALLOUT ROW -->
+      <div onclick="startOnboarding(null)" style="border:1.5px dashed var(--border2);border-radius:14px;padding:20px 24px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:16px;transition:all .2s"
+        onmouseover="this.style.borderColor='var(--cyan)';this.style.background='rgba(6,214,160,.04)'"
+        onmouseout="this.style.borderColor='var(--border2)';this.style.background='transparent'">
+        <div style="display:flex;align-items:center;gap:16px">
+          <div style="font-size:28px;flex-shrink:0">📦</div>
+          <div>
+            <div style="font-size:14px;font-weight:700;margin-bottom:3px">Just need it once? One-Time Callout — <span style="color:var(--cyan)">$12.99 per visit</span></div>
+            <div style="font-size:12px;color:var(--sub)">No subscription needed. Book a single Bin Out or Bin In, any time, dispatched to your nearest runner.</div>
+          </div>
+        </div>
+        <div style="flex-shrink:0;font-size:13px;font-weight:700;color:var(--cyan);white-space:nowrap">Check My Area →</div>
+      </div>
+
+      <!-- FINE PRINT -->
+      <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--muted)">
+        All plans billed monthly · No contracts · Pause or cancel any time · Subject to runner availability in your area
       </div>
     </div>
 
@@ -3524,6 +3623,15 @@ let signupRole='hw'
 function setSR(r){signupRole=r;document.getElementById('sr-hw').classList.toggle('on',r==='hw');document.getElementById('sr-rn').classList.toggle('on',r==='rn')}
 function startSignup(){go(signupRole==='rn'?'S-rn-ob':'S-hw-ob')}
 
+// ── LANDING PAGE PLAN CLICK → jump to onboarding + pre-select plan ──
+function startOnboarding(planLetter){
+  // Go to homeowner onboarding, land on step 1 (address)
+  go('S-hw-ob')
+  // After the screen renders, pre-select the plan on step 3
+  // Store desired plan so selectFreq/selectObPlan can apply it when step 3 loads
+  window._landingPlanLetter = planLetter  // 'a', 'b', 'c', or null (as-needed/callout)
+}
+
 // Radio
 function rOpt(el){el.closest('.radio-row').querySelectorAll('.r-opt').forEach(o=>o.classList.remove('on'));el.classList.add('on')}
 
@@ -3747,7 +3855,20 @@ function hNext(s){
   const sc=document.getElementById('h-sc'+s); if(sc){ sc.classList.remove('active'); sc.classList.add('done'); sc.textContent='✓' }
   const sl=document.getElementById('h-sl'+s); if(sl) sl.classList.add('done')
   const nsc=document.getElementById('h-sc'+(s+1)); if(nsc) nsc.classList.add('active')
-  if(s===2){ selectFreq('weekly') }
+  if(s===2){ 
+    // Default weekly; then apply any plan pre-selected from landing page
+    selectFreq('weekly')
+    if(window._landingPlanLetter){
+      const letter = window._landingPlanLetter
+      window._landingPlanLetter = null  // consume it
+      // Map a/b/c to weekly plan ids w1/w2/w3
+      const planMap = { a:'w1', b:'w2', c:'w3' }
+      const planId = planMap[letter]
+      if(planId) setTimeout(()=>selectObPlan(planId), 0)
+      // For callout (null) — 'asneeded' frequency
+      if(letter === null) setTimeout(()=>selectFreq('asneeded'), 0)
+    }
+  }
   window.scrollTo(0,0)
 }
 
