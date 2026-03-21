@@ -110,7 +110,7 @@ function updateCheckoutSummary(){
   safe('checkout-plan-name',  plan.name)
   safe('checkout-plan-price', '$'+plan.monthlyAmt.toFixed(2)+'/mo')
   safe('checkout-plan-desc',  plan.desc)
-  safe('checkout-total',      '$'+(plan.monthlyAmt+15).toFixed(2)+' today')
+  safe('checkout-total',      '$'+plan.monthlyAmt.toFixed(2)+' today')
   // Show split day selectors note in checkout
   const splitNote = document.getElementById('checkout-split-note')
   if(splitNote) splitNote.style.display = plan.splitDays ? 'block' : 'none'
@@ -1511,13 +1511,13 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           </div>
           <div style="font-size:12px;color:var(--sub);line-height:1.7" id="checkout-plan-desc"></div>
           <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:13px;color:var(--sub)">First month + one-time setup fee</span>
+            <span style="font-size:13px;color:var(--sub)">First month — billed today</span>
             <span style="font-size:14px;font-weight:700;color:var(--text)" id="checkout-total">—</span>
           </div>
         </div>
 
-        <div style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:12px;color:var(--sub);line-height:1.6">
-          <strong style="color:var(--amber)">📋 One-time setup fee $15</strong> — Covers route planning and runner assignment for your address. Charged once at signup, never again.
+        <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:12px;color:var(--sub);line-height:1.6">
+          ✅ <strong style="color:var(--text)">Cancel or pause any time</strong> — no lock-in. Your first collection is booked after admin reviews and approves your account.
         </div>
 
         <button class="btn btn-cyan btn-lg btn-full" id="stripe-checkout-btn" onclick="launchStripeCheckout()">
