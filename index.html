@@ -88,6 +88,7 @@ const STRIPE_PRICES = {
   },
 }
 let _checkoutPlanKey = 'plan_a'
+let _obCachedPassword = '' // cached from step 2 so it's available at step 4/5
 
 function selectPlan(p){
   _checkoutPlanKey = 'plan_' + p
@@ -144,8 +145,8 @@ async function launchStripeCheckout(){
   if(!em || !fn){ showToast('Missing name or email','err'); if(btn){btn.disabled=false;btn.textContent='🔒 Pay Securely with Stripe →'} return }
 
   try {
-    // 1. Create auth user — non-blocking, don't let failure stop the save
-    const pw = document.getElementById('h-pw')?.value || ''
+    // 1. Create auth user — non-blocking
+    const pw = _obCachedPassword || document.getElementById('h-pw')?.value || ''
     let authUserId = null
     try {
       if(pw.length >= 8){
@@ -153,10 +154,10 @@ async function launchStripeCheckout(){
           email: em, password: pw,
           options:{ data:{ role:'hw', first_name:fn, last_name:ln } }
         })
-        if(authErr && authErr.message !== 'User already registered'){
-          console.warn('[BinDash] Auth warning (non-blocking):', authErr.message)
-        } else {
+        if(!authErr || authErr.message === 'User already registered'){
           authUserId = authData?.user?.id || null
+        } else {
+          console.warn('[BinDash] Auth warning (non-blocking):', authErr.message)
         }
       }
     } catch(authEx){
@@ -262,9 +263,12 @@ function handleStripeReturn(){
   } else if(p.get('checkout')==='cancel'){
     window.history.replaceState({},'',' ')
     showToast('Payment cancelled — try again anytime','info')
+  } else if(p.get('portal')==='return'){
+    window.history.replaceState({},'',' ')
+    // Will show toast after app loads and user is detected
+    window._showPortalReturnToast = true
   } else if(hash && (hash.includes('type=recovery') || hash.includes('type=signup'))){
     window.history.replaceState({}, '', ' ')
-    // Delay slightly so app JS is fully initialised
     setTimeout(()=>_handlePasswordResetHash(hash), 800)
   }
 }
@@ -2358,7 +2362,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <button class="btn btn-cyan btn-sm" onclick="showCallout()" style="margin-left:auto">+ Book One-Time Callout — $12.99</button>
           </div>
           <div class="card" style="margin-bottom:14px">
-            <div class="card-ttl">Upcoming Schedule — Weekly Recycling · Thursdays</div>
+            <div class="card-ttl" id="hw-schedule-title">Upcoming Schedule</div>
             <div style="display:flex;flex-direction:column;gap:8px" id="schedule-list"></div>
           </div>
         </div>
@@ -2434,7 +2438,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <div style="font-size:28px">💳</div>
                 <div>
                   <div style="font-weight:700;font-size:14px" id="acct-card-display">No card on file</div>
-                  <div style="font-size:11px;color:var(--sub);margin-top:2px">Saved securely via Stripe</div>
+                  <div style="font-size:11px;color:var(--sub);margin-top:2px" id="acct-card-sub">Saved securely via Stripe</div>
                 </div>
               </div>
               <div style="display:flex;gap:8px;align-items:center">
@@ -2856,33 +2860,43 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
             <div class="card">
               <div class="card-ttl">Personal Information</div>
-              <div class="field"><label>First Name</label><input placeholder="First name"></div>
-              <div class="field"><label>Last Name</label><input placeholder="Last name"></div>
-              <div class="field"><label>Email</label><input placeholder="Email address"></div>
-              <div class="field"><label>Phone</label><input placeholder="Phone number"></div>
-              <div class="field"><label>Home Address</label><input placeholder="Home address"></div>
-              <button class="btn btn-cyan btn-sm" onclick="showToast('Information updated ✅','ok')">Save Changes</button>
+              <div class="field"><label>First Name</label><input id="rn-acct-fn" placeholder="First name"></div>
+              <div class="field"><label>Last Name</label><input id="rn-acct-ln" placeholder="Last name"></div>
+              <div class="field"><label>Email</label><input id="rn-acct-em" placeholder="Email address" readonly style="opacity:.6;cursor:not-allowed"></div>
+              <div class="field"><label>Phone</label><input id="rn-acct-ph" placeholder="Phone number"></div>
+              <div class="field"><label>Home ZIP</label><input id="rn-acct-zip" placeholder="85374" maxlength="5"></div>
+              <div id="rn-acct-error" style="display:none;color:#fca5a5;font-size:12px;margin-bottom:8px"></div>
+              <button class="btn btn-cyan btn-sm" onclick="saveRNAccountInfo()">Save Changes</button>
             </div>
             <div>
               <div class="card" style="margin-bottom:12px">
                 <div class="card-ttl">Visit Preference</div>
                 <div class="field"><label>Which visits will you do?</label>
-                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-                    <div class="r-opt on" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')" style="text-align:center;padding:10px 6px;font-size:11px">🌙☀️<br><strong>Both</strong></div>
-                    <div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')" style="text-align:center;padding:10px 6px;font-size:11px">🌙<br>Out only</div>
-                    <div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')" style="text-align:center;padding:10px 6px;font-size:11px">☀️<br>In only</div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px" id="rn-visit-type-pills">
+                    <div class="r-opt on" id="rnvt-both" onclick="document.querySelectorAll('#rn-visit-type-pills .r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')" style="text-align:center;padding:10px 6px;font-size:11px">🌙☀️<br><strong>Both</strong></div>
+                    <div class="r-opt" id="rnvt-out" onclick="document.querySelectorAll('#rn-visit-type-pills .r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')" style="text-align:center;padding:10px 6px;font-size:11px">🌙<br>Out only</div>
+                    <div class="r-opt" id="rnvt-in" onclick="document.querySelectorAll('#rn-visit-type-pills .r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')" style="text-align:center;padding:10px 6px;font-size:11px">☀️<br>In only</div>
                   </div>
                 </div>
-                <div class="field"><label>Service Area</label><select><option>Within 2 miles</option><option selected>Within 5 miles</option><option>Within 10 miles</option></select></div>
-                <div class="field"><label>Vehicle</label><select><option selected>Van</option><option>Car</option><option>Cargo Bike</option><option>None</option></select></div>
-                <div class="field"><label>Availability Status</label><select><option selected>Available</option><option>Off Duty</option></select></div>
-                <button class="btn btn-outline btn-sm" onclick="showToast('Preferences saved ✅','ok')">Save Preferences</button>
+                <div class="field"><label>Vehicle</label>
+                  <select id="rn-acct-vehicle">
+                    <option>Van</option><option>Car</option><option>Cargo Bike</option><option>On foot</option>
+                  </select>
+                </div>
+                <div class="field"><label>Availability Status</label>
+                  <select id="rn-acct-status">
+                    <option value="AVAILABLE">Available</option>
+                    <option value="OFF_DUTY">Off Duty</option>
+                  </select>
+                </div>
+                <button class="btn btn-outline btn-sm" onclick="saveRNPreferences()">Save Preferences</button>
               </div>
               <div class="card">
                 <div class="card-ttl">Security</div>
-                <div class="field"><label>New Password</label><input type="password" placeholder="Leave blank to keep current"></div>
-                <div class="field"><label>Confirm Password</label><input type="password" placeholder="Repeat new password"></div>
-                <button class="btn btn-outline btn-sm" onclick="showToast('Password updated ✅','ok')">Update Password</button>
+                <div class="field"><label>New Password</label><input type="password" id="rn-acct-pw1" placeholder="Leave blank to keep current"></div>
+                <div class="field"><label>Confirm Password</label><input type="password" id="rn-acct-pw2" placeholder="Repeat new password"></div>
+                <div id="rn-pw-error" style="display:none;color:#fca5a5;font-size:12px;margin-bottom:8px"></div>
+                <button class="btn btn-outline btn-sm" onclick="saveRNPassword()">Update Password</button>
               </div>
             </div>
           </div>
@@ -3586,9 +3600,6 @@ function setCurrentUser(supabaseUser){
 // ── POPULATE HW DASHBOARD from currentUser + Supabase ────────
 async function populateHWDashboard(){
   if(!currentUser) return
-  const fn = currentUser.first_name || 'there'
-  const ln = currentUser.last_name  || ''
-  const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'HW'
 
   try {
     let data = null, loadErr = null
@@ -3609,12 +3620,26 @@ async function populateHWDashboard(){
     }
 
     const row = data
+    // Use DB row for name — most reliable source
+    const fn = row.first_name || currentUser.user_metadata?.first_name || currentUser.email?.split('@')[0] || 'there'
+    const ln = row.last_name  || currentUser.user_metadata?.last_name  || ''
+    const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'HW'
+
+    // Store stripe IDs on window for pause/resume
+    window._hwStripeSubId      = row.stripe_subscription_id || null
+    window._hwStripeCustomerId = row.stripe_customer_id     || null
+    window._hwSubPeriodEnd     = null // will be fetched from Stripe if needed
+
     const status = row.status
 
     if(status === 'approved'){
-      // ── FULLY ACTIVE: show dashboard ──
       go('S-hw-dash')
       _populateHWDashData(row, fn, ln, initials)
+      loadHWCollections(row.email)
+      if(window._showPortalReturnToast){
+        window._showPortalReturnToast = false
+        setTimeout(()=>{ showToast('Payment method updated ✅','ok'); populateHWDashboard() }, 500)
+      }
 
     } else if(status === 'zone_assigned'){
       // ── ZONE ASSIGNED: HW was notified, needs to confirm service ──
@@ -3677,12 +3702,35 @@ function _populateHWDashData(row, fn, ln, initials){
   setVal('acct-em', row.email      || '')
   setVal('acct-ph', row.phone      || '')
 
-  // Payment card
+  // Payment card — fetch from Stripe if we have customer ID
   const cardEl = document.getElementById('acct-card-display')
   if(cardEl){
-    cardEl.textContent = row.card_last4
-      ? '•••• •••• •••• ' + row.card_last4
-      : 'No card on file'
+    if(row.stripe_customer_id){
+      cardEl.textContent = 'Loading...'
+      // Fetch card details via edge function
+      try {
+        const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/get-payment-method', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY },
+          body: JSON.stringify({ customerId: row.stripe_customer_id })
+        })
+        const d = await res.json()
+        if(d.brand && d.last4){
+          cardEl.textContent = d.brand.charAt(0).toUpperCase()+d.brand.slice(1) + ' •••• ' + d.last4
+          // Also show expiry
+          const cardSubEl = document.getElementById('acct-card-sub')
+          if(cardSubEl) cardSubEl.textContent = 'Expires ' + d.exp_month + '/' + d.exp_year
+        } else {
+          cardEl.textContent = row.card_last4 ? '•••• •••• •••• '+row.card_last4 : 'Card on file via Stripe'
+        }
+      } catch(e){
+        cardEl.textContent = row.card_last4 ? '•••• •••• •••• '+row.card_last4 : 'Card on file via Stripe'
+      }
+    } else if(row.card_last4){
+      cardEl.textContent = '•••• •••• •••• ' + row.card_last4
+    } else {
+      cardEl.textContent = 'No card on file'
+    }
   }
 
   // Zone / day / runner strip
@@ -3753,18 +3801,21 @@ function _populateHWDashData(row, fn, ln, initials){
     currentPlanEl.prepend(badge)
   }
 
-  // Property page
+  // Property page — use DB fields
   safe('prop-address',    row.street_address || '—')
-  safe('prop-city-zip',   (row.city ? row.city + ', ' : '') + (row.state||'') + ' ' + (row.zip_code||''))
-  safe('prop-bin-storage','—')
-  safe('prop-gate',       '—')
-  safe('prop-pets',       '—')
+  safe('prop-city-zip',   (row.city ? row.city + ', ' : '') + (row.state||'AZ') + ' ' + (row.zip_code||''))
+  safe('prop-bin-storage', row.bin_location  || '—')
+  safe('prop-gate',       row.gate_type ? row.gate_type + (row.gate_code ? ' · Code: ' + row.gate_code : '') : '—')
+  safe('prop-pets',       row.pet_info       || 'None')
   safe('pref-service',    row.service_type   || 'Recycling')
   safe('pref-day',        row.collection_day || '—')
   const prevDayName = colDayIdx >= 0 ? dayNames[(colDayIdx + 6) % 7] : '—'
   safe('pref-binout-night', prevDayName !== '—' ? prevDayName + ' evening' : '—')
   safe('pref-plan',       planLabels[planKey] || '—')
   safe('pref-notes',      row.service_notes  || '—')
+
+  // Build upcoming schedule from DB row
+  buildScheduleFromRow(row)
 }
 
 // ── POPULATE CONFIRM SCREEN with homeowner\'s existing data ──
@@ -3836,20 +3887,9 @@ async function submitServiceConfirmation(){
 // ── POPULATE RUNNER DASHBOARD from currentUser + Supabase ────
 async function populateRNDashboard(){
   if(!currentUser) return
-  const fn = currentUser.first_name || 'Runner'
-  const ln = currentUser.last_name  || ''
-  const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'RN'
 
-  // Sidebar
-  const nameEl = document.getElementById('rn-sidebar-name')
-  const avEl   = document.getElementById('rn-sidebar-avatar')
-  const roleEl = document.getElementById('rn-sidebar-role')
-  const grEl   = document.getElementById('rn-home-subtitle')
-  if(nameEl) nameEl.textContent = fn + ' ' + ln
-  if(avEl)   avEl.textContent   = initials
-  if(roleEl) roleEl.textContent = 'Runner'
+  const grEl = document.getElementById('rn-home-subtitle')
 
-  // Load their application record
   try {
     const res = await _supa
       .from('runner_applications')
@@ -3858,10 +3898,26 @@ async function populateRNDashboard(){
       .single()
 
     const row = res?.data
-    if(!row) return
+    if(!row){ console.warn('[BinDash] No runner record for', currentUser.email); return }
+
+    // Use DB row for name
+    const fn = row.first_name || currentUser.user_metadata?.first_name || currentUser.email?.split('@')[0] || 'Runner'
+    const ln = row.last_name  || currentUser.user_metadata?.last_name  || ''
+    const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'RN'
+
+    // Sidebar
+    const nameEl = document.getElementById('rn-sidebar-name')
+    const avEl   = document.getElementById('rn-sidebar-avatar')
+    const roleEl = document.getElementById('rn-sidebar-role')
+    if(nameEl) nameEl.textContent = fn + ' ' + ln
+    if(avEl)   avEl.textContent   = initials
+    if(roleEl) roleEl.textContent = 'Runner'
+
+    // Store for later use
+    window._rnRow = row
 
     if(row.status === 'pending_review'){
-      if(grEl) grEl.textContent = 'Your application is pending review \u2014 we\'ll notify you within 24\u201348 hrs'
+      if(grEl) grEl.textContent = 'Your application is pending review — we\'ll notify you within 24–48 hrs'
     } else if(row.status === 'approved'){
       if(grEl) grEl.textContent = 'Account active · Check your routes below'
       await loadRunnerRoutes(row)
@@ -3869,15 +3925,19 @@ async function populateRNDashboard(){
       if(grEl) grEl.textContent = 'Application not approved — contact support for details'
     }
 
-    // Account page pre-fill
-    const fnEl = document.querySelector('#rn-account input[placeholder="First name"]')
-    const lnEl = document.querySelector('#rn-account input[placeholder="Last name"]')
-    const emEl = document.querySelector('#rn-account input[placeholder="Email address"]')
-    const phEl = document.querySelector('#rn-account input[placeholder="Phone number"]')
-    if(fnEl) fnEl.value = row.first_name || ''
-    if(lnEl) lnEl.value = row.last_name  || ''
-    if(emEl) emEl.value = row.email      || ''
-    if(phEl) phEl.value = row.phone      || ''
+    // Account page pre-fill — use IDs not placeholder selectors
+    const setVal = (id,v) => { const el=document.getElementById(id); if(el) el.value=v||'' }
+    setVal('rn-acct-fn',   row.first_name || fn)
+    setVal('rn-acct-ln',   row.last_name  || ln)
+    setVal('rn-acct-em',   row.email      || '')
+    setVal('rn-acct-ph',   row.phone      || '')
+    setVal('rn-acct-zip',  row.zip_code   || '')
+
+    // Stats
+    const safe = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v }
+    safe('rn-total-earned',  row.total_earned  ? '$'+parseFloat(row.total_earned).toFixed(2)  : '$0.00')
+    safe('rn-total-stops',   row.total_stops   || 0)
+    safe('rn-rating-display',row.rating        ? row.rating+'★' : '—')
 
   } catch(err){
     console.warn('[BinDash] RN profile load failed:', String(err?.message||err))
@@ -3887,78 +3947,261 @@ async function populateRNDashboard(){
 // ── LOAD RUNNER ROUTES (jobs assigned to this runner) ─────────
 async function loadRunnerRoutes(runnerRow){
   try {
-    const res = await _supa
+    // Load both pending offers AND accepted jobs
+    const { data: jobs, error } = await _supa
       .from('jobs')
-      .select('*, homeowner_signups(first_name, last_name, street_address, zip_code, service_type)')
+      .select('*, homeowner_signups(first_name, last_name, street_address, zip_code, service_type, bin_location, gate_type, gate_code, pet_info, service_notes)')
       .eq('runner_id', runnerRow.id)
-      .in('status', ['scheduled','in_progress'])
+      .in('status', ['offered','accepted','in_progress','scheduled'])
       .order('scheduled_date', { ascending: true })
 
-    const jobs = res?.data || []
-    if(!jobs.length) return
+    if(error) throw error
 
-    const batchArea = document.getElementById('rn-home-batch-area')
-    const upcomingList = document.getElementById('upcoming-batch-list')
+    const batchArea    = document.getElementById('rn-home-batch-area')
+    const offerBanner  = document.getElementById('offer-banner')
 
-    if(!jobs.length){
-      if(batchArea) batchArea.innerHTML = `<div style="text-align:center;padding:40px 20px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--muted)"><div style="font-size:36px;margin-bottom:10px">📬</div><div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No routes yet</div><div style="font-size:13px">Batch offers will appear here before each collection day.</div></div>`
+    // Separate pending offers from accepted jobs
+    const pendingOffers = (jobs||[]).filter(j => j.status === 'offered')
+    const activeJobs    = (jobs||[]).filter(j => j.status !== 'offered')
+
+    // ── PENDING OFFERS ──────────────────────────────────────
+    if(pendingOffers.length > 0 && offerBanner){
+      const offer = pendingOffers[0] // show first pending offer
+      const earn  = (pendingOffers.filter(j=>j.batch_id===offer.batch_id||j.id===offer.id).length * 3.25).toFixed(2)
+      const batchJobs = pendingOffers.filter(j => (j.batch_id||j.id) === (offer.batch_id||offer.id))
+      const stopCount = batchJobs.length
+      const offerType = offer.offer_type || 'loyalty' // loyalty / zone / broadcast
+      const windowMins = offer.offer_type === 'broadcast' ? 30 : offer.offer_type === 'zone' ? 45 : 25
+      const offerTypeBadge = offerType==='loyalty'
+        ? '<span style="background:rgba(6,214,160,.15);color:var(--cyan);font-size:9px;font-weight:700;padding:1px 7px;border-radius:4px;margin-left:6px">🔒 Loyalty — First Refusal</span>'
+        : offerType==='broadcast'
+        ? '<span style="background:rgba(245,158,11,.15);color:#fbbf24;font-size:9px;font-weight:700;padding:1px 7px;border-radius:4px;margin-left:6px">📢 Broadcast + Bonus</span>'
+        : '<span style="background:rgba(59,130,246,.12);color:var(--blue);font-size:9px;font-weight:700;padding:1px 7px;border-radius:4px;margin-left:6px">📍 Zone Offer</span>'
+
+      // Countdown from offer_expires_at
+      window._currentOfferId   = offer.batch_id || offer.id
+      window._currentRunnerRow = runnerRow
+      startOfferCountdown(offer.offer_expires_at, windowMins)
+
+      offerBanner.style.display = 'block'
+      offerBanner.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:18px">📬</span>
+          <div>
+            <div style="font-weight:700;font-size:14px;color:#fbbf24">
+              ${offer.visit_type==='BIN_OUT'?'🌙 Bin Out':'☀️ Bin In'} Batch Offer ${offerTypeBadge}
+            </div>
+            <div style="font-size:11px;color:var(--muted)">
+              ${stopCount} stop${stopCount!==1?'s':''} · expires in 
+              <span id="offer-countdown" style="font-weight:700;color:#f59e0b">--:--</span>
+            </div>
+          </div>
+        </div>
+        <div style="background:rgba(245,158,11,.2);border-radius:8px;padding:6px 12px;text-align:center">
+          <div style="font-size:8px;color:var(--muted)">EARN</div>
+          <div style="font-size:18px;font-weight:800;color:#fbbf24">$${earn}</div>
+        </div>
+      </div>
+      <div style="background:rgba(0,0,0,.2);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px">
+        ${batchJobs.slice(0,3).map((j,i)=>`
+        <div style="display:flex;align-items:center;gap:8px;padding:4px 0;${i>0?'border-top:1px solid rgba(255,255,255,.05)':''}">
+          <div style="width:18px;height:18px;border-radius:50%;background:rgba(99,102,241,.3);color:#a5b4fc;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
+          <div style="flex:1">
+            <span style="font-weight:600">${(j.homeowner_signups?.first_name||'')+' '+(j.homeowner_signups?.last_name||'')}</span>
+            <span style="color:var(--muted);margin-left:6px">${j.homeowner_signups?.street_address||'—'}</span>
+          </div>
+          ${j.homeowner_signups?.gate_code?`<span style="color:#fbbf24;font-size:10px">🔑 ${j.homeowner_signups.gate_code}</span>`:''}
+        </div>`).join('')}
+        ${stopCount>3?`<div style="font-size:10px;color:var(--muted);margin-top:4px">+ ${stopCount-3} more stops</div>`:''}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-cyan btn-sm" style="flex:1" onclick="acceptOffer()">✓ Accept — $${earn}</button>
+        <button class="btn btn-outline btn-sm" onclick="showCurrentOfferDetail()">View Details</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="declineOffer()">✕ Decline</button>
+      </div>`
+    } else if(offerBanner){
+      offerBanner.style.display = 'none'
+    }
+
+    // ── ACTIVE / UPCOMING JOBS ───────────────────────────────
+    if(!activeJobs.length){
+      if(batchArea) batchArea.innerHTML = `
+      <div style="text-align:center;padding:40px 20px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--muted)">
+        <div style="font-size:36px;margin-bottom:10px">📬</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No active routes</div>
+        <div style="font-size:13px">Batch offers will appear here before each collection day.</div>
+      </div>`
       return
     }
 
-    // Group jobs by batch_id
+    // Group by batch_id
     const batches = {}
-    jobs.forEach(j=>{
+    activeJobs.forEach(j=>{
       const key = j.batch_id || j.id
-      if(!batches[key]) batches[key] = { id:key, date:j.scheduled_date, type:j.visit_type, stops:[] }
+      if(!batches[key]) batches[key] = { id:key, date:j.scheduled_date, type:j.visit_type, status:j.status, stops:[] }
       batches[key].stops.push(j)
     })
 
     const batchCards = Object.values(batches).map(batch => {
       const earn = (batch.stops.length * 3.25).toFixed(2)
-      const mapsAddresses = batch.stops.map(s=>encodeURIComponent((s.homeowner_signups?.street_address||'') + ', ' + (s.homeowner_signups?.zip_code||''))).join('|')
-      const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${mapsAddresses.split('|').pop()}&waypoints=${mapsAddresses.split('|').slice(0,-1).join('|')}&travelmode=driving`
+      const addrs = batch.stops.map(s=>encodeURIComponent((s.homeowner_signups?.street_address||'')+', '+(s.homeowner_signups?.zip_code||''))).filter(Boolean)
+      const mapsUrl = addrs.length
+        ? `https://www.google.com/maps/dir/?api=1&destination=${addrs.at(-1)}&waypoints=${addrs.slice(0,-1).join('|')}&travelmode=driving`
+        : '#'
+      const isToday = batch.date && new Date(batch.date).toDateString() === new Date().toDateString()
+      const statusBadge = batch.status==='in_progress'
+        ? '<span style="background:#22c55e22;color:#22c55e;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700">● In Progress</span>'
+        : isToday
+        ? '<span style="background:rgba(99,102,241,.2);color:#a5b4fc;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700">Today</span>'
+        : '<span style="background:var(--surface2);color:var(--muted);font-size:10px;padding:2px 8px;border-radius:4px">Upcoming</span>'
 
       return `<div class="batch-card" style="margin-bottom:14px">
-        <div class="batch-head ${batch.type==='bin_out'?'out':'in'}">
+        <div class="batch-head ${batch.type==='BIN_OUT'?'out':'in'}">
           <div>
             <div style="display:flex;align-items:center;gap:8px">
-              <span class="${batch.type==='bin_out'?'vt-out':'vt-in'}">${batch.type==='bin_out'?'🌙 BIN OUT':'☀️ BIN IN'}</span>
-              <span style="font-weight:700;font-size:13px">${batch.id.slice(0,12).toUpperCase()}</span>
+              <span class="${batch.type==='BIN_OUT'?'vt-out':'vt-in'}">${batch.type==='BIN_OUT'?'🌙 BIN OUT':'☀️ BIN IN'}</span>
+              <span style="font-weight:700;font-size:13px">${String(batch.id).slice(0,12).toUpperCase()}</span>
+              ${statusBadge}
             </div>
-            <div style="font-size:11px;color:var(--muted);margin-top:3px">${new Date(batch.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">
+              ${batch.date ? new Date(batch.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : '—'}
+            </div>
           </div>
-          <div style="text-align:right"><div style="font-size:18px;font-weight:800;color:${batch.type==='bin_out'?'#a5b4fc':'#6ee7b7'}">$${earn}</div><div style="font-size:10px;color:var(--muted)">${batch.stops.length} stops</div></div>
+          <div style="text-align:right">
+            <div style="font-size:18px;font-weight:800;color:${batch.type==='BIN_OUT'?'#a5b4fc':'#6ee7b7'}">$${earn}</div>
+            <div style="font-size:10px;color:var(--muted)">${batch.stops.length} stop${batch.stops.length!==1?'s':''}</div>
+          </div>
         </div>
         <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
           ${batch.stops.map((s,i)=>`
           <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:${i<batch.stops.length-1?'1px solid rgba(30,40,64,.5)':'none'}">
             <div style="width:22px;height:22px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
             <div style="flex:1">
-              <div style="font-size:13px;font-weight:600">${(s.homeowner_signups?.first_name||'') + ' ' + (s.homeowner_signups?.last_name||'')}</div>
-              <div style="font-size:11px;color:var(--muted)">${s.homeowner_signups?.street_address||'—'}</div>
-              ${s.gate_code ? `<div style="font-size:11px;color:#fbbf24;margin-top:2px">🔑 Gate: ${s.gate_code}</div>` : ''}
-              ${s.pet_note  ? `<div style="font-size:11px;color:#fbbf24;margin-top:2px">🐾 ${s.pet_note}</div>` : ''}
+              <div style="font-size:13px;font-weight:600">${(s.homeowner_signups?.first_name||'')+' '+(s.homeowner_signups?.last_name||'')}</div>
+              <div style="font-size:11px;color:var(--muted)">📍 ${s.homeowner_signups?.street_address||'—'}</div>
+              ${s.homeowner_signups?.gate_code?`<div style="font-size:11px;color:#fbbf24;margin-top:2px">🔑 Gate: ${s.homeowner_signups.gate_code}</div>`:''}
+              ${s.homeowner_signups?.pet_info&&s.homeowner_signups.pet_info!=='None'?`<div style="font-size:11px;color:#fbbf24;margin-top:2px">🐾 ${s.homeowner_signups.pet_info}</div>`:''}
+              ${s.homeowner_signups?.bin_location&&s.homeowner_signups.bin_location!=='—'?`<div style="font-size:11px;color:var(--muted);margin-top:2px">📦 Bins: ${s.homeowner_signups.bin_location}</div>`:''}
+              ${s.homeowner_signups?.service_notes?`<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic">📝 ${s.homeowner_signups.service_notes}</div>`:''}
             </div>
-            <div style="font-size:11px;color:var(--green);font-weight:600">$3.25</div>
+            <div style="font-size:11px;color:var(--green);font-weight:600;flex-shrink:0">$3.25</div>
           </div>`).join('')}
         </div>
-        <div style="padding:10px 16px 14px;display:flex;gap:8px;flex-wrap:wrap">
-          <a href="${mapsUrl}" target="_blank" rel="noopener"
-             style="display:inline-flex;align-items:center;gap:6px;background:#1a73e8;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;color:#fff;text-decoration:none">
-            📍 Open Route in Google Maps
-          </a>
-          <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600;align-self:center">Est. $${earn}</span>
+        <div style="padding:10px 16px 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          ${addrs.length ? `<a href="${mapsUrl}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#1a73e8;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;color:#fff;text-decoration:none">📍 Open in Google Maps</a>` : ''}
+          ${isToday&&batch.status!=='in_progress' ? `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>` : ''}
+          ${batch.status==='in_progress' ? `<button class="btn btn-green btn-sm" onclick="completeBatch('${batch.id}')">✓ Mark Complete</button>` : ''}
+          <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600">$${earn}</span>
         </div>
       </div>`
     }).join('')
 
     if(batchArea) batchArea.innerHTML = batchCards
-    if(upcomingList) upcomingList.innerHTML = batchCards
+
+    // Update projected pay
+    const todayJobs = activeJobs.filter(j => j.scheduled_date && new Date(j.scheduled_date).toDateString()===new Date().toDateString())
+    const projected = (todayJobs.length * 3.25).toFixed(2)
+    const projEl = document.getElementById('rn-projected-pay')
+    const projSub = document.getElementById('rn-projected-sub')
+    if(projEl) projEl.textContent = '$'+projected
+    if(projSub) projSub.textContent = todayJobs.length ? todayJobs.length+' stop'+( todayJobs.length!==1?'s':'')+' today' : 'No routes today'
 
   } catch(err){
     console.warn('[BinDash] Route load failed:', String(err?.message||err))
   }
 }
+
+function startOfferCountdown(expiresAt, windowMins){
+  clearInterval(window._offerCountdownTimer)
+  const countdownEl = () => document.getElementById('offer-countdown')
+  const end = expiresAt ? new Date(expiresAt).getTime() : Date.now() + windowMins*60*1000
+  window._offerCountdownTimer = setInterval(()=>{
+    const remaining = Math.max(0, end - Date.now())
+    const mins = Math.floor(remaining/60000)
+    const secs = Math.floor((remaining%60000)/1000)
+    const el = countdownEl()
+    if(el) el.textContent = String(mins).padStart(2,'0')+':'+String(secs).padStart(2,'0')
+    if(remaining <= 0){
+      clearInterval(window._offerCountdownTimer)
+      document.getElementById('offer-banner')?.style && (document.getElementById('offer-banner').style.display='none')
+      showToast('Offer expired — sent to other runners','info')
+    }
+  }, 1000)
+}
+
+async function acceptOffer(){
+  const offerId   = window._currentOfferId
+  const runnerRow = window._currentRunnerRow
+  if(!offerId || !runnerRow) return
+
+  const btn = document.querySelector('#offer-banner .btn-cyan')
+  if(btn){ btn.disabled=true; btn.textContent='Accepting...' }
+
+  try {
+    // Update all jobs in this batch to 'accepted'
+    const { error } = await _supa.from('jobs')
+      .update({ status:'accepted', runner_accepted:true, updated_at:new Date().toISOString() })
+      .or(`batch_id.eq.${offerId},id.eq.${offerId}`)
+      .eq('runner_id', runnerRow.id)
+
+    if(error) throw error
+
+    clearInterval(window._offerCountdownTimer)
+    document.getElementById('offer-banner').style.display = 'none'
+    showToast('Batch accepted ✅ — you\'ll be notified when Bin In unlocks','ok', 5000)
+
+    // Reload routes to show in active list
+    await loadRunnerRoutes(runnerRow)
+  } catch(e){
+    showToast('Accept failed: '+String(e?.message||e),'err')
+    if(btn){ btn.disabled=false; btn.textContent='✓ Accept' }
+  }
+}
+
+async function declineOffer(){
+  const offerId   = window._currentOfferId
+  const runnerRow = window._currentRunnerRow
+  if(!offerId || !runnerRow) return
+
+  try {
+    await _supa.from('jobs')
+      .update({ status:'declined', updated_at:new Date().toISOString() })
+      .or(`batch_id.eq.${offerId},id.eq.${offerId}`)
+      .eq('runner_id', runnerRow.id)
+  } catch(e){ console.warn('Decline error:', e) }
+
+  clearInterval(window._offerCountdownTimer)
+  document.getElementById('offer-banner').style.display = 'none'
+  showToast('Offer declined — batch sent to next runner','info')
+}
+
+async function startBatch(batchId){
+  try {
+    await _supa.from('jobs')
+      .update({ status:'in_progress', updated_at:new Date().toISOString() })
+      .or(`batch_id.eq.${batchId},id.eq.${batchId}`)
+    showToast('Route started ▶ — stops are live','ok')
+    await loadRunnerRoutes(window._currentRunnerRow)
+  } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
+}
+
+async function completeBatch(batchId){
+  try {
+    await _supa.from('jobs')
+      .update({ status:'complete', completed_at:new Date().toISOString(), updated_at:new Date().toISOString() })
+      .or(`batch_id.eq.${batchId},id.eq.${batchId}`)
+    showToast('Route completed ✅ — pay will be processed within 24–48 hrs','ok', 5000)
+    await loadRunnerRoutes(window._currentRunnerRow)
+  } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
+}
+
+function showCurrentOfferDetail(){
+  const offerId = window._currentOfferId
+  const runnerRow = window._currentRunnerRow
+  showToast('Loading offer details...','info')
+}
+
 
 // ── Session restore on page load ──
 async function initApp(){
@@ -4092,9 +4335,26 @@ async function doLogin(){
       return
     }
 
-    // Determine role from user metadata
-    const role = data.user?.user_metadata?.role || 'hw'
+    // Determine role from user metadata — fallback to DB check
+    let role = data.user?.user_metadata?.role || ''
     const name = data.user?.user_metadata?.first_name || 'there'
+    const email = data.user?.email || ''
+
+    // If no role in metadata, check which table this email is in
+    if(!role){
+      const [hwRes, rnRes] = await Promise.all([
+        _supa.from('homeowner_signups').select('id').eq('email', email).single(),
+        _supa.from('runner_applications').select('id').eq('email', email).single()
+      ])
+      if(rnRes?.data) role = 'rn'
+      else role = 'hw'
+    }
+
+    // Also check admin table
+    if(!role || role === 'hw'){
+      const adminRes = await _supa.from('admins').select('role,is_active').eq('email', email).single()
+      if(adminRes?.data?.is_active) role = adminRes.data.role || 'admin'
+    }
 
     document.getElementById('l-email').value = ''
     document.getElementById('l-pass').value = ''
@@ -4104,6 +4364,16 @@ async function doLogin(){
     if(role === 'rn'){
       go('S-rn-dash')
       populateRNDashboard()
+      showToast('Welcome back, ' + name + ' 👋', 'ok')
+    } else if(role === 'admin' || role === 'super_admin' || role === 'ops'){
+      adminAuthed = true
+      go('S-admin')
+      setTimeout(() => adNav(null, 'ad-overview'), 80)
+      await loadZonesFromSupabase()
+      loadSignupsFromSupabase()
+      loadHomeownersFromSupabase()
+      loadRunnersFromSupabase()
+      loadRunnerApplicationsFromSupabase()
       showToast('Welcome back, ' + name + ' 👋', 'ok')
     } else {
       go('S-hw-dash')
@@ -4141,6 +4411,34 @@ function setVP(v){['both','out','in'].forEach(x=>document.getElementById('vp-'+x
 // ── COLLECTIONS DATA & RENDERING ─────────────────
 const collections = [] // Populated from Supabase jobs
 
+async function loadHWCollections(email){
+  if(!email) return
+  try {
+    const { data, error } = await _supa
+      .from('jobs')
+      .select('*')
+      .eq('homeowner_email', email)
+      .order('scheduled_date', { ascending: false })
+      .limit(50)
+    if(error || !data) return
+    collections.length = 0
+    data.forEach(job => {
+      collections.push({
+        id:            job.id,
+        date:          job.scheduled_date ? new Date(job.scheduled_date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—',
+        sortKey:       job.scheduled_date || '',
+        label:         job.visit_type === 'BIN_OUT' ? '🌙 Bin Out' : job.visit_type === 'BIN_IN' ? '☀️ Bin In' : job.visit_type || '—',
+        type:          job.job_type || 'subscription',
+        service:       job.service_type || 'Recycling',
+        runner:        job.runner_name  || 'TBD',
+        status:        job.status       || 'scheduled',
+        runnerAccepted:job.runner_accepted || false,
+      })
+    })
+    renderCollections()
+  } catch(e){ console.warn('[BinDash] loadHWCollections:', e) }
+}
+
 // Upcoming scheduled slots — populated from Supabase jobs
 const scheduledSlots = []
 
@@ -4158,6 +4456,13 @@ function renderCollections(){
     ? `<span class="badge" style="background:rgba(245,158,11,.12);color:#fbbf24;font-size:10px">📦 Callout</span>`
     : `<span style="font-size:11px;color:var(--muted)">Subscription</span>`
   const sorted = [...collections].sort((a,b) => b.sortKey.localeCompare(a.sortKey))
+  if(!sorted.length){
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--muted);font-size:13px">
+      <div style="font-size:28px;margin-bottom:8px">📋</div>
+      No collections yet — your first one will appear here after your first scheduled visit.
+    </td></tr>`
+    return
+  }
   tbody.innerHTML = sorted.map(c=>{
     const cancelBtn = (c.type==='callout' && c.status==='scheduled' && !c.runnerAccepted)
       ? `<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px;color:#ef4444;border-color:rgba(239,68,68,.3)" onclick="showCancelCallout('${c.id}')">✕ Cancel</button>`
@@ -4175,7 +4480,109 @@ function renderCollections(){
   }).join('')
 }
 
-function renderSchedule(){
+function buildScheduleFromRow(row){
+  // Generate 8 weeks of upcoming Bin Out + Bin In slots from collection_day
+  const scheduleTitleEl = document.getElementById('hw-schedule-title')
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  const shortDays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+  const shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+  const isSplit = row.plan_id === 'plan_c' || row.collection_day_2
+  const colDay  = row.collection_day || ''
+  const colDay2 = row.collection_day_2 || ''
+  const planLabels = { plan_a:'1 Can', plan_b:'2 Cans', plan_c:'2 Cans Split' }
+  const planLabel = planLabels[row.plan_id] || '1 Can'
+
+  if(scheduleTitleEl){
+    scheduleTitleEl.textContent = 'Upcoming Schedule — ' + planLabel + ' · ' + (isSplit ? colDay + ' + ' + colDay2 : colDay + 's')
+  }
+
+  const dayIdx = dayNames.findIndex(d => d.toLowerCase() === colDay.toLowerCase())
+  const dayIdx2 = isSplit ? dayNames.findIndex(d => d.toLowerCase() === colDay2.toLowerCase()) : -1
+
+  if(dayIdx < 0){ renderSchedule(); return }
+
+  // Clear and rebuild
+  scheduledSlots.length = 0
+
+  const today = new Date(); today.setHours(0,0,0,0)
+  const fmtDate = d => shortDays[d.getDay()] + ' ' + shortMonths[d.getMonth()] + ' ' + d.getDate()
+
+  // Generate next 8 collection dates
+  for(let week = 0; week < 8; week++){
+    // Primary collection day
+    const daysUntil = ((dayIdx - today.getDay()) + 7) % 7 || 7
+    const colDate = new Date(today); colDate.setDate(today.getDate() + daysUntil + (week * 7))
+    const binOutDate = new Date(colDate); binOutDate.setDate(colDate.getDate() - 1)
+
+    // Bin Out slot
+    scheduledSlots.push({
+      id:         'bo-' + week,
+      visit:      'BIN_OUT',
+      label:      '🌙 Bin Out',
+      dateLabel:  fmtDate(binOutDate),
+      sortKey:    binOutDate.toISOString().slice(0,10),
+      timing:     fmtDate(binOutDate) + ' · Evening — bins to curb before 6am',
+      badge:      week === 0 ? '🔜 Next' : 'Scheduled',
+      badgeStyle: week === 0 ? 'background:rgba(99,102,241,.2);color:#a5b4fc' : 'background:var(--surface2);color:var(--muted)',
+      skippable:  week > 0,
+      isCallout:  false,
+      cancelled:  false,
+    })
+
+    // Bin In slot
+    scheduledSlots.push({
+      id:         'bi-' + week,
+      visit:      'BIN_IN',
+      label:      '☀️ Bin In',
+      dateLabel:  fmtDate(colDate),
+      sortKey:    colDate.toISOString().slice(0,10) + 'T12',
+      timing:     fmtDate(colDate) + ' · After truck passes — bins returned same day',
+      badge:      week === 0 ? '🔜 Next' : 'Scheduled',
+      badgeStyle: week === 0 ? 'background:rgba(6,214,160,.15);color:var(--cyan)' : 'background:var(--surface2);color:var(--muted)',
+      skippable:  week > 0,
+      isCallout:  false,
+      cancelled:  false,
+    })
+
+    // Split day — second collection
+    if(isSplit && dayIdx2 >= 0){
+      const daysUntil2 = ((dayIdx2 - today.getDay()) + 7) % 7 || 7
+      const colDate2 = new Date(today); colDate2.setDate(today.getDate() + daysUntil2 + (week * 7))
+      const binOutDate2 = new Date(colDate2); binOutDate2.setDate(colDate2.getDate() - 1)
+
+      scheduledSlots.push({
+        id:         'bo2-' + week,
+        visit:      'BIN_OUT',
+        label:      '🌙 Bin Out (waste)',
+        dateLabel:  fmtDate(binOutDate2),
+        sortKey:    binOutDate2.toISOString().slice(0,10) + 'T00',
+        timing:     fmtDate(binOutDate2) + ' · Evening — general waste bin to curb',
+        badge:      'Scheduled',
+        badgeStyle: 'background:var(--surface2);color:var(--muted)',
+        skippable:  week > 0,
+        isCallout:  false,
+        cancelled:  false,
+      })
+      scheduledSlots.push({
+        id:         'bi2-' + week,
+        visit:      'BIN_IN',
+        label:      '☀️ Bin In (waste)',
+        dateLabel:  fmtDate(colDate2),
+        sortKey:    colDate2.toISOString().slice(0,10) + 'T13',
+        timing:     fmtDate(colDate2) + ' · After truck — waste bin returned',
+        badge:      'Scheduled',
+        badgeStyle: 'background:var(--surface2);color:var(--muted)',
+        skippable:  week > 0,
+        isCallout:  false,
+        cancelled:  false,
+      })
+    }
+  }
+  renderSchedule()
+}
+
+
   const list = document.getElementById('schedule-list')
   if(!list) return
   const bc = {BIN_OUT_s:'var(--indigo)', BIN_IN_s:'var(--cyan)', BIN_OUT_w:'rgba(99,102,241,.3)', BIN_IN_w:'rgba(6,214,160,.2)', CO:'rgba(245,158,11,.5)', CO_ACC:'rgba(99,102,241,.4)'}
@@ -4305,6 +4712,8 @@ function hNext(s){
     if(!document.getElementById('h-fn')?.value.trim()){ showToast('Please enter your first name','err'); return }
     if(!document.getElementById('h-em')?.value.trim()){ showToast('Please enter your email address','err'); return }
     if(!document.getElementById('h-pw')?.value || document.getElementById('h-pw').value.length < 8){ showToast('Password must be at least 8 characters','err'); return }
+    // Cache password now — field will be hidden but value may get cleared on some browsers
+    _obCachedPassword = document.getElementById('h-pw').value
   }
   if(s===3){
     // Validate split-day conflict
@@ -4331,7 +4740,7 @@ function hNext(s){
         const _addr= document.getElementById('h-addr')?.value.trim()|| ''
         const _city= document.getElementById('h-city')?.value.trim()|| ''
         const _zip = document.getElementById('h-zip')?.value.trim() || ''
-        const _pw  = document.getElementById('h-pw')?.value         || ''
+        const _pw  = _obCachedPassword || document.getElementById('h-pw')?.value || ''
         const _isSplit = obSelectedPlan.endsWith('3')
         const _colDay  = _isSplit ? null : (document.getElementById('h-day')?.value || null)
         const _colDayW = _isSplit ? (document.getElementById('h-day-waste')?.value || null) : null
@@ -5264,12 +5673,89 @@ function confirmCallout(){
   if(upcomingEl) upcomingEl.textContent = (parseInt(upcomingEl.textContent)||1)+1
 }
 function showSosHW(){
-  if(!requireCard()) return
-  document.getElementById('modal-box').innerHTML=`<div class="mh" style="background:rgba(239,68,68,.06)"><div style="font-size:15px;font-weight:700;color:#fca5a5">🚨 Emergency Callout</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb"><div class="warn-box">⚠️ Emergency dispatch sends the nearest available runner immediately. Standard rate + $5 urgent fee. Bin service only.</div>
-<div class="field"><label>Service Type</label><div class="radio-row"><div class="r-opt on" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">♻️ Recycling</div><div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">🗑️ General Waste</div></div></div>
-<div class="field"><label>What's needed?</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="r-opt on" style="text-align:center;padding:12px 8px" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')"><div style="font-size:20px;margin-bottom:4px">🌙</div><div style="font-size:12px;font-weight:700">Bins Out — Urgent</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Move to curb now</div></div><div class="r-opt" style="text-align:center;padding:12px 8px" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')"><div style="font-size:20px;margin-bottom:4px">☀️</div><div style="font-size:12px;font-weight:700">Bins In — Urgent</div><div style="font-size:10px;color:var(--muted);margin-top:2px">Return from curb now</div></div></div></div>
-<div class="field"><label>Notes for runner <span style="color:var(--muted);font-size:10px;font-weight:400">(optional)</span></label><textarea placeholder="Any details the runner needs to know..."></textarea></div></div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-red" onclick="closeM();showToast('🚨 Emergency dispatch sent to nearest runner!','err')">🚨 Confirm Emergency Callout</button></div>`
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh" style="background:rgba(239,68,68,.06)">
+    <div style="font-size:15px;font-weight:700;color:#fca5a5">🚨 Emergency Pickup</div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div class="warn-box" style="margin-bottom:14px">
+      Emergency dispatch goes to <strong>all available runners</strong> immediately — regardless of zone. 
+      Standard rate + <strong>$5 urgency bonus</strong>. First to accept gets the job.
+    </div>
+    <div class="field"><label>What's needed?</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="sos-type-pills">
+        <div class="r-opt on" id="sos-type-out" style="text-align:center;padding:12px 8px" onclick="document.querySelectorAll('#sos-type-pills .r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">
+          <div style="font-size:20px;margin-bottom:4px">🌙</div>
+          <div style="font-size:12px;font-weight:700">Bins Out</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">Move to curb now</div>
+        </div>
+        <div class="r-opt" id="sos-type-in" style="text-align:center;padding:12px 8px" onclick="document.querySelectorAll('#sos-type-pills .r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">
+          <div style="font-size:20px;margin-bottom:4px">☀️</div>
+          <div style="font-size:12px;font-weight:700">Bins In</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">Return from curb now</div>
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label>Notes for runner <span style="color:var(--muted);font-size:10px;font-weight:400">(optional)</span></label>
+      <textarea id="sos-notes" placeholder="Any details the runner needs to know..."></textarea>
+    </div>
+    <div style="background:rgba(239,68,68,.06);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--sub)">
+      💳 $15.00 will be charged to your card on file. Cancellation within 5 minutes of dispatch is free.
+    </div>
+    <div id="sos-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:8px"></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-red" id="sos-confirm-btn" onclick="confirmSosHW()">🚨 Dispatch Now</button>
+  </div>`
   openM()
+}
+
+async function confirmSosHW(){
+  const btn = document.getElementById('sos-confirm-btn')
+  const errEl = document.getElementById('sos-error')
+  if(btn){ btn.disabled=true; btn.textContent='Dispatching...' }
+
+  const visitType = document.getElementById('sos-type-out')?.classList.contains('on') ? 'BIN_OUT' : 'BIN_IN'
+  const notes     = document.getElementById('sos-notes')?.value.trim() || null
+
+  try {
+    // Create SOS job in Supabase
+    const { data: job, error } = await _supa.from('jobs').insert({
+      homeowner_email:  currentUser.email,
+      visit_type:       visitType,
+      job_type:         'sos',
+      service_type:     'Recycling',
+      status:           'offered',
+      offer_type:       'sos',
+      is_sos:           true,
+      service_notes:    notes,
+      urgency_bonus:    5.00,
+      amount:           15.00,
+      scheduled_date:   new Date().toISOString().slice(0,10),
+      created_at:       new Date().toISOString(),
+      updated_at:       new Date().toISOString(),
+    }).select('id').single()
+
+    if(error) throw new Error(error.message)
+
+    closeM()
+    showToast('🚨 Emergency dispatched! All available runners have been notified. You\'ll get an email when a runner accepts.','err', 7000)
+
+    // Send notification email to admin
+    sendEmail(
+      'admin@bindash.shop',
+      '🚨 SOS dispatch — '+currentUser.email,
+      `<p>Emergency ${visitType==='BIN_OUT'?'Bin Out':'Bin In'} dispatch from ${currentUser.email}. Job ID: ${job?.id||'—'}. Notes: ${notes||'None'}.</p>`,
+      'sos_admin'
+    )
+
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='🚨 Dispatch Now' }
+  }
 }
 function showAdminSos(){
   document.getElementById('modal-box').innerHTML=`<div class="mh" style="background:rgba(239,68,68,.06)"><div style="font-size:15px;font-weight:700;color:#fca5a5">🚨 Admin Emergency Dispatch</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb"><div class="field"><label>Homeowner</label><select><option value="">— Select homeowner —</option></select></div><div class="field"><label>Service Type</label><div class="radio-row"><div class="r-opt on" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">♻️ Recycling</div><div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">🗑️ General Waste</div></div></div><div class="field"><label>Visit Type Needed</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="r-opt on" style="text-align:center;padding:10px" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')"><div style="font-size:18px">🌙</div><div style="font-size:11px;font-weight:700;margin-top:3px">Bin Out</div></div><div class="r-opt" style="text-align:center;padding:10px" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')"><div style="font-size:18px">☀️</div><div style="font-size:11px;font-weight:700;margin-top:3px">Bin In</div></div></div></div><div class="field"><label>Notes</label><textarea placeholder="Reason for emergency dispatch..."></textarea></div></div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-red" onclick="closeM();showToast('🚨 Emergency dispatched to nearest available runner!','err')">🚨 Confirm Dispatch</button></div>`
@@ -5292,20 +5778,133 @@ function showScheduleModal(){
   openM()
 }
 function showPauseModal(){
-  document.getElementById('modal-box').innerHTML=`<div class="mh" style="background:rgba(245,158,11,.06)"><div style="font-size:15px;font-weight:700;color:#fbbf24">⏸ Pause Service</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
-<div class="warn-box">Pausing stops all scheduled collections. Your property details and schedule are saved — resume any time and everything picks up where it left off.</div>
-<div class="field"><label>Pause from</label><input type="date" value="2025-03-20"></div>
-<div class="field"><label>Pause until (optional)</label><input type="date" placeholder="Leave blank to pause indefinitely"></div>
-<div class="field"><label>Reason <span style="color:var(--muted);font-size:10px;font-weight:400">(optional — helps us improve)</span></label>
-<div class="radio-row" style="flex-wrap:wrap">
-  <div class="r-opt on" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Going away</div>
-  <div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Property renovation</div>
-  <div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Cost</div>
-  <div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Other</div>
-</div></div>
-<div style="font-size:12px;color:var(--sub);margin-top:4px">You can resume service at any time from your dashboard — no need to contact us.</div>
-</div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-outline btn-sm" style="border-color:rgba(245,158,11,.4);color:#fbbf24" onclick="closeM();showToast('Service paused ⏸ — resume any time from your dashboard','info')">⏸ Confirm Pause</button></div>`
+  const subId = window._hwStripeSubId
+  const periodEnd = window._hwSubPeriodEnd
+
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh" style="background:rgba(245,158,11,.06)">
+    <div style="font-size:15px;font-weight:700;color:#fbbf24">⏸ Pause Service</div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div class="warn-box" style="margin-bottom:14px">
+      <strong>How pausing works:</strong> Pausing stops all future collections and billing. 
+      Your current billing period continues until its end date — <strong>you won't be charged again</strong> until you resume. 
+      No proration, no fees. Resume any time and everything picks up exactly where it left off.
+    </div>
+    ${periodEnd ? `<div style="font-size:13px;color:var(--sub);margin-bottom:14px">Your current period ends <strong style="color:var(--text)">${new Date(periodEnd*1000).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</strong> — service and billing continue until then.</div>` : ''}
+    <div class="field">
+      <label>Reason <span style="color:var(--muted);font-size:10px;font-weight:400">(optional)</span></label>
+      <div class="radio-row" style="flex-wrap:wrap" id="pause-reason-pills">
+        <div class="r-opt on" onclick="this.closest('#pause-reason-pills').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Going away</div>
+        <div class="r-opt" onclick="this.closest('#pause-reason-pills').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Renovation</div>
+        <div class="r-opt" onclick="this.closest('#pause-reason-pills').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Cost</div>
+        <div class="r-opt" onclick="this.closest('#pause-reason-pills').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Other</div>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--sub)">Resume any time from your dashboard — no need to contact us.</div>
+    <div id="pause-modal-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:8px"></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-outline btn-sm" id="pause-confirm-btn" style="border-color:rgba(245,158,11,.4);color:#fbbf24" onclick="confirmPauseService()">⏸ Confirm Pause</button>
+  </div>`
   openM()
+}
+
+async function confirmPauseService(){
+  const subId = window._hwStripeSubId
+  const btn = document.getElementById('pause-confirm-btn')
+  const errEl = document.getElementById('pause-modal-error')
+
+  if(!subId){
+    if(errEl){ errEl.textContent = 'No subscription found — contact support'; errEl.style.display='block' }
+    return
+  }
+
+  if(btn){ btn.disabled=true; btn.textContent='Pausing...' }
+
+  try {
+    const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/pause-subscription', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify({ action:'pause', subscriptionId: subId, email: currentUser?.email })
+    })
+    const d = await res.json()
+    if(d.error) throw new Error(d.error)
+
+    closeM()
+    showToast('Service paused ⏸ — '+d.message, 'info', 5000)
+
+    // Update UI — swap Pause button to Resume
+    document.querySelectorAll('[onclick="showPauseModal()"]').forEach(btn=>{
+      btn.textContent = '▶ Resume Service'
+      btn.setAttribute('onclick', 'resumeService()')
+      btn.style.borderColor = 'rgba(6,214,160,.4)'
+      btn.style.color = 'var(--cyan)'
+    })
+
+    // Update plan banner
+    const planBanner = document.getElementById('acct-plan-status')
+    if(planBanner) planBanner.textContent = '⏸ Paused'
+
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='⏸ Confirm Pause' }
+  }
+}
+
+async function resumeService(){
+  const subId = window._hwStripeSubId
+  if(!subId){ showToast('No subscription found — contact support','err'); return }
+
+  // Show confirm modal
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh" style="background:rgba(6,214,160,.06)">
+    <div style="font-size:15px;font-weight:700;color:var(--cyan)">▶ Resume Service</div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div class="info-box">Resuming will restart your scheduled collections and monthly billing on your next collection day. Your runner, schedule and property details are all exactly as you left them.</div>
+    <div id="resume-modal-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:8px"></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan btn-sm" id="resume-confirm-btn" onclick="confirmResumeService()">▶ Resume Now</button>
+  </div>`
+  openM()
+}
+
+async function confirmResumeService(){
+  const subId = window._hwStripeSubId
+  const btn = document.getElementById('resume-confirm-btn')
+  const errEl = document.getElementById('resume-modal-error')
+  if(btn){ btn.disabled=true; btn.textContent='Resuming...' }
+
+  try {
+    const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/pause-subscription', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify({ action:'resume', subscriptionId: subId, email: currentUser?.email })
+    })
+    const d = await res.json()
+    if(d.error) throw new Error(d.error)
+
+    closeM()
+    showToast('Service resumed ✅ — '+d.message, 'ok', 5000)
+
+    // Swap Resume back to Pause
+    document.querySelectorAll('[onclick="resumeService()"]').forEach(btn=>{
+      btn.textContent = '⏸ Pause Service'
+      btn.setAttribute('onclick', 'showPauseModal()')
+      btn.style.borderColor = 'rgba(245,158,11,.4)'
+      btn.style.color = '#fbbf24'
+    })
+
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='▶ Resume Now' }
+  }
 }
 function showSkipModal(date){
   document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">Skip — ${date}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
@@ -5345,39 +5944,259 @@ function adjCans(d) {
   document.getElementById('extra-cost').textContent = extraCans > 0 ? '+$' + (extraCans*8) + '/mo' : '+$0/mo'
   document.getElementById('plan-b-total').textContent = 'Total: $' + (44.99 + extraCans*8).toFixed(2) + '/mo'
 }
-function savePlan() {
-  const labels = {a:'1 Can — $34.99/mo', b:'2 Cans Same Day — $'+(44.99+extraCans*8).toFixed(2)+'/mo', c:'2 Cans Split Days — $54.99/mo'}
-  showToast('Subscription updated to ' + labels[activePlan] + ' ✅', 'ok')
+async function savePlan(){
+  const subId = window._hwStripeSubId
+  const labels   = {a:'1 Can — $34.99/mo', b:'2 Cans Same Day — $'+(44.99+(window.extraCans||0)*8).toFixed(2)+'/mo', c:'2 Cans Split Days — $54.99/mo'}
+  const priceIds = { a:'price_1TDRNCKQcgkU1rZoZ2Fj53FW', b:'price_1TDRNdKQcgkU1rZoNzhZLAEq', c:'price_1TDRNvKQcgkU1rZoVJQwiQ68' }
+  const planKeys = { a:'plan_a', b:'plan_b', c:'plan_c' }
+
+  if(!subId){
+    showToast('No active subscription found — contact support','err'); return
+  }
+
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh"><div style="font-size:15px;font-weight:700">📋 Confirm Plan Change</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+  <div class="mb">
+    <div class="info-box">Changing to <strong>${labels[activePlan]}</strong>.<br>The new rate takes effect at your next billing date — no proration, no surprise charges.</div>
+    <div id="plan-change-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:8px"></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan btn-sm" id="plan-change-btn" onclick="confirmPlanChange('${activePlan}','${priceIds[activePlan]}','${planKeys[activePlan]}')">Confirm Change</button>
+  </div>`
+  openM()
+}
+
+async function confirmPlanChange(planLetter, priceId, planKey){
+  const btn = document.getElementById('plan-change-btn')
+  const errEl = document.getElementById('plan-change-error')
+  if(btn){ btn.disabled=true; btn.textContent='Updating...' }
+  try {
+    const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/change-plan', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify({ subscriptionId: window._hwStripeSubId, newPriceId: priceId, planKey, email: currentUser?.email })
+    })
+    const d = await res.json()
+    if(d.error) throw new Error(d.error)
+    closeM()
+    showToast('Plan updated ✅ — effective next billing date','ok')
+    setTimeout(populateHWDashboard, 500)
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='Confirm Change' }
+  }
 }
 
 
 // ── PROPERTY & PREFERENCES MODALS ────────────────
 function showEditProperty(){
-  document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit Property</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
-<div class="sec-h" style="margin-top:0">Address</div>
-<div class="field"><label>Street Address</label><input value="123 Main Street"></div>
-<div class="g3"><div class="field"><label>City</label><input id="add-rn-city" placeholder="City"></div><div class="field"><label>State</label><input id="add-rn-state" placeholder="AZ"></div><div class="field"><label>ZIP</label><input id="add-rn-zip" placeholder="ZIP"></div></div>
-<div class="field"><label>Property Type</label><select><option selected>Single Family Home</option><option>Townhouse</option><option>Condo</option><option>Apartment</option></select></div>
-<div class="sec-h">Bin Storage &amp; Access</div>
-<div class="field"><label>Where are your bins stored?</label><select><option selected>Back yard</option><option>Side of house</option><option>Front of house</option><option>Garage</option></select></div>
-<div class="field"><label>Curb placement instructions</label><textarea>Confirmed after first collection</textarea></div>
-<div class="field"><label>Gate access</label><select><option>No gate</option><option>Unlocked gate</option><option selected>Locked gate (code below)</option></select></div>
-<div class="field"><label>Gate code / access notes</label><input value="1234"></div>
-<div class="field"><label>Pets</label><select><option>No pets</option><option selected>Dog — friendly</option><option>Dog — keep gate closed</option><option>Other pets</option></select></div>
-</div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Property updated ✅','ok')">Save Changes</button></div>`
+  // Pre-populate from current DB data
+  const addr  = document.getElementById('prop-address')?.textContent || ''
+  const cityZip = document.getElementById('prop-city-zip')?.textContent || ''
+  const city  = cityZip.split(',')[0]?.trim() || ''
+  const zip   = cityZip.match(/\d{5}/)?.[0] || ''
+  const binLoc = document.getElementById('prop-bin-storage')?.textContent || ''
+  const gate  = document.getElementById('prop-gate')?.textContent || ''
+  const pets  = document.getElementById('prop-pets')?.textContent || ''
+
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit Property</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+  <div class="mb">
+    <div class="sec-h" style="margin-top:0">Address</div>
+    <div class="field"><label>Street Address</label><input id="ep-addr" value="${addr}"></div>
+    <div class="g3">
+      <div class="field"><label>City</label><input id="ep-city" value="${city}"></div>
+      <div class="field"><label>State</label><input id="ep-state" placeholder="AZ" value="AZ"></div>
+      <div class="field"><label>ZIP</label><input id="ep-zip" value="${zip}" maxlength="5"></div>
+    </div>
+    <div class="sec-h">Bin Storage &amp; Access</div>
+    <div class="field"><label>Where are your bins stored?</label>
+      <select id="ep-binloc">
+        <option ${binLoc.includes('Back')?'selected':''}>Back yard</option>
+        <option ${binLoc.includes('Side')?'selected':''}>Side of house</option>
+        <option ${binLoc.includes('Front')?'selected':''}>Front of house</option>
+        <option ${binLoc.includes('Garage')?'selected':''}>Garage</option>
+        <option ${binLoc.includes('Other')?'selected':''}>Other</option>
+      </select>
+    </div>
+    <div class="field"><label>Gate access</label>
+      <select id="ep-gate">
+        <option ${gate.includes('No gate')||gate==='—'?'selected':''}>No gate</option>
+        <option ${gate.includes('Unlocked')?'selected':''}>Unlocked gate</option>
+        <option ${gate.includes('Locked')?'selected':''}>Locked gate</option>
+      </select>
+    </div>
+    <div class="field"><label>Gate code / access notes</label>
+      <input id="ep-gatecode" placeholder="e.g. 1234" value="${gate.includes('Code:')?gate.split('Code:')[1].trim():''}">
+    </div>
+    <div class="field"><label>Pets on property</label>
+      <select id="ep-pets">
+        <option ${pets==='None'||pets==='—'?'selected':''}>No pets</option>
+        <option ${pets.includes('Dog')?'selected':''}>Dog — friendly</option>
+        <option ${pets.includes('keep gate')?'selected':''}>Dog — keep gate closed</option>
+        <option ${pets.includes('Other')?'selected':''}>Other pets</option>
+        <option ${pets.includes('Cat')?'selected':''}>Cats only (indoor)</option>
+      </select>
+    </div>
+    <div class="field"><label>Curb placement / special notes</label>
+      <textarea id="ep-notes" placeholder="e.g. Place bins left of driveway behind mailbox">${document.getElementById('pref-notes')?.textContent||''}</textarea>
+    </div>
+    <div id="ep-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:4px"></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan btn-sm" id="ep-save-btn" onclick="saveEditProperty()">Save Changes</button>
+  </div>`
   openM()
 }
+
+async function saveEditProperty(){
+  const btn = document.getElementById('ep-save-btn')
+  const errEl = document.getElementById('ep-error')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+
+  const payload = {
+    street_address: document.getElementById('ep-addr')?.value.trim()    || null,
+    city:           document.getElementById('ep-city')?.value.trim()    || null,
+    zip_code:       document.getElementById('ep-zip')?.value.trim()     || null,
+    bin_location:   document.getElementById('ep-binloc')?.value         || null,
+    gate_type:      document.getElementById('ep-gate')?.value           || null,
+    gate_code:      document.getElementById('ep-gatecode')?.value.trim()|| null,
+    pet_info:       document.getElementById('ep-pets')?.value           || null,
+    service_notes:  document.getElementById('ep-notes')?.value.trim()   || null,
+    updated_at:     new Date().toISOString(),
+  }
+
+  try {
+    const { error } = await _supa.from('homeowner_signups')
+      .update(payload)
+      .eq('email', currentUser.email)
+    if(error) throw new Error(error.message)
+
+    // Update display
+    const safe = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v||'—' }
+    safe('prop-address',    payload.street_address)
+    safe('prop-city-zip',   (payload.city||'') + ', AZ ' + (payload.zip_code||''))
+    safe('prop-bin-storage', payload.bin_location)
+    safe('prop-gate',       payload.gate_type + (payload.gate_code ? ' · Code: '+payload.gate_code : ''))
+    safe('prop-pets',       payload.pet_info)
+    safe('pref-notes',      payload.service_notes)
+
+    closeM()
+    showToast('Property updated ✅', 'ok')
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
+  }
+}
 function showEditPreferences(){
-  document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit Service Preferences</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
-<div class="field"><label>Primary Service</label><select><option selected>Recycling</option><option>General Waste</option></select></div>
-<div class="g2">
-<div class="field"><label>Collection Frequency</label><select><option selected>Weekly</option><option>Bi-weekly</option><option>Monthly</option></select></div>
-<div class="field"><label>Preferred Collection Day</label><select><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option selected>Thursday</option><option>Friday</option></select></div>
-</div>
-<div class="field"><label>Number of Bins</label><select><option>1</option><option selected>2</option><option>3</option><option>4+</option></select></div>
-<div class="field"><label>Special Instructions</label><textarea>—</textarea></div>
-</div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Preferences updated ✅','ok')">Save Changes</button></div>`
+  const curDay   = document.getElementById('pref-day')?.textContent   || 'Monday'
+  const curNotes = document.getElementById('pref-notes')?.textContent || ''
+
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit Service Preferences</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+  <div class="mb">
+    <div class="info-box" style="margin-bottom:14px">Day changes apply from your next billing cycle. Contact support to change plan or frequency.</div>
+    <div class="field"><label>Preferred Collection Day</label>
+      <select id="epr-day">
+        ${['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d=>`<option ${d===curDay?'selected':''}>${d}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field"><label>Special Instructions for Runner</label>
+      <textarea id="epr-notes" placeholder="e.g. Use side gate, dog is friendly">${curNotes==='—'?'':curNotes}</textarea>
+    </div>
+    <div id="epr-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:4px"></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan btn-sm" id="epr-btn" onclick="saveEditPreferences()">Save Changes</button>
+  </div>`
   openM()
+}
+
+async function saveEditPreferences(){
+  const btn = document.getElementById('epr-btn')
+  const errEl = document.getElementById('epr-error')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+  try {
+    const newDay   = document.getElementById('epr-day')?.value   || ''
+    const newNotes = document.getElementById('epr-notes')?.value.trim() || null
+    const { error } = await _supa.from('homeowner_signups')
+      .update({ collection_day: newDay, service_notes: newNotes, updated_at: new Date().toISOString() })
+      .eq('email', currentUser.email)
+    if(error) throw new Error(error.message)
+    const safe = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v||'—' }
+    safe('pref-day', newDay)
+    safe('pref-notes', newNotes)
+    closeM()
+    showToast('Preferences saved ✅','ok')
+    setTimeout(populateHWDashboard, 300)
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
+  }
+}
+
+// ── RUNNER ACCOUNT SAVE FUNCTIONS ─────────────────
+async function saveRNAccountInfo(){
+  const btn = document.getElementById('rn-acct-save-btn') || document.querySelector('#rn-account .btn-cyan')
+  const errEl = document.getElementById('rn-acct-error')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+  try {
+    const fn  = document.getElementById('rn-acct-fn')?.value.trim()  || ''
+    const ln  = document.getElementById('rn-acct-ln')?.value.trim()  || ''
+    const ph  = document.getElementById('rn-acct-ph')?.value.trim()  || null
+    const zip = document.getElementById('rn-acct-zip')?.value.trim() || null
+    const { error } = await _supa.from('runner_applications')
+      .update({ first_name: fn, last_name: ln, phone: ph, zip_code: zip, updated_at: new Date().toISOString() })
+      .eq('email', currentUser.email)
+    if(error) throw new Error(error.message)
+    // Update sidebar
+    const nameEl = document.getElementById('rn-sidebar-name')
+    if(nameEl) nameEl.textContent = fn + ' ' + ln
+    showToast('Info updated ✅','ok')
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
+  }
+}
+
+async function saveRNPreferences(){
+  try {
+    const vtEl = document.querySelector('#rn-visit-type-pills .r-opt.on')
+    const vtMap = { 'rnvt-both':'BOTH', 'rnvt-out':'BIN_OUT', 'rnvt-in':'BIN_IN' }
+    const visitType = vtMap[vtEl?.id] || 'BOTH'
+    const vehicle   = document.getElementById('rn-acct-vehicle')?.value || 'Car'
+    const status    = document.getElementById('rn-acct-status')?.value  || 'AVAILABLE'
+    const { error } = await _supa.from('runner_applications')
+      .update({ visit_type: visitType, vehicle, status, updated_at: new Date().toISOString() })
+      .eq('email', currentUser.email)
+    if(error) throw new Error(error.message)
+    showToast('Preferences saved ✅','ok')
+  } catch(e){
+    showToast('Save failed: '+String(e?.message||e),'err')
+  }
+}
+
+async function saveRNPassword(){
+  const pw1 = document.getElementById('rn-acct-pw1')?.value || ''
+  const pw2 = document.getElementById('rn-acct-pw2')?.value || ''
+  const errEl = document.getElementById('rn-pw-error')
+  if(errEl) errEl.style.display='none'
+  if(!pw1){ showToast('Enter a new password','err'); return }
+  if(pw1.length < 8){ if(errEl){ errEl.textContent='Min. 8 characters'; errEl.style.display='block' } return }
+  if(pw1 !== pw2){ if(errEl){ errEl.textContent='Passwords do not match'; errEl.style.display='block' } return }
+  try {
+    const { error } = await _supa.auth.updateUser({ password: pw1 })
+    if(error) throw new Error(error.message)
+    document.getElementById('rn-acct-pw1').value = ''
+    document.getElementById('rn-acct-pw2').value = ''
+    showToast('Password updated ✅','ok')
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+  }
 }
 
 // ── RUNNER MODALS ─────────────────────────────────
@@ -5935,27 +6754,48 @@ function updateRnDashboard(){
 }
 
 function showUpdatePaymentModal(){
-  const cardDisplay = document.getElementById('acct-card-display')?.textContent || 'No card on file'
-  document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">💳 Update Payment Method</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
-<div style="background:var(--surface2);border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;margin-bottom:16px">
-  <span style="font-size:22px">💳</span>
-  <div><div style="font-weight:600;font-size:13px">Current card: ${cardDisplay}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Will be replaced on save</div></div>
-</div>
-<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">
-  <span style="font-size:14px">🔒</span><span style="font-size:11px;color:var(--sub)">Secured with 256-bit SSL · Powered by Stripe · BinDash never stores full card numbers</span>
-</div>
-<div class="field"><label>Cardholder Name</label><input id="up-name" placeholder="Jane Smith"></div>
-<div class="field"><label>Card Number</label><input id="up-num" placeholder="1234 5678 9012 3456" maxlength="19" style="font-family:'DM Mono',monospace;letter-spacing:.05em"></div>
-<div class="g2">
-  <div class="field"><label>Expiry (MM/YY)</label><input id="up-exp" placeholder="MM/YY" maxlength="5" style="font-family:'DM Mono',monospace"></div>
-  <div class="field"><label>CVV</label><input id="up-cvv" placeholder="•••" maxlength="4" type="password" style="font-family:'DM Mono',monospace"></div>
-</div>
-<div class="field"><label>Billing ZIP Code</label><input id="up-zip" placeholder="85374" maxlength="5" style="font-family:'DM Mono',monospace;width:120px"></div>
-</div><div class="mf">
-  <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
-  <button class="btn btn-cyan btn-sm" onclick="saveUpdatedCard()">Save New Card</button>
-</div>`
+  const subId = window._hwStripeSubId
+  const custId = window._hwStripeCustomerId
+
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh"><div style="font-size:15px;font-weight:700">💳 Update Payment Method</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+  <div class="mb">
+    <div style="background:var(--surface2);border-radius:10px;padding:14px 16px;margin-bottom:16px;text-align:center">
+      <div style="font-size:28px;margin-bottom:8px">🔒</div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px">Secured by Stripe</div>
+      <div style="font-size:12px;color:var(--sub);line-height:1.6">You'll be taken to Stripe's secure portal to update your payment method. BinDash never stores your full card details.</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted)">After updating, you'll be returned to your BinDash dashboard automatically.</div>
+    <div id="upm-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:8px"></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan btn-sm" id="upm-btn" onclick="openStripePortal()">Open Stripe Portal →</button>
+  </div>`
   openM()
+}
+
+async function openStripePortal(){
+  const btn = document.getElementById('upm-btn')
+  const errEl = document.getElementById('upm-error')
+  if(btn){ btn.disabled=true; btn.textContent='Opening...' }
+
+  try {
+    const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/create-portal-session', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        customerId:  window._hwStripeCustomerId,
+        returnUrl:   window.location.origin + '/?portal=return',
+      })
+    })
+    const d = await res.json()
+    if(d.error || !d.url) throw new Error(d.error || 'No portal URL')
+    window.location.href = d.url
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='Open Stripe Portal →' }
+  }
 }
 function saveUpdatedCard(){
   const name=document.getElementById('up-name').value.trim()
