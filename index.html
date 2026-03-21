@@ -256,13 +256,71 @@ function handleStripeReturn(){
   if(p.get('checkout')==='success'){
     window.history.replaceState({},'',' ')
     go('S-hw-pending')
-    showToast('Payment successful! Account being set up \u2705','ok')
+    showToast('Payment successful! Account being set up ✅','ok')
   } else if(p.get('checkout')==='cancel'){
     window.history.replaceState({},'',' ')
     showToast('Payment cancelled — try again anytime','info')
+  } else if(p.get('reset')==='true' || window.location.hash.includes('type=recovery')){
+    // Supabase password reset redirect
+    window.history.replaceState({},'',' ')
+    showPasswordResetForm()
   }
 }
 document.addEventListener('DOMContentLoaded', handleStripeReturn)
+
+function showPasswordResetForm(){
+  // Show a modal to set new password
+  setTimeout(()=>{
+    document.getElementById('modal-box').innerHTML = `
+    <div class="mh">
+      <div style="font-size:15px;font-weight:700">🔒 Set New Password</div>
+    </div>
+    <div class="mb">
+      <div style="font-size:13px;color:var(--sub);margin-bottom:16px">Enter your new password below.</div>
+      <div class="field"><label>New Password</label><input type="password" id="reset-pw1" placeholder="Min. 8 characters" style="font-size:16px"></div>
+      <div class="field"><label>Confirm Password</label><input type="password" id="reset-pw2" placeholder="Repeat password" style="font-size:16px"></div>
+      <div id="reset-pw-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:4px"></div>
+    </div>
+    <div class="mf">
+      <button class="btn btn-cyan btn-full" onclick="confirmNewPassword()">Save New Password →</button>
+    </div>`
+    openM()
+  }, 300)
+}
+
+async function confirmNewPassword(){
+  const pw1 = document.getElementById('reset-pw1')?.value || ''
+  const pw2 = document.getElementById('reset-pw2')?.value || ''
+  const errEl = document.getElementById('reset-pw-error')
+  if(errEl) errEl.style.display = 'none'
+
+  if(pw1.length < 8){
+    if(errEl){ errEl.textContent = 'Password must be at least 8 characters'; errEl.style.display='block' }
+    return
+  }
+  if(pw1 !== pw2){
+    if(errEl){ errEl.textContent = 'Passwords do not match'; errEl.style.display='block' }
+    return
+  }
+
+  const btn = document.querySelector('#modal-box .btn-cyan')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+
+  try {
+    const { error } = await _supa.auth.updateUser({ password: pw1 })
+    if(error){
+      if(errEl){ errEl.textContent = error.message; errEl.style.display='block' }
+      if(btn){ btn.disabled=false; btn.textContent='Save New Password →' }
+      return
+    }
+    closeM()
+    showToast('Password updated successfully ✅ — please log in','ok')
+    setTimeout(()=>go('S-login'), 1200)
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='Save New Password →' }
+  }
+}
 
 function renderEmailStopList(stopList){
   const rows = stopList.slice(0,5).map((s,i)=>{
@@ -1337,12 +1395,45 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <div class="r-opt" id="lr-rn" onclick="setLR('rn')" style="text-align:center;padding:14px 10px"><div style="font-size:22px;margin-bottom:5px">🚐</div><div style="font-size:13px;font-weight:700">Runner</div></div>
       </div>
       <div class="field"><label>Email</label><input type="email" id="l-email" placeholder="you@example.com"></div>
-      <div class="field"><label>Password</label><input type="password" id="l-pass" placeholder="••••••••"></div>
+      <div class="field">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <label style="margin:0">Password</label>
+          <a onclick="showForgotPassword()" style="font-size:12px;color:var(--cyan);cursor:pointer">Forgot password?</a>
+        </div>
+        <input type="password" id="l-pass" placeholder="••••••••">
+      </div>
       <div id="login-error" style="display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:#fca5a5;margin-bottom:12px"></div>
         <button class="btn btn-cyan btn-full" style="margin-bottom:14px" onclick="doLogin()">Sign In →</button>
       <div style="text-align:center;font-size:13px;color:var(--muted);margin-bottom:16px">Don't have an account? <a onclick="go('S-signup')" style="color:var(--cyan);cursor:pointer;font-weight:600">Sign up free</a></div>
       <button class="btn btn-ghost btn-full btn-sm" onclick="go('S-land')">← Back to Home</button>
       
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ FORGOT PASSWORD ══════════ -->
+<div id="S-forgot" class="screen">
+  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px 20px">
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:20px;padding:38px;width:100%;max-width:420px">
+      <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:853;text-align:center;margin-bottom:6px">🗑️ BIN<em style="color:var(--cyan);font-style:normal">DASH</em></div>
+      <div style="text-align:center;font-size:15px;font-weight:700;margin-bottom:6px">Reset your password</div>
+      <div style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:24px">Enter your email and we'll send you a reset link.</div>
+
+      <div id="forgot-success" style="display:none;background:rgba(6,214,160,.08);border:1px solid rgba(6,214,160,.25);border-radius:10px;padding:16px;text-align:center;margin-bottom:16px">
+        <div style="font-size:24px;margin-bottom:8px">📧</div>
+        <div style="font-size:14px;font-weight:700;color:var(--cyan);margin-bottom:4px">Reset link sent!</div>
+        <div style="font-size:12px;color:var(--sub)">Check your inbox — the link expires in 1 hour. Check your spam folder if you don't see it.</div>
+      </div>
+
+      <div id="forgot-form">
+        <div class="field"><label>Email address</label><input type="email" id="forgot-email" placeholder="you@example.com"></div>
+        <div id="forgot-error" style="display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:#fca5a5;margin-bottom:12px"></div>
+        <button class="btn btn-cyan btn-full" style="margin-bottom:14px" onclick="sendPasswordReset()">Send Reset Link →</button>
+      </div>
+
+      <div style="text-align:center">
+        <a onclick="go('S-login')" style="font-size:13px;color:var(--cyan);cursor:pointer">← Back to login</a>
+      </div>
     </div>
   </div>
 </div>
@@ -3846,6 +3937,55 @@ function startDemo(role){closeDemoModal();go(role==='hw'?'S-hw-dash':'S-rn-dash'
 // Login
 let loginRole='hw'
 function setLR(r){loginRole=r;document.getElementById('lr-hw').classList.toggle('on',r==='hw');document.getElementById('lr-rn').classList.toggle('on',r==='rn')}
+function showForgotPassword(){
+  // Pre-fill email if already typed
+  const em = document.getElementById('l-email')?.value.trim() || ''
+  go('S-forgot')
+  const forgotEmail = document.getElementById('forgot-email')
+  if(forgotEmail && em) forgotEmail.value = em
+  // Reset state
+  const form = document.getElementById('forgot-form')
+  const success = document.getElementById('forgot-success')
+  const err = document.getElementById('forgot-error')
+  if(form) form.style.display = 'block'
+  if(success) success.style.display = 'none'
+  if(err) err.style.display = 'none'
+}
+
+async function sendPasswordReset(){
+  const em = document.getElementById('forgot-email')?.value.trim() || ''
+  const errEl = document.getElementById('forgot-error')
+  if(errEl) errEl.style.display = 'none'
+
+  if(!em){ showToast('Please enter your email address','err'); return }
+
+  const btn = document.querySelector('#S-forgot .btn-cyan')
+  if(btn){ btn.disabled=true; btn.textContent='Sending...' }
+
+  try {
+    const { error } = await _supa.auth.resetPasswordForEmail(em, {
+      redirectTo: window.location.origin + '/?reset=true'
+    })
+
+    if(error){
+      if(errEl){ errEl.textContent = error.message; errEl.style.display='block' }
+      if(btn){ btn.disabled=false; btn.textContent='Send Reset Link →' }
+      return
+    }
+
+    // Show success — hide form
+    const form = document.getElementById('forgot-form')
+    const success = document.getElementById('forgot-success')
+    if(form) form.style.display = 'none'
+    if(success) success.style.display = 'block'
+    if(btn){ btn.disabled=false; btn.textContent='Send Reset Link →' }
+
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='Send Reset Link →' }
+  }
+}
+
 async function doLogin(){
   const em = document.getElementById('l-email').value.trim()
   const pw = document.getElementById('l-pass').value
