@@ -417,16 +417,52 @@ const EMAIL = {
     <p>We'll email you once you're approved and your first collection is scheduled.</p>
   `),
 
-  hwApproved: (name, day, zone, runner) => emailBase(`
-    <h1>You're all set, ${name}! ✅</h1>
-    <p>Your BinDash account is <strong style="color:${BRAND.cyan}">active</strong>. Your bins will be handled automatically on your collection day — just put them out the night before.</p>
+  hwApproved: (name, day, zone, runner, plan, binOut) => emailBase(`
+    <h1>Welcome to BinDash, ${name}! 🎉</h1>
+    <p>Your account is <strong style="color:${BRAND.cyan}">active</strong> and your first collection is scheduled. Here's everything you need to know.</p>
+
     <div class="card">
-      <div class="row"><div class="lbl">Collection Day</div><div class="val">${day}</div></div>
+      <div class="row"><div class="lbl">Collection Day</div><div class="val"><strong>${day}</strong></div></div>
+      <div class="row"><div class="lbl">Bin Out Night</div><div class="val">${binOut||'Evening before collection'}</div></div>
       <div class="row"><div class="lbl">Service Zone</div><div class="val">${zone}</div></div>
-      ${runner ? '<div class="row"><div class="lbl">Your Runner</div><div class="val">'+runner+'</div></div>' : ''}
+      ${runner ? '<div class="row"><div class="lbl">Your Runner</div><div class="val"><strong style="color:'+BRAND.cyan+'">'+runner+'</strong></div></div>' : '<div class="row"><div class="lbl">Runner</div><div class="val">Being assigned — you\'ll be notified</div></div>'}
+      ${plan ? '<div class="row"><div class="lbl">Plan</div><div class="val">'+plan+'</div></div>' : ''}
     </div>
+
+    <h2 style="font-size:18px;margin-top:28px;margin-bottom:6px">What to expect 📋</h2>
+
+    <div class="card" style="padding:0">
+      <div class="row" style="align-items:flex-start;padding:14px 18px">
+        <div class="lbl" style="padding-top:2px">🌙 Evening before</div>
+        <div class="val"><strong>Bin Out</strong> — your runner will move your bins to the curb before your waste management truck arrives. You don't need to do anything.</div>
+      </div>
+      <div class="row" style="align-items:flex-start;padding:14px 18px;border-top:1px solid #e2e8f0">
+        <div class="lbl" style="padding-top:2px">📧 Notifications</div>
+        <div class="val">You'll receive an email when your bins are placed at the curb, and again once they're returned to your property.</div>
+      </div>
+      <div class="row" style="align-items:flex-start;padding:14px 18px;border-top:1px solid #e2e8f0">
+        <div class="lbl" style="padding-top:2px">☀️ Collection day</div>
+        <div class="val"><strong>Bin In</strong> — after the truck passes, your runner returns your bins to your property. You'll get a notification when it's done.</div>
+      </div>
+      <div class="row" style="align-items:flex-start;padding:14px 18px;border-top:1px solid #e2e8f0">
+        <div class="lbl" style="padding-top:2px">🚨 Emergency pickup</div>
+        <div class="val">Need bins out urgently? Use the <strong>SOS Emergency</strong> button in your dashboard to dispatch the nearest available runner immediately.</div>
+      </div>
+    </div>
+
+    <h2 style="font-size:18px;margin-top:28px;margin-bottom:6px">Help your runner help you ✅</h2>
+    <div class="card" style="padding:14px 18px">
+      <ul style="margin:0;padding-left:18px;color:#475569;line-height:2;font-size:14px">
+        <li>Keep the pathway to your bins <strong style="color:#1e293b">clear of obstacles and hazards</strong> — your runner carries bins in all weather</li>
+        <li>If you have a <strong style="color:#1e293b">gate or lock</strong>, ensure the code in your profile is current</li>
+        <li>If you have <strong style="color:#1e293b">dogs or pets</strong>, ensure they're secured on collection day</li>
+        <li>Make sure your <strong style="color:#1e293b">bin placement instructions</strong> in your profile are accurate — runners use these every visit</li>
+        <li>Your bins should be at the curb <strong style="color:#1e293b">before 6am</strong> on collection day (your runner handles this — just don't move them!)</li>
+      </ul>
+    </div>
+
     <a href="${BRAND.url}" class="btn">View My Dashboard →</a>
-    <p>Your runner will move your bins to the curb before pickup and return them afterward. First charge occurs after your first confirmed collection.</p>
+    <p style="font-size:13px;color:#64748b;margin-top:16px">Questions? Just reply to this email. We're here to help.</p>
   `),
 
   hwRejected: (name) => emailBase(`
@@ -3289,105 +3325,122 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <div class="pg" id="ad-dispatch">
 
           <!-- DISPATCH CONTROLS ROW -->
-          <div style="display:grid;grid-template-columns:220px 1fr;gap:14px;margin-bottom:14px">
+          <div style="display:grid;grid-template-columns:280px 1fr;gap:14px;margin-bottom:14px">
             <div>
+              <!-- GENERATE CONTROLS CARD -->
               <div class="card" style="margin-bottom:10px">
-                <div class="card-ttl">Dispatch Config</div>
+                <div class="card-ttl" style="margin-bottom:14px">🗺️ Generate Routes</div>
 
-                <!-- MIXED ROUTE TOGGLE -->
-                <div style="background:rgba(6,214,160,.05);border:1px solid rgba(6,214,160,.2);border-radius:8px;padding:10px 12px;margin-bottom:12px">
-                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-                    <div style="font-size:12px;font-weight:700;color:var(--cyan)">⚡ Smart Mixed Routes</div>
-                    <label style="position:relative;display:inline-block;width:38px;height:20px;cursor:pointer;flex-shrink:0">
-                      <input type="checkbox" id="mixed-route-toggle" checked style="opacity:0;width:0;height:0">
-                      <span onclick="this.previousElementSibling.checked=!this.previousElementSibling.checked;showToast('Mixed routes '+(this.previousElementSibling.checked?'enabled':'disabled'),'ok')" style="position:absolute;inset:0;background:var(--cyan);border-radius:99px;cursor:pointer"><span style="position:absolute;left:3px;top:2px;width:16px;height:16px;background:#fff;border-radius:50%"></span></span>
-                    </label>
-                  </div>
-                  <div style="font-size:11px;color:var(--sub);line-height:1.5">When Bin In and Bin Out stops are geographically close in the same zone, combine them into a single optimised route — sequenced by proximity not visit type. Runners earn more per trip, homeowners get faster service.</div>
-                  <div style="font-size:10px;color:var(--muted);margin-top:6px">Example: walk to house A for Bin In → walk next door to house B for Bin Out → saves a separate trip entirely.</div>
+                <!-- ZONE SELECTOR -->
+                <div class="field" style="margin-bottom:10px">
+                  <label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Zone</label>
+                  <select id="dispatch-zone-select" style="font-size:13px" onchange="updateDispatchStats()">
+                    <option value="">All Zones</option>
+                  </select>
                 </div>
 
-                <!-- CLUSTER RADIUS SLIDER -->
-                <div style="margin-bottom:14px">
-                  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
-                    <div style="font-size:10px;color:var(--muted)">Cluster Radius</div>
-                    <div style="font-size:14px;font-weight:700;color:var(--cyan)" id="radius-val">0.6 mi</div>
+                <!-- DAY SELECTOR -->
+                <div class="field" style="margin-bottom:14px">
+                  <label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Collection Day</label>
+                  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px" id="dispatch-day-pills">
+                    <div class="ob-day-pill" data-day="Monday"    onclick="pickDispatchDay(this)">Mon</div>
+                    <div class="ob-day-pill" data-day="Tuesday"   onclick="pickDispatchDay(this)">Tue</div>
+                    <div class="ob-day-pill" data-day="Wednesday" onclick="pickDispatchDay(this)">Wed</div>
+                    <div class="ob-day-pill" data-day="Thursday"  onclick="pickDispatchDay(this)">Thu</div>
+                    <div class="ob-day-pill" data-day="Friday"    onclick="pickDispatchDay(this)">Fri</div>
                   </div>
-                  <input type="range" id="cluster-radius" min="3" max="30" step="1" value="10" style="width:100%;accent-color:var(--cyan)" oninput="updateClusterPreview(this.value)">
-                  <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-top:2px"><span>Tight (0.2 mi)</span><span>Wide (1.9 mi)</span></div>
+                  <input type="hidden" id="dispatch-day-val" value="">
                 </div>
 
-                <!-- LIVE PREVIEW STATS -->
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">
-                  <div style="background:var(--surface2);border-radius:7px;padding:8px;text-align:center">
-                    <div style="font-size:8px;color:var(--muted)">BATCHES</div>
-                    <div style="font-size:18px;font-weight:700;color:var(--amber)" id="preview-batches">—</div>
+                <!-- LIVE STATS -->
+                <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:14px">
+                  <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Scheduled for selection</div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <div style="text-align:center">
+                      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;color:var(--cyan)" id="disp-hw-count">—</div>
+                      <div style="font-size:10px;color:var(--muted)">Homeowners</div>
+                    </div>
+                    <div style="text-align:center">
+                      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;color:var(--green)" id="disp-runner-count">—</div>
+                      <div style="font-size:10px;color:var(--muted)">Available Runners</div>
+                    </div>
                   </div>
-                  <div style="background:var(--surface2);border-radius:7px;padding:8px;text-align:center">
-                    <div style="font-size:8px;color:var(--muted)">AVG STOPS</div>
-                    <div style="font-size:18px;font-weight:700;color:var(--cyan)" id="preview-stops">—</div>
-                  </div>
-                  <div style="background:var(--surface2);border-radius:7px;padding:8px;text-align:center">
-                    <div style="font-size:8px;color:var(--muted)">AVG MI</div>
-                    <div style="font-size:18px;font-weight:700;color:var(--green)" id="preview-km">—</div>
-                  </div>
+                  <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--sub)" id="disp-stats-detail">Select a day to see schedule</div>
                 </div>
 
-                <!-- BATCH SIZE LIMITS -->
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+                <!-- GENERATE BUTTONS -->
+                <button class="btn btn-cyan btn-full btn-sm" onclick="adGenerateBatches()" style="margin-bottom:7px">🌙 Generate Bin Out Batches</button>
+                <button class="btn btn-outline btn-full btn-sm" onclick="showPrequeueInfo()">☀️ Pre-queue Bin In Batches</button>
+
+                <!-- BATCH SIZE -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
                   <div class="field" style="margin:0">
                     <label style="font-size:10px">Min stops/batch</label>
-                    <input type="number" id="min-stops" value="3" min="1" max="20" style="font-size:12px;padding:5px 8px" oninput="updateClusterPreview(document.getElementById('cluster-radius').value)">
+                    <input type="number" id="min-stops" value="3" min="1" max="20" style="font-size:12px;padding:5px 8px">
                   </div>
                   <div class="field" style="margin:0">
                     <label style="font-size:10px">Max stops/batch</label>
-                    <input type="number" id="max-stops" value="10" min="1" max="30" style="font-size:12px;padding:5px 8px" oninput="updateClusterPreview(document.getElementById('cluster-radius').value)">
+                    <input type="number" id="max-stops" value="10" min="1" max="30" style="font-size:12px;padding:5px 8px">
                   </div>
                 </div>
-
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:12px">
-                  <div style="background:var(--surface2);border-radius:7px;padding:9px;text-align:center"><div style="font-size:8px;color:var(--muted)">PENDING STOPS</div><div style="font-size:20px;font-weight:700;color:var(--amber)" id="disp-pending-stops">0</div></div>
-                  <div style="background:var(--surface2);border-radius:7px;padding:9px;text-align:center"><div style="font-size:8px;color:var(--muted)">RUNNERS AVAIL.</div><div style="font-size:20px;font-weight:700;color:var(--green)" id="disp-runners-avail">0</div></div>
-                </div>
-
-                <button class="btn btn-cyan btn-full btn-sm" onclick="adGenerateBatches()" style="margin-bottom:8px">🌙 Generate Bin Out Batches</button>
-                <div style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5">Groups tonight's active homeowners into geo-clusters by proximity, creates batches of 5–10 stops, then sends each batch as an offer to the best-fit available runner.</div>
-                <button class="btn btn-outline btn-full btn-sm" onclick="showPrequeueInfo()">☀️ Pre-queue Bin In Batches</button>
-                <div style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.5">Prepares tomorrow's Bin In routes using the same properties as tonight's Bin Out. Batches stay locked until the waste truck confirms each zone — then they auto-unlock and offers go out to runners.</div>
               </div>
+
+              <!-- LOYALTY & OFFER CHAIN CARD -->
+              <div class="card" style="margin-bottom:10px">
+                <div class="card-ttl" style="margin-bottom:10px">🔒 Offer Chain</div>
+                <div style="display:flex;flex-direction:column;gap:0">
+
+                  <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+                    <div style="width:26px;height:26px;border-radius:50%;background:rgba(6,214,160,.15);color:var(--cyan);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">1</div>
+                    <div>
+                      <div style="font-size:12px;font-weight:700;color:var(--cyan)">Primary Runner — 25 min</div>
+                      <div style="font-size:11px;color:var(--muted);line-height:1.5">Assigned runner gets first refusal. Loyalty offer — they have 25 minutes to accept before it escalates.</div>
+                    </div>
+                  </div>
+
+                  <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+                    <div style="width:26px;height:26px;border-radius:50%;background:rgba(59,130,246,.15);color:var(--blue);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">2</div>
+                    <div>
+                      <div style="font-size:12px;font-weight:700;color:var(--blue)">Zone Runners — 45 min</div>
+                      <div style="font-size:11px;color:var(--muted);line-height:1.5">Other available runners in the same ZIP zone. 45 minutes to accept.</div>
+                    </div>
+                  </div>
+
+                  <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+                    <div style="width:26px;height:26px;border-radius:50%;background:rgba(245,158,11,.15);color:var(--amber);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">3</div>
+                    <div>
+                      <div style="font-size:12px;font-weight:700;color:var(--amber)">All Runners + Bonus — 30 min</div>
+                      <div style="font-size:11px;color:var(--muted);line-height:1.5">Broadcast to all available runners system-wide with an urgency bonus incentive. 30 minutes to accept.</div>
+                    </div>
+                  </div>
+
+                  <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0">
+                    <div style="width:26px;height:26px;border-radius:50%;background:rgba(239,68,68,.15);color:#ef4444;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">🚨</div>
+                    <div>
+                      <div style="font-size:12px;font-weight:700;color:#ef4444">SOS Override</div>
+                      <div style="font-size:11px;color:var(--muted);line-height:1.5">Emergency dispatch — goes to all runners immediately regardless of zone, with urgent rate.</div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
+              <!-- COLLECTION TIMING CARD -->
               <div class="card">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
                   <div class="card-ttl" style="margin:0">Collection Timing</div>
                   <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px" onclick="showAddZone()">+ Add Zone</button>
                 </div>
                 <div style="font-size:11px;color:var(--sub);line-height:1.5;margin-bottom:10px">
-                  Each zone has an expected time when the waste truck passes. BinDash uses this to decide when to unlock Bin In routes so the runner arrives right after collection.
+                  Expected time when the waste truck passes each zone. Used to unlock Bin In routes at the right time.
                 </div>
                 <div id="zone-list" style="display:flex;flex-direction:column;gap:6px"></div>
-
                 <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-                  <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">How Bin In unlocks</div>
-                  <div style="font-size:11px;color:var(--sub);line-height:1.8;margin-bottom:10px">
-                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px"><span style="width:6px;height:6px;background:#22c55e;border-radius:50%;flex-shrink:0"></span><span><strong style="color:var(--text)">Homeowner confirms</strong> — "Yes, bins are empty" tap or SMS reply → instant unlock</span></div>
-                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px"><span style="width:6px;height:6px;background:#a5b4fc;border-radius:50%;flex-shrink:0"></span><span><strong style="color:var(--text)">Typical time learned</strong> — system uses the average confirmed time once enough data exists</span></div>
-                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px"><span style="width:6px;height:6px;background:#f59e0b;border-radius:50%;flex-shrink:0"></span><span><strong style="color:var(--text)">Estimated window</strong> — falls back to the time you set below plus a buffer</span></div>
-                    <div style="display:flex;align-items:center;gap:6px"><span style="width:6px;height:6px;background:#94a3b8;border-radius:50%;flex-shrink:0"></span><span><strong style="color:var(--text)">Default noon</strong> — used only if no other data is available</span></div>
-                  </div>
                   <div style="font-size:10px;color:var(--muted);margin-bottom:5px">Extra wait after estimated window before unlocking</div>
-                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                  <div style="display:flex;align-items:center;gap:8px">
                     <input type="number" id="unlock-delay" value="30" min="0" max="120" style="width:60px;font-size:12px;padding:4px 8px" onchange="saveUnlockDelay(this.value)">
                     <span style="font-size:12px;color:var(--sub)">minutes</span>
                   </div>
-                </div>
-
-                <!-- TYPICAL COLLECTION TIMES -->
-                <div style="border-top:1px solid var(--border);padding-top:12px">
-                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-                    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Typical Collection Times</div>
-                    <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 7px" onclick="showZoneLearningDetail()">Details →</button>
-                  </div>
-                  <div style="font-size:11px;color:var(--sub);margin-bottom:8px">Based on homeowner confirmations — when bins are typically empty in each zone.</div>
-                  <div id="zone-learned-list" style="display:flex;flex-direction:column;gap:5px"></div>
                 </div>
               </div>
             </div>
@@ -3403,7 +3456,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                   </select>
                   <select id="dispatch-day-filter" style="font-size:11px;padding:3px 8px" onchange="renderDispatchPipeline()">
                     <option value="">All Days</option>
-                    <option>Mon</option><option>Tue</option><option>Wed</option><option selected>Thu</option><option>Fri</option>
+                    <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+                    <option>Thursday</option><option>Friday</option>
                   </select>
                 </div>
                 <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -8190,8 +8244,14 @@ function approveHW(appId, directZoneId){
   })()
 
   showToast(app.name+' approved ✅ '+runnerNote,'ok')
-  const _approveZoneName = ADMIN_ZONES.find(z=>z.id===app.zoneId)?.name||'Your zone'
-  sendEmail(app.email, 'Your BinDash account is active! ✅', EMAIL.hwApproved(app.name.split(' ')[0], app.day||'Tuesday', _approveZoneName, autoRunner?.name||null), 'hw_approved')
+  const _approveZone    = ADMIN_ZONES.find(z=>z.id===zoneId)
+  const _approveZoneName = _approveZone?.name || 'Your zone'
+  const _dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  const _colDayIdx = _dayNames.findIndex(d=>d.toLowerCase()===(app.day||'').toLowerCase())
+  const _binOutNight = _colDayIdx >= 0 ? _dayNames[(_colDayIdx+6)%7]+' evening' : 'evening before collection'
+  const _planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split Days · $54.99/mo', w1:'1 Can · $34.99/mo', w2:'2 Cans Same Day · $44.99/mo', w3:'2 Cans Split Days · $54.99/mo' }
+  const _planLabel = _planLabels[app.plan] || app.plan || ''
+  sendEmail(app.email, 'Welcome to BinDash — your account is active! 🎉', EMAIL.hwApproved(app.name.split(' ')[0], app.day||'Tuesday', _approveZoneName, autoRunner?.name||null, _planLabel, _binOutNight), 'hw_approved')
 
   // Reload from Supabase to sync and remove from pending
   setTimeout(()=>{ loadHomeownersFromSupabase(); loadSignupsFromSupabase() }, 1000)
@@ -8343,27 +8403,132 @@ function affected_reassign(fromId, toId){
 
 let generatedBatches = []
 
+// Full day names for matching
+const FULL_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+
+function pickDispatchDay(el){
+  document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>p.classList.remove('on'))
+  el.classList.add('on')
+  const day = el.dataset.day
+  const inp = document.getElementById('dispatch-day-val')
+  if(inp) inp.value = day
+  // Sync pipeline filter
+  const pf = document.getElementById('dispatch-day-filter')
+  if(pf) pf.value = day
+  updateDispatchStats()
+}
+
+function updateDispatchStats(){
+  const day     = document.getElementById('dispatch-day-val')?.value || ''
+  const zoneId  = document.getElementById('dispatch-zone-select')?.value || ''
+  const safe = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v }
+
+  if(!day){ safe('disp-hw-count','—'); safe('disp-runner-count','—'); safe('disp-stats-detail','Select a day to see schedule'); return }
+
+  // Count homeowners scheduled for day+zone
+  const scheduled = HOMEOWNERS.filter(hw=>{
+    if(hw.status !== 'active') return false
+    if(zoneId && hw.zoneId !== zoneId) return false
+    const hwDay = (hw.day||'').toLowerCase()
+    const hwDayR = (hw.dayRecycling||'').toLowerCase()
+    const hwDayW = (hw.dayWaste||'').toLowerCase()
+    const target = day.toLowerCase()
+    if(hw.service==='SPLIT') return hwDayR===target || hwDayW===target
+    return hwDay===target
+  })
+
+  // Count available runners for zone
+  const runners = RUNNERS.filter(r=>{
+    if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
+    if(zoneId) return r.zoneId===zoneId||r.coverageZones?.includes(zoneId)
+    return true
+  })
+
+  safe('disp-hw-count', scheduled.length)
+  safe('disp-runner-count', runners.length)
+
+  const zoneLabel2 = zoneId ? (ADMIN_ZONES.find(z=>z.id===zoneId)?.name||'zone') : 'all zones'
+  const splitCount = scheduled.filter(h=>h.service==='SPLIT').length
+  safe('disp-stats-detail',
+    scheduled.length
+      ? `${scheduled.length} stop${scheduled.length!==1?'s':''} in ${zoneLabel2} · ${runners.length} runner${runners.length!==1?'s':''} available${splitCount?' · '+splitCount+' split-day':''}`
+      : `No homeowners scheduled for ${day} in ${zoneLabel2}`
+  )
+
+  // Sync pipeline filter
+  const pf = document.getElementById('dispatch-day-filter')
+  if(pf) pf.value = day
+  const zf = document.getElementById('dispatch-zone-filter')
+  if(zf) zf.value = zoneId
+}
+
 function adGenerateBatches(){
-  const radiusEl = document.getElementById('cluster-radius')
-  const km = radiusEl ? (radiusEl.value / 10).toFixed(1) : '1.0'
-  const today = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date().getDay()]
-  const dayFil = document.getElementById('dispatch-day-filter')?.value || today
+  const day    = document.getElementById('dispatch-day-val')?.value || FULL_DAYS[new Date().getDay()]
+  const zoneId = document.getElementById('dispatch-zone-select')?.value || ''
+
+  if(!day){ showToast('Please select a collection day first','err'); return }
 
   // Get active HOs scheduled for this day
   const scheduled = HOMEOWNERS.filter(hw=>{
     if(hw.status !== 'active') return false
-    if(hw.service==='SPLIT') return hw.dayRecycling===dayFil || hw.dayWaste===dayFil
-    return hw.day === dayFil
+    if(zoneId && hw.zoneId !== zoneId) return false
+    const hwDay  = (hw.day||'').toLowerCase()
+    const hwDayR = (hw.dayRecycling||'').toLowerCase()
+    const hwDayW = (hw.dayWaste||'').toLowerCase()
+    const target = day.toLowerCase()
+    if(hw.service==='SPLIT') return hwDayR===target || hwDayW===target
+    return hwDay===target
   })
 
   if(!scheduled.length){
-    showToast('No active homeowners scheduled for '+dayFil,'info')
+    showToast('No active homeowners scheduled for '+day+(zoneId?' in selected zone':''),'info')
     return
   }
 
-  // Check for runner unavailability alerts
-  const unzoned = scheduled.filter(hw=>!hw.zoneId)
-  renderRunnerAvailabilityAlerts(unzoned)
+  // ── LOYALTY OFFER CHAIN ──────────────────────────────────────
+  // Step 1: Primary (assigned) runner — 25 min window
+  // Step 2: Other runners in same zone — 45 min window
+  // Step 3: All runners system-wide + urgency bonus — 30 min urgency
+  // SOS: immediate to all regardless of zone
+  function findOfferChain(hw, visitType){
+    const hwZone = hw.zoneId || ''
+    const hwZip  = hw.zip || ''
+
+    // Step 1 — Primary/assigned runner (loyalty)
+    if(hw.assignedRunner){
+      const primary = RUNNERS.find(r=>
+        r.id===hw.assignedRunner &&
+        r.status!=='INACTIVE' && r.status!=='OFF_DUTY' &&
+        (r.visitType==='BOTH' || r.visitType===visitType)
+      )
+      if(primary) return { runner: primary, offerType: 'loyalty', windowMins: 25 }
+    }
+
+    // Step 2 — Other runners in same zone/ZIP
+    const zoneRunners = RUNNERS.filter(r=>{
+      if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
+      if(r.id===hw.assignedRunner) return false // already tried
+      const vtOk = r.visitType==='BOTH'||(visitType==='BIN_OUT'&&(r.visitType==='BIN_OUT'||r.visitType==='BOTH'))||(visitType==='BIN_IN'&&(r.visitType==='BIN_IN'||r.visitType==='BOTH'))
+      if(!vtOk) return false
+      return r.zoneId===hwZone || r.coverageZones?.includes(hwZone) || r.zip===hwZip || r.zip?.slice(0,3)===hwZip?.slice(0,3)
+    })
+    if(zoneRunners.length){
+      const available = zoneRunners.find(r=>r.status==='AVAILABLE') || zoneRunners[0]
+      return { runner: available, offerType: 'zone', windowMins: 45 }
+    }
+
+    // Step 3 — Broadcast all runners + urgency bonus
+    const allAvail = RUNNERS.filter(r=>r.status==='AVAILABLE'&&r.id!==hw.assignedRunner&&(r.visitType==='BOTH'||r.visitType===visitType))
+    if(allAvail.length){
+      return { runner: allAvail[0], offerType: 'broadcast', windowMins: 30 }
+    }
+
+    return { runner: null, offerType: 'unassigned', windowMins: 0 }
+  }
+
+  const maxStops = parseInt(document.getElementById('max-stops')?.value)||10
+  generatedBatches = []
+  let batchNum = 1
 
   // Group by zone
   const byZone = {}
@@ -8373,92 +8538,51 @@ function adGenerateBatches(){
     byZone[key].push(hw)
   })
 
-  // ── RUNNER MATCHING LOGIC ───────────────────────────────────
-  // Match runners to homeowners based on:
-  //   1. Zone coverage (runner covers the zone or ZIP)
-  //   2. Day preference (runner's collection day matches)
-  //   3. Visit type (bin_out, bin_in, or both)
-  //   4. Availability status
-  // Loyalty: if HW has assignedRunner, that runner gets 25min first offer
-  function findBestRunner(hw, visitType){
-    const hwZip = hw.zip || ''
-    const hwZone = hw.zoneId || ''
-    const hwDay  = hw.day || dayFil
-
-    // All eligible runners for this homeowner
-    const eligible = RUNNERS.filter(r=>{
-      if(r.status === 'INACTIVE' || r.status === 'OFF_DUTY') return false
-      // Visit type match: runner must do this visit type
-      const vtMatch = r.visitType==='BOTH' ||
-        (visitType==='BIN_OUT' && (r.visitType==='BIN_OUT'||r.visitType==='BOTH')) ||
-        (visitType==='BIN_IN'  && (r.visitType==='BIN_IN' ||r.visitType==='BOTH'))
-      if(!vtMatch) return false
-      // Zone/ZIP match
-      const inZone = r.coverageZones?.includes(hwZone) || r.zoneId===hwZone ||
-        r.zip===hwZip || r.zip?.slice(0,3)===hwZip?.slice(0,3)
-      return inZone
-    })
-
-    if(!eligible.length) return null
-
-    // Loyalty: assigned runner gets first priority (25min window in real dispatch)
-    if(hw.assignedRunner){
-      const loyal = eligible.find(r=>r.id===hw.assignedRunner)
-      if(loyal) return loyal
-    }
-    // Otherwise pick first available in zone
-    return eligible.find(r=>r.status==='AVAILABLE') || eligible[0]
-  }
-
-  const maxStops = parseInt(document.getElementById('max-stops')?.value)||10
-  generatedBatches = []
-  let batchNum = 1
-
-  Object.entries(byZone).forEach(([zoneId, hws])=>{
-    const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+  Object.entries(byZone).forEach(([zId, hws])=>{
+    const zone = ADMIN_ZONES.find(z=>z.id===zId)
     const zoneName = zone?.name || 'Unzoned'
 
     for(let i=0; i<hws.length; i+=maxStops){
       const chunk = hws.slice(i, i+maxStops)
-      // Determine visit type for this batch (bin_out = evening, bin_in = morning)
-      const batchVisitType = 'BIN_OUT' // Bin Out batches first
-      const bestRunner = findBestRunner(chunk[0], batchVisitType)
-      const unlock = getUnlockTime(zoneId)
-      const hasSplit = chunk.some(h=>h.service==='SPLIT')
+      const offer = findOfferChain(chunk[0], 'BIN_OUT')
+      const unlock = getUnlockTime(zId)
       const earn = (chunk.length * 3.25).toFixed(2)
-      const isLoyal = bestRunner && bestRunner.id === chunk[0].assignedRunner
+      const offerBadge = offer.offerType==='loyalty' ? '🔒 Loyalty (25 min)' : offer.offerType==='zone' ? '📍 Zone offer (45 min)' : offer.offerType==='broadcast' ? '📢 Broadcast + bonus (30 min)' : '⚠️ Unassigned'
 
-      const _nb_runner = bestRunner
-      const _nb_stops = chunk.length
-      const _nb_earn = earn
       generatedBatches.push({
         id: (()=>{
-          const _zone = ADMIN_ZONES.find(z=>z.id===zoneId)
-          const _abbr = zoneLabel(_zone).split('-').slice(0,2).join('-') // e.g. GLE-85305
+          const _abbr = zoneLabel(zone).split('-').slice(0,2).join('-')
           const _now  = new Date()
-          const _mmdd = String(_now.getMonth()+1).padStart(2,'0') + String(_now.getDate()).padStart(2,'0')
-          return _abbr + '-' + _mmdd + '-' + String(batchNum++).padStart(3,'0')
+          const _mmdd = String(_now.getMonth()+1).padStart(2,'0')+String(_now.getDate()).padStart(2,'0')
+          return _abbr+'-'+_mmdd+'-'+String(batchNum++).padStart(3,'0')
         })(),
-        zoneId, zoneName, day: dayFil,
+        zoneId: zId, zoneName, day,
         stops: chunk,
-        runner: bestRunner || null,
-        status: bestRunner ? 'offered' : 'unassigned',
-        isLoyalOffer: isLoyal,           // flags 25min loyalty window
-        loyaltyExpiry: isLoyal ? Date.now() + 25*60*1000 : null,
+        runner:        offer.runner || null,
+        status:        offer.runner ? 'offered' : 'unassigned',
+        offerType:     offer.offerType,
+        offerBadge,
+        windowMins:    offer.windowMins,
+        isLoyalOffer:  offer.offerType==='loyalty',
+        loyaltyExpiry: offer.offerType==='loyalty' ? Date.now()+25*60*1000 : null,
         earnOut: earn, earnIn: earn, earnTotal: (chunk.length*6.50).toFixed(2),
         binInUnlock: unlock.time, unlockMethod: unlock.method,
-        hasSplit,
+        hasSplit: chunk.some(h=>h.service==='SPLIT'),
       })
-      if(_nb_runner?.email) sendEmail(_nb_runner.email, 'New route: '+_nb_stops+' stops · $'+_nb_earn+' available', EMAIL.batchOffer(_nb_runner.name.split(' ')[0], _nb_stops, _nb_earn, dayFil, zoneName, chunk.map(h=>({name:h.name,address:h.address||h.zip,service:h.service||'Recycling'}))), 'batch_offer')
+
+      // Send offer email
+      if(offer.runner?.email){
+        const urgencyNote = offer.offerType==='broadcast' ? ' · urgency bonus included' : offer.offerType==='loyalty' ? ' · loyalty first offer' : ''
+        sendEmail(offer.runner.email,
+          'New route: '+chunk.length+' stops · $'+earn+' available'+urgencyNote,
+          EMAIL.batchOffer(offer.runner.name.split(' ')[0], chunk.length, earn, day, zoneName, chunk.map(h=>({name:h.name,address:h.address||h.zip,service:h.service||'Recycling'}))),
+          'batch_offer')
+      }
     }
   })
 
   renderDispatchPipeline()
-
-  const batchesEl = document.getElementById('preview-batches')
-  const stopsEl = document.getElementById('preview-stops')
-  const avg = stopsEl ? stopsEl.textContent : scheduled.length
-  showToast(`${generatedBatches.length} Bin Out batches generated for ${dayFil} · ${scheduled.length} homeowners · offers sent ✅`,'ok')
+  showToast(`${generatedBatches.length} batch${generatedBatches.length!==1?'es':''} generated for ${day} · ${scheduled.length} homeowners · offers sent ✅`, 'ok')
 }
 
 function renderRunnerAvailabilityAlerts(unzoned){
@@ -8510,9 +8634,10 @@ function renderDispatchPipeline(){
     const unassigned = !b.runner
     const borderCol = b.status==='accepted'?'#22c55e': b.status==='offered'?'#f59e0b': b.status==='broadcast'?'#3b82f6':'#ef4444'
     const bgCol     = b.status==='accepted'?'rgba(34,197,94,.04)': b.status==='offered'?'rgba(245,158,11,.04)': b.status==='broadcast'?'rgba(59,130,246,.04)':'rgba(239,68,68,.05)'
-    const loyalTag  = b.isLoyalOffer && b.status==='offered' ? ' · 🔒 25min loyalty window' : ''
-    const badgeTxt  = b.status==='accepted'?'✓ Accepted': b.status==='offered'?'⏳ Offer sent'+loyalTag: b.status==='broadcast'?'📡 Broadcast':'🚨 Unassigned'
+    const loyalTag  = b.offerBadge || (b.isLoyalOffer && b.status==='offered' ? '🔒 25min loyalty window' : '')
+    const badgeTxt  = b.status==='accepted'?'✓ Accepted': b.status==='offered'?'⏳ Offer sent': b.status==='broadcast'?'📡 Broadcast':'🚨 Unassigned'
     const badgeStyle= b.status==='accepted'?'background:#22c55e22;color:#22c55e': b.status==='offered'?'background:rgba(245,158,11,.15);color:#f59e0b': b.status==='broadcast'?'background:rgba(59,130,246,.15);color:#3b82f6':'background:rgba(239,68,68,.15);color:#ef4444'
+    const offerChainStyle = b.offerType==='loyalty'?'background:rgba(6,214,160,.1);color:var(--cyan)': b.offerType==='zone'?'background:rgba(59,130,246,.1);color:var(--blue)': b.offerType==='broadcast'?'background:rgba(245,158,11,.1);color:var(--amber)':''
 
     const stopList = b.stops.map(h=>{
       const isSplitToday = h.service==='SPLIT'
@@ -8536,6 +8661,7 @@ function renderDispatchPipeline(){
             <span style="font-size:12px;font-weight:700">${b.id}</span>
             <span style="font-size:10px;color:var(--muted)">${b.zoneName}</span>
             ${b.hasSplit?'<span style="background:rgba(34,197,94,.15);color:#22c55e;font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px">split stops</span>':''}
+            ${loyalTag?`<span style="font-size:10px;font-weight:600;padding:1px 7px;border-radius:5px;${offerChainStyle}">${loyalTag}</span>`:''}
           </div>
           <div style="font-size:10px;color:var(--muted)">${b.stops.length} stops · Bin In unlocks ~${b.binInUnlock} (${b.unlockMethod})</div>
         </div>
@@ -8570,6 +8696,33 @@ function initDispatchPage(){
   try { renderZoneList() } catch(e){ console.warn('renderZoneList:', e) }
   try { renderDispatchPipeline() } catch(e){ console.warn('renderDispatchPipeline:', e) }
   try { renderZoneLearnedList() } catch(e){ console.warn('renderZoneLearnedList:', e) }
+
+  // Populate zone selectors
+  const zoneSelects = ['dispatch-zone-select', 'dispatch-zone-filter']
+  zoneSelects.forEach(id=>{
+    const sel = document.getElementById(id)
+    if(!sel) return
+    // Keep first option, remove rest
+    while(sel.options.length > 1) sel.remove(1)
+    ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
+      const o = document.createElement('option'); o.value=z.id; o.textContent=z.name; sel.appendChild(o)
+    })
+  })
+
+  // Auto-select today's day
+  const todayFull = FULL_DAYS[new Date().getDay()]
+  const pills = document.querySelectorAll('#dispatch-day-pills .ob-day-pill')
+  pills.forEach(p=>{
+    if(p.dataset.day === todayFull){
+      p.classList.add('on')
+      const inp = document.getElementById('dispatch-day-val')
+      if(inp) inp.value = todayFull
+      const pf = document.getElementById('dispatch-day-filter')
+      if(pf) pf.value = todayFull
+    }
+  })
+
+  updateDispatchStats()
 }
 
 // Initialise homeowner list when page loads
