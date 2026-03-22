@@ -215,13 +215,16 @@ async function launchStripeCheckout(){
     }
     const savedId = savedData?.id || null
 
-    // 3. Create Stripe Checkout session
-    const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/create-checkout', {
+    // 3. Create Stripe Checkout session via edge function
+    // Add timestamp to bust any caching
+    const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/create-checkout?t='+Date.now(), {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
         'Authorization': 'Bearer '+SUPABASE_ANON_KEY,
         'apikey':        SUPABASE_ANON_KEY,
+        'Cache-Control': 'no-cache',
+        'x-client-info': 'bindash/1.0',
       },
       body: JSON.stringify({
         planKey:    _checkoutPlanKey,
