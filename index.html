@@ -3779,7 +3779,6 @@ async function lookupReferralCode(code, appId){
 
     if(name){
       if(resultEl) resultEl.innerHTML = `<span style="color:#22c55e">✅ Code verified — issued to <strong>${name}</strong></span>`
-      // Set the dropdown to match this runner if they're in RUNNERS
       if(refByEl){
         const opt = [...refByEl.options].find(o=>o.value===name||o.value.startsWith(name.split(' ')[0]))
         if(opt) refByEl.value = opt.value
@@ -3788,45 +3787,6 @@ async function lookupReferralCode(code, appId){
     } else {
       if(resultEl) resultEl.innerHTML = '<span style="color:#f59e0b">⚠️ Code not found in system — check manually before crediting</span>'
     }
-  } catch(e){
-    if(resultEl) resultEl.innerHTML = '<span style="color:#ef4444">Error looking up code</span>'
-  }
-}
-  const resultEl  = document.getElementById('rnpc-refcode-result-'+appId)
-  const refByEl   = document.getElementById('rnpc-referredby-'+appId)
-  const tierInput = document.getElementById('rnpc-tier-'+appId)
-  if(!code || code.length < 4){
-    if(resultEl) resultEl.textContent = 'Enter a referral code to look up the referring runner'
-    if(refByEl)  refByEl.value = ''
-    return
-  }
-  if(resultEl) resultEl.innerHTML = '<span style="color:var(--muted)">Looking up...</span>'
-  try {
-    // Check runner_applications first
-    const { data } = await _supa.from('runner_applications')
-      .select('first_name, last_name, email, invite_code')
-      .ilike('invite_code', code).limit(1)
-    const found = data?.[0]
-    if(found){
-      const name = (found.first_name+' '+found.last_name).trim()||found.email
-      if(resultEl) resultEl.innerHTML = `<span style="color:#22c55e">✅ Referred by <strong>${name}</strong></span>`
-      if(refByEl)  refByEl.value = name
-      if(tierInput && tierInput.value==='standard'){ tierInput.value='builder'; selectLoyaltyTier(appId,'builder') }
-      return
-    }
-    // Also check runners table
-    const { data: rData } = await _supa.from('runners')
-      .select('first_name, last_name, email').ilike('referral_code', code).limit(1)
-    const found2 = rData?.[0]
-    if(found2){
-      const name = (found2.first_name+' '+found2.last_name).trim()||found2.email
-      if(resultEl) resultEl.innerHTML = `<span style="color:#22c55e">✅ Referred by <strong>${name}</strong></span>`
-      if(refByEl)  refByEl.value = name
-      if(tierInput && tierInput.value==='standard'){ tierInput.value='builder'; selectLoyaltyTier(appId,'builder') }
-      return
-    }
-    if(resultEl) resultEl.innerHTML = '<span style="color:#f59e0b">⚠️ Code not found — verify manually or leave blank</span>'
-    if(refByEl)  refByEl.value = ''
   } catch(e){
     if(resultEl) resultEl.innerHTML = '<span style="color:#ef4444">Error looking up code</span>'
   }
@@ -4344,6 +4304,8 @@ async function _checkRunnerWaitlistZones(row){
     else homeEl.appendChild(notif)
   } catch(e){ console.warn('[BinDash] _checkRunnerWaitlistZones:', e) }
 }
+
+async function populateRNDashboard(){
   if(!currentUser) return
 
   const grEl = document.getElementById('rn-home-subtitle')
@@ -5512,7 +5474,7 @@ function requireCard(){
 }
 
 // -- HOMEOWNER ONBOARDING --------------------------
-function hNext(s){
+async function hNext(s){
   obSave() // save progress before moving forward
   if(s===1){
     const zip = document.getElementById('h-zip')?.value.trim() || ''
@@ -6319,6 +6281,8 @@ async function submitLeaveZone(zoneId, zoneName, isOnly){
     loadRNZones()
   } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
 }
+
+async function openStripePortalRunner(){
   const row = window._rnRow
   if(!row?.stripe_connect_id){
     // Not connected yet -- take them to Connect setup
@@ -11324,7 +11288,7 @@ function getZoneSuggestion(zip){
   return match ? `suggested: ${match.name}` : 'no existing zone -- will create new'
 }
 
-function approveHW(appId, directZoneId){
+async function approveHW(appId, directZoneId){
   const app = PENDING_HOMEOWNERS.find(x=>x.id===appId); if(!app) return
   const zoneVal = directZoneId || document.getElementById('hwpc-zone-'+appId)?.value || ''
   if(!zoneVal){ showToast('Please assign a zone before approving','err'); return }
@@ -14189,6 +14153,8 @@ async function denyZoneRequest(reqId, runnerName){
     showToast(`${runnerName}'s request denied`, 'info')
   } catch(e){ showToast('Error','err') }
 }
+
+async function createZoneFromRunnerRequest(zip){
   // Pre-fill the create zone modal with this ZIP
   showCreateZone()
   setTimeout(()=>{
