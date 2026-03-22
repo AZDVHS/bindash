@@ -3178,6 +3178,20 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <!-- AD PENDING HOMEOWNERS -->
         <div class="pg" id="ad-pending-hw">
           <div style="color:var(--sub);font-size:13px;margin-bottom:14px">Review new homeowner applications. Verify their address, assign them to a zone, confirm service details, then approve to activate their account.</div>
+
+          <!-- TABS -->
+          <div style="display:flex;gap:2px;background:var(--surface2);border-radius:10px;padding:4px;margin-bottom:16px;width:fit-content">
+            <button id="hwtab-pending" onclick="switchHWTab('pending')" class="btn btn-sm" style="border-radius:7px;background:var(--cyan);color:#07090f;font-weight:700;border:none">
+              ⏳ Pending <span id="hwtab-pending-count" style="background:rgba(0,0,0,.2);border-radius:99px;padding:1px 7px;font-size:10px;margin-left:4px">0</span>
+            </button>
+            <button id="hwtab-info" onclick="switchHWTab('info')" class="btn btn-sm btn-ghost" style="border-radius:7px;border:none">
+              📧 Awaiting Info <span id="hwtab-info-count" style="background:rgba(255,255,255,.1);border-radius:99px;padding:1px 7px;font-size:10px;margin-left:4px">0</span>
+            </button>
+            <button id="hwtab-rejected" onclick="switchHWTab('rejected')" class="btn btn-sm btn-ghost" style="border-radius:7px;border:none">
+              ✕ Not Approved <span id="hwtab-rejected-count" style="background:rgba(255,255,255,.1);border-radius:99px;padding:1px 7px;font-size:10px;margin-left:4px">0</span>
+            </button>
+          </div>
+
           <div id="pending-hw-list" style="display:flex;flex-direction:column;gap:12px">
             <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No pending homeowner applications.</div>
           </div>
@@ -3186,6 +3200,19 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <!-- AD PENDING RUNNERS -->
         <div class="pg" id="ad-pending">
           <div style="color:var(--sub);font-size:13px;margin-bottom:14px">Review runner applications. Check 1099 agreements, background check consent, assign a service zone, then approve to add them to the dispatch pool.</div>
+
+          <!-- TABS -->
+          <div style="display:flex;gap:2px;background:var(--surface2);border-radius:10px;padding:4px;margin-bottom:16px;width:fit-content">
+            <button id="rntab-pending" onclick="switchRNTab('pending')" class="btn btn-sm" style="border-radius:7px;background:var(--cyan);color:#07090f;font-weight:700;border:none">
+              ⏳ Pending <span id="rntab-pending-count" style="background:rgba(0,0,0,.2);border-radius:99px;padding:1px 7px;font-size:10px;margin-left:4px">0</span>
+            </button>
+            <button id="rntab-info" onclick="switchRNTab('info')" class="btn btn-sm btn-ghost" style="border-radius:7px;border:none">
+              📧 Awaiting Info <span id="rntab-info-count" style="background:rgba(255,255,255,.1);border-radius:99px;padding:1px 7px;font-size:10px;margin-left:4px">0</span>
+            </button>
+            <button id="rntab-rejected" onclick="switchRNTab('rejected')" class="btn btn-sm btn-ghost" style="border-radius:7px;border:none">
+              ✕ Not Approved <span id="rntab-rejected-count" style="background:rgba(255,255,255,.1);border-radius:99px;padding:1px 7px;font-size:10px;margin-left:4px">0</span>
+            </button>
+          </div>
 
           <div id="pending-runner-list" style="display:flex;flex-direction:column;gap:12px">
             <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No pending runner applications.</div>
@@ -9994,33 +10021,47 @@ function renderPendingRunnerList(){
   const el = document.getElementById('pending-runner-list')
   if(!el) return
 
-  if(!PENDING_RUNNERS.length){
-    const b = document.getElementById('pcount')
-    if(b){ b.textContent='0'; b.style.display='none' }
-    el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No pending runner applications.</div>'
-    return
+  // Update tab counts
+  const counts = { pending:0, info:0, rejected:0 }
+  PENDING_RUNNERS.forEach(a => {
+    if(a.status==='pending_review'||a.status==='pending') counts.pending++
+    else if(a.status==='info_requested') counts.info++
+    else if(a.status==='rejected') counts.rejected++
+  })
+  const updateCount = (id, n) => { const e = document.getElementById(id); if(e) e.textContent = n }
+  updateCount('rntab-pending-count', counts.pending)
+  updateCount('rntab-info-count',    counts.info)
+  updateCount('rntab-rejected-count',counts.rejected)
+
+  // Nav badge — pending only
+  const badge = document.getElementById('pcount')
+  if(badge){
+    badge.textContent = counts.pending
+    badge.style.display = counts.pending > 0 ? 'inline' : 'none'
   }
 
-  // Wait for zones to load
+  // Filter by active tab
+  let list = []
+  if(_rnActiveTab === 'pending')  list = PENDING_RUNNERS.filter(a=>a.status==='pending_review'||a.status==='pending')
+  if(_rnActiveTab === 'info')     list = PENDING_RUNNERS.filter(a=>a.status==='info_requested')
+  if(_rnActiveTab === 'rejected') list = PENDING_RUNNERS.filter(a=>a.status==='rejected')
+
   const activeZones = ADMIN_ZONES.filter(z=>z.status!=='inactive')
-  if(!activeZones.length){
+  if(!activeZones.length && _rnActiveTab === 'pending'){
     el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">⏳ Loading zones...</div>'
     setTimeout(renderPendingRunnerList, 600)
     return
   }
 
-  const badge = document.getElementById('pcount')
-  if(badge){ badge.textContent = PENDING_RUNNERS.length; badge.style.display = 'inline' }
-
-  if(!PENDING_RUNNERS.length){
-    el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No pending runner applications.</div>'
+  if(!list.length){
+    const msgs = { pending:'No pending runner applications.', info:'No applications awaiting info.', rejected:'No rejected applications.' }
+    el.innerHTML = `<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">${msgs[_rnActiveTab]||'Nothing here.'}</div>`
     return
   }
-  el.innerHTML = PENDING_RUNNERS.map(app => {
+
+  el.innerHTML = list.map(app => {
     const vpLabel = app.visitPref==='both' ? '🌙☀️ Both visits' : app.visitPref==='bin_out' ? '🌙 Bin Out only' : '☀️ Bin In only'
     const vpColor = app.visitPref==='bin_in' ? '#6ee7b7' : '#a5b4fc'
-    const activeZones = ADMIN_ZONES.filter(z=>z.status!=='inactive')
-    if(!activeZones.length){ setTimeout(renderPendingRunnerList, 500); return '' }
     const zoneOptions = activeZones.map(z=>`<option value="${z.id}">${z.name} (ZIP ${z.zips?.join(', ')||z.zip})</option>`).join('')
 
     // Referral detection
@@ -10117,9 +10158,18 @@ function renderPendingRunnerList(){
         </div>
 
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-green btn-sm" onclick="approveRunner('${app.id}')">✅ Approve</button>
-          <button class="btn btn-outline btn-sm" onclick="showToast('Email sent to ${app.name}','info')">📧 Request Info</button>
-          <button class="btn btn-red btn-sm" onclick="rejectRunner('${app.id}','${app.name}')">✕ Reject</button>
+          ${app.status==='rejected' || app.status==='info_requested' ? `
+            <button class="btn btn-green btn-sm" onclick="approveRunner('${app.id}')">✅ Approve</button>
+            ${app.status==='rejected'
+              ? `<button class="btn btn-outline btn-sm" onclick="restoreRNPending('${app.id}','${app.name}')">↩ Move to Pending</button>`
+              : `<button class="btn btn-red btn-sm" onclick="rejectRunner('${app.id}','${app.name}')">✕ Reject</button>`
+            }
+            <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="deleteApplicationRN('${app.id}','${app.name}')">🗑 Delete</button>
+          ` : `
+            <button class="btn btn-green btn-sm" onclick="approveRunner('${app.id}')">✅ Approve</button>
+            <button class="btn btn-outline btn-sm" onclick="requestInfoRN('${app.id}','${app.name}')">📧 Request Info</button>
+            <button class="btn btn-red btn-sm" onclick="rejectRunner('${app.id}','${app.name}')">✕ Reject</button>
+          `}
         </div>
       </div>
     </div>`
@@ -10229,9 +10279,8 @@ async function approveRunner(appId){
 
 
 async function rejectRunner(appId, name){
-  const idx = PENDING_RUNNERS.findIndex(x=>x.id===appId)
-  if(idx>=0) PENDING_RUNNERS.splice(idx,1)
-  pc = PENDING_RUNNERS.length
+  const app = PENDING_RUNNERS.find(x=>x.id===appId)
+  if(app) app.status = 'rejected'
   renderPendingRunnerList(); updateOverviewCounts()
   try {
     await _supa.from('runner_applications').update({
@@ -10240,30 +10289,86 @@ async function rejectRunner(appId, name){
       updated_at:  new Date().toISOString(),
     }).eq('id', appId)
   } catch(err){ console.warn('[BinDash] Runner reject failed:', String(err?.message||err)) }
-  showToast(name + "'s application rejected", 'err')
+  showToast(name + "'s application declined — moved to Not Approved tab", 'info')
 }
 
 // -- PENDING HOMEOWNER APPROVAL SYSTEM ------------
 const PENDING_HOMEOWNERS = [] // Populated from Supabase homeowner_signups
 const PENDING_RUNNERS    = [] // Populated from Supabase runner_applications
 
+let _hwActiveTab = 'pending'
+let _rnActiveTab = 'pending'
+
+function switchHWTab(tab){
+  _hwActiveTab = tab
+  const tabs = ['pending','info','rejected']
+  tabs.forEach(t => {
+    const btn = document.getElementById('hwtab-'+t)
+    if(!btn) return
+    if(t === tab){
+      btn.style.background = 'var(--cyan)'; btn.style.color = '#07090f'; btn.style.fontWeight = '700'
+    } else {
+      btn.style.background = 'transparent'; btn.style.color = 'var(--sub)'; btn.style.fontWeight = '400'
+    }
+  })
+  renderPendingHWList()
+}
+
+function switchRNTab(tab){
+  _rnActiveTab = tab
+  const tabs = ['pending','info','rejected']
+  tabs.forEach(t => {
+    const btn = document.getElementById('rntab-'+t)
+    if(!btn) return
+    if(t === tab){
+      btn.style.background = 'var(--cyan)'; btn.style.color = '#07090f'; btn.style.fontWeight = '700'
+    } else {
+      btn.style.background = 'transparent'; btn.style.color = 'var(--sub)'; btn.style.fontWeight = '400'
+    }
+  })
+  renderPendingRunnerList()
+}
+
 function renderPendingHWList(){
   const el = document.getElementById('pending-hw-list')
   if(!el) return
 
-  const pending = PENDING_HOMEOWNERS.filter(a=>a.status==='pending'||a.status==='payment_pending')
+  // Update tab counts
+  const counts = { pending:0, info:0, rejected:0 }
+  PENDING_HOMEOWNERS.forEach(a => {
+    if(a.status==='pending_review'||a.status==='payment_pending') counts.pending++
+    else if(a.status==='info_requested') counts.info++
+    else if(a.status==='rejected') counts.rejected++
+  })
+  const updateCount = (id, n) => { const el = document.getElementById(id); if(el) el.textContent = n }
+  updateCount('hwtab-pending-count', counts.pending)
+  updateCount('hwtab-info-count',    counts.info)
+  updateCount('hwtab-rejected-count',counts.rejected)
+
+  // Badge for nav
   const badge = document.getElementById('hw-pcount')
   if(badge){
-    badge.textContent = pending.length
-    badge.style.display = pending.length > 0 ? 'inline' : 'none'
+    badge.textContent = counts.pending
+    badge.style.display = counts.pending > 0 ? 'inline' : 'none'
   }
 
-  if(!pending.length){
-    el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No pending homeowner applications.</div>'
+  // Filter by active tab
+  let list = []
+  if(_hwActiveTab === 'pending')  list = PENDING_HOMEOWNERS.filter(a=>a.status==='pending_review'||a.status==='payment_pending')
+  if(_hwActiveTab === 'info')     list = PENDING_HOMEOWNERS.filter(a=>a.status==='info_requested')
+  if(_hwActiveTab === 'rejected') list = PENDING_HOMEOWNERS.filter(a=>a.status==='rejected')
+
+  if(!list.length){
+    const msgs = {
+      pending:  'No pending homeowner applications.',
+      info:     'No applications awaiting info.',
+      rejected: 'No rejected applications.',
+    }
+    el.innerHTML = `<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">${msgs[_hwActiveTab]||'Nothing here.'}</div>`
     return
   }
 
-  el.innerHTML = pending.map(app=>{
+  el.innerHTML = list.map(app=>{
     const assignedZone = ADMIN_ZONES.find(z=>z.id===app.zoneId)
     const zoneBadge = assignedZone
       ? `<span class="badge" style="background:rgba(6,214,160,.1);color:var(--cyan);margin-left:8px">📍 ${assignedZone.name}</span>`
@@ -10356,14 +10461,130 @@ function renderPendingHWList(){
       </div>
 
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-green btn-sm" onclick="approveHW('${app.id}')">✅ Approve &amp; Activate</button>
-        <button class="btn btn-outline btn-sm" onclick="editPendingHW('${app.id}')">✏️ Edit Details</button>
-        <button class="btn btn-outline btn-sm" onclick="showToast('Email sent to ${app.name}','info')">📧 Request Info</button>
-        <button class="btn btn-red btn-sm" onclick="rejectHW('${app.id}','${app.name}')">✕ Reject</button>
+        ${app.status==='rejected' || app.status==='info_requested' ? `
+          <button class="btn btn-green btn-sm" onclick="approveHW('${app.id}')">✅ Approve &amp; Activate</button>
+          ${app.status==='rejected'
+            ? `<button class="btn btn-outline btn-sm" onclick="restoreHWPending('${app.id}','${app.name}')">↩ Move to Pending</button>`
+            : `<button class="btn btn-red btn-sm" onclick="rejectHW('${app.id}','${app.name}')">✕ Reject</button>`
+          }
+          <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="deleteApplicationHW('${app.id}','${app.name}')">🗑 Delete</button>
+        ` : `
+          <button class="btn btn-green btn-sm" onclick="approveHW('${app.id}')">✅ Approve &amp; Activate</button>
+          <button class="btn btn-outline btn-sm" onclick="editPendingHW('${app.id}')">✏️ Edit Details</button>
+          <button class="btn btn-outline btn-sm" onclick="requestInfoHW('${app.id}','${app.name}')">📧 Request Info</button>
+          <button class="btn btn-red btn-sm" onclick="rejectHW('${app.id}','${app.name}')">✕ Reject</button>
+        `}
       </div>
       </div>
     </div>`
   }).join('')
+}
+
+async function requestInfoHW(appId, name){
+  const app = PENDING_HOMEOWNERS.find(x=>x.id===appId); if(!app) return
+  app.status = 'info_requested'
+  renderPendingHWList()
+  try {
+    await _supa.from('homeowner_signups').update({ status:'info_requested', updated_at:new Date().toISOString() }).eq('email', app.email)
+  } catch(e){ console.warn(e) }
+  sendEmail(app.email, 'We need a little more info about your BinDash application',
+    `<p>Hi ${app.name?.split(' ')[0]||'there'},</p><p>We're reviewing your BinDash application and need a bit more information before we can activate your account. Please reply to this email with any additional details, and our team will follow up shortly.</p><p>— The BinDash Team</p>`,
+    'info_requested')
+  showToast(name+' moved to Awaiting Info — email sent', 'ok')
+  switchHWTab('info')
+}
+
+async function restoreHWPending(appId, name){
+  const app = PENDING_HOMEOWNERS.find(x=>x.id===appId); if(!app) return
+  app.status = 'pending_review'
+  renderPendingHWList()
+  try {
+    await _supa.from('homeowner_signups').update({ status:'pending_review', updated_at:new Date().toISOString() }).eq('email', app.email)
+  } catch(e){ console.warn(e) }
+  showToast(name+' moved back to Pending', 'ok')
+  switchHWTab('pending')
+}
+
+async function deleteApplicationHW(appId, name){
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh" style="background:rgba(239,68,68,.06)">
+    <div style="font-size:15px;font-weight:700;color:#fca5a5">🗑 Delete Application</div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div style="font-size:14px;margin-bottom:8px">Permanently delete <strong>${name}</strong>'s application?</div>
+    <div style="font-size:12px;color:var(--muted)">This cannot be undone. Use this only to remove test data or genuine errors.</div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-red" onclick="closeM();_confirmDeleteHW('${appId}','${name}')">🗑 Delete Permanently</button>
+  </div>`
+  openM()
+}
+
+async function _confirmDeleteHW(appId, name){
+  const idx = PENDING_HOMEOWNERS.findIndex(x=>x.id===appId)
+  if(idx>=0) PENDING_HOMEOWNERS.splice(idx,1)
+  renderPendingHWList(); updateOverviewCounts()
+  try {
+    const app = PENDING_HOMEOWNERS.find(x=>x.id===appId)
+    const email = app?.email
+    if(email) await _supa.from('homeowner_signups').delete().eq('email', email)
+    else await _supa.from('homeowner_signups').delete().eq('id', appId)
+  } catch(e){ console.warn('[BinDash] delete HW:', e) }
+  showToast(name+"'s application deleted", 'info')
+}
+
+async function requestInfoRN(appId, name){
+  const app = PENDING_RUNNERS.find(x=>x.id===appId); if(!app) return
+  app.status = 'info_requested'
+  renderPendingRunnerList()
+  try {
+    await _supa.from('runner_applications').update({ status:'info_requested', updated_at:new Date().toISOString() }).eq('id', appId)
+  } catch(e){ console.warn(e) }
+  sendEmail(app.email, 'We need more info about your BinDash runner application',
+    `<p>Hi ${app.name?.split(' ')[0]||'there'},</p><p>We're reviewing your runner application and need a bit more information. Please reply to this email and our team will follow up shortly.</p><p>— The BinDash Team</p>`,
+    'info_requested')
+  showToast(name+' moved to Awaiting Info — email sent', 'ok')
+  switchRNTab('info')
+}
+
+async function restoreRNPending(appId, name){
+  const app = PENDING_RUNNERS.find(x=>x.id===appId); if(!app) return
+  app.status = 'pending_review'
+  renderPendingRunnerList()
+  try {
+    await _supa.from('runner_applications').update({ status:'pending_review', updated_at:new Date().toISOString() }).eq('id', appId)
+  } catch(e){ console.warn(e) }
+  showToast(name+' moved back to Pending', 'ok')
+  switchRNTab('pending')
+}
+
+async function deleteApplicationRN(appId, name){
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh" style="background:rgba(239,68,68,.06)">
+    <div style="font-size:15px;font-weight:700;color:#fca5a5">🗑 Delete Application</div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div style="font-size:14px;margin-bottom:8px">Permanently delete <strong>${name}</strong>'s runner application?</div>
+    <div style="font-size:12px;color:var(--muted)">This cannot be undone. Use only to remove test data or genuine errors.</div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-red" onclick="closeM();_confirmDeleteRN('${appId}','${name}')">🗑 Delete Permanently</button>
+  </div>`
+  openM()
+}
+
+async function _confirmDeleteRN(appId, name){
+  const idx = PENDING_RUNNERS.findIndex(x=>x.id===appId)
+  if(idx>=0) PENDING_RUNNERS.splice(idx,1)
+  renderPendingRunnerList(); updateOverviewCounts()
+  try {
+    await _supa.from('runner_applications').delete().eq('id', appId)
+  } catch(e){ console.warn('[BinDash] delete RN:', e) }
+  showToast(name+"'s application deleted", 'info')
 }
 
 function getZoneSuggestion(zip){
@@ -10460,7 +10681,7 @@ function approveHW(appId, directZoneId){
 
 async function rejectHW(appId, name){
   const app = PENDING_HOMEOWNERS.find(x=>x.id===appId); if(!app) return
-  app.status='rejected'
+  app.status = 'rejected'
   renderPendingHWList()
   updateOverviewCounts()
   try {
@@ -10470,9 +10691,8 @@ async function rejectHW(appId, name){
       updated_at:  new Date().toISOString(),
     }).eq('email', app.email)
   } catch(err){ console.warn('[BinDash] Reject save failed:', err) }
-  showToast(name+"'s application rejected",'err')
-  const _rejApp = PENDING_HOMEOWNERS.find(x=>x.id===appId)||PENDING_HOMEOWNERS.find(x=>x.name===name)
-  if(_rejApp?.email) sendEmail(_rejApp.email, 'Update on your BinDash application', EMAIL.hwRejected(_rejApp.name?.split(' ')[0]||name), 'hw_rejected')
+  showToast(name+"'s application declined — moved to Not Approved tab", 'info')
+  if(app?.email) sendEmail(app.email, 'Update on your BinDash application', EMAIL.hwRejected(app.name?.split(' ')[0]||name), 'hw_rejected')
 }
 
 function editPendingHW(appId){
@@ -11950,7 +12170,7 @@ async function loadSignupsFromSupabase(){
       const res = await _supa
         .from('homeowner_signups')
         .select('*')
-        .in('status', ['pending_review', 'payment_pending', 'waitlisted'])
+        .in('status', ['pending_review', 'payment_pending', 'waitlisted', 'rejected', 'info_requested'])
         .order('created_at', { ascending: false })
       data    = res?.data    || []
       loadErr = res?.error?.message || null
@@ -11987,7 +12207,7 @@ async function loadSignupsFromSupabase(){
         cardLast4:       row.card_last4 || '----',
         zoneId:          row.zone_id || null,
         submittedAt:     new Date(row.created_at).toLocaleString(),
-        status:          row.status === 'waitlisted' ? 'waitlist' : 'pending',
+        status:          row.status,  // preserve real DB status: pending_review, payment_pending, rejected, info_requested, waitlisted
         // Property info
         storage:         row.bin_location || '--',
         gate:            row.gate_type    || '--',
@@ -12002,7 +12222,7 @@ async function loadSignupsFromSupabase(){
       if(row.status === 'waitlisted'){
         WAITLIST_SIGNUPS.push(entry)
       } else {
-        PENDING_HOMEOWNERS.push(entry)
+        PENDING_HOMEOWNERS.push(entry)  // includes pending_review, payment_pending, rejected, info_requested
       }
     })
 
@@ -12021,7 +12241,7 @@ async function loadRunnerApplicationsFromSupabase(){
       const res = await _supa
         .from('runner_applications')
         .select('*')
-        .eq('status', 'pending_review')  // only truly pending -- not approved/rejected
+        .in('status', ['pending_review', 'rejected', 'info_requested'])
         .order('created_at', { ascending: false })
       data    = res?.data    || []
       loadErr = res?.error?.message || null
@@ -12048,7 +12268,7 @@ async function loadRunnerApplicationsFromSupabase(){
         visitPref:    row.visit_preference || 'both',
         bgcConsent:   row.bgc_consent || false,
         submittedAt:  new Date(row.created_at).toLocaleString(),
-        status:       'pending',
+        status:       row.status || 'pending_review',  // preserve: pending_review, rejected, info_requested
         auth_user_id: row.auth_user_id || null,
         referralCode: row.referral_code || null,   // code they used to sign up
         referredBy:   row.referred_by   || null,   // name/id of referring runner
