@@ -9747,7 +9747,6 @@ async function _adGenerateBatchesAsync(){
   })
 
   renderDispatchPipeline()
-  showToast(`${generatedBatches.length} batch${generatedBatches.length!==1?'es':''} generated for ${day} . ${scheduled.length} homeowners . offers sent`, 'ok')
 
   // ── WRITE JOBS TO SUPABASE ──────────────────────────────────
   try {
@@ -9788,9 +9787,14 @@ async function _adGenerateBatchesAsync(){
     })
 
     if(jobRows.length){
-      const { error } = await _supa.from('jobs').insert(jobRows)
-      if(error) console.warn('[BinDash] Job insert error:', error.message)
-      else console.log('[BinDash] ✅ Wrote', jobRows.length, 'jobs to Supabase')
+      const { data: inserted, error } = await _supa.from('jobs').insert(jobRows).select('id')
+      if(error){
+        console.error('[BinDash] Job insert FAILED:', error.message, error.details, error.hint)
+        showToast('⚠️ Batches generated but DB write failed: ' + error.message, 'err', 8000)
+      } else {
+        console.log('[BinDash] ✅ Wrote', inserted?.length, 'jobs to Supabase')
+        showToast(`${generatedBatches.length} batch${generatedBatches.length!==1?'es':''} generated · ${jobRows.length} jobs saved · offers sent ✅`, 'ok', 5000)
+      }
     }
   } catch(e){
     console.warn('[BinDash] Failed to write jobs:', e)
