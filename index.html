@@ -4090,34 +4090,49 @@ async function loadRNEarnings(){
 }
 async function loadRunnerRoutes(runnerRow){
   try {
-    // Query jobs by runner_id OR by runner_name/email fallback
-    const email = runnerRow.email
-    const rid   = runnerRow.id
+    const rid        = runnerRow.id
+    const runnerName = ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim()
 
+    // Fetch jobs for this runner (by id or name fallback)
     const { data: jobs, error } = await _supa
       .from('jobs')
-      .select('*, homeowner_signups(first_name, last_name, street_address, zip_code, service_type, bin_location, gate_type, gate_code, pet_info, service_notes)')
-      .or(`runner_id.eq.${rid},runner_name.eq.${encodeURIComponent((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).replace(/%20/g,' ')}`)
+      .select('*')
+      .or(`runner_id.eq.${rid},runner_name.eq."${runnerName}"`)
       .in('status', ['offered','accepted','in_progress','scheduled'])
       .order('scheduled_date', { ascending: true })
 
     if(error) throw error
 
+    // Fetch homeowner details for each unique email
+    const emails = [...new Set((jobs||[]).map(j=>j.homeowner_email).filter(Boolean))]
+    let hwMap = {}
+    if(emails.length){
+      const { data: hwRows } = await _supa
+        .from('homeowner_signups')
+        .select('email, first_name, last_name, street_address, zip_code, bin_location, gate_type, gate_code, pet_info, service_notes')
+        .in('email', emails)
+      ;(hwRows||[]).forEach(h => hwMap[h.email] = h)
+    }
+
+    // Attach homeowner data to each job
+    const enriched = (jobs||[]).map(j => ({
+      ...j,
+      hw: hwMap[j.homeowner_email] || null
+    }))
+
     const batchArea    = document.getElementById('rn-home-batch-area')
     const offerBanner  = document.getElementById('offer-banner')
-
-    // Separate pending offers from accepted jobs
-    const pendingOffers = (jobs||[]).filter(j => j.status === 'offered')
-    const activeJobs    = (jobs||[]).filter(j => j.status !== 'offered')
+    const pendingOffers = enriched.filter(j => j.status === 'offered')
+    const activeJobs    = enriched.filter(j => j.status !== 'offered')
 
     // -- PENDING OFFERS --------------------------------------
     if(pendingOffers.length > 0 && offerBanner){
-      const offer = pendingOffers[0] // show first pending offer
-      const earn  = (pendingOffers.filter(j=>j.batch_id===offer.batch_id||j.id===offer.id).length * 3.25).toFixed(2)
+      const offer = pendingOffers[0]
       const batchJobs = pendingOffers.filter(j => (j.batch_id||j.id) === (offer.batch_id||offer.id))
+      const earn = (batchJobs.length * 3.25).toFixed(2)
       const stopCount = batchJobs.length
-      const offerType = offer.offer_type || 'loyalty' // loyalty / zone / broadcast
-      const windowMins = offer.offer_type === 'broadcast' ? 30 : offer.offer_type === 'zone' ? 45 : 25
+      const offerType = offer.offer_type || 'zone'
+      const windowMins = offerType === 'broadcast' ? 30 : offerType === 'zone' ? 45 : 25
       const offerTypeBadge = offerType==='loyalty'
         ? '<span style="background:rgba(6,214,160,.15);color:var(--cyan);font-size:9px;font-weight:700;padding:1px 7px;border-radius:4px;margin-left:6px">🔒 Loyalty -- First Refusal</span>'
         : offerType==='broadcast'
@@ -4154,10 +4169,10 @@ async function loadRunnerRoutes(runnerRow){
         <div style="display:flex;align-items:center;gap:8px;padding:4px 0;${i>0?'border-top:1px solid rgba(255,255,255,.05)':''}">
           <div style="width:18px;height:18px;border-radius:50%;background:rgba(99,102,241,.3);color:#a5b4fc;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
           <div style="flex:1">
-            <span style="font-weight:600">${(j.homeowner_signups?.first_name||'')+' '+(j.homeowner_signups?.last_name||'')}</span>
-            <span style="color:var(--muted);margin-left:6px">${j.homeowner_signups?.street_address||'--'}</span>
+            <span style="font-weight:600">${(j.hw?.first_name||'')+' '+(j.hw?.last_name||'')}</span>
+            <span style="color:var(--muted);margin-left:6px">${j.hw?.street_address||'--'}</span>
           </div>
-          ${j.homeowner_signups?.gate_code?`<span style="color:#fbbf24;font-size:10px">🔑 ${j.homeowner_signups.gate_code}</span>`:''}
+          ${j.hw?.gate_code?`<span style="color:#fbbf24;font-size:10px">🔑 ${j.hw?.gate_code}</span>`:''}
         </div>`).join('')}
         ${stopCount>3?`<div style="font-size:10px;color:var(--muted);margin-top:4px">+ ${stopCount-3} more stops</div>`:''}
       </div>
@@ -4191,7 +4206,7 @@ async function loadRunnerRoutes(runnerRow){
 
     const batchCards = Object.values(batches).map(batch => {
       const earn = (batch.stops.length * 3.25).toFixed(2)
-      const addrs = batch.stops.map(s=>encodeURIComponent((s.homeowner_signups?.street_address||'')+', '+(s.homeowner_signups?.zip_code||''))).filter(Boolean)
+      const addrs = batch.stops.map(s=>encodeURIComponent((s.hw?.street_address||'')+', '+(s.hw?.zip_code||''))).filter(Boolean)
       const mapsUrl = addrs.length
         ? `https://www.google.com/maps/dir/?api=1&destination=${addrs.at(-1)}&waypoints=${addrs.slice(0,-1).join('|')}&travelmode=driving`
         : '#'
@@ -4224,12 +4239,12 @@ async function loadRunnerRoutes(runnerRow){
           <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:${i<batch.stops.length-1?'1px solid rgba(30,40,64,.5)':'none'}">
             <div style="width:22px;height:22px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
             <div style="flex:1">
-              <div style="font-size:13px;font-weight:600">${(s.homeowner_signups?.first_name||'')+' '+(s.homeowner_signups?.last_name||'')}</div>
-              <div style="font-size:11px;color:var(--muted)">📍 ${s.homeowner_signups?.street_address||'--'}</div>
-              ${s.homeowner_signups?.gate_code?`<div style="font-size:11px;color:#fbbf24;margin-top:2px">🔑 Gate: ${s.homeowner_signups.gate_code}</div>`:''}
-              ${s.homeowner_signups?.pet_info&&s.homeowner_signups.pet_info!=='None'?`<div style="font-size:11px;color:#fbbf24;margin-top:2px">🐾 ${s.homeowner_signups.pet_info}</div>`:''}
-              ${s.homeowner_signups?.bin_location&&s.homeowner_signups.bin_location!=='--'?`<div style="font-size:11px;color:var(--muted);margin-top:2px">📦 Bins: ${s.homeowner_signups.bin_location}</div>`:''}
-              ${s.homeowner_signups?.service_notes?`<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic">📝 ${s.homeowner_signups.service_notes}</div>`:''}
+              <div style="font-size:13px;font-weight:600">${(s.hw?.first_name||'')+' '+(s.hw?.last_name||'')}</div>
+              <div style="font-size:11px;color:var(--muted)">📍 ${s.hw?.street_address||'--'}</div>
+              ${s.hw?.gate_code?`<div style="font-size:11px;color:#fbbf24;margin-top:2px">🔑 Gate: ${s.hw?.gate_code}</div>`:''}
+              ${s.hw?.pet_info&&s.hw?.pet_info!=='None'?`<div style="font-size:11px;color:#fbbf24;margin-top:2px">🐾 ${s.hw?.pet_info}</div>`:''}
+              ${s.hw?.bin_location&&s.hw?.bin_location!=='--'?`<div style="font-size:11px;color:var(--muted);margin-top:2px">📦 Bins: ${s.hw?.bin_location}</div>`:''}
+              ${s.hw?.service_notes?`<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic">📝 ${s.hw?.service_notes}</div>`:''}
             </div>
             <div style="font-size:11px;color:var(--green);font-weight:600;flex-shrink:0">$3.25</div>
           </div>`).join('')}
@@ -4288,7 +4303,7 @@ async function acceptOffer(){
     // Update all jobs in this batch to 'accepted'
     const { error } = await _supa.from('jobs')
       .update({ status:'accepted', runner_accepted:true, updated_at:new Date().toISOString() })
-      .or(`batch_id.eq.${offerId},id.eq.${offerId}`)
+      .eq('batch_id', offerId)
       .eq('runner_id', runnerRow.id)
 
     if(error) throw error
@@ -4313,7 +4328,7 @@ async function declineOffer(){
   try {
     await _supa.from('jobs')
       .update({ status:'declined', updated_at:new Date().toISOString() })
-      .or(`batch_id.eq.${offerId},id.eq.${offerId}`)
+      .eq('batch_id', offerId)
       .eq('runner_id', runnerRow.id)
   } catch(e){ console.warn('Decline error:', e) }
 
@@ -4326,7 +4341,7 @@ async function startBatch(batchId){
   try {
     await _supa.from('jobs')
       .update({ status:'in_progress', updated_at:new Date().toISOString() })
-      .or(`batch_id.eq.${batchId},id.eq.${batchId}`)
+      .eq('batch_id', batchId)
     showToast('Route started ▶ -- stops are live','ok')
     await loadRunnerRoutes(window._currentRunnerRow)
   } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
@@ -4338,7 +4353,7 @@ async function completeBatch(batchId){
     // Mark all jobs in batch complete
     const { data: jobs } = await _supa.from('jobs')
       .update({ status:'complete', completed_at:new Date().toISOString(), updated_at:new Date().toISOString() })
-      .or(`batch_id.eq.${batchId},id.eq.${batchId}`)
+      .eq('batch_id', batchId)
       .select('id, amount')
 
     const jobCount  = jobs?.length || 0
