@@ -3756,6 +3756,10 @@ async function _populateHWDashData(row, fn, ln, initials){
   }
   safe('hw-collections-count', row.collections_done || 0)
 
+  // Upcoming = next 4 weeks of Bin Out visits (each collection day = 1 collection)
+  const upcomingWeeks = 4
+  safe('hw-upcoming-count', colDayIdx >= 0 ? upcomingWeeks : 0)
+
   // Next collection dates computed from collection_day
   const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   const shortDays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
@@ -4296,13 +4300,40 @@ async function startBatch(batchId){
 }
 
 async function completeBatch(batchId){
+  const runnerRow = window._currentRunnerRow
   try {
-    await _supa.from('jobs')
+    // Mark all jobs in batch complete
+    const { data: jobs } = await _supa.from('jobs')
       .update({ status:'complete', completed_at:new Date().toISOString(), updated_at:new Date().toISOString() })
       .or(`batch_id.eq.${batchId},id.eq.${batchId}`)
-    showToast('Route completed ✅ -- pay will be processed within 24-48 hrs','ok', 5000)
-    await loadRunnerRoutes(window._currentRunnerRow)
-  } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
+      .select('id, amount')
+
+    const jobCount  = jobs?.length || 0
+    const totalEarned = (jobCount * 3.25).toFixed(2)
+
+    // Create pending payout record -- batched to next pay day (Friday)
+    if(runnerRow?.id && jobCount > 0){
+      const today   = new Date()
+      const daysToFri = (5 - today.getDay() + 7) % 7 || 7
+      const payDate = new Date(today); payDate.setDate(today.getDate() + daysToFri)
+      await _supa.from('runner_payouts').insert({
+        runner_id:        runnerRow.id,
+        runner_name:      ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim(),
+        stops:            jobCount,
+        amount:           totalEarned,
+        status:           'pending',
+        triggered_by:     'auto',
+        pay_period_start: today.toISOString().slice(0,10),
+        pay_period_end:   payDate.toISOString().slice(0,10),
+        created_at:       new Date().toISOString(),
+      })
+    }
+
+    showToast('Route completed ✅ -- $'+totalEarned+' queued for your next payout (Friday)', 'ok', 6000)
+    await loadRunnerRoutes(runnerRow)
+  } catch(e){
+    showToast('Error: '+String(e?.message||e), 'err')
+  }
 }
 
 function showCurrentOfferDetail(){
@@ -9457,6 +9488,11 @@ function updateDispatchStats(){
 }
 
 function adGenerateBatches(){
+  // Kick off async version
+  _adGenerateBatchesAsync()
+}
+
+async function _adGenerateBatchesAsync(){
   const day    = document.getElementById('dispatch-day-val')?.value || FULL_DAYS[new Date().getDay()]
   const zoneId = document.getElementById('dispatch-zone-select')?.value || ''
 
@@ -9576,7 +9612,54 @@ function adGenerateBatches(){
   })
 
   renderDispatchPipeline()
-  showToast(`${generatedBatches.length} batch${generatedBatches.length!==1?'es':''} generated for ${day} . ${scheduled.length} homeowners . offers sent ✅`, 'ok')
+  showToast(`${generatedBatches.length} batch${generatedBatches.length!==1?'es':''} generated for ${day} . ${scheduled.length} homeowners . offers sent`, 'ok')
+
+  // ── WRITE JOBS TO SUPABASE ──────────────────────────────────
+  try {
+    const jobRows = []
+    const now = new Date()
+
+    generatedBatches.forEach(batch => {
+      const expiresAt = new Date(now.getTime() + batch.windowMins * 60 * 1000).toISOString()
+      const scheduledDate = (() => {
+        // Find next occurrence of the collection day
+        const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+        const targetIdx = dayNames.findIndex(d => d.toLowerCase() === (batch.day||'').toLowerCase())
+        if(targetIdx < 0) return now.toISOString().slice(0,10)
+        const d = new Date(); const diff = (targetIdx - d.getDay() + 7) % 7 || 7
+        d.setDate(d.getDate() + diff)
+        return d.toISOString().slice(0,10)
+      })()
+
+      batch.stops.forEach(hw => {
+        jobRows.push({
+          batch_id:          batch.id,
+          homeowner_email:   hw.email,
+          runner_id:         batch.runner?.id || null,
+          runner_name:       batch.runner?.name || null,
+          visit_type:        'BIN_OUT',
+          job_type:          'subscription',
+          service_type:      hw.service === 'BOTH' ? 'Recycling + General Waste' : hw.service === 'GENERAL' ? 'General Waste' : 'Recycling',
+          status:            batch.runner ? 'offered' : 'unassigned',
+          offer_type:        batch.offerType || 'zone',
+          offer_expires_at:  expiresAt,
+          scheduled_date:    scheduledDate,
+          amount:            3.25,
+          zone_id:           batch.zoneId || null,
+          created_at:        now.toISOString(),
+          updated_at:        now.toISOString(),
+        })
+      })
+    })
+
+    if(jobRows.length){
+      const { error } = await _supa.from('jobs').insert(jobRows)
+      if(error) console.warn('[BinDash] Job insert error:', error.message)
+      else console.log('[BinDash] ✅ Wrote', jobRows.length, 'jobs to Supabase')
+    }
+  } catch(e){
+    console.warn('[BinDash] Failed to write jobs:', e)
+  }
 }
 
 function renderRunnerAvailabilityAlerts(unzoned){
