@@ -13658,29 +13658,33 @@ async function submitCreateRunnerCode(){
 
   try {
     // Insert into runner_interest table
-    const basePayload = {
+    // Confirmed base columns: full_name, email, zip_code, invite_code, approved_at, created_at
+    // Optional columns added via migration: phone, notes, source
+    const minPayload = {
       full_name:   fullName,
       email,
-      phone,
       zip_code:    zip,
       invite_code: code,
       approved_at: new Date().toISOString(),
       created_at:  new Date().toISOString(),
     }
 
-    let insertResult = await _supa.from('runner_interest').insert({
-      ...basePayload,
-      notes:  notes || null,
-      source: 'admin_created',
-    })
+    // Try progressively simpler payloads until one succeeds
+    const payloads = [
+      { ...minPayload, phone, notes: notes||null, source:'admin_created' },
+      { ...minPayload, phone, source:'admin_created' },
+      { ...minPayload, phone },
+      minPayload,
+    ]
 
-    // If schema error (columns don't exist yet), retry with base columns only
-    if(insertResult.error?.message?.includes('column') || insertResult.error?.message?.includes('schema')){
-      console.warn('[BinDash] Retrying without optional columns -- run migration SQL to add notes/source')
-      insertResult = await _supa.from('runner_interest').insert(basePayload)
+    let insertResult = { error: { message:'not tried' } }
+    for(const payload of payloads){
+      insertResult = await _supa.from('runner_interest').insert(payload)
+      if(!insertResult.error) break
+      console.warn('[BinDash] insert attempt failed:', insertResult.error.message, '-- trying simpler payload')
     }
 
-    const error = null // consumed above
+    if(insertResult.error) throw new Error(insertResult.error.message)
 
     // Show success state with the code in the modal
     document.getElementById('modal-box').innerHTML = `
