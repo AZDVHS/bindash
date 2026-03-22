@@ -11131,6 +11131,15 @@ async function approveRunner(appId){
   if(btn){ btn.disabled=false; btn.textContent='✅ Approve' }
   renderPendingRunnerList(); renderRunnerList(); syncZoneData(); updateOverviewCounts()
   showToast(app.name+' approved ✅ -- added to runner pool','ok')
+
+  // Clear any pending zone requests from this runner (they now have an assigned zone)
+  try {
+    await _supa.from('runner_zone_requests')
+      .update({ status:'approved_via_runner', updated_at:new Date().toISOString() })
+      .eq('runner_email', app.email)
+      .eq('status','pending')
+    loadRunnerZoneRequestsBadge()
+  } catch(e){ console.warn('[BinDash] zone request clear:', e) }
   const _rnZoneName = ADMIN_ZONES.find(z=>z.id===zoneId)?.name||'Your zone'
   // Send approval email with their own referral code
   sendEmail(app.email, 'Welcome to BinDash! Your runner account is active',
@@ -14225,7 +14234,12 @@ async function renderRunnerZoneRequests(){
           </div>
 
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button class="btn btn-cyan btn-sm" onclick="approveNewZoneRequest('${zip}','${inputId}',${JSON.stringify(group.map(r=>r.id))},${JSON.stringify(group.map(r=>({email:r.runner_email,name:r.runner_name})))})">✅ Approve &amp; Create Zone</button>
+            <button class="btn btn-cyan btn-sm"
+              data-zip="${zip}"
+              data-inputid="${inputId}"
+              data-reqids="${group.map(r=>r.id).join(',')}"
+              data-runners="${encodeURIComponent(JSON.stringify(group.map(r=>({email:r.runner_email,name:r.runner_name}))))}"
+              onclick="approveNewZoneRequest(this.dataset.zip,this.dataset.inputid,this.dataset.reqids.split(','),JSON.parse(decodeURIComponent(this.dataset.runners)))">✅ Approve &amp; Create Zone</button>
             <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="dismissRunnerZoneRequests('${zip}')">Dismiss</button>
           </div>
         </div>`
@@ -14411,7 +14425,12 @@ function approveNewZoneRequest(zip, inputId, reqIds, runnersJson){
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
-    <button class="btn btn-cyan" onclick="_submitApproveNewZone('${zip}',${JSON.stringify(reqIds)},${JSON.stringify(runners)})">✅ Create Zone(s) &amp; Notify Runner</button>
+    <button class="btn btn-cyan"
+      id="nzr-submit-btn"
+      data-zip="${zip}"
+      data-reqids="${Array.isArray(reqIds)?reqIds.join(','):reqIds}"
+      data-runners="${encodeURIComponent(JSON.stringify(runners))}"
+      onclick="const b=this;_submitApproveNewZone(b.dataset.zip,b.dataset.reqids.split(','),JSON.parse(decodeURIComponent(b.dataset.runners)))">✅ Create Zone(s) &amp; Notify Runner</button>
   </div>`
   openM()
 }
