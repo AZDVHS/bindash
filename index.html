@@ -3404,7 +3404,12 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
                 <!-- GENERATE BUTTONS -->
                 <button class="btn btn-cyan btn-full btn-sm" onclick="adGenerateBatches()" style="margin-bottom:7px">🌙 Generate Bin Out Batches</button>
-                <button class="btn btn-outline btn-full btn-sm" onclick="showPrequeueInfo()">☀️ Pre-queue Bin In Batches</button>
+                <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.15);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--sub);margin-bottom:7px;line-height:1.5">
+                  ☀️ <strong style="color:var(--text)">Bin In auto-routes</strong> when runner marks Bin Out complete — no action needed. Offered to same runner with 25 min loyalty window.
+                </div>
+                <div style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--sub);margin-bottom:7px;line-height:1.5">
+                  📅 <strong style="color:var(--text)">Future:</strong> Bin Out batches will auto-generate 24hrs before each collection day based on zone schedule.
+                </div>
 
                 <!-- BATCH SIZE -->
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
@@ -4497,20 +4502,20 @@ async function startBatch(batchId){
 async function completeBatch(batchId){
   const runnerRow = window._currentRunnerRow
   try {
-    // Mark all jobs in batch complete
     const { data: jobs } = await _supa.from('jobs')
       .update({ status:'complete', completed_at:new Date().toISOString(), updated_at:new Date().toISOString() })
       .eq('batch_id', batchId)
-      .select('id, amount')
+      .select('id, amount, visit_type, homeowner_email, runner_id, runner_name, scheduled_date, zone_id, service_type')
 
-    const jobCount  = jobs?.length || 0
+    const jobCount    = jobs?.length || 0
     const totalEarned = (jobCount * 3.25).toFixed(2)
+    const visitType   = jobs?.[0]?.visit_type
 
-    // Create pending payout record -- batched to next pay day (Friday)
+    // Create pending payout
     if(runnerRow?.id && jobCount > 0){
-      const today   = new Date()
+      const today    = new Date()
       const daysToFri = (5 - today.getDay() + 7) % 7 || 7
-      const payDate = new Date(today); payDate.setDate(today.getDate() + daysToFri)
+      const payDate  = new Date(today); payDate.setDate(today.getDate() + daysToFri)
       await _supa.from('runner_payouts').insert({
         runner_id:        runnerRow.id,
         runner_name:      ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim(),
@@ -4524,10 +4529,52 @@ async function completeBatch(batchId){
       })
     }
 
-    showToast('Route completed ✅ -- $'+totalEarned+' queued for your next payout (Friday)', 'ok', 6000)
+    // AUTO-CREATE BIN IN batch if this was BIN OUT
+    if(visitType === 'BIN_OUT' && jobs?.length){
+      await _autoCreateBinInBatch(jobs, runnerRow)
+    }
+
+    showToast(`Route complete ✅ — $${totalEarned} queued for Friday payout`, 'ok', 5000)
     await loadRunnerRoutes(runnerRow)
   } catch(e){
     showToast('Error: '+String(e?.message||e), 'err')
+  }
+}
+
+async function _autoCreateBinInBatch(binOutJobs, runnerRow){
+  try {
+    const ref      = binOutJobs[0]
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
+    const inBatchId = (ref.batch_id || ref.id).replace('0321','0322').replace('BIN_OUT','BIN_IN') + '-IN'
+    const expiresAt = new Date(Date.now() + 25 * 60 * 1000).toISOString() // 25 min loyalty window
+
+    const inJobs = binOutJobs.map(j => ({
+      batch_id:          inBatchId,
+      homeowner_email:   j.homeowner_email,
+      runner_id:         j.runner_id,
+      runner_name:       j.runner_name,
+      visit_type:        'BIN_IN',
+      job_type:          'subscription',
+      service_type:      j.service_type,
+      status:            'offered',
+      offer_type:        'loyalty',
+      offer_expires_at:  expiresAt,
+      scheduled_date:    tomorrow.toISOString().slice(0,10),
+      amount:            3.25,
+      zone_id:           j.zone_id,
+      created_at:        new Date().toISOString(),
+      updated_at:        new Date().toISOString(),
+    }))
+
+    const { error } = await _supa.from('jobs').insert(inJobs)
+    if(error) console.warn('[BinDash] Bin In auto-create failed:', error.message)
+    else {
+      showToast('☀️ Bin In route auto-created — check your offers!', 'info', 4000)
+      // Reload routes so offer banner appears
+      setTimeout(() => loadRunnerRoutes(runnerRow), 1500)
+    }
+  } catch(e){
+    console.warn('[BinDash] _autoCreateBinInBatch:', e)
   }
 }
 
@@ -9025,91 +9072,95 @@ function initRoutesTabs(){
 
 const COMPLETED_ROUTES = [] // Populated from Supabase completed jobs
 
-function renderCompletedRoutes(){
+async function renderCompletedRoutes(){
   const container = document.getElementById('completed-route-container')
   if(!container) return
+  container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted)">Loading...</div>'
+
   const range = document.getElementById('completed-range')?.value || 'today'
-  const today = new Date()
+  const runnerRow = window._rnRow
+  if(!runnerRow){ container.innerHTML = '<div style="padding:20px;color:var(--muted)">No runner session</div>'; return }
 
-  const filtered = COMPLETED_ROUTES.filter(r => {
-    const diff = Math.round((today - new Date(r.date)) / 86400000)
-    if(range==='today')  return diff===0
-    if(range==='3days')  return diff<=2
-    if(range==='7days')  return diff<=6
-    return true
-  })
+  try {
+    // Date filter
+    const now = new Date()
+    const fromDate = new Date(now)
+    if(range==='today')  fromDate.setHours(0,0,0,0)
+    else if(range==='3days')  fromDate.setDate(now.getDate()-2)
+    else if(range==='7days')  fromDate.setDate(now.getDate()-6)
+    else fromDate.setFullYear(2020)
 
-  if(!filtered.length){
-    container.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted)"><div style="font-size:40px;margin-bottom:12px">✅</div><div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No completed routes in this period</div><div style="font-size:13px">Try expanding the date range.</div></div>`
-    return
+    const { data: jobs } = await _supa
+      .from('jobs')
+      .select('*')
+      .or(`runner_id.eq.${runnerRow.id},runner_name.eq."${((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).trim()}"`)
+      .eq('status', 'complete')
+      .gte('completed_at', fromDate.toISOString())
+      .order('completed_at', { ascending: false })
+
+    if(!jobs?.length){
+      container.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted)">
+        <div style="font-size:40px;margin-bottom:12px">✅</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No completed routes in this period</div>
+        <div style="font-size:13px">Try expanding the date range.</div>
+      </div>`
+      return
+    }
+
+    // Group by batch_id
+    const batches = {}
+    jobs.forEach(j => {
+      const key = j.batch_id || j.id
+      if(!batches[key]) batches[key] = { id:key, date:j.completed_at, type:j.visit_type, stops:[], amount:0 }
+      batches[key].stops.push(j)
+      batches[key].amount += parseFloat(j.amount||3.25)
+    })
+
+    // Also fetch homeowner emails for each batch
+    const allEmails = [...new Set(jobs.map(j=>j.homeowner_email).filter(Boolean))]
+    let hwMap = {}
+    if(allEmails.length){
+      const { data: hwRows } = await _supa.from('homeowner_signups')
+        .select('email, first_name, last_name, street_address')
+        .in('email', allEmails)
+      ;(hwRows||[]).forEach(h => hwMap[h.email] = h)
+    }
+
+    container.innerHTML = Object.values(batches).map(batch => {
+      const dt = batch.date ? new Date(batch.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : '--'
+      const isOut = batch.type==='BIN_OUT' || batch.type==='Bin Out'
+      return `<div style="background:var(--surface);border:1px solid ${isOut?'rgba(99,102,241,.25)':'rgba(6,214,160,.2)'};border-radius:12px;padding:14px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="${isOut?'vt-out':'vt-in'}">${isOut?'🌙 BIN OUT':'☀️ BIN IN'}</span>
+            <div>
+              <div style="font-size:13px;font-weight:700">${String(batch.id).slice(0,16).toUpperCase()}</div>
+              <div style="font-size:11px;color:var(--muted)">${dt}</div>
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:16px;font-weight:800;color:var(--green)">$${batch.amount.toFixed(2)}</div>
+            <div style="font-size:10px;color:var(--muted)">${batch.stops.length} stop${batch.stops.length!==1?'s':''}</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          ${batch.stops.map((s,i)=>{
+            const hw = hwMap[s.homeowner_email] || {}
+            return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:5px 0;border-top:${i>0?'1px solid var(--border)':'none'}">
+              <span style="color:#22c55e;font-size:14px">✓</span>
+              <span style="flex:1">${(hw.first_name||'')+' '+(hw.last_name||s.homeowner_email||'--')} · ${hw.street_address||'--'}</span>
+              <span style="color:var(--green);font-weight:600">$${parseFloat(s.amount||3.25).toFixed(2)}</span>
+            </div>`
+          }).join('')}
+        </div>
+      </div>`
+    }).join('')
+
+  } catch(e){
+    container.innerHTML = `<div style="padding:20px;color:#fca5a5">Error loading: ${e.message}</div>`
   }
-
-  const byDate = {}
-  filtered.forEach(r=>{ if(!byDate[r.label]) byDate[r.label]=[]; byDate[r.label].push(r) })
-  const typeColor = {'Bin Out':'#a5b4fc','Bin In':'#6ee7b7','Mixed':'var(--cyan)'}
-  const typeIcon  = {'Bin Out':'🌙','Bin In':'☀️','Mixed':'⚡'}
-
-  container.innerHTML = Object.entries(byDate).map(([lbl, routes])=>{
-    const total = routes.reduce((s,r)=>s+r.earned,0).toFixed(2)
-    const stops = routes.reduce((s,r)=>s+r.stops,0)
-    return `<div style="margin-bottom:18px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <span style="font-size:13px;font-weight:700">${lbl}</span>
-        <span style="font-size:12px;color:var(--sub)">${stops} stops . <strong style="color:var(--green)">$${total}</strong></span>
-      </div>
-      ${routes.map(r=>{
-        const hasLog = r.stopLog && r.stopLog.length > 0
-        const stopRows = hasLog ? r.stopLog.map(s=>`
-          <div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
-            <div style="width:20px;height:20px;border-radius:50%;background:rgba(34,197,94,.15);color:#22c55e;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;margin-top:1px">${s.num}</div>
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:600;font-size:12px">${s.name}</div>
-              <div style="font-size:11px;color:var(--muted)">${s.address}</div>
-              ${s.note ? `<div style="font-size:11px;color:var(--sub);margin-top:2px">${s.note}</div>` : ''}
-            </div>
-            <div style="font-size:10px;color:var(--muted);flex-shrink:0;text-align:right">✅ ${s.done}</div>
-          </div>`).join('') : '<div style="font-size:12px;color:var(--muted);padding:10px 0;text-align:center">No stop detail recorded</div>'
-
-        return `
-        <div style="border:1px solid var(--border);border-left:4px solid ${typeColor[r.type]||'var(--cyan)'};border-radius:10px;margin-bottom:8px;background:var(--surface);overflow:hidden">
-          <div style="display:flex;align-items:center;gap:10px;padding:10px 14px">
-            <div style="flex:1">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
-                <span style="font-size:13px">${typeIcon[r.type]||'✅'}</span>
-                <span style="font-weight:700;font-size:13px">${r.id}</span>
-                <span style="font-size:11px;color:var(--muted)">${r.zone}</span>
-              </div>
-              <div style="display:flex;gap:12px;font-size:11px;color:var(--muted);flex-wrap:wrap">
-                <span>📍 ${r.stops} stops</span>
-                <span>🕐 ${r.duration}</span>
-                <span>📏 ${r.distance}</span>
-                <span>✅ ${r.submittedAt}</span>
-              </div>
-            </div>
-            <div style="text-align:right;flex-shrink:0">
-              <div style="font-size:16px;font-weight:800;color:var(--green)">$${r.earned.toFixed(2)}</div>
-              <div style="margin-top:4px">
-                ${r.payStatus==='pending'
-                  ? `<span style="background:rgba(245,158,11,.15);color:#fbbf24;font-size:9px;font-weight:700;border-radius:99px;padding:2px 7px">⏳ Pending Approval</span>`
-                  : `<span style="font-size:9px;color:var(--muted)">Pay: Friday</span>`
-                }
-              </div>
-            </div>
-          </div>
-          <div style="border-top:1px solid var(--border);padding:0 14px">
-            <button onclick="toggleStopLog(this)" style="background:none;border:none;width:100%;text-align:left;padding:8px 0;font-size:12px;color:var(--sub);cursor:pointer;display:flex;align-items:center;gap:6px">
-              <span style="font-size:11px">▶</span>
-              <span>Review Stops (${r.stops})</span>
-            </button>
-            <div class="stop-log-body" style="display:none;padding-bottom:8px">
-              ${stopRows}
-            </div>
-          </div>
-        </div>`
-      }).join('')}
-    </div>`
-  }).join('')
 }
+
 
 function toggleStopLog(btn){
   const body = btn.nextElementSibling
@@ -10388,9 +10439,11 @@ function renderDispatchPipeline(){
 
     return `<div style="border:1px solid rgba(${borderCol==='#22c55e'?'34,197,94':borderCol==='#f59e0b'?'245,158,11':borderCol==='#3b82f6'?'59,130,246':'239,68,68'},.3);border-left:4px solid ${borderCol};border-radius:10px;overflow:hidden${b.status==='unassigned'?';animation:pulse-border 2s infinite':''}">
       <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:${bgCol}">
-        <div style="display:flex;flex-direction:column;gap:2px">
-          <span class="vt-out" style="font-size:10px">🌙 OUT</span>
-          <span class="vt-in" style="font-size:10px">☀️ IN</span>
+        <div style="flex-shrink:0">
+          <span class="${b.visitType==='BIN_IN'?'vt-in':'vt-out'}" style="font-size:12px;padding:4px 10px">
+            ${b.visitType==='BIN_IN'?'☀️ BIN IN':'🌙 BIN OUT'}
+          </span>
+          ${b.visitType!=='BIN_IN' ? `<div style="font-size:9px;color:var(--muted);margin-top:3px;text-align:center">☀️ In auto-queues on complete</div>` : ''}
         </div>
         <div style="flex:1">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
