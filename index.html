@@ -13,7 +13,14 @@
 // ══════════════════════════════════════════════════
 const SUPABASE_URL     = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
 const SUPABASE_ANON_KEY = 'sb_publishable_PzQNU1g9t7nH_c8GrK37sQ_2OocnlNQ'
-const _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+let _supa
+try {
+  _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+} catch(e) {
+  console.error('[BinDash] Supabase init failed:', e)
+  // Fallback stub so app doesn't crash
+  _supa = { from: () => ({ select: () => ({ eq: () => ({ single: () => Promise.resolve({}) }) }), insert: () => Promise.resolve({}), update: () => ({ eq: () => Promise.resolve({}) }), upsert: () => Promise.resolve({}) }), auth: { getSession: () => Promise.resolve({data:{session:null}}), signInWithPassword: () => Promise.resolve({error:{message:'Service unavailable'}}), signUp: () => Promise.resolve({}), onAuthStateChange: () => {} } }
+}
 
 
 // ─────────────────────────────────────────────────────────────
@@ -3569,7 +3576,6 @@ function go(id){
   if(!target){ console.error('[BinDash] go() — screen not found:', id); return }
   target.classList.add('active')
   window.scrollTo(0,0)
-  // Pre-fill runner name from invite if coming from code validation
   if(id === 'S-rn-ob' && window._runnerInviteName){
     const parts = (window._runnerInviteName || '').split(' ')
     const fnEl = document.getElementById('r-fn')
@@ -3578,6 +3584,10 @@ function go(id){
     if(lnEl && parts[1]) lnEl.value = parts.slice(1).join(' ')
   }
 }
+// Quick self-test — if this runs, JS is working
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('[BinDash] ✅ JS loaded OK — go() is defined:', typeof go)
+})
 
 // ── CURRENT USER STATE ────────────────────────────
 // Set on login/session restore, cleared on logout
