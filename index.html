@@ -254,9 +254,28 @@ async function launchStripeCheckout(){
 
   } catch(e){
     console.error('[BinDash] Checkout error:', String(e?.message||e))
-    showToast('Something went wrong -- '+String(e?.message||e), 'err')
+    // Don't leave user stuck -- offer skip option
+    showToast('Payment issue: '+String(e?.message||e).slice(0,60), 'err', 6000)
+    const btn = document.getElementById('stripe-checkout-btn')
     if(btn){ btn.disabled=false; btn.textContent='🔒 Pay Securely with Stripe ->' }
+    // Show the skip option more prominently
+    document.getElementById('h-s5')?.querySelector?.('[onclick="skipPaymentForNow()"]')?.setAttribute('style','color:var(--cyan);font-size:13px;font-weight:600')
   }
+}
+
+async function skipPaymentForNow(){
+  // Record is already saved in Supabase from step 4 -- just redirect to pending screen
+  // Mark status as payment_pending so admin knows payment isn't done
+  const em = document.getElementById('h-em')?.value?.trim() || ''
+  if(em){
+    try {
+      await _supa.from('homeowner_signups')
+        .update({ status:'payment_pending', updated_at:new Date().toISOString() })
+        .eq('email', em)
+    } catch(e){ console.warn('Status update:', e) }
+  }
+  go('S-hw-pending')
+  showToast('Account saved ✅ — complete payment from your dashboard to activate scheduling', 'ok', 6000)
 }
 
 function handleStripeReturn(){
@@ -1864,7 +1883,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <!-- STEP 5: Payment -->
       <div id="h-s5" style="display:none">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;margin-bottom:6px">Secure Payment 💳</div>
-        <div style="color:var(--sub);font-size:14px;margin-bottom:28px">You'll be taken to Stripe's secure checkout. No card details stored on BinDash.</div>
+        <div style="color:var(--sub);font-size:14px;margin-bottom:20px">Your info is saved. Complete payment to activate your account — or skip for now and pay from your dashboard.</div>
 
         <div style="background:var(--surface2);border:1px solid var(--border2);border-radius:14px;padding:18px 20px;margin-bottom:16px" id="checkout-plan-summary">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -1878,17 +1897,27 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           </div>
         </div>
 
-        <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:12px;color:var(--sub);line-height:1.6">
-          ✅ <strong style="color:var(--text)">Cancel or pause any time</strong> -- no lock-in. Your first collection is booked after admin reviews and approves your account.
+        <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:var(--sub);line-height:1.6">
+          ✅ <strong style="color:var(--text)">Cancel or pause any time</strong> -- no lock-in. Scheduling begins after admin approves your account.
         </div>
 
-        <button class="btn btn-cyan btn-lg btn-full" id="stripe-checkout-btn" onclick="launchStripeCheckout()">
+        <button class="btn btn-cyan btn-lg btn-full" id="stripe-checkout-btn" onclick="launchStripeCheckout()" style="margin-bottom:10px">
           🔒 Pay Securely with Stripe ->
         </button>
-        <div style="text-align:center;margin-top:10px;font-size:11px;color:var(--muted)">
+        <div style="text-align:center;margin-bottom:16px;font-size:11px;color:var(--muted)">
           Redirects to Stripe . 256-bit SSL . Cancel anytime
         </div>
-        <div style="display:flex;gap:12px;margin-top:24px">
+
+        <div style="border-top:1px solid var(--border);padding-top:16px">
+          <button class="btn btn-ghost btn-full" onclick="skipPaymentForNow()" style="color:var(--sub);font-size:13px">
+            ⏭ Skip for now — complete payment from my dashboard
+          </button>
+          <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:8px">
+            Your info is saved. Scheduling is unlocked once payment is complete.
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:16px">
           <button class="btn btn-ghost btn-sm" onclick="hBack(5)"><- Back</button>
         </div>
       </div>
@@ -2148,23 +2177,51 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 <div id="S-hw-pending" class="screen">
   <div style="min-height:100vh;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:36px 20px">
     <div style="max-width:520px;width:100%;text-align:center">
-      <div style="font-size:64px;margin-bottom:16px">⏳</div>
-      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;margin-bottom:10px">Application Submitted!</div>
-      <div style="font-size:16px;color:var(--sub);line-height:1.7;margin-bottom:28px">
-        Thank you -- your BinDash account is <strong style="color:var(--text)">pending review</strong>. Our team will verify your details and assign you to a service zone, usually within <strong style="color:var(--cyan)">24-48 hours</strong>.
-      </div>
-      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:22px;margin-bottom:24px;text-align:left">
-        <div style="font-size:13px;font-weight:700;margin-bottom:14px;color:var(--text)">What happens next</div>
-        <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--sub)">
-          <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">1</span><span>Our team reviews your application and property details</span></div>
-          <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</span><span>You're assigned to a service zone based on your address and availability in your area</span></div>
-          <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">3</span><span>You'll receive an email confirmation when your account is approved and your first collection is scheduled</span></div>
+
+      <!-- PAYMENT PENDING STATE (shown when payment was skipped) -->
+      <div id="hw-pending-pay-state" style="display:none">
+        <div style="font-size:64px;margin-bottom:16px">💳</div>
+        <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;margin-bottom:10px">One step left!</div>
+        <div style="font-size:15px;color:var(--sub);line-height:1.7;margin-bottom:24px">
+          Your info is saved. Complete payment below to activate your account and get on the schedule.
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:22px;margin-bottom:20px;text-align:left">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-weight:700" id="hw-pending-plan-name">Your Plan</span>
+            <span style="font-family:'DM Mono',monospace;font-weight:700;color:var(--cyan)" id="hw-pending-plan-price">--</span>
+          </div>
+          <div style="font-size:12px;color:var(--sub)" id="hw-pending-plan-desc"></div>
+        </div>
+        <button class="btn btn-cyan btn-lg btn-full" onclick="retryPayment()" style="margin-bottom:12px">
+          🔒 Complete Payment with Stripe ->
+        </button>
+        <div style="font-size:12px;color:var(--muted)">Secure · 256-bit SSL · Cancel anytime</div>
+        <div style="margin-top:20px;font-size:13px;color:var(--muted)">
+          Already paid? <a style="color:var(--cyan);cursor:pointer" onclick="go('S-login')">Log in to your account</a>
         </div>
       </div>
-      <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:14px 16px;font-size:13px;color:var(--sub);margin-bottom:24px">
-        📧 We'll email you at the address you provided. If you have any questions in the meantime, reply to that email or contact <span style="color:var(--cyan)"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="becdcbceced1cccafedcd7d0dadfcdd690ddd1d3">[email&#160;protected]</a></span>
+
+      <!-- REVIEW PENDING STATE (payment done, waiting admin) -->
+      <div id="hw-pending-review-state">
+        <div style="font-size:64px;margin-bottom:16px">⏳</div>
+        <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;margin-bottom:10px">Application Submitted!</div>
+        <div style="font-size:16px;color:var(--sub);line-height:1.7;margin-bottom:28px">
+          Thank you -- your BinDash account is <strong style="color:var(--text)">pending review</strong>. Our team will verify your details and assign you to a service zone, usually within <strong style="color:var(--cyan)">24-48 hours</strong>.
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:22px;margin-bottom:24px;text-align:left">
+          <div style="font-size:13px;font-weight:700;margin-bottom:14px;color:var(--text)">What happens next</div>
+          <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--sub)">
+            <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">1</span><span>Our team reviews your application and property details</span></div>
+            <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</span><span>You're assigned to a service zone and a runner is matched to your area</span></div>
+            <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">3</span><span>You'll receive an email when your account is approved and your first collection is scheduled</span></div>
+          </div>
+        </div>
+        <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:14px 16px;font-size:13px;color:var(--sub);margin-bottom:24px">
+          📧 Check your email for confirmation. Questions? Contact <span style="color:var(--cyan)">hello@bindash.shop</span>
+        </div>
+        <button class="btn btn-outline btn-lg" onclick="go('S-land')" style="margin-right:10px"><- Back to BinDash</button>
       </div>
-      <button class="btn btn-outline btn-lg" onclick="go('S-land')" style="margin-right:10px"><- Back to BinDash</button>
+
     </div>
   </div>
 </div>
@@ -2260,6 +2317,23 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- HW HOME -->
         <div class="pg on" id="hw-home">
+
+          <!-- PAYMENT PENDING BANNER -->
+          <div id="hw-payment-banner" style="display:none;background:linear-gradient(135deg,rgba(245,158,11,.1),rgba(251,191,36,.05));border:1.5px solid rgba(245,158,11,.4);border-radius:14px;padding:16px;margin-bottom:18px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:12px">
+                <span style="font-size:28px">💳</span>
+                <div>
+                  <div style="font-weight:700;font-size:14px;color:#fbbf24">Payment required to activate service</div>
+                  <div style="font-size:12px;color:var(--muted);margin-top:2px">Your account is saved but scheduling is locked until payment is complete.</div>
+                </div>
+              </div>
+              <button class="btn btn-sm" style="background:#f59e0b;color:#07090f;border:none;font-weight:700;flex-shrink:0" onclick="hwCompletePayment()">
+                Complete Payment ->
+              </button>
+            </div>
+          </div>
+
           <div style="margin-bottom:18px"><div style="font-size:21px;font-weight:700" id="hw-greeting">Welcome to BinDash 👋</div><div style="color:var(--sub);font-size:14px;margin-top:3px" id="hw-next-collection-strip">Next collection: <strong style="color:var(--cyan)">--</strong></div></div>
 
           <!-- TRUCK CONFIRMATION PROMPT -- shown on collection day -->
@@ -3602,6 +3676,27 @@ function go(id){
     if(fnEl && parts[0]) fnEl.value = parts[0]
     if(lnEl && parts[1]) lnEl.value = parts.slice(1).join(' ')
   }
+  // Show correct state on pending screen
+  if(id === 'S-hw-pending'){
+    const payState    = document.getElementById('hw-pending-pay-state')
+    const reviewState = document.getElementById('hw-pending-review-state')
+    const isPending   = window._hwPendingPayment === true
+    if(payState)    payState.style.display    = isPending ? 'block' : 'none'
+    if(reviewState) reviewState.style.display = isPending ? 'none'  : 'block'
+    if(isPending && _checkoutPlanKey){
+      const plan = STRIPE_PRICES[_checkoutPlanKey]
+      if(plan){
+        const el = (id) => document.getElementById(id)
+        if(el('hw-pending-plan-name'))  el('hw-pending-plan-name').textContent  = plan.name
+        if(el('hw-pending-plan-price')) el('hw-pending-plan-price').textContent = '$'+plan.monthlyAmt+'/mo'
+        if(el('hw-pending-plan-desc'))  el('hw-pending-plan-desc').textContent  = plan.desc
+      }
+    }
+  }
+}
+
+async function retryPayment(){
+  await launchStripeCheckout()
 }
 // Quick self-test -- if this runs, JS is working
 document.addEventListener('DOMContentLoaded', () => {
@@ -3664,10 +3759,24 @@ async function populateHWDashboard(){
       go('S-hw-dash')
       _populateHWDashData(row, fn, ln, initials)
       loadHWCollections(row.email)
+      // Hide payment banner for approved accounts
+      const payBanner = document.getElementById('hw-payment-banner')
+      if(payBanner) payBanner.style.display = 'none'
       if(window._showPortalReturnToast){
         window._showPortalReturnToast = false
         setTimeout(()=>{ showToast('Payment method updated ✅','ok'); populateHWDashboard() }, 500)
       }
+
+    } else if(status === 'payment_pending'){
+      // Signed up but skipped payment -- show dashboard with payment banner
+      go('S-hw-dash')
+      _populateHWDashData(row, fn, ln, initials)
+      // Show payment banner
+      const payBanner = document.getElementById('hw-payment-banner')
+      if(payBanner) payBanner.style.display = 'block'
+      // Store plan for retry
+      window._hwPendingPlanKey = row.plan_id || row.plan || 'plan_a'
+      window._hwPendingEmail   = row.email
 
     } else if(status === 'zone_assigned'){
       // -- ZONE ASSIGNED: HW was notified, needs to confirm service --
@@ -3712,7 +3821,44 @@ async function populateHWDashboard(){
   }
 }
 
-// -- WIRE ALL HW DASHBOARD DATA from the homeowner_signups row --
+async function hwCompletePayment(){
+  const planKey = window._hwPendingPlanKey || 'plan_a'
+  const email   = window._hwPendingEmail  || currentUser?.email
+  if(!email){ showToast('Session error -- please log in again', 'err'); return }
+
+  // Set the checkout plan key so launchStripeCheckout uses it
+  _checkoutPlanKey = planKey
+
+  // Pre-fill email field if possible
+  const emEl = document.getElementById('h-em')
+  if(emEl) emEl.value = email
+
+  // Launch checkout
+  const btn = document.querySelector('#hw-payment-banner button')
+  if(btn){ btn.disabled = true; btn.textContent = 'Opening Stripe...' }
+
+  try {
+    const plan = STRIPE_PRICES[planKey]
+    const res  = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/create-checkout', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        planKey,
+        priceId:    plan.monthly,
+        email,
+        name:       ((currentUser?.user_metadata?.first_name||'') + ' ' + (currentUser?.user_metadata?.last_name||'')).trim() || email,
+        successUrl: window.location.origin + '/?checkout=success',
+        cancelUrl:  window.location.origin + '/?checkout=cancel',
+      })
+    })
+    const d = await res.json()
+    if(d.error || !d.url) throw new Error(d.error || 'No checkout URL')
+    window.location.href = d.url
+  } catch(e){
+    showToast('Error: ' + String(e?.message||e), 'err')
+    if(btn){ btn.disabled = false; btn.textContent = 'Complete Payment ->' }
+  }
+}
 async function _populateHWDashData(row, fn, ln, initials){
   const safe = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val }
 
@@ -11459,10 +11605,16 @@ async function loadSignupsFromSupabase(){
     WAITLIST_SIGNUPS.length   = 0
 
     data.forEach(row => {
+      // Skip blank records -- no name AND no email means it's a corrupted signup
+      if(!row.first_name && !row.last_name && !row.email) return
+      // Skip if email looks invalid
+      if(!row.email || !row.email.includes('@')) return
+
       const initials = ((row.first_name?.[0]||'') + (row.last_name?.[0]||'')).toUpperCase() || '?'
+      const name = (row.first_name + ' ' + row.last_name).trim() || row.email?.split('@')[0] || '--'
       const entry = {
         id:              row.id,
-        name:            (row.first_name + ' ' + row.last_name).trim(),
+        name,
         initials,
         email:           row.email,
         phone:           row.phone || '--',
