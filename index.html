@@ -6,7 +6,7 @@
 <title>BinDash — Smart Bin Collection</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;853&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
+<script data-cfasync="false">
 // ══════════════════════════════════════════════════
 //  SUPABASE CONFIG — replace with your project keys
 //  Supabase Dashboard → Settings → API
@@ -20,7 +20,7 @@ const _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 // EMAIL SERVICE — calls Supabase Edge Function → Resend API
 // ─────────────────────────────────────────────────────────────
 async function sendEmail(to, subject, html, type){
-  if(!to || to.includes('@lead.bindash')){
+  if(!to || to.includes('@lead.'+'bindash')){
     console.log('[BinDash] sendEmail SKIPPED — bad address:', to)
     return
   }
@@ -2473,7 +2473,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px" id="plan-cards">
 
               <!-- PLAN A -->
-              <div class="plan-card on" id="plan-a" onclick="selectPlan('a')" style="border:2px solid var(--cyan);background:rgba(6,214,160,.06);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;position:relative">
+              <div class="plan-card on" id="plan-a" onclick="selectAccountPlan('a')" style="border:2px solid var(--cyan);background:rgba(6,214,160,.06);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;position:relative">
                 <div style="position:absolute;top:12px;right:12px"><span class="badge" style="background:var(--cyan);color:#07090f">Current</span></div>
                 <div style="font-size:24px;margin-bottom:10px">🗑️</div>
                 <div style="font-size:15px;font-weight:700;margin-bottom:4px">1 Can</div>
@@ -2486,7 +2486,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               </div>
 
               <!-- PLAN B -->
-              <div class="plan-card" id="plan-b" onclick="selectPlan('b')" style="border:2px solid var(--border2);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s">
+              <div class="plan-card" id="plan-b" onclick="selectAccountPlan('b')" style="border:2px solid var(--border2);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s">
                 <div style="font-size:24px;margin-bottom:10px">🗑️🗑️</div>
                 <div style="font-size:15px;font-weight:700;margin-bottom:4px">2 Cans — Same Day</div>
                 <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;color:var(--blue);margin-bottom:6px">$44.99<span style="font-size:13px;font-weight:400;color:var(--sub)">/mo</span></div>
@@ -2510,7 +2510,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               </div>
 
               <!-- PLAN C -->
-              <div class="plan-card" id="plan-c" onclick="selectPlan('c')" style="border:2px solid var(--border2);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;grid-column:1/-1">
+              <div class="plan-card" id="plan-c" onclick="selectAccountPlan('c')" style="border:2px solid var(--border2);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;grid-column:1/-1">
                 <div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--purple);text-transform:uppercase;margin-bottom:6px">Most Flexible</div>
                 <div style="font-size:24px;margin-bottom:10px">♻️🗑️</div>
                 <div style="font-size:15px;font-weight:700;margin-bottom:4px">2 Cans — Split Days</div>
@@ -4888,7 +4888,7 @@ async function submitLead(){
     const res = await _supa.from('homeowner_signups').insert({
       first_name:     fn,
       last_name:      ln || '',
-      email:          em || (fn.toLowerCase().replace(/\s/g,'') + '+' + zip + '@lead.bindash'),
+      email:          em || (fn.toLowerCase().replace(/\s/g,'') + '+' + zip + '@lead.'+'bindash'),
       phone:          ph || null,
       street_address: addr || null,
       city:           city || null,
@@ -4916,7 +4916,7 @@ async function submitLead(){
 
   if(!saveErr){
     showToast('You\'re on the list for ZIP '+zip+' \uD83C\uDF89','ok')
-    if(em && !em.includes('@lead.bindash')) sendEmail(em, 'You\'re on the BinDash list for ZIP '+zip, EMAIL.leadConfirm(fn||'there', zip), 'lead_confirm')
+    if(em && !em.includes('@lead.'+'bindash')) sendEmail(em, 'You\'re on the BinDash list for ZIP '+zip, EMAIL.leadConfirm(fn||'there', zip), 'lead_confirm')
   }
 }
 
@@ -5746,7 +5746,7 @@ async function confirmSosHW(){
 
     // Send notification email to admin
     sendEmail(
-      'admin@bindash.shop',
+      ['admin','bindash.shop'].join('@'),
       '🚨 SOS dispatch — '+currentUser.email,
       `<p>Emergency ${visitType==='BIN_OUT'?'Bin Out':'Bin In'} dispatch from ${currentUser.email}. Job ID: ${job?.id||'—'}. Notes: ${notes||'None'}.</p>`,
       'sos_admin'
@@ -5920,7 +5920,7 @@ function closeM(){document.getElementById('modal-bg').classList.remove('open')}
 // ── SUBSCRIPTION PLAN PICKER ─────────────────────
 let activePlan = 'a'
 let extraCans = 0
-function selectPlan(p) {
+function selectAccountPlan(p) {
   activePlan = p
   document.querySelectorAll('.plan-card').forEach(c => {
     c.style.border = '2px solid var(--border2)'
@@ -8690,7 +8690,7 @@ async function confirmCreateZoneFromWaitlist(zip){
     console.log('[BinDash] Moved', movedCount, 'to zone_assigned for ZIP', zip)
 
     for(const row of rows){
-      const _cemail = row.email && !row.email.includes('@lead.bindash') ? row.email : null
+      const _cemail = row.email && !row.email.includes('@lead.'+'bindash') ? row.email : null
       if(_cemail) sendEmail(_cemail, 'BinDash is now in your area! Launch in ZIP '+zip, EMAIL.zoneActivated(row.first_name||'there', zip, newZone.name), 'zone_activated')
     }
   } catch(e){ console.warn('[BinDash] Zone assign failed:', String(e?.message||e)) }
@@ -10267,7 +10267,7 @@ async function notifyWaitlistForZip(zip, zone){
       await _supa.from('homeowner_signups').update({
         status:'zone_assigned', zone_id:zone.id, updated_at:new Date().toISOString()
       }).eq('id', row.id)
-      const email = row.email && !row.email.includes('@lead.bindash') ? row.email : null
+      const email = row.email && !row.email.includes('@lead.'+'bindash') ? row.email : null
       if(email) sendEmail(email,
         'BinDash is now in your area! \uD83D\uDE80',
         EMAIL.zoneActivated(row.first_name||'there', zip, zone.name),
@@ -11232,9 +11232,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── OFFER SYSTEM ──────────────────────────────────
 
-// Countdown timer for offer banner
-let offerSeconds = 874 // ~14:34
-let offerActive = true
+// Countdown timer for offer banner (legacy fallback)
+let offerSeconds = 874
+let offerActive = false // disabled — real countdown handled by startOfferCountdown()
 function updateOfferCountdown(){
   if(!offerActive) return
   offerSeconds = Math.max(0, offerSeconds - 1)
@@ -11242,26 +11242,8 @@ function updateOfferCountdown(){
   if(!el) return
   const m = Math.floor(offerSeconds/60), s = offerSeconds%60
   el.textContent = m + ':' + String(s).padStart(2,'0')
-  if(offerSeconds === 0) {
-    showToast('Offer expired — batch sent to broadcast','info')
-    document.getElementById('offer-banner').style.display = 'none'
-    offerActive = false
-  }
 }
 setInterval(updateOfferCountdown, 1000)
-
-function acceptOffer(){
-  offerActive = false
-  document.getElementById('offer-banner').style.display = 'none'
-  showToast('Batch accepted ✅ — both visits locked in. You\'ll be notified when your zone unlocks for Bin In.','ok')
-  NOTIFS.rn.unshift({ id:'rn_acc', read:false, time:'Just now', icon:'✅', accent:'#22c55e', title:'Batch confirmed', body:'Batch accepted. Bin Out and Bin In are locked in — you\'ll be notified when Bin In unlocks.', actions:[] })
-}
-
-function declineOffer(){
-  offerActive = false
-  document.getElementById('offer-banner').style.display = 'none'
-  showToast('Offer declined — batch sent to broadcast','info')
-}
 
 function showOfferDetail(){
   document.getElementById('modal-box').innerHTML=`
@@ -11605,7 +11587,7 @@ async function sendWaitlistReminder(id, contact){
     try {
       const _rr = await _supa.from('homeowner_signups').select('first_name,email,zip_code,zone_id').eq('id',id).single()
       const _rd = _rr?.data
-      if(_rd?.email && !_rd.email.includes('@lead.bindash')){
+      if(_rd?.email && !_rd.email.includes('@lead.'+'bindash')){
         const _rzn = ADMIN_ZONES.find(z=>z.id===_rd.zone_id)?.name||'your area'
         sendEmail(_rd.email, 'Reminder: Complete your BinDash signup', EMAIL.waitlistReminder(_rd.first_name||'there', _rd.zip_code, _rzn), 'waitlist_reminder')
       }
