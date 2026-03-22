@@ -10524,59 +10524,28 @@ function collapseWaitlistForm(){
 }
 
 async function _autoCreateWaitlistZoneForRunner(fn, ln, em, zip){
+  // Do NOT create the zone automatically -- save a pending request for admin to review.
+  // Admin can split the ZIP, rename the zone, adjust boundaries, then approve.
   try {
-    // Pull data from the waitlist form if filled
-    const areaName  = document.getElementById('r-wl-area')?.value?.trim() || ''
-    const collDay   = document.getElementById('r-wl-day')?.value || ''
-    const notes     = document.getElementById('r-wl-notes')?.value?.trim() || ''
+    const areaName = document.getElementById('r-wl-area')?.value?.trim() || ''
+    const collDay  = document.getElementById('r-wl-day')?.value || ''
+    const notes    = document.getElementById('r-wl-notes')?.value?.trim() || ''
+    const zoneName = areaName || ('ZIP '+zip+' Area')
 
-    const zoneName  = areaName || suggestZoneName(zip) || ('ZIP '+zip+' Area')
-    const newZoneId = (typeof crypto !== 'undefined' && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : 'z-'+Date.now()+'-'+Math.random().toString(36).slice(2,8)
-
-    // Race condition guard
-    const existing = ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip.slice(0,3))
-    if(existing){
-      console.log('[BinDash] Zone already exists for ZIP', zip, '-- skipping auto-create')
-      return
-    }
-
-    const newZone = {
-      id:         newZoneId,
-      name:       zoneName,
-      zip:        zip.slice(0,3),
-      zips:       [zip],
-      status:     'waitlist',
-      pilot:      false,
-      runners:    0,
-      capacity:   10,
-      homeowners: 0,
-      threshold:  3,   // 3 homeowners + 1 runner to go live
-      collection: collDay ? [collDay] : [],
-      assignedRunner: null,
-      notes: `Requested by ${fn} ${ln} (${em}) for ZIP ${zip}${notes?'. '+notes:''}`,
-    }
-
-    ADMIN_ZONES.push(newZone)
-    syncZoneData()
-    await dbSaveZone(newZone)
-
-    // Save zone request so admin sees it with full context
     const payload = {
       runner_name:  (fn+' '+ln).trim(),
       runner_email: em,
       zip_code:     zip,
-      zone_id:      newZoneId,
-      zone_name:    zoneName,
-      status:       'waitlist_pending',
+      zone_name:    zoneName,   // admin can edit before approving
+      status:       'pending',  // awaiting admin review -- no zone created yet
       type:         'new_zone',
       created_at:   new Date().toISOString(),
     }
-    let res = await _supa.from('runner_zone_requests').insert({...payload, notes})
+    const notesStr = [collDay?'Preferred day: '+collDay:'', notes].filter(Boolean).join('. ')
+    let res = await _supa.from('runner_zone_requests').insert({...payload, notes: notesStr||null})
     if(res.error) res = await _supa.from('runner_zone_requests').insert(payload)
 
-    console.log('[BinDash] ✅ Waitlist zone created:', zoneName, 'for ZIP', zip)
+    console.log('[BinDash] Zone request saved for admin review — ZIP', zip, '— no zone created yet')
   } catch(e){
     console.warn('[BinDash] _autoCreateWaitlistZoneForRunner:', e)
   }
@@ -14403,43 +14372,104 @@ async function denyZoneRequest(reqId, runnerName){
   } catch(e){ showToast('Error','err') }
 }
 
-async function approveNewZoneRequest(zip, inputId, reqIds, runners){
-  const nameEl  = document.getElementById(inputId)
-  const zoneName = nameEl?.value?.trim() || ('ZIP '+zip+' Area')
+function approveNewZoneRequest(zip, inputId, reqIds, runnersJson){
+  const runners   = typeof runnersJson === 'string' ? JSON.parse(runnersJson) : runnersJson
+  const suggested = document.getElementById(inputId)?.value?.trim() || ('ZIP '+zip+' Area')
+  const runnerNames = runners.map(r=>r.name||r.email).join(', ')
 
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh" style="background:linear-gradient(135deg,rgba(6,214,160,.08),rgba(99,102,241,.05))">
+    <div>
+      <div style="font-size:15px;font-weight:700">🗺️ Approve Zone Request — ZIP ${zip}</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:2px">Requested by: ${runnerNames}</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--sub);margin-bottom:14px;line-height:1.6">
+      💡 <strong style="color:#fbbf24">Large ZIP?</strong> Split it into multiple zones below. Assign the runner to one zone. All start as waitlist.
+    </div>
+    <div id="nzr-zones-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px">
+      <div class="nzr-zone-row" style="display:flex;gap:8px;align-items:center">
+        <input class="nzr-zone-name" value="${suggested}" placeholder="Zone name" style="flex:1;font-size:13px;font-weight:600;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);padding:10px 13px">
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;cursor:pointer">
+          <input type="radio" name="nzr-assign" value="0" checked style="accent-color:var(--cyan)"> Assign runner here
+        </label>
+      </div>
+    </div>
+    <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--cyan)" onclick="_addNZRZone()">+ Add another zone (split ZIP)</button>
+    <div style="margin-top:14px" class="field">
+      <label style="font-size:11px">Collection day(s) <span style="color:var(--muted)">(can set later)</span></label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
+        ${['Mon','Tue','Wed','Thu','Fri'].map(d=>`<div onclick="this.classList.toggle('on')" class="r-opt" style="padding:6px 10px;font-size:11px;font-weight:700" data-day="\${d}">\${d}</div>`).join('')}
+      </div>
+    </div>
+    <div style="margin-top:12px" class="field">
+      <label style="font-size:11px">Notes for runner <span style="color:var(--muted)">(optional)</span></label>
+      <textarea id="nzr-admin-notes" rows="2" placeholder="e.g. Covers north side of ZIP only..." style="font-size:12px;resize:none"></textarea>
+    </div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan" onclick="_submitApproveNewZone('${zip}',${JSON.stringify(reqIds)},${JSON.stringify(runners)})">✅ Create Zone(s) &amp; Notify Runner</button>
+  </div>`
+  openM()
+}
+
+function _addNZRZone(){
+  const list  = document.getElementById('nzr-zones-list')
+  const count = list.querySelectorAll('.nzr-zone-row').length
+  const row   = document.createElement('div')
+  row.className = 'nzr-zone-row'
+  row.style.cssText = 'display:flex;gap:8px;align-items:center'
+  row.innerHTML = `<input class="nzr-zone-name" placeholder="Zone name" style="flex:1;font-size:13px;font-weight:600;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);padding:10px 13px">
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;cursor:pointer">
+      <input type="radio" name="nzr-assign" value="\${count}" style="accent-color:var(--cyan)"> Assign runner here
+    </label>
+    <button onclick="this.parentNode.remove()" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:16px;padding:0 4px">✕</button>`
+  list.appendChild(row)
+}
+
+async function _submitApproveNewZone(zip, reqIds, runners){
+  const rows      = [...document.querySelectorAll('.nzr-zone-row')]
+  const zoneNames = rows.map(r=>r.querySelector('.nzr-zone-name')?.value?.trim()).filter(Boolean)
+  const assignIdx = parseInt(document.querySelector('input[name="nzr-assign"]:checked')?.value||'0')
+  const days      = [...document.querySelectorAll('.r-opt[data-day].on')].map(el=>el.dataset.day)
+  const adminNotes= document.getElementById('nzr-admin-notes')?.value?.trim()||''
+  if(!zoneNames.length){ showToast('Enter at least one zone name','err'); return }
   try {
-    // Create the zone as waitlist
-    const newZoneId = (typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():'z-'+Date.now()
-    const newZone = {
-      id: newZoneId, name: zoneName,
-      zip: zip.slice(0,3), zips:[zip],
-      status:'waitlist', runners:0, capacity:10,
-      homeowners:0, threshold:3,
-      collection:[], notes:'Created from runner zone request for ZIP '+zip
+    const createdZones = []
+    for(let i=0;i<zoneNames.length;i++){
+      const zoneName  = zoneNames[i]
+      const newZoneId = crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+i
+      const newZone = { id:newZoneId, name:zoneName, zip:zip.slice(0,3), zips:[zip],
+        status:'waitlist', runners:0, capacity:10, homeowners:0, threshold:3,
+        collection:days.length?days:[], notes:`Created from runner request ZIP ${zip}.${adminNotes?' '+adminNotes:''}` }
+      ADMIN_ZONES.push(newZone)
+      await dbSaveZone(newZone)
+      createdZones.push(newZone)
     }
-    ADMIN_ZONES.push(newZone)
     syncZoneData()
-    await dbSaveZone(newZone)
-
-    // Mark all requests approved
+    const assignedZone = createdZones[assignIdx]||createdZones[0]
     for(const id of reqIds){
       await _supa.from('runner_zone_requests').update({
-        status:'approved', zone_id:newZoneId, zone_name:zoneName,
+        status:'approved', zone_id:assignedZone.id, zone_name:assignedZone.name,
         updated_at:new Date().toISOString()
       }).eq('id',id)
     }
-
-    // Email each requesting runner
     for(const r of runners){
+      await _supa.from('runner_applications')
+        .update({ zone_id:assignedZone.id, updated_at:new Date().toISOString() })
+        .eq('email', r.email).is('zone_id', null)
       const fn = r.name?.split(' ')[0]||'there'
-      sendEmail(r.email, `✅ Zone approved — ${zoneName} is now on the waitlist`,
-        `<p>Hi ${fn},</p><p>Your zone request for ZIP ${zip} has been approved! <strong>${zoneName}</strong> is now in waitlist mode — once 3 homeowners and 1 runner are confirmed, service begins.</p><p>Log in to your runner dashboard to track progress.</p><p>— The BinDash Team</p>`,
+      const others = createdZones.filter(z=>z.id!==assignedZone.id)
+      sendEmail(r.email, `✅ Zone approved — ${assignedZone.name}`,
+        `<p>Hi ${fn},</p><p>Your zone request has been approved! You've been assigned to <strong>${assignedZone.name}</strong> (ZIP ${zip}) in waitlist mode.</p>${others.length?`<p>We've also created ${others.map(z=>'<strong>'+z.name+'</strong>').join(' and ')} for other parts of this ZIP.</p>`:''}<p>Once 3 homeowners join the waitlist, the zone goes live.</p>${adminNotes?`<p><em>Admin note: ${adminNotes}</em></p>`:''}<p>— The BinDash Team</p>`,
         'new_zone_approved')
     }
-
-    notifyWaitlistRunners(zip, zoneName)
+    closeM()
     renderRunnerZoneRequests()
-    showToast(`Zone "${zoneName}" created ✅ — ${runners.length} runner${runners.length!==1?'s':''} notified`, 'ok')
+    showToast(`${zoneNames.length} zone${zoneNames.length>1?'s':''} created ✅`, 'ok', 5000)
   } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
 }
 
