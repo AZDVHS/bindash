@@ -278,6 +278,7 @@ async function skipPaymentForNow(){
         .eq('email', em)
     } catch(e){ console.warn('Status update:', e) }
   }
+  obClear()
   go('S-hw-pending')
   showToast('Account saved ✅ — complete payment from your dashboard to activate scheduling', 'ok', 6000)
 }
@@ -288,6 +289,7 @@ function handleStripeReturn(){
 
   if(p.get('checkout')==='success'){
     window.history.replaceState({},'',' ')
+    obClear()  // signup complete -- clear saved progress
     go('S-hw-pending')
     showToast('Payment successful! Account being set up ✅','ok')
   } else if(p.get('checkout')==='cancel'){
@@ -1555,14 +1557,31 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 </div>
 
 <!-- ========== HOMEOWNER ONBOARDING ========== -->
-<div id="S-hw-ob" class="screen">
+<div id="S-hw-ob" class="screen" onload="obCheckResume()">
   <div style="min-height:100vh;background:var(--bg);padding:36px 20px">
     <div style="max-width:640px;margin:0 auto">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
         <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:853">🗑️ BIN<em style="color:var(--cyan);font-style:normal">DASH</em></div>
         <div style="display:flex;align-items:center;gap:10px">
           <span style="font-size:13px;color:var(--muted)">Already have an account? <a onclick="go('S-login')" style="color:var(--cyan);cursor:pointer;font-weight:600">Log in -></a></span>
-          <button class="btn btn-ghost btn-sm" onclick="go('S-land')">✕</button>
+          <button class="btn btn-ghost btn-sm" onclick="obClear();go('S-land')">✕</button>
+        </div>
+      </div>
+
+      <!-- RESUME BANNER — shown when returning mid-signup -->
+      <div id="ob-resume-banner" style="display:none;background:linear-gradient(135deg,rgba(6,214,160,.1),rgba(99,102,241,.06));border:1.5px solid rgba(6,214,160,.3);border-radius:12px;padding:12px 16px;margin-bottom:20px;display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:20px">👋</span>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:var(--text)">Welcome back — your progress is saved</div>
+              <div style="font-size:12px;color:var(--muted)" id="ob-resume-subtitle">Pick up where you left off</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-cyan btn-sm" onclick="obDoResume()">Continue -></button>
+            <button class="btn btn-ghost btn-sm" onclick="obClear();document.getElementById('ob-resume-banner').style.display='none'" style="font-size:11px">Start over</button>
+          </div>
         </div>
       </div>
 
@@ -1585,11 +1604,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div id="h-s1">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Let's check your area 📍</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Enter your address to see if BinDash is available near you.</div>
-        <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street"></div>
+        <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street" oninput="obSave()"></div>
         <div class="g3">
-          <div class="field"><label>City</label><input id="h-city" placeholder="Glendale"></div>
-          <div class="field"><label>State</label><input id="h-state" placeholder="AZ"></div>
-          <div class="field"><label>ZIP *</label><input id="h-zip" placeholder="85301" maxlength="5" oninput="checkZipCoverage(this.value)"></div>
+          <div class="field"><label>City</label><input id="h-city" placeholder="Glendale" oninput="obSave()"></div>
+          <div class="field"><label>State</label><input id="h-state" placeholder="AZ" oninput="obSave()"></div>
+          <div class="field"><label>ZIP *</label><input id="h-zip" placeholder="85301" maxlength="5" oninput="checkZipCoverage(this.value);obSave()"></div>
         </div>
         <div id="zip-coverage-result" style="display:none;border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:8px"></div>
         <div style="display:flex;justify-content:flex-end;margin-top:6px">
@@ -3784,6 +3803,10 @@ function go(id){
     if(fnEl && parts[0]) fnEl.value = parts[0]
     if(lnEl && parts[1]) lnEl.value = parts.slice(1).join(' ')
   }
+  // Check for saved onboarding progress
+  if(id === 'S-hw-ob'){
+    setTimeout(obCheckResume, 100)
+  }
   // Show correct state on pending screen
   if(id === 'S-hw-pending'){
     const payState    = document.getElementById('hw-pending-pay-state')
@@ -5352,6 +5375,7 @@ function requireCard(){
 
 // -- HOMEOWNER ONBOARDING --------------------------
 function hNext(s){
+  obSave() // save progress before moving forward
   if(s===1){
     const zip = document.getElementById('h-zip')?.value.trim() || ''
     if(!zip || zip.length < 5){ showToast('Please enter your ZIP code','err'); return }
@@ -5523,6 +5547,7 @@ function hBack(s){
   const sl=document.getElementById('h-sl'+(s-1)); if(sl) sl.classList.remove('done')
   const csc=document.getElementById('h-sc'+s); if(csc) csc.classList.remove('active')
   window.scrollTo(0,0)
+  obSave()
 }
 
 // -- LEAD CAPTURE SUBMIT (no-zone path) --------------------------
@@ -7932,8 +7957,126 @@ const OB_FREQ_NOTE = {
   biweekly: 'Extra bins +$7/mo each . Cancel or pause any time',
   weekly:   'Extra bins +$8/mo each . Cancel or pause any time',
 }
-let obSelectedFreq = 'weekly'
-let obSelectedPlan = 'w2'
+// ================================================================
+// ONBOARDING STATE PERSISTENCE -- survives mobile app backgrounding
+// Saves to sessionStorage on every step so users don't lose progress
+// ================================================================
+const OB_SAVE_KEY = 'bd_ob_state'
+
+function obSave(){
+  try {
+    const fields = ['h-addr','h-city','h-state','h-zip','h-fn','h-ln','h-em','h-ph',
+      'h-day','h-day-recycling','h-day-waste','h-bin-location','h-gate-type',
+      'h-gate-code','h-pet-info','h-curb-notes','h-svc-notes']
+    const saved = { ts: Date.now() }
+    fields.forEach(id => {
+      const el = document.getElementById(id)
+      if(el) saved[id] = el.value || ''
+    })
+    saved._obSelectedPlan = obSelectedPlan
+    saved._obSelectedFreq = obSelectedFreq
+    saved._checkoutPlanKey = _checkoutPlanKey
+    saved._hwZipHasCoverage = window._hwZipHasCoverage
+    saved._hwMatchedZoneId  = window._hwMatchedZone?.id || null
+    // Figure out which step is visible
+    for(let i=1; i<=6; i++){
+      const el = document.getElementById('h-s'+i)
+      if(el && el.style.display !== 'none' && el.offsetParent !== null){ saved._step = i; break }
+    }
+    if(document.getElementById('h-lead')?.style.display !== 'none') saved._step = 'lead'
+    sessionStorage.setItem(OB_SAVE_KEY, JSON.stringify(saved))
+  } catch(e){ /* sessionStorage may be unavailable */ }
+}
+
+function obRestore(){
+  try {
+    const raw = sessionStorage.getItem(OB_SAVE_KEY)
+    if(!raw) return false
+    const saved = JSON.parse(raw)
+    // Expire after 2 hours
+    if(Date.now() - saved.ts > 2 * 60 * 60 * 1000){
+      sessionStorage.removeItem(OB_SAVE_KEY)
+      return false
+    }
+    // Restore field values
+    const fields = ['h-addr','h-city','h-state','h-zip','h-fn','h-ln','h-em','h-ph',
+      'h-day','h-day-recycling','h-day-waste','h-bin-location','h-gate-type',
+      'h-gate-code','h-pet-info','h-curb-notes','h-svc-notes']
+    fields.forEach(id => {
+      const el = document.getElementById(id)
+      if(el && saved[id]) el.value = saved[id]
+    })
+    // Restore global state
+    if(saved._obSelectedPlan) obSelectedPlan = saved._obSelectedPlan
+    if(saved._obSelectedFreq) obSelectedFreq = saved._obSelectedFreq
+    if(saved._checkoutPlanKey) _checkoutPlanKey = saved._checkoutPlanKey
+    window._hwZipHasCoverage = saved._hwZipHasCoverage ?? null
+    // Restore matched zone
+    if(saved._hwMatchedZoneId){
+      window._hwMatchedZone = ADMIN_ZONES.find(z=>z.id===saved._hwMatchedZoneId) || null
+    }
+    return saved
+  } catch(e){ return false }
+}
+
+function obClear(){
+  try { sessionStorage.removeItem(OB_SAVE_KEY) } catch(e){}
+}
+
+function obRestoreStep(saved){
+  if(!saved || !saved._step) return
+  const step = saved._step
+  ;['h-s1','h-s2','h-s3','h-s4','h-s5','h-lead'].forEach(id=>{
+    const el = document.getElementById(id)
+    if(el) el.style.display = 'none'
+  })
+  if(step === 'lead'){
+    const zipDisplay = document.getElementById('lead-zip-display')
+    if(zipDisplay) zipDisplay.textContent = 'ZIP ' + (saved['h-zip']||'your area')
+    const leadEl = document.getElementById('h-lead')
+    if(leadEl) leadEl.style.display = 'block'
+    return
+  }
+  if(step >= 2){
+    const stepsBar = document.getElementById('h-steps-bar')
+    if(stepsBar) stepsBar.style.display = 'block'
+  }
+  const stepEl = document.getElementById('h-s'+step)
+  if(stepEl) stepEl.style.display = 'block'
+  const zip = saved['h-zip']
+  if(zip) setTimeout(()=>checkZipCoverage(zip), 300)
+  if(saved._obSelectedPlan) setTimeout(()=>{ try{ selectPlanOB(saved._obSelectedPlan) }catch(e){} }, 200)
+  if(step >= 2) setTimeout(()=>{ try{ updateStepBar(step) }catch(e){} }, 100)
+  window.scrollTo(0,0)
+}
+
+function obCheckResume(){
+  try {
+    const raw = sessionStorage.getItem(OB_SAVE_KEY)
+    if(!raw) return
+    const saved = JSON.parse(raw)
+    if(Date.now() - saved.ts > 2 * 60 * 60 * 1000){ sessionStorage.removeItem(OB_SAVE_KEY); return }
+    // Only show if they got past step 1
+    if(!saved._step || saved._step === 1) return
+    const stepNames = { 2:'Account info', 3:'Service preferences', 4:'Property details', 5:'Payment', 6:'Review' }
+    const sub = saved._step && saved._step !== 'lead'
+      ? `You were on: ${stepNames[saved._step] || 'Step '+saved._step}`
+      : `Coverage check for ZIP ${saved['h-zip']||''}`
+    const banner   = document.getElementById('ob-resume-banner')
+    const subtitle = document.getElementById('ob-resume-subtitle')
+    if(banner)   banner.style.display   = 'block'
+    if(subtitle) subtitle.textContent   = sub
+  } catch(e){}
+}
+
+async function obDoResume(){
+  const banner = document.getElementById('ob-resume-banner')
+  if(banner) banner.style.display = 'none'
+  if(ADMIN_ZONES.length === 0) await loadZonesFromSupabase()
+  const saved = obRestore()
+  if(!saved) return
+  obRestoreStep(saved)
+}
 
 function selectFreq(freq){
   obSelectedFreq = freq
