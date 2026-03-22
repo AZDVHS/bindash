@@ -2774,34 +2774,35 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <!-- RN EARNINGS -->
         <div class="pg" id="rn-earnings">
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
-            <div class="earn-card"><div class="card-ttl">This Week</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--cyan)">$0.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px">No visits yet</div></div>
-            <div class="earn-card"><div class="card-ttl">This Month</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--green)">$0.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px">No visits yet</div></div>
-            <div class="earn-card"><div class="card-ttl">Year to Date</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--blue)">$0.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px">Year to date</div></div>
+            <div class="earn-card"><div class="card-ttl">This Week</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--cyan)" id="rn-earn-week">$0.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px" id="rn-earn-week-sub">No visits yet</div></div>
+            <div class="earn-card"><div class="card-ttl">This Month</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--green)" id="rn-earn-month">$0.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px" id="rn-earn-month-sub">No visits yet</div></div>
+            <div class="earn-card"><div class="card-ttl">Year to Date</div><div style="font-family:'Syne',sans-serif;font-size:30px;font-weight:853;color:var(--blue)" id="rn-earn-ytd">$0.00</div><div style="font-size:11px;color:var(--sub);margin-top:4px">Year to date</div></div>
           </div>
 
           <!-- VISIT TYPE BREAKDOWN -->
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
             <div style="border:1px solid rgba(99,102,241,.3);background:rgba(99,102,241,.05);border-radius:10px;padding:14px">
               <div class="card-ttl" style="color:#a5b4fc">🌙 Bin Out Visits — This Month</div>
-              <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:#a5b4fc">$0.00</div>
-              <div style="font-size:12px;color:var(--sub);margin-top:4px">No Bin Out visits yet</div>
+              <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:#a5b4fc" id="rn-earn-out">$0.00</div>
+              <div style="font-size:12px;color:var(--sub);margin-top:4px" id="rn-earn-out-sub">No Bin Out visits yet</div>
             </div>
             <div style="border:1px solid rgba(6,214,160,.3);background:rgba(6,214,160,.05);border-radius:10px;padding:14px">
               <div class="card-ttl" style="color:#6ee7b7">☀️ Bin In Visits — This Month</div>
-              <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:#6ee7b7">$0.00</div>
-              <div style="font-size:12px;color:var(--sub);margin-top:4px">No Bin In visits yet</div>
+              <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:#6ee7b7" id="rn-earn-in">$0.00</div>
+              <div style="font-size:12px;color:var(--sub);margin-top:4px" id="rn-earn-in-sub">No Bin In visits yet</div>
             </div>
           </div>
 
           <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px">
             <div class="card">
               <div class="card-ttl">Pay History</div>
-              <table><thead><tr><th>Period</th><th>Visits</th><th>Out</th><th>In</th><th>Total</th><th>Status</th></tr></thead><tbody id="pay-history-tbody"><tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">No pay history yet</td></tr></tbody></table>
+              <table><thead><tr><th>Period</th><th>Visits</th><th>Out</th><th>In</th><th>Total</th><th>Status</th></tr></thead>
+              <tbody id="pay-history-tbody"><tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Loading...</td></tr></tbody></table>
             </div>
             <div>
               <div class="card" style="margin-bottom:12px">
                 <div class="card-ttl">Pay Method</div>
-                <div style="font-size:13px;font-weight:600;margin-bottom:4px">No bank account on file</div>
+                <div style="font-size:13px;font-weight:600;margin-bottom:4px" id="rn-bank-display">No bank account on file</div>
                 <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Add your bank details to receive payouts</div>
                 <button class="btn btn-outline btn-full btn-sm" onclick="showBankModal()">Update Bank Info</button>
               </div>
@@ -2811,8 +2812,6 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                   <div><span class="vt-out">🌙 Bin Out</span> <span style="float:right;color:var(--text);font-weight:600">$3.25/stop</span></div>
                   <div><span class="vt-in">☀️ Bin In</span> <span style="float:right;color:var(--text);font-weight:600">$3.25/stop</span></div>
                   <div style="border-top:1px solid var(--border);margin:6px 0;padding-top:6px"><span style="color:var(--text)">Both visits:</span> <span style="float:right;color:var(--cyan);font-weight:700">$6.50/stop</span></div>
-                  <div><span style="color:var(--text)">2-bin property:</span> <span style="float:right;font-weight:600">+$0.75/stop</span></div>
-                  <div><span style="color:var(--text)">Extra can (3+):</span> <span style="float:right;font-weight:600">+$2.00/can</span></div>
                   <div><span style="color:var(--text)">SOS dispatch:</span> <span style="float:right;font-weight:600">+$5.00</span></div>
                   <div><span style="color:var(--text)">Weekend:</span> <span style="float:right;font-weight:600">+10%</span></div>
                 </div>
@@ -2846,9 +2845,9 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               <div class="card">
                 <div class="card-ttl">Helpful Resources</div>
                 <div style="display:flex;flex-direction:column;gap:7px">
-                  <button class="btn btn-outline btn-full btn-sm" onclick="showToast('Opening IRS guide...','info')">🔗 IRS Self-Employment Tax Guide</button>
-                  <button class="btn btn-outline btn-full btn-sm" onclick="showToast('Opening quarterly dates...','info')">🔗 Quarterly Estimated Tax Dates</button>
-                  <button class="btn btn-outline btn-full btn-sm" onclick="showToast('Opening mileage tracker...','info')">🔗 Mileage &amp; Expense Tracker</button>
+                  <button class="btn btn-outline btn-full btn-sm" onclick="window.open('https://www.irs.gov/businesses/small-businesses-self-employed/self-employed-individuals-tax-center','_blank')">🔗 IRS Self-Employment Tax Guide</button>
+                  <button class="btn btn-outline btn-full btn-sm" onclick="window.open('https://www.irs.gov/businesses/small-businesses-self-employed/estimated-taxes','_blank')">🔗 Quarterly Estimated Tax Dates</button>
+                  <button class="btn btn-outline btn-full btn-sm" onclick="showToast('Mileage tracker — coming soon','info')">🔗 Mileage &amp; Expense Tracker</button>
                 </div>
               </div>
             </div>
@@ -3944,7 +3943,107 @@ async function populateRNDashboard(){
   }
 }
 
-// ── LOAD RUNNER ROUTES (jobs assigned to this runner) ─────────
+// ── LOAD RUNNER EARNINGS FROM SUPABASE ────────────
+async function loadRNEarnings(){
+  const row = window._rnRow
+  if(!row) return
+
+  try {
+    const { data: jobs } = await _supa
+      .from('jobs')
+      .select('visit_type, amount, status, scheduled_date, completed_at')
+      .eq('runner_id', row.id)
+      .eq('status', 'complete')
+      .order('completed_at', { ascending: false })
+
+    const completed = jobs || []
+
+    const now = new Date()
+    const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay())
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const yearStart  = new Date(now.getFullYear(), 0, 1)
+
+    const sum = arr => arr.reduce((t, j) => t + parseFloat(j.amount || 3.25), 0)
+
+    const weekJobs  = completed.filter(j => j.completed_at && new Date(j.completed_at) >= weekStart)
+    const monthJobs = completed.filter(j => j.completed_at && new Date(j.completed_at) >= monthStart)
+    const ytdJobs   = completed.filter(j => j.completed_at && new Date(j.completed_at) >= yearStart)
+    const outJobs   = monthJobs.filter(j => j.visit_type === 'BIN_OUT')
+    const inJobs    = monthJobs.filter(j => j.visit_type === 'BIN_IN')
+
+    const safe = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v }
+
+    safe('rn-earn-week',     '$' + sum(weekJobs).toFixed(2))
+    safe('rn-earn-week-sub', weekJobs.length + ' visit' + (weekJobs.length !== 1 ? 's' : '') + ' this week')
+    safe('rn-earn-month',    '$' + sum(monthJobs).toFixed(2))
+    safe('rn-earn-month-sub',monthJobs.length + ' visit' + (monthJobs.length !== 1 ? 's' : '') + ' this month')
+    safe('rn-earn-ytd',      '$' + sum(ytdJobs).toFixed(2))
+    safe('rn-earn-out',      '$' + sum(outJobs).toFixed(2))
+    safe('rn-earn-out-sub',  outJobs.length + ' Bin Out stop' + (outJobs.length !== 1 ? 's' : ''))
+    safe('rn-earn-in',       '$' + sum(inJobs).toFixed(2))
+    safe('rn-earn-in-sub',   inJobs.length + ' Bin In stop' + (inJobs.length !== 1 ? 's' : ''))
+
+    // Update dashboard stats
+    safe('rn-stat-visits', completed.length)
+    safe('rn-stat-month',  '$' + sum(monthJobs).toFixed(2))
+
+    // Pay history — group by week
+    const tbody = document.getElementById('pay-history-tbody')
+    if(tbody){
+      if(!completed.length){
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">No completed visits yet</td></tr>'
+      } else {
+        // Group by week
+        const weeks = {}
+        completed.forEach(j => {
+          const d = new Date(j.completed_at || j.scheduled_date)
+          const ws = new Date(d); ws.setDate(d.getDate() - d.getDay())
+          const key = ws.toISOString().slice(0,10)
+          if(!weeks[key]) weeks[key] = { start: ws, out:[], in:[], other:[] }
+          if(j.visit_type==='BIN_OUT') weeks[key].out.push(j)
+          else if(j.visit_type==='BIN_IN') weeks[key].in.push(j)
+          else weeks[key].other.push(j)
+        })
+        tbody.innerHTML = Object.entries(weeks).slice(0,10).map(([key, w]) => {
+          const outEarn = sum(w.out), inEarn = sum(w.in)
+          const total = outEarn + inEarn + sum(w.other)
+          const visits = w.out.length + w.in.length + w.other.length
+          const endDate = new Date(w.start); endDate.setDate(w.start.getDate()+6)
+          const fmt = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+          return `<tr>
+            <td>${fmt(w.start)} – ${fmt(endDate)}</td>
+            <td>${visits}</td>
+            <td>$${outEarn.toFixed(2)}</td>
+            <td>$${inEarn.toFixed(2)}</td>
+            <td style="font-weight:700;color:var(--cyan)">$${total.toFixed(2)}</td>
+            <td><span class="badge" style="background:#22c55e22;color:#22c55e">Paid</span></td>
+          </tr>`
+        }).join('')
+      }
+    }
+
+    // Load payout records for pay history
+    const { data: payouts } = await _supa
+      .from('runner_payouts')
+      .select('*')
+      .eq('runner_id', row.id)
+      .order('created_at', { ascending: false })
+      .limit(5)
+
+    if(payouts?.length && tbody){
+      tbody.innerHTML = payouts.map(p => `<tr>
+        <td>${p.pay_period_start ? new Date(p.pay_period_start).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '—'} – ${p.pay_period_end ? new Date(p.pay_period_end).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '—'}</td>
+        <td>${p.stops || 0}</td>
+        <td>—</td><td>—</td>
+        <td style="font-weight:700;color:var(--cyan)">$${parseFloat(p.amount||0).toFixed(2)}</td>
+        <td><span class="badge" style="${p.status==='paid'?'background:#22c55e22;color:#22c55e':p.status==='processing'?'background:rgba(245,158,11,.15);color:#fbbf24':'background:var(--surface2);color:var(--muted)'}">${p.status||'pending'}</span></td>
+      </tr>`).join('')
+    }
+
+  } catch(e){
+    console.warn('[BinDash] loadRNEarnings:', e)
+  }
+}
 async function loadRunnerRoutes(runnerRow){
   try {
     // Load both pending offers AND accepted jobs
@@ -5111,7 +5210,16 @@ async function rSubmit(){
 
 // Nav
 function hwNav(el,pg){document.querySelectorAll('#S-hw-dash .nav-i').forEach(n=>n.classList.remove('on'));if(el)el.classList.add('on');document.querySelectorAll('#S-hw-dash .pg').forEach(p=>p.classList.remove('on'));document.getElementById(pg).classList.add('on');const t={'hw-home':'Dashboard','hw-collections':'My Collections','hw-property':'My Property','hw-schedule':'Schedule','hw-account':'Account & Plan'};document.getElementById('hw-pg-title').textContent=t[pg]}
-function rnNav(el,pg){if(el)document.querySelectorAll('#S-rn-dash .nav-i').forEach(n=>n.classList.remove('on'));if(el)el.classList.add('on');document.querySelectorAll('#S-rn-dash .pg').forEach(p=>p.classList.remove('on'));document.getElementById(pg).classList.add('on');const t={'rn-home':'Dashboard','rn-routes':'My Routes','rn-earnings':'Earnings & Pay','rn-tax':'Tax Documents','rn-account':'My Info'};document.getElementById('rn-pg-title').textContent=t[pg];if(pg==='rn-routes')initRoutesTabs()}
+function rnNav(el,pg){
+  if(el) document.querySelectorAll('#S-rn-dash .nav-i').forEach(n=>n.classList.remove('on'))
+  if(el) el.classList.add('on')
+  document.querySelectorAll('#S-rn-dash .pg').forEach(p=>p.classList.remove('on'))
+  document.getElementById(pg).classList.add('on')
+  const t={'rn-home':'Dashboard','rn-routes':'My Routes','rn-earnings':'Earnings & Pay','rn-tax':'Tax Documents','rn-account':'My Info'}
+  document.getElementById('rn-pg-title').textContent = t[pg]
+  if(pg==='rn-routes')   initRoutesTabs()
+  if(pg==='rn-earnings') loadRNEarnings()
+}
 function adNav(el, pg){
   // Resolve to the .nav-i container even if a child element (badge/icon span) was clicked
   const navEl = el ? (el.classList && el.classList.contains('nav-i') ? el : el.closest && el.closest('.nav-i')) : null
@@ -5763,19 +5871,54 @@ function showAdminSos(){
 }
 
 function showScheduleModal(){
-  if(!requireCard()) return
-  document.getElementById('modal-box').innerHTML=`<div class="mh"><div style="font-size:15px;font-weight:700">⚙️ Manage Regular Schedule</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb">
-<div class="info-box">Changes apply from your next scheduled collection. Current and tonight's bookings are unaffected.</div>
-<div class="field"><label>Service Type</label><div class="radio-row"><div class="r-opt on" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">♻️ Recycling</div><div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">🗑️ General Waste</div><div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Both</div></div></div>
-<div class="g2">
-<div class="field"><label>Frequency</label><select><option selected>Weekly</option><option>Bi-weekly (every 2 weeks)</option><option>Monthly</option></select></div>
-<div class="field"><label>Collection Day</label><select><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option></select></div>
-</div>
-<div class="field"><label>Number of Bins</label><select><option>1 bin</option><option selected>2 bins</option><option>3 bins</option><option>4+ bins</option></select></div>
-<div class="field"><label>Special Instructions</label><textarea placeholder="e.g. Please knock on arrival. Recycling bin lid is broken.">—</textarea></div>
-<div style="background:var(--surface2);border-radius:8px;padding:12px;font-size:12px;color:var(--sub);margin-top:4px">Need to skip a single week? Use the <strong style="color:var(--text)">Skip</strong> button next to any upcoming slot instead of changing your whole schedule.</div>
-</div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-cyan btn-sm" onclick="closeM();showToast('Schedule updated ✅ Changes apply from next collection','ok')">Save Schedule</button></div>`
+  const curDay = document.getElementById('pref-day')?.textContent || 'Monday'
+  const curNotes = document.getElementById('pref-notes')?.textContent || ''
+
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh"><div style="font-size:15px;font-weight:700">⚙️ Manage Regular Schedule</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+  <div class="mb">
+    <div class="info-box">Changes apply from your next scheduled collection. Current bookings are unaffected.</div>
+    <div class="field"><label>Collection Day</label>
+      <select id="sched-day">
+        ${['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d=>`<option ${d===curDay?'selected':''}>${d}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field"><label>Special Instructions</label>
+      <textarea id="sched-notes" placeholder="e.g. Please knock on arrival. Recycling bin lid is broken.">${curNotes==='—'?'':curNotes}</textarea>
+    </div>
+    <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--sub)">
+      Need to skip a single week? Use the <strong style="color:var(--text)">Skip</strong> button next to any upcoming slot instead.
+    </div>
+    <div id="sched-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:8px"></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan btn-sm" id="sched-save-btn" onclick="saveScheduleModal()">Save Changes</button>
+  </div>`
   openM()
+}
+
+async function saveScheduleModal(){
+  const btn   = document.getElementById('sched-save-btn')
+  const errEl = document.getElementById('sched-error')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+  try {
+    const newDay   = document.getElementById('sched-day')?.value || ''
+    const newNotes = document.getElementById('sched-notes')?.value.trim() || null
+    const { error } = await _supa.from('homeowner_signups')
+      .update({ collection_day: newDay, service_notes: newNotes, updated_at: new Date().toISOString() })
+      .eq('email', currentUser.email)
+    if(error) throw new Error(error.message)
+    const safe = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v||'—' }
+    safe('pref-day', newDay)
+    safe('pref-notes', newNotes)
+    closeM()
+    showToast('Schedule updated ✅ — changes apply from next collection','ok')
+    setTimeout(populateHWDashboard, 300)
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
+  }
 }
 function showPauseModal(){
   const subId = window._hwStripeSubId
