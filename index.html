@@ -2662,38 +2662,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             </div>
           </div>
 
-          <!-- INCOMING OFFER BANNER -->
-          <div id="offer-banner" style="background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(251,191,36,.06));border:1.5px solid rgba(245,158,11,.4);border-radius:14px;padding:16px;margin-bottom:18px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div style="display:flex;align-items:center;gap:8px">
-                <span style="font-size:18px">📬</span>
-                <div>
-                  <div style="font-weight:700;font-size:14px;color:#fbbf24">Paired Batch Offer -- Both Visits</div>
-                  <div style="font-size:11px;color:var(--muted)">Accept once, covers Bin Out <em>and</em> Bin In . expires in <span id="offer-countdown" style="font-weight:700;color:#f59e0b">14:32</span></div>
-                </div>
-              </div>
-              <div style="background:rgba(245,158,11,.2);border-radius:8px;padding:6px 12px;text-align:center">
-                <div style="font-size:8px;color:var(--muted)">TOTAL EARN</div>
-                <div style="font-size:18px;font-weight:800;color:#fbbf24">$32.50</div>
-              </div>
-            </div>
-            <div style="background:rgba(0,0,0,.2);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px">
-              <div style="display:flex;gap:16px;margin-bottom:6px;flex-wrap:wrap">
-                <span><span style="color:var(--muted)">Batch:</span> <strong>OUT-NGL-048</strong></span>
-                <span><span class="vt-out">🌙 Bin Out</span> Fri Mar 15 . 6:30 PM</span>
-                <span><span class="vt-in">☀️ Bin In</span> Sat Mar 16 . ~9:00 AM (unlocks when your zone clears)</span>
-              </div>
-              <div style="display:flex;gap:12px;font-size:11px;color:var(--muted)">
-                <span>📍 4 stops . 1.3 mi . ~30 min each visit</span>
-                <span>📍 0.4 mi from your location</span>
-              </div>
-            </div>
-            <div style="display:flex;gap:8px">
-              <button class="btn btn-cyan btn-sm" style="flex:1" onclick="acceptOffer()">✓ Accept Both Visits -- $32.50</button>
-              <button class="btn btn-outline btn-sm" onclick="showOfferDetail()">View Details</button>
-              <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="declineOffer()">✕ Decline</button>
-            </div>
-          </div>
+          <!-- INCOMING OFFER BANNER -- populated by loadRunnerRoutes() -->
+          <div id="offer-banner" style="display:none;background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(251,191,36,.06));border:1.5px solid rgba(245,158,11,.4);border-radius:14px;padding:16px;margin-bottom:18px"></div>
 
           <div style="margin-bottom:18px">
             <div style="font-size:21px;font-weight:700">Runner Dashboard 👋</div>
@@ -2754,7 +2724,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                     <span style="color:var(--sub)">Current rate</span><span style="font-weight:700;color:var(--cyan)">$3.25/stop</span>
                   </div>
                   <div style="display:flex;justify-content:space-between">
-                    <span style="color:var(--sub)">Signup bonuses earned</span><span style="font-weight:700;color:var(--green)">$70.00</span>
+                    <span style="color:var(--sub)">Signup bonuses earned</span><span style="font-weight:700;color:var(--green)" id="rn-bonus-earned">$0.00</span>
                   </div>
                 </div>
                 <button class="btn btn-cyan btn-full btn-sm" onclick="showReferralLink()">🔗 Share My Referral Link</button>
@@ -7430,7 +7400,7 @@ function showRateRunner(){
     </div>
     <div class="mf">
       <button class="btn btn-ghost btn-sm" onclick="closeM()">Skip</button>
-      <button class="btn btn-cyan" onclick="closeM();showToast('Thanks for rating Marcus! ⭐','ok')">Submit Rating</button>
+      <button class="btn btn-cyan" onclick="closeM();showToast('Rating submitted ⭐','ok')">Submit Rating</button>
     </div>`
   openM()
   window._stars = 0
@@ -7848,66 +7818,104 @@ async function renderPaymentsPage(){
 
 // -- DATA LOADER ---------------------------------------------------
 async function loadPaymentsData(){
-  // Build HW_PAYMENTS from HOMEOWNERS array
-  HW_PAYMENTS = HOMEOWNERS.map(hw => {
+  // Build HW_PAYMENTS from homeowner_signups in DB
+  try {
+    const { data: hwRows } = await _supa
+      .from('homeowner_signups')
+      .select('id, first_name, last_name, email, plan, stripe_subscription_id, stripe_customer_id, status')
+      .in('status', ['approved','active'])
+      .order('created_at', { ascending: false })
+
     const planPrices = { plan_a:34.99, plan_b:44.99, plan_c:54.99, w1:34.99, w2:44.99, w3:54.99 }
     const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split', w1:'1 Can', w2:'2 Cans Same Day', w3:'2 Cans Split' }
-    const planKey = hw.plan || 'plan_a'
-    return {
-      hwId:        hw.id,
-      name:        hw.name,
-      email:       hw.email,
-      plan:        planKey,
-      planLabel:   planLabels[planKey] || planKey,
-      monthly:     planPrices[planKey] || 34.99,
-      status:      hw.status === 'active' ? 'active' : hw.status === 'paused' ? 'paused' : 'active',
-      nextCharge:  _nextChargeDate(),
-      lastCharged: _lastChargeDate(),
-      cardLast4:   hw.cardLast4 || '----',
-      stripeSubId: hw.stripeSubscriptionId || null,
-    }
-  })
+    HW_PAYMENTS = (hwRows||[]).map(hw => {
+      const planKey = hw.plan || 'plan_a'
+      return {
+        hwId:        hw.id,
+        name:        (hw.first_name||'')+' '+(hw.last_name||''),
+        email:       hw.email,
+        plan:        planKey,
+        planLabel:   planLabels[planKey] || planKey,
+        monthly:     planPrices[planKey] || 34.99,
+        status:      hw.status || 'active',
+        nextCharge:  _nextChargeDate(),
+        lastCharged: '--',
+        cardLast4:   '----',
+        stripeSubId: hw.stripe_subscription_id || null,
+      }
+    })
+    // Fallback to in-memory if DB empty
+    if(!HW_PAYMENTS.length) HW_PAYMENTS = HOMEOWNERS.map(hw => ({
+      hwId:hw.id, name:hw.name, email:hw.email, plan:hw.plan||'plan_a',
+      planLabel:'1 Can', monthly:34.99, status:'active',
+      nextCharge:_nextChargeDate(), lastCharged:'--', cardLast4:'----', stripeSubId:null,
+    }))
+  } catch(e){ console.warn('HW payments load:', e) }
 
-  // Build RUNNER_PAYOUTS -- pull pending amounts from DB
+  // Build RUNNER_PAYOUTS directly from runner_payouts table (no dependency on RUNNERS array)
   try {
     const { data: payouts } = await _supa
       .from('runner_payouts')
-      .select('runner_id, runner_name, stops, amount, status, created_at')
-      .eq('status', 'pending')
+      .select('*')
+      .in('status', ['pending','processing'])
       .order('created_at', { ascending: false })
 
-    // Group by runner_id to sum pending amounts
+    // Also pull all runners to merge
+    const runnerMap = {}
+    RUNNERS.forEach(r => { runnerMap[r.id] = r; runnerMap[r.email] = r })
+
     const pendingByRunner = {}
     ;(payouts||[]).forEach(p => {
-      if(!pendingByRunner[p.runner_id]) pendingByRunner[p.runner_id] = { stops:0, amount:0 }
-      pendingByRunner[p.runner_id].stops  += p.stops  || 0
-      pendingByRunner[p.runner_id].amount += parseFloat(p.amount || 0)
-      pendingByRunner[p.runner_id].name    = p.runner_name
+      const key = p.runner_id || p.runner_name
+      if(!pendingByRunner[key]) pendingByRunner[key] = {
+        runnerId:        p.runner_id,
+        name:            p.runner_name || '--',
+        stops:           0,
+        amount:          0,
+        stripeConnectId: runnerMap[p.runner_id]?.stripeConnectId || null,
+        autoPay:         runnerMap[p.runner_id]?.autoPay || false,
+        payDay:          runnerMap[p.runner_id]?.payDay  || 'Friday',
+        lastPaidAt:      runnerMap[p.runner_id]?.lastPaidAt || null,
+        lastPaidAmt:     runnerMap[p.runner_id]?.lastPaidAmt || null,
+      }
+      pendingByRunner[key].stops  += p.stops || 0
+      pendingByRunner[key].amount += parseFloat(p.amount || 0)
     })
 
-    RUNNER_PAYOUTS = RUNNERS.filter(r=>r.status!=='INACTIVE').map(r => {
-      const pending = pendingByRunner[r.id] || { stops:0, amount:0 }
-      return {
-        runnerId:        r.id,
-        name:            r.name,
-        zone:            r.zones?.[0] || '--',
-        stopsThisWeek:   pending.stops,
-        pendingAmt:      pending.amount.toFixed(2),
-        autoPay:         r.autoPay || false,
-        payDay:          r.payDay  || 'Friday',
-        stripeConnectId: r.stripeConnectId || null,
-        lastPaidAt:      r.lastPaidAt  || null,
-        lastPaidAmt:     r.lastPaidAmt || null,
-      }
+    RUNNER_PAYOUTS = Object.values(pendingByRunner).map(p => ({
+      runnerId:        p.runnerId,
+      name:            p.name,
+      zone:            runnerMap[p.runnerId]?.area || '--',
+      stopsThisWeek:   p.stops,
+      pendingAmt:      p.amount.toFixed(2),
+      autoPay:         p.autoPay,
+      payDay:          p.payDay,
+      stripeConnectId: p.stripeConnectId,
+      lastPaidAt:      p.lastPaidAt,
+      lastPaidAmt:     p.lastPaidAmt,
+    }))
+
+    // Add runners with no pending payout (so admin can still see them)
+    const activeRunners = RUNNERS.filter(r => r.status !== 'INACTIVE')
+    activeRunners.forEach(r => {
+      const alreadyIn = RUNNER_PAYOUTS.some(p => p.runnerId === r.id || p.name === r.name)
+      if(!alreadyIn) RUNNER_PAYOUTS.push({
+        runnerId: r.id, name: r.name, zone: r.area || '--',
+        stopsThisWeek: 0, pendingAmt: '0.00',
+        autoPay: r.autoPay||false, payDay: r.payDay||'Friday',
+        stripeConnectId: r.stripeConnectId||null,
+        lastPaidAt: r.lastPaidAt||null, lastPaidAmt: r.lastPaidAmt||null,
+      })
     })
+
   } catch(e){
     console.warn('[BinDash] loadPaymentsData payouts:', e)
-    // Fallback to in-memory
     RUNNER_PAYOUTS = RUNNERS.filter(r=>r.status!=='INACTIVE').map(r => ({
-      runnerId: r.id, name: r.name, zone: r.zones?.[0]||'--',
-      stopsThisWeek: r.completedToday||0, pendingAmt: ((r.completedToday||0)*3.25).toFixed(2),
-      autoPay: r.autoPay||false, payDay: r.payDay||'Friday',
-      stripeConnectId: r.stripeConnectId||null, lastPaidAt: r.lastPaidAt||null, lastPaidAmt: r.lastPaidAmt||null,
+      runnerId:r.id, name:r.name, zone:r.area||'--',
+      stopsThisWeek:0, pendingAmt:'0.00',
+      autoPay:r.autoPay||false, payDay:r.payDay||'Friday',
+      stripeConnectId:r.stripeConnectId||null,
+      lastPaidAt:r.lastPaidAt||null, lastPaidAmt:r.lastPaidAmt||null,
     }))
   }
 
@@ -7918,10 +7926,7 @@ function _nextChargeDate(){
   const d = new Date(); d.setDate(d.getDate() + 30)
   return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
 }
-function _lastChargeDate(){
-  const d = new Date(); d.setDate(d.getDate() - (Math.floor(Math.random()*28)+2))
-  return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
-}
+function _lastChargeDate(){ return '--' }
 function _updateNextAutoPayLabel(){
   const autoRunners = RUNNER_PAYOUTS.filter(r=>r.autoPay)
   const el = document.getElementById('rp-next-run')
@@ -8923,7 +8928,7 @@ function navSubmitRoute(){
   }))
 
   COMPLETED_ROUTES.unshift({
-    id: batchId, date:'2025-03-14', label:'Today',
+    id: batchId, date:new Date().toISOString().slice(0,10), label:'Today',
     type: visitType, zone: ADMIN_ZONES[0]?.name || 'Your Zone',
     stops, earned,
     duration:'--', distance:'--',
@@ -9024,7 +9029,7 @@ function renderCompletedRoutes(){
   const container = document.getElementById('completed-route-container')
   if(!container) return
   const range = document.getElementById('completed-range')?.value || 'today'
-  const today = new Date('2025-03-14')
+  const today = new Date()
 
   const filtered = COMPLETED_ROUTES.filter(r => {
     const diff = Math.round((today - new Date(r.date)) / 86400000)
@@ -11799,35 +11804,27 @@ function checkZoneAvailability(){
 }
 
 function showReferralLink(){
+  const row  = window._rnRow
+  const name = row ? ((row.first_name||'')+(row.last_name?'-'+row.last_name:'')).toUpperCase().replace(/\s/g,'-') : 'RUNNER'
+  const refCode = (row?.id || '').slice(-4).toUpperCase() || 'XXXX'
+  const refUrl  = `bindash-eight.vercel.app/join?ref=${name}-${refCode}`
+  const fullUrl = `https://bindash-eight.vercel.app/join?ref=${name}-${refCode}`
+
   document.getElementById('modal-box').innerHTML = `
   <div class="mh"><div style="font-size:15px;font-weight:700">🔗 My Referral Link</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
   <div class="mb">
-    <div style="font-size:13px;color:var(--sub);margin-bottom:16px;line-height:1.6">Share this link with your neighbours. Every homeowner who signs up through it joins your route permanently -- recurring weekly income for you.</div>
+    <div style="font-size:13px;color:var(--sub);margin-bottom:16px;line-height:1.6">Share this link with your neighbours. Every homeowner who signs up through it gets routed to your zone.</div>
     <div style="background:var(--surface2);border-radius:8px;padding:12px 14px;display:flex;align-items:center;gap:10px;margin-bottom:16px">
-      <div style="flex:1;font-family:'DM Mono',monospace;font-size:12px;color:var(--cyan);word-break:break-all">bindash.com/join?ref=MARCUS-REID-ZB</div>
-      <button class="btn btn-outline btn-sm" onclick="showToast('Link copied to clipboard ✅','ok')">Copy</button>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
-      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
-        <div style="font-size:8px;color:var(--muted);text-transform:uppercase">Signups via link</div>
-        <div style="font-size:20px;font-weight:700;color:var(--cyan);margin-top:4px">7</div>
-      </div>
-      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
-        <div style="font-size:8px;color:var(--muted);text-transform:uppercase">Bonuses earned</div>
-        <div style="font-size:20px;font-weight:700;color:var(--green);margin-top:4px">$70</div>
-      </div>
-      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
-        <div style="font-size:8px;color:var(--muted);text-transform:uppercase">Added to route</div>
-        <div style="font-size:20px;font-weight:700;color:var(--amber);margin-top:4px">5</div>
-      </div>
+      <div style="flex:1;font-family:'DM Mono',monospace;font-size:12px;color:var(--cyan);word-break:break-all">${refUrl}</div>
+      <button class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${fullUrl}');showToast('Link copied ✅','ok')">Copy</button>
     </div>
     <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--sub)">
-      💡 <strong style="color:var(--text)">3 more signups</strong> unlocks Builder tier -- your rate increases to $3.50/stop permanently.
+      💡 Referral tracking coming soon — your link is live and ready to share.
     </div>
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Close</button>
-    <button class="btn btn-cyan" onclick="showToast('Link shared ✅','ok');closeM()">Share via Email / WhatsApp</button>
+    <button class="btn btn-cyan" onclick="navigator.clipboard.writeText('${fullUrl}');showToast('Link copied ✅','ok');closeM()">Copy &amp; Share</button>
   </div>`
   openM()
 }
@@ -12102,53 +12099,64 @@ function updateOfferCountdown(){
 setInterval(updateOfferCountdown, 1000)
 
 function showOfferDetail(){
-  document.getElementById('modal-box').innerHTML=`
+  // Use real offer data from current pending offer
+  const offerId  = window._currentOfferId
+  const allJobs  = window._lastEnrichedJobs || []
+  const batchJobs = offerId
+    ? allJobs.filter(j => (j.batch_id||j.id) === offerId && j.status === 'offered')
+    : []
+
+  const stopCount = batchJobs.length
+  const earn      = (stopCount * 3.25).toFixed(2)
+  const visitType = batchJobs[0]?.visit_type || 'BIN_OUT'
+  const batchId   = batchJobs[0]?.batch_id   || offerId || '--'
+  const schedDate = batchJobs[0]?.scheduled_date
+    ? new Date(batchJobs[0].scheduled_date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})
+    : '--'
+
+  document.getElementById('modal-box').innerHTML = `
   <div class="mh" style="background:rgba(245,158,11,.07)">
     <div>
-      <div style="font-size:15px;font-weight:700;color:#fbbf24">📬 Batch Offer -- OUT-SWE-051</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:2px">You have first refusal . expires in <span style="color:#f59e0b;font-weight:700" id="modal-countdown">--:--</span></div>
+      <div style="font-size:15px;font-weight:700;color:#fbbf24">📬 ${visitType==='BIN_OUT'?'🌙 Bin Out':'☀️ Bin In'} Batch Offer</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">${batchId} · expires in <span style="color:#f59e0b;font-weight:700" id="offer-countdown-modal">--:--</span></div>
     </div>
     <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
   </div>
   <div class="mb">
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
-      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center"><div style="font-size:8px;color:var(--muted)">STOPS</div><div style="font-size:20px;font-weight:700;margin-top:3px">5</div></div>
-      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center"><div style="font-size:8px;color:var(--muted)">DISTANCE</div><div style="font-size:20px;font-weight:700;margin-top:3px">1.4 mi</div></div>
-      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center"><div style="font-size:8px;color:var(--muted)">EST. TIME</div><div style="font-size:20px;font-weight:700;margin-top:3px">35min</div></div>
-      <div style="background:rgba(245,158,11,.1);border-radius:8px;padding:10px;text-align:center"><div style="font-size:8px;color:var(--muted)">EARN</div><div style="font-size:20px;font-weight:700;margin-top:3px;color:#fbbf24">$16.25</div></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center"><div style="font-size:8px;color:var(--muted)">STOPS</div><div style="font-size:20px;font-weight:700;margin-top:3px">${stopCount}</div></div>
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center"><div style="font-size:8px;color:var(--muted)">DATE</div><div style="font-size:14px;font-weight:700;margin-top:3px">${schedDate}</div></div>
+      <div style="background:rgba(245,158,11,.1);border-radius:8px;padding:10px;text-align:center"><div style="font-size:8px;color:var(--muted)">EARN</div><div style="font-size:20px;font-weight:700;margin-top:3px;color:#fbbf24">$${earn}</div></div>
     </div>
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Stops</div>
     <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px">
-      ${[
-        {n:'Stop 1',a:'Address from your batch',d:'Details will load from your assignment',s:'♻ Recycling'},
-        {n:'Stop 2',a:'Address from your batch',d:'Details will load from your assignment',s:'♻ Recycling'},
-        {n:'Stop 3',a:'Address from your batch',d:'Details will load from your assignment',s:'♻ Recycling'},
-      ].map((s,i)=>`<div style="display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border-radius:8px;padding:9px 12px">
-        <div style="width:22px;height:22px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
-        <div style="flex:1">
-          <div style="font-size:13px;font-weight:600">${s.n}</div>
-          <div style="font-size:11px;color:var(--muted)">${s.a} . ${s.s}</div>
-          <div style="font-size:11px;color:var(--sub);margin-top:2px">${s.d}</div>
-        </div>
-        <div style="font-size:11px;color:var(--green);font-weight:600">$3.25</div>
-      </div>`).join('')}
-    </div>
-    <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--sub)">
-      📍 Closest stop is 0.25 mi from your current location . Fri Mar 15 . Start 7:30 PM
+      ${batchJobs.map((j,i)=>{
+        const hw = j.hw || {}
+        return `<div style="display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border-radius:8px;padding:9px 12px">
+          <div style="width:22px;height:22px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600">${(hw.first_name||'') + ' ' + (hw.last_name||j.homeowner_email||'--')}</div>
+            <div style="font-size:11px;color:var(--muted)">${hw.street_address||'--'} · ${j.service_type||'Recycling'}</div>
+            ${hw.gate_code?`<div style="font-size:10px;color:#fbbf24;margin-top:2px">🔑 ${hw.gate_code}</div>`:''}
+          </div>
+          <div style="font-size:11px;color:var(--green);font-weight:600">$3.25</div>
+        </div>`
+      }).join('')}
     </div>
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM();declineOffer()">✕ Decline</button>
-    <button class="btn btn-cyan" onclick="closeM();acceptOffer()">✓ Accept Batch -- $16.25</button>
+    <button class="btn btn-cyan" onclick="closeM();acceptOffer()">✓ Accept -- $${earn}</button>
   </div>`
   openM()
-  // sync countdown in modal
+
+  // Sync countdown with main timer
   const syncModal = setInterval(()=>{
-    const el=document.getElementById('modal-countdown')
-    if(!el){clearInterval(syncModal);return}
-    const m=Math.floor(offerSeconds/60),s=offerSeconds%60
-    el.textContent=m+':'+String(s).padStart(2,'0')
-  },1000)
+    const src = document.getElementById('offer-countdown')
+    const tgt = document.getElementById('offer-countdown-modal')
+    if(!tgt){ clearInterval(syncModal); return }
+    if(src) tgt.textContent = src.textContent
+  }, 1000)
 }
 
 // Admin dispatch actions
