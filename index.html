@@ -2295,7 +2295,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           </div>
         </div>
         <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:14px 16px;font-size:13px;color:var(--sub);margin-bottom:24px">
-          📧 Check your email for confirmation. Questions? Contact <span style="color:var(--cyan)">hello@bindash.shop</span>
+          📧 Check your email for confirmation. Questions? Contact <span style="color:var(--cyan)"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="d2bab7bebebd92b0bbbcb6b3a1bafca1babda2">[email&#160;protected]</a></span>
         </div>
         <button class="btn btn-outline btn-lg" onclick="go('S-land')" style="margin-right:10px"><- Back to BinDash</button>
       </div>
@@ -3089,6 +3089,16 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <div id="rn-pw-error" style="display:none;color:#fca5a5;font-size:12px;margin-bottom:8px"></div>
                 <button class="btn btn-outline btn-sm" onclick="saveRNPassword()">Update Password</button>
               </div>
+              <div class="card" style="margin-top:12px;border-color:rgba(6,214,160,.2)">
+                <div class="card-ttl">My Referral Code</div>
+                <div style="font-size:12px;color:var(--sub);line-height:1.6;margin-bottom:10px">
+                  Share this code with homeowners signing up — earn <strong style="color:var(--cyan)">$10</strong> per referral + priority dispatch status.
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.15);border-radius:8px;padding:10px 14px;margin-bottom:10px" id="rn-acct-ref-code-display">
+                  <span style="color:var(--muted);font-size:12px">Loading...</span>
+                </div>
+                <button class="btn btn-cyan btn-full btn-sm" onclick="showReferralLink()">🔗 View &amp; Share Referral Link</button>
+              </div>
             </div>
           </div>
         </div>
@@ -3262,11 +3272,16 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- AD RUNNER ZONE REQUESTS -->
         <div class="pg" id="ad-runner-zone-requests">
-          <div style="color:var(--sub);font-size:13px;margin-bottom:16px">
-            Runners who want to service a ZIP code that doesn't have a zone yet. Use this to gauge runner supply before opening new zones.
-          </div>
+
+          <!-- ZONE HEALTH OVERVIEW (computed by renderRunnerZoneRequests) -->
+          <div id="rzr-overview" style="margin-bottom:20px"></div>
+
+          <!-- ZONE CARDS GRID (waitlist + live) -->
+          <div id="rzr-zone-grid" style="margin-bottom:24px"></div>
+
+          <!-- INCOMING REQUESTS -->
           <div id="rzr-list" style="display:flex;flex-direction:column;gap:10px">
-            <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No runner zone requests yet.</div>
+            <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">Loading...</div>
           </div>
         </div>
 
@@ -3789,7 +3804,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 <div id="toast"></div>
 
 
-<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 
 // -- TOAST NOTIFICATIONS --------------------------------------
 function onReferredByChange(appId, runnerName){
@@ -4368,9 +4383,19 @@ async function populateRNDashboard(){
     const row = res?.data
     if(!row){ console.warn('[BinDash] No runner record for', currentUser.email); return }
 
+    // Also load from runners table for fields only stored there (own_ref_code, priority_dispatch, hw_referral_count, bonus_earned)
+    let rnRow = null
+    try {
+      const rRes = await _supa.from('runners').select('*').eq('email', currentUser.email).single()
+      rnRow = rRes?.data || null
+    } catch(e){}
+
+    // Merge: runners table fields take precedence for referral/payout data
+    const merged = { ...row, ...(rnRow || {}) }
+
     // Use DB row for name
-    const fn = row.first_name || currentUser.user_metadata?.first_name || currentUser.email?.split('@')[0] || 'Runner'
-    const ln = row.last_name  || currentUser.user_metadata?.last_name  || ''
+    const fn = merged.first_name || currentUser.user_metadata?.first_name || currentUser.email?.split('@')[0] || 'Runner'
+    const ln = merged.last_name  || currentUser.user_metadata?.last_name  || ''
     const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'RN'
 
     // Sidebar
@@ -4384,11 +4409,11 @@ async function populateRNDashboard(){
     // Show Stripe Connect setup banner if not yet connected
     const stripeBanner = document.getElementById('rn-stripe-setup-banner')
     if(stripeBanner){
-      stripeBanner.style.display = row.stripe_connect_id ? 'none' : 'block'
+      stripeBanner.style.display = (merged.stripe_connect_id || rnRow?.stripe_connect_id) ? 'none' : 'block'
     }
 
-    // Store for later use
-    window._rnRow = row
+    // Store merged row for later use (earnings, routes, etc.)
+    window._rnRow = merged
 
     if(row.status === 'pending_review'){
       if(grEl) grEl.textContent = 'Your application is pending review -- we\'ll notify you within 24-48 hrs'
@@ -4396,29 +4421,41 @@ async function populateRNDashboard(){
       _checkRunnerWaitlistZones(row)
     } else if(row.status === 'approved'){
       if(grEl) grEl.textContent = 'Account active . Check your routes below'
-      await loadRunnerRoutes(row)
+      await loadRunnerRoutes(merged)
     } else if(row.status === 'rejected'){
       if(grEl) grEl.textContent = 'Application not approved -- contact support for details'
     }
 
-    // Account page pre-fill -- use IDs not placeholder selectors
+    // Account page pre-fill
     const setVal = (id,v) => { const el=document.getElementById(id); if(el) el.value=v||'' }
-    setVal('rn-acct-fn',   row.first_name || fn)
-    setVal('rn-acct-ln',   row.last_name  || ln)
-    setVal('rn-acct-em',   row.email      || '')
-    setVal('rn-acct-ph',   row.phone      || '')
-    setVal('rn-acct-zip',  row.zip_code   || '')
+    setVal('rn-acct-fn',   merged.first_name || fn)
+    setVal('rn-acct-ln',   merged.last_name  || ln)
+    setVal('rn-acct-em',   merged.email      || '')
+    setVal('rn-acct-ph',   merged.phone      || '')
+    setVal('rn-acct-zip',  merged.zip_code   || '')
+
+    // Referral code display in account page
+    const ownCode = merged.own_ref_code || row.own_ref_code || null
+    const refCodeEl = document.getElementById('rn-acct-ref-code-display')
+    if(refCodeEl){
+      if(ownCode){
+        refCodeEl.innerHTML = `<span style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:var(--cyan);letter-spacing:.08em">${ownCode}</span>
+          <button onclick="navigator.clipboard.writeText('${ownCode}');showToast('Code copied ✅','ok')" style="background:rgba(6,214,160,.1);border:1px solid rgba(6,214,160,.2);color:var(--cyan);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;margin-left:8px">📋 Copy</button>`
+      } else {
+        refCodeEl.innerHTML = `<span style="color:var(--muted);font-size:12px">Generated on approval</span>`
+      }
+    }
 
     // Stats
     const safe = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v }
-    safe('rn-total-earned',  row.total_earned  ? '$'+parseFloat(row.total_earned).toFixed(2)  : '$0.00')
-    safe('rn-total-stops',   row.total_stops   || 0)
-    safe('rn-rating-display',row.rating        ? row.rating+'★' : '--')
+    safe('rn-total-earned',  merged.total_earned  ? '$'+parseFloat(merged.total_earned).toFixed(2)  : '$0.00')
+    safe('rn-total-stops',   merged.total_stops   || 0)
+    safe('rn-rating-display',merged.rating        ? merged.rating+'★' : '--')
 
     // Referral bonus & priority dispatch
-    const bonusEarned    = parseFloat(row.bonus_earned||0)
-    const hwRefCount     = row.hw_referral_count || 0
-    const hasPriority    = !!row.priority_dispatch
+    const bonusEarned    = parseFloat(merged.bonus_earned||0)
+    const hwRefCount     = merged.hw_referral_count || 0
+    const hasPriority    = !!(merged.priority_dispatch)
     safe('rn-bonus-earned', '$'+bonusEarned.toFixed(2))
 
     // Growth bar — based on HW referrals
@@ -6571,9 +6608,15 @@ function renderRunnerCard(r){
         </div>
       </div>
       <div class="dl"><div class="dl-l">Referrals</div>
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="font-weight:600">${r.totalReferrals||0}</span>
-          ${r.referredBy ? `<span style="font-size:11px;color:var(--muted)">via ${r.referredBy}</span>` : ''}
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-weight:600">${r.totalReferrals||0}</span>
+            ${r.referredBy ? `<span style="font-size:11px;color:var(--muted)">via ${r.referredBy}</span>` : ''}
+          </div>
+          ${r.ownRefCode ? `<div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+            <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--cyan);background:rgba(6,214,160,.08);border:1px solid rgba(6,214,160,.15);border-radius:5px;padding:2px 7px;letter-spacing:.06em">${r.ownRefCode}</span>
+            <button onclick="navigator.clipboard.writeText('${r.ownRefCode}');showToast('Ref code copied','ok')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0">📋</button>
+          </div>` : ''}
         </div>
       </div>
       <div class="dl"><div class="dl-l">Status</div><div>${inactive
@@ -11596,17 +11639,48 @@ function editPendingHW(appId){
   openM()
 }
 
-function savePendingHWEdit(appId){
+async function savePendingHWEdit(appId){
   const app = PENDING_HOMEOWNERS.find(x=>x.id===appId); if(!app) return
-  app.name    = document.getElementById('ephw-name').value
-  app.email   = document.getElementById('ephw-email').value
-  app.phone   = document.getElementById('ephw-phone').value
-  app.zip     = document.getElementById('ephw-zip').value
-  app.address = document.getElementById('ephw-addr').value
-  app.service = document.getElementById('ephw-svc').value
-  app.day     = document.getElementById('ephw-day').value
-  app.svcNotes= document.getElementById('ephw-notes').value
-  app.initials= app.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
+  const btn = document.querySelector('#modal-box .btn-cyan')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+
+  const newName  = document.getElementById('ephw-name').value.trim()
+  const newEmail = document.getElementById('ephw-email').value.trim()
+  const newPhone = document.getElementById('ephw-phone').value.trim()
+  const newZip   = document.getElementById('ephw-zip').value.trim()
+  const newAddr  = document.getElementById('ephw-addr').value.trim()
+  const newSvc   = document.getElementById('ephw-svc').value
+  const newDay   = document.getElementById('ephw-day').value
+  const newNotes = document.getElementById('ephw-notes').value.trim()
+
+  // Update in-memory
+  const parts = newName.split(' ')
+  app.name    = newName
+  app.email   = newEmail
+  app.phone   = newPhone
+  app.zip     = newZip
+  app.address = newAddr
+  app.service = newSvc
+  app.day     = newDay
+  app.svcNotes= newNotes
+  app.initials= (parts[0]?.[0]||'')+(parts[1]?.[0]||'')
+
+  // Persist to Supabase
+  try {
+    await _supa.from('homeowner_signups').update({
+      first_name:    parts[0] || '',
+      last_name:     parts.slice(1).join(' ') || '',
+      email:         newEmail,
+      phone:         newPhone || null,
+      zip_code:      newZip   || null,
+      street_address:newAddr  || null,
+      service_type:  newSvc   || null,
+      collection_day:newDay   || null,
+      service_notes: newNotes || null,
+      updated_at:    new Date().toISOString(),
+    }).eq('id', appId)
+  } catch(e){ console.warn('[BinDash] savePendingHWEdit:', e) }
+
   closeM(); renderPendingHWList()
   showToast('Application updated ✅','ok')
 }
@@ -13088,6 +13162,9 @@ async function loadSignupsFromSupabase(){
         // Stripe
         stripeSessionId: row.stripe_session_id || null,
         stripeCustomerId:row.stripe_customer_id || null,
+        // Referral
+        referredByCode:  row.referred_by_code   || null,
+        referredByRunner:row.referred_by_runner  || null,
       }
       if(row.status === 'waitlisted'){
         WAITLIST_SIGNUPS.push(entry)
@@ -13297,6 +13374,9 @@ async function loadRunnersFromSupabase(){
         loyaltyRate:     row.loyalty_rate     || 3.25,
         totalReferrals:  row.total_referrals  || 0,
         bonusEarned:     row.bonus_earned     || 0,
+        ownRefCode:      row.own_ref_code     || null,
+        hwReferralCount: row.hw_referral_count|| 0,
+        priorityDispatch:!!row.priority_dispatch,
       }
     }
 
@@ -14163,10 +14243,225 @@ async function renderZoneWaitlist(){
 }
 
 // -- RUNNER ZONE REQUESTS --------------------------------------
+
+function _renderZoneHealthOverview(){
+  const ovEl = document.getElementById('rzr-overview')
+  if(!ovEl) return
+
+  const allZones    = ADMIN_ZONES.filter(z => z.status !== 'inactive')
+  const liveZones   = allZones.filter(z => z.status === 'live' && !z.pilot)
+  const pilotZones  = allZones.filter(z => z.pilot || z.status === 'pilot')
+  const waitlZones  = allZones.filter(z => z.status === 'waitlist')
+
+  const totalHW     = allZones.reduce((t,z) => t + (z.homeowners||0), 0)
+  const totalRN     = RUNNERS.filter(r => r.status !== 'INACTIVE').length
+  const totalWL     = WAITLIST_SIGNUPS.length
+  const totalRef    = RUNNERS.reduce((t,r) => t + (r.totalReferrals||0), 0)
+
+  // MRR estimate
+  const planRates   = { plan_a:34.99, plan_b:44.99, plan_c:54.99 }
+  const mrrEst      = HOMEOWNERS.reduce((t,h) => t + (planRates[h.plan]||34.99), 0)
+
+  // Zones closest to going live
+  const readyZones = waitlZones.map(z => {
+    const needed   = z.threshold || 3
+    const hwCount  = (z.homeowners||0)
+    const rnCount  = (z.runners||0)
+    const hwPct    = Math.min(100, Math.round(hwCount/Math.max(needed,1)*100))
+    const rnPct    = Math.min(100, Math.round(rnCount/Math.max(z.capacity||4,1)*100))
+    const wlCount  = WAITLIST_SIGNUPS.filter(s => z.zips?.includes(s.zip)||z.zip===s.zip?.slice(0,3)).length
+    return { z, needed, hwCount, rnCount, hwPct, rnPct, wlCount }
+  }).sort((a,b) => (b.hwPct+b.rnPct)-(a.hwPct+a.rnPct))
+
+  ovEl.innerHTML = `
+  <div style="margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800">Zone Management Overview</div>
+    <button class="btn btn-cyan btn-sm" onclick="showCreateZone()">+ New Zone</button>
+  </div>
+
+  <!-- KPI ROW -->
+  <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:16px">
+    ${[
+      { label:'Live Zones',    val:liveZones.length,  col:'var(--cyan)',   icon:'🟢' },
+      { label:'Pilot Zones',   val:pilotZones.length, col:'#a5b4fc',       icon:'🔬' },
+      { label:'Waitlist Zones',val:waitlZones.length, col:'#fbbf24',       icon:'⏳' },
+      { label:'Active HOs',    val:totalHW,            col:'var(--green)',  icon:'🏠' },
+      { label:'Waitlisted HOs',val:totalWL,            col:'#f97316',       icon:'📋' },
+      { label:'Est. MRR',      val:'$'+mrrEst.toFixed(0), col:'var(--cyan)',icon:'💵' },
+    ].map(k=>`
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 10px;text-align:center">
+        <div style="font-size:18px;margin-bottom:3px">${k.icon}</div>
+        <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:800;color:${k.col}">${k.val}</div>
+        <div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">${k.label}</div>
+      </div>`).join('')}
+  </div>
+
+  <!-- REFERRAL + RUNNER SUMMARY ROW -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+    <div style="background:linear-gradient(135deg,rgba(139,92,246,.08),rgba(99,102,241,.04));border:1px solid rgba(139,92,246,.25);border-radius:10px;padding:14px">
+      <div style="font-size:11px;font-weight:700;color:#c4b5fd;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">🔗 Runner Referral Pipeline</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div><div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#c4b5fd">${totalRN}</div><div style="font-size:10px;color:var(--muted)">Active runners</div></div>
+        <div><div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#a78bfa">${totalRef}</div><div style="font-size:10px;color:var(--muted)">Runner referrals</div></div>
+        <div><div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#818cf8">${RUNNERS.filter(r=>r.priorityDispatch).length}</div><div style="font-size:10px;color:var(--muted)">Priority runners</div></div>
+      </div>
+      ${totalRN ? `<div style="margin-top:10px;display:flex;flex-direction:column;gap:4px">
+        ${RUNNERS.slice(0,3).map(r=>`
+          <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;background:rgba(255,255,255,.04);border-radius:6px;padding:4px 8px">
+            <span style="font-weight:600">${r.name}</span>
+            <span style="color:var(--muted)">${r.area||r.zip||'--'}</span>
+            ${r.ownRefCode?`<span style="font-family:'DM Mono',monospace;color:var(--cyan);font-size:10px">${r.ownRefCode}</span>`:'<span style="color:var(--muted);font-size:10px">No code</span>'}
+            <span style="color:#c4b5fd">${r.totalReferrals||0} ref${(r.totalReferrals||0)!==1?'s':''}</span>
+          </div>`).join('')}
+      </div>` : ''}
+    </div>
+
+    <div style="background:linear-gradient(135deg,rgba(6,214,160,.08),rgba(16,185,129,.04));border:1px solid rgba(6,214,160,.2);border-radius:10px;padding:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">🚀 Zones Closest to Launch</div>
+      ${readyZones.length ? readyZones.slice(0,3).map(({z,needed,hwCount,rnCount,hwPct,rnPct,wlCount})=>{
+        const launchScore = Math.round((hwPct*0.6)+(rnPct*0.4))
+        const scoreCol = launchScore>=80?'#22c55e':launchScore>=50?'#fbbf24':'#f97316'
+        return `<div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-size:12px;font-weight:700">${z.name}</span>
+            <span style="font-size:11px;font-weight:800;color:${scoreCol}">${launchScore}% ready</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:3px">
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:2px">
+                <span>🏠 Homeowners</span><span>${hwCount}/${needed}</span>
+              </div>
+              <div style="background:var(--surface2);border-radius:99px;height:4px"><div style="width:${hwPct}%;height:100%;background:var(--cyan);border-radius:99px;transition:width .4s"></div></div>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:2px">
+                <span>🚐 Runners</span><span>${rnCount}/${z.capacity||4}</span>
+              </div>
+              <div style="background:var(--surface2);border-radius:99px;height:4px"><div style="width:${rnPct}%;height:100%;background:#a5b4fc;border-radius:99px;transition:width .4s"></div></div>
+            </div>
+          </div>
+          ${wlCount?`<div style="font-size:10px;color:#22c55e">+${wlCount} homeowner${wlCount!==1?'s':''} on waitlist</div>`:''}
+        </div>`
+      }).join('') : '<div style="font-size:12px;color:var(--muted)">No waitlist zones yet</div>'}
+    </div>
+  </div>`
+}
+
+function _renderZoneGrid(){
+  const gridEl = document.getElementById('rzr-zone-grid')
+  if(!gridEl) return
+
+  const zones = ADMIN_ZONES.filter(z => z.status !== 'inactive')
+  if(!zones.length){ gridEl.innerHTML=''; return }
+
+  const statusOrder = { live:0, pilot:1, waitlist:2 }
+  const sorted = [...zones].sort((a,b)=>(statusOrder[a.status]||3)-(statusOrder[b.status]||3))
+
+  const statusStyle = {
+    live:     { badge:'🟢 Live',    border:'rgba(34,197,94,.35)',  bg:'rgba(34,197,94,.05)',   col:'#22c55e' },
+    pilot:    { badge:'🔬 Pilot',   border:'rgba(165,180,252,.35)',bg:'rgba(165,180,252,.05)', col:'#a5b4fc' },
+    waitlist: { badge:'⏳ Waitlist',border:'rgba(251,191,36,.35)', bg:'rgba(251,191,36,.05)',  col:'#fbbf24' },
+  }
+
+  gridEl.innerHTML = `
+  <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">📍 All Zones (${zones.length})</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+    ${sorted.map(z => {
+      const st      = statusStyle[z.status] || statusStyle.waitlist
+      const needed  = z.threshold || 3
+      const hwPct   = Math.min(100, Math.round((z.homeowners||0)/Math.max(needed,1)*100))
+      const rnPct   = Math.min(100, Math.round((z.runners||0)/Math.max(z.capacity||4,1)*100))
+      const wlCount = WAITLIST_SIGNUPS.filter(s => z.zips?.includes(s.zip)||z.zip===s.zip?.slice(0,3)).length
+      const dayLabels = (z.collection||[]).map(d=>typeof d==='object'?d.day||d:d).join(', ')||'--'
+      const assignedRunners = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id))
+      const refCount = assignedRunners.reduce((t,r)=>(t+(r.totalReferrals||0)),0)
+      const launchScore = Math.round((hwPct*0.6)+(rnPct*0.4))
+      const scoreCol = launchScore>=80?'#22c55e':launchScore>=50?'#fbbf24':'#f97316'
+
+      return `<div style="background:${st.bg};border:1.5px solid ${st.border};border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px">
+        <!-- Header -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <div style="font-size:13px;font-weight:700">${z.name}</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:1px">ZIP ${z.zips?.join(', ')||z.zip} · ${dayLabels}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+            <span style="background:${st.bg};border:1px solid ${st.border};color:${st.col};border-radius:99px;font-size:9px;font-weight:700;padding:2px 8px">${st.badge}</span>
+            ${z.status==='waitlist'?`<span style="font-size:10px;font-weight:800;color:${scoreCol}">${launchScore}% ready</span>`:''}
+          </div>
+        </div>
+
+        <!-- Stats row -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center">
+          <div style="background:rgba(255,255,255,.04);border-radius:6px;padding:6px 4px">
+            <div style="font-size:16px;font-weight:800;color:var(--cyan)">${z.homeowners||0}</div>
+            <div style="font-size:9px;color:var(--muted)">HOs</div>
+          </div>
+          <div style="background:rgba(255,255,255,.04);border-radius:6px;padding:6px 4px">
+            <div style="font-size:16px;font-weight:800;color:#a5b4fc">${z.runners||0}</div>
+            <div style="font-size:9px;color:var(--muted)">Runners</div>
+          </div>
+          <div style="background:rgba(255,255,255,.04);border-radius:6px;padding:6px 4px">
+            <div style="font-size:16px;font-weight:800;color:#fbbf24">${wlCount}</div>
+            <div style="font-size:9px;color:var(--muted)">Waitlist</div>
+          </div>
+          <div style="background:rgba(255,255,255,.04);border-radius:6px;padding:6px 4px">
+            <div style="font-size:16px;font-weight:800;color:#c4b5fd">${refCount}</div>
+            <div style="font-size:9px;color:var(--muted)">Refs</div>
+          </div>
+        </div>
+
+        ${z.status==='waitlist'?`
+        <!-- Launch progress bars -->
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:2px">
+              <span>Homeowners to launch</span><span>${z.homeowners||0}/${needed}</span>
+            </div>
+            <div style="background:var(--surface2);border-radius:99px;height:5px">
+              <div style="width:${hwPct}%;height:100%;background:var(--cyan);border-radius:99px;transition:width .5s"></div>
+            </div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:2px">
+              <span>Runner capacity</span><span>${z.runners||0}/${z.capacity||4}</span>
+            </div>
+            <div style="background:var(--surface2);border-radius:99px;height:5px">
+              <div style="width:${rnPct}%;height:100%;background:#a5b4fc;border-radius:99px;transition:width .5s"></div>
+            </div>
+          </div>
+        </div>`:``}
+
+        ${assignedRunners.length?`
+        <!-- Assigned runners -->
+        <div style="display:flex;flex-wrap:wrap;gap:4px">
+          ${assignedRunners.slice(0,3).map(r=>`
+            <span style="background:rgba(255,255,255,.07);border-radius:99px;font-size:10px;padding:2px 8px;display:flex;align-items:center;gap:4px">
+              <span style="width:6px;height:6px;background:#22c55e;border-radius:50%;flex-shrink:0"></span>
+              ${r.name.split(' ')[0]}${r.ownRefCode?` <span style="font-family:'DM Mono',monospace;color:var(--cyan);font-size:9px">${r.ownRefCode}</span>`:''}
+            </span>`).join('')}
+          ${assignedRunners.length>3?`<span style="font-size:10px;color:var(--muted)">+${assignedRunners.length-3} more</span>`:''}
+        </div>`:``}
+
+        <!-- Actions -->
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:2px">
+          ${z.status==='waitlist'&&hwPct>=80?`<button class="btn btn-green btn-sm" style="font-size:10px;padding:3px 9px" onclick="promoteToLive('${z.id}')">🚀 Go Live</button>`:''}
+          <button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 9px" onclick="showZoneDetail('${z.id}')">📋 Details</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 9px" onclick="showEditZone('${z.id}')">✏️ Edit</button>
+          ${wlCount?`<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 9px;color:#fbbf24" onclick="notifyZipFromWaitlist('${z.zips?.[0]||z.zip}','${z.id}')">📧 Notify ${wlCount}</button>`:''}
+        </div>
+      </div>`
+    }).join('')}
+  </div>`
+}
+
 async function renderRunnerZoneRequests(){
   const el = document.getElementById('rzr-list')
   if(!el) return
-  el.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px">Loading...</div>'
+  el.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px">Loading requests...</div>'
+
+  _renderZoneHealthOverview()
+  _renderZoneGrid()
 
   try {
     let data = [], err = null
@@ -14181,48 +14476,54 @@ async function renderRunnerZoneRequests(){
     if(badge){ badge.textContent=data.length; badge.style.display=data.length?'inline':'none' }
 
     if(!data.length){
-      el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No runner zone requests.</div>'
+      el.innerHTML = `
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">📥 Incoming Requests</div>
+      <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px;background:var(--surface2);border-radius:10px;border:1px dashed var(--border)">
+        <div style="font-size:28px;margin-bottom:8px">📭</div>
+        No pending runner zone requests
+      </div>`
       return
     }
 
-    // Split by type — expansions include new zone requests and general expansion requests
+    // Split by type
     const expansions = data.filter(r=>!r.type||r.type==='expansion'||r.type==='waitlist_pending'||r.type==='new_zone')
     const removals   = data.filter(r=>r.type==='removal'||r.type==='removal_only_runner')
-
-    let html = ''
-
-    // NEW ZONE REQUESTS — runner wants to create a brand new zone for a ZIP
     const newZoneReqs = expansions.filter(r=>r.type==='new_zone'||r.type==='waitlist_pending')
     const zoneExpReqs = expansions.filter(r=>!r.type||r.type==='expansion')
 
+    let html = `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">📥 Incoming Requests (${data.length})</div>`
+
+    // NEW ZONE REQUESTS
     if(newZoneReqs.length){
-      html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">🚀 New Zone Requests (${newZoneReqs.length})</div>`
+      html += `<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">🚀 New Zone Requests (${newZoneReqs.length})</div>`
       const byZip = {}
       newZoneReqs.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
       html += Object.entries(byZip).map(([zip,group])=>{
         const suggested  = group[0]?.zone_name || ('ZIP '+zip+' Area')
         const hwInterest = WAITLIST_SIGNUPS.filter(s=>s.zip===zip||s.zip?.slice(0,3)===zip.slice(0,3)).length
         const inputId    = 'nzr-name-'+zip.replace(/\D/g,'')
-        const notesText  = group[0]?.notes ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;font-style:italic">Runner notes: "${group[0].notes}"</div>` : ''
+        const notesText  = group[0]?.notes ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;font-style:italic">💬 Runner notes: "${group[0].notes}"</div>` : ''
+        const hwBar      = hwInterest ? `
+          <div style="margin-top:8px;padding:8px 10px;background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.2);border-radius:7px;font-size:11px;display:flex;align-items:center;gap:8px">
+            <span style="color:#22c55e;font-weight:700">🏠 ${hwInterest} homeowner${hwInterest!==1?'s':''} already waiting in this ZIP</span>
+            <span style="color:var(--muted)">— approve to start enrolling them</span>
+          </div>` : ''
         return `<div class="card" style="margin-bottom:10px;border-left:3px solid #fbbf24">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
             <div>
               <div style="font-size:14px;font-weight:700">New zone for ZIP ${zip}
-                <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px">${group.length} runner${group.length!==1?'s':''} requested this</span>
+                <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px">${group.length} runner${group.length!==1?'s':''} requested</span>
               </div>
-              <div style="font-size:11px;color:var(--sub);margin-top:2px">
-                No zone exists yet · ${hwInterest ? `<span style="color:#22c55e">${hwInterest} homeowner${hwInterest>1?'s':''} also waiting</span>` : 'No homeowners yet'}
-              </div>
+              <div style="font-size:11px;color:var(--sub);margin-top:2px">No zone exists yet</div>
               ${notesText}
+              ${hwBar}
             </div>
           </div>
-
           <div class="field" style="margin-bottom:12px">
             <label style="font-size:11px">Zone Name — edit or accept suggestion</label>
             <input id="${inputId}" value="${suggested}" style="font-size:13px;font-weight:600" placeholder="e.g. North Peoria">
-            <div style="font-size:10px;color:var(--muted);margin-top:3px">Suggested from runner's input. Edit before approving.</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:3px">Suggested from runner input. Edit before approving.</div>
           </div>
-
           <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:12px">
             ${group.map(row=>`
               <div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:12px">
@@ -14232,7 +14533,6 @@ async function renderRunnerZoneRequests(){
                 </div>
               </div>`).join('')}
           </div>
-
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-cyan btn-sm"
               data-zip="${zip}"
@@ -14246,9 +14546,9 @@ async function renderRunnerZoneRequests(){
       }).join('')
     }
 
-    // EXPANSION REQUESTS — runner wants to join existing zones
+    // ZONE EXPANSION REQUESTS
     if(zoneExpReqs.length){
-      html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">📍 Zone Expansion Requests (${zoneExpReqs.length})</div>`
+      html += `<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;margin-top:${newZoneReqs.length?'16px':'0'}">📍 Zone Expansion Requests (${zoneExpReqs.length})</div>`
       const byZip = {}
       zoneExpReqs.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
       html += Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
@@ -14283,8 +14583,12 @@ async function renderRunnerZoneRequests(){
                   ${row.notes ? `<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic">"${row.notes}"</div>` : ''}
                 </div>
                 <div style="display:flex;gap:4px;flex-shrink:0">
-                  <button class="btn btn-green btn-sm" style="font-size:10px;padding:3px 8px" onclick="approveZoneExpansionRequest('${row.id}','${row.runner_email}','${row.runner_name}','${row.zone_id||''}','${row.zone_name||zoneName}')">✓</button>
-                  <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px;color:#ef4444" onclick="denyZoneRequest('${row.id}','${row.runner_name}')">✕</button>
+                  <button class="btn btn-green btn-sm" style="font-size:10px;padding:3px 8px"
+                    data-reqid="${row.id}" data-email="${row.runner_email}" data-name="${row.runner_name}" data-zoneid="${row.zone_id||''}" data-zonename="${row.zone_name||zoneName}"
+                    onclick="approveZoneExpansionRequest(this.dataset.reqid,this.dataset.email,this.dataset.name,this.dataset.zoneid,this.dataset.zonename)">✓</button>
+                  <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px;color:#ef4444"
+                    data-reqid="${row.id}" data-name="${row.runner_name}"
+                    onclick="denyZoneRequest(this.dataset.reqid,this.dataset.name)">✕</button>
                 </div>
               </div>`).join('')}
           </div>
@@ -14294,26 +14598,22 @@ async function renderRunnerZoneRequests(){
 
     // REMOVAL REQUESTS
     if(removals.length){
-      html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:16px 0 8px">🚪 Zone Removal Requests (${removals.length})</div>`
+      html += `<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 6px">🚪 Zone Removal Requests (${removals.length})</div>`
       html += removals.map(row=>{
-        const isOnly = row.type === 'removal_only_runner'
-        const zone   = ADMIN_ZONES.find(z=>z.id===row.zone_id)
-        return `<div class="card" style="margin-bottom:10px;border-left:3px solid ${isOnly?'#ef4444':'#f59e0b'}">
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id)
+        return `<div class="card" style="margin-bottom:10px;border-left:3px solid #ef4444">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div>
-              <div style="font-size:14px;font-weight:700">${row.runner_name} wants to leave ${row.zone_name||'a zone'}</div>
-              <div style="font-size:11px;color:var(--sub);margin-top:3px">${row.runner_email} · ${new Date(row.created_at).toLocaleDateString()}</div>
-              ${row.notes ? `<div style="font-size:11px;color:var(--muted);margin-top:3px;font-style:italic">Reason: "${row.notes}"</div>` : ''}
-              ${isOnly ? `<div style="margin-top:6px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:6px;padding:6px 10px;font-size:11px;color:#fca5a5">
-                ⚠️ <strong>Only runner in zone.</strong> Approving will leave ${row.zone_name} without coverage. Ensure a replacement is lined up first.
-              </div>` : ''}
-              ${zone ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">Zone currently: ${zone.runners||0} runner${(zone.runners||0)!==1?'s':''} · ${zone.homeowners||0} homeowners</div>` : ''}
+              <div style="font-size:14px;font-weight:700">${row.runner_name} wants to leave ${zone?.name||row.zone_name||'a zone'}</div>
+              <div style="font-size:11px;color:var(--sub);margin-top:2px">${row.runner_email}${row.notes?` · "${row.notes}"`:''}${row.type==='removal_only_runner'?' · ⚠️ Only runner in zone':''}</div>
             </div>
-            <div style="display:flex;gap:6px;flex-shrink:0">
-              <button class="btn btn-${isOnly?'outline':'red'} btn-sm" style="font-size:11px" onclick="approveZoneRemoval('${row.id}','${row.runner_name}','${row.runner_email}','${row.zone_id}','${row.zone_name}',${isOnly})">
-                ${isOnly ? '⚠️ Approve (special)' : '✅ Approve Removal'}
-              </button>
-              <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="denyZoneRequest('${row.id}','${row.runner_name}')">Deny</button>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-red btn-sm" style="font-size:11px"
+                data-reqid="${row.id}" data-name="${row.runner_name}" data-email="${row.runner_email}" data-zoneid="${row.zone_id||''}" data-zonename="${zone?.name||row.zone_name||''}" data-isonly="${row.type==='removal_only_runner'}"
+                onclick="approveZoneRemoval(this.dataset.reqid,this.dataset.name,this.dataset.email,this.dataset.zoneid,this.dataset.zonename,this.dataset.isonly==='true')">✓ Approve Removal</button>
+              <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--muted)"
+                data-reqid="${row.id}" data-name="${row.runner_name}"
+                onclick="denyZoneRequest(this.dataset.reqid,this.dataset.name)">Deny</button>
             </div>
           </div>
         </div>`
@@ -14323,6 +14623,7 @@ async function renderRunnerZoneRequests(){
     el.innerHTML = html
   } catch(e){ el.innerHTML='<div style="padding:20px;color:#ef4444">Error: '+String(e?.message||e)+'</div>' }
 }
+
 
 async function approveZoneExpansionRequest(reqId, runnerEmail, runnerName, zoneId, zoneName){
   try {
@@ -15072,11 +15373,10 @@ async function submitRunnerInterest(){
   if(btn){ btn.disabled=false; btn.textContent='🙋 Request an Invite' }
   if(errDiv){
     errDiv.style.display = 'block'
-    errDiv.textContent = '⚠️ Could not save: ' + saveErr
+    errDiv.textContent = saveErr || 'Could not save — please try again'
   }
-  console.warn('[BinDash] Runner interest error:', saveErr)
-  showToast('Could not submit -- see error above','err')
 }
+
 </script>
 </body>
 </html>
