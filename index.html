@@ -3354,14 +3354,34 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <!-- AD JOBS -->
         <div class="pg" id="ad-jobs">
           <div class="toolbar">
-            <input placeholder="Search..." style="width:150px">
-            <select style="width:auto"><option>All Visit Types</option><option>🌙 Bin Out</option><option>☀️ Bin In</option><option>🚨 SOS</option></select>
-            <select style="width:auto"><option>All Status</option><option>Pending</option><option>In Progress</option><option>Complete</option></select>
+            <input placeholder="Search jobs..." id="jobs-search" oninput="filterAdminJobs()" style="width:150px">
+            <select id="jobs-status-filter" onchange="filterAdminJobs()" style="width:auto">
+              <option value="">All Status</option>
+              <option value="offered">Offered</option>
+              <option value="accepted">Accepted</option>
+              <option value="in_progress">In Progress</option>
+              <option value="complete">Complete</option>
+              <option value="declined">Declined</option>
+            </select>
+            <select id="jobs-type-filter" onchange="filterAdminJobs()" style="width:auto">
+              <option value="">All Types</option>
+              <option value="BIN_OUT">🌙 Bin Out</option>
+              <option value="BIN_IN">☀️ Bin In</option>
+              <option value="sos">🚨 SOS</option>
+            </select>
             <span class="tc" id="jobs-count">0 jobs</span>
-            <button class="btn btn-cyan btn-sm" onclick="showCreateJobModal()">+ Create</button>
+            <button class="btn btn-ghost btn-sm" onclick="loadAdminJobs()">↺ Refresh</button>
           </div>
+          <!-- Late warning banner -->
+          <div id="jobs-late-banner" style="display:none;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:13px;color:#fca5a5"></div>
           <div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
-            <table><thead><tr><th>Job ID</th><th>Homeowner</th><th>Visit</th><th>Service</th><th>Date</th><th>Runner</th><th>Pay</th><th>Status</th><th></th></tr></thead><tbody id="jobs-tbody"><tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No jobs yet -- will populate as homeowners are enrolled and dispatched</td></tr></tbody></table>
+            <table><thead><tr>
+              <th>Batch</th><th>Homeowner</th><th>Visit</th><th>Date</th>
+              <th>Runner</th><th>Status</th><th>Pay</th><th></th>
+            </tr></thead>
+            <tbody id="jobs-tbody">
+              <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">Loading jobs...</td></tr>
+            </tbody></table>
           </div>
         </div>
 
@@ -3987,6 +4007,85 @@ async function populateRNDashboard(){
   }
 }
 
+// ── ADMIN JOBS TAB ─────────────────────────────────
+let _adminJobsCache = []
+
+async function loadAdminJobs(){
+  const tbody  = document.getElementById('jobs-tbody')
+  const banner = document.getElementById('jobs-late-banner')
+  if(tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">Loading...</td></tr>'
+
+  try {
+    const { data: jobs, error } = await _supa
+      .from('jobs').select('*').order('created_at', { ascending: false }).limit(200)
+    if(error) throw error
+    _adminJobsCache = jobs || []
+
+    // Check for late jobs
+    const now  = new Date()
+    const late = _adminJobsCache.filter(j => {
+      if(!['accepted','in_progress'].includes(j.status)) return false
+      if(!j.scheduled_date) return false
+      const sched = new Date(j.scheduled_date); sched.setHours(23,59,0,0)
+      return now > sched
+    })
+    if(banner){
+      if(late.length){
+        banner.style.display = 'block'
+        banner.innerHTML = `🚨 <strong>${late.length} overdue job${late.length!==1?'s':''}</strong> — accepted but not completed past scheduled date. &nbsp;${late.map(j=>`<span style="background:rgba(239,68,68,.15);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px">${j.batch_id||j.id} · ${j.runner_name||'Unassigned'}</span>`).join('')}`
+      } else { banner.style.display = 'none' }
+    }
+    filterAdminJobs()
+  } catch(e){
+    if(tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#fca5a5;padding:24px">Error: ${e.message}</td></tr>`
+  }
+}
+
+function filterAdminJobs(){
+  const q       = (document.getElementById('jobs-search')?.value||'').toLowerCase()
+  const status  = document.getElementById('jobs-status-filter')?.value||''
+  const type    = document.getElementById('jobs-type-filter')?.value||''
+  const tbody   = document.getElementById('jobs-tbody')
+  const countEl = document.getElementById('jobs-count')
+
+  const filtered = _adminJobsCache.filter(j=>{
+    if(status && j.status!==status) return false
+    if(type   && j.visit_type!==type) return false
+    if(q && !JSON.stringify(j).toLowerCase().includes(q)) return false
+    return true
+  })
+  if(countEl) countEl.textContent = filtered.length+' job'+(filtered.length!==1?'s':'')
+  if(!filtered.length){ if(tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">No jobs match filter</td></tr>'; return }
+
+  const sc = { offered:'#f59e0b', accepted:'#6366f1', in_progress:'#06d6a0', complete:'#22c55e', declined:'#ef4444', unassigned:'#64748b', late:'#ef4444' }
+  const si = { offered:'📬', accepted:'✅', in_progress:'🔄', complete:'✓', declined:'✕', unassigned:'⚠️', late:'🚨' }
+  const now = new Date()
+
+  tbody.innerHTML = filtered.map(j=>{
+    const late = ['accepted','in_progress'].includes(j.status) && j.scheduled_date && now > new Date(j.scheduled_date+'T23:59:00')
+    const col  = sc[j.status]||'#64748b', icon = si[j.status]||'·'
+    const dt   = j.scheduled_date ? new Date(j.scheduled_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '--'
+    return `<tr style="${late?'background:rgba(239,68,68,.04)':''}">
+      <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${(j.batch_id||j.id||'').slice(0,18)}</td>
+      <td style="font-size:12px">${j.homeowner_email||'--'}</td>
+      <td><span class="${j.visit_type==='BIN_OUT'?'vt-out':'vt-in'}">${j.visit_type==='BIN_OUT'?'🌙 Out':'☀️ In'}</span></td>
+      <td style="font-size:12px">${dt}${late?' <span style="color:#ef4444;font-size:10px;font-weight:700">LATE</span>':''}</td>
+      <td style="font-size:12px">${j.runner_name||'<span style="color:var(--muted)">Unassigned</span>'}</td>
+      <td><span style="background:${col}22;color:${col};font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">${icon} ${j.status||'--'}</span></td>
+      <td style="font-size:12px;color:var(--green);font-weight:600">$${parseFloat(j.amount||3.25).toFixed(2)}</td>
+      <td>${['accepted','in_progress'].includes(j.status)?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fbbf24" onclick="adminMarkJobLate('${j.id}')">⚠️ Flag</button>`:''}${j.status==='complete'?'<span style="color:#22c55e;font-size:11px">✓</span>':''}</td>
+    </tr>`
+  }).join('')
+}
+
+async function adminMarkJobLate(jobId){
+  try {
+    await _supa.from('jobs').update({ status:'late', updated_at:new Date().toISOString() }).eq('id', jobId)
+    showToast('Job flagged as late', 'info')
+    await loadAdminJobs()
+  } catch(e){ showToast('Error: '+e.message,'err') }
+}
+
 // -- LOAD RUNNER EARNINGS FROM SUPABASE ------------
 async function loadRNEarnings(){
   const row = window._rnRow
@@ -4255,7 +4354,8 @@ async function loadRunnerRoutes(runnerRow){
         <div style="padding:10px 16px 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           ${addrs.length ? `<a href="${mapsUrl}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#1a73e8;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;color:#fff;text-decoration:none">📍 Open in Google Maps</a>` : ''}
           ${batch.status==='accepted' ? `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>` : ''}
-          ${batch.status==='in_progress' ? `<button class="btn btn-green btn-sm" onclick="completeBatch('${batch.id}')">✓ Mark Complete</button>` : ''}
+          ${batch.status==='in_progress' ? `<button class="btn btn-cyan btn-sm" onclick="resumeBatch('${batch.id}')">↺ Resume Route</button>` : ''}
+          ${batch.status==='in_progress' ? `<button class="btn btn-green btn-sm" onclick="completeBatch('${batch.id}')">✓ Mark All Complete</button>` : ''}
           <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600">$${earn}</span>
         </div>
       </div>`
@@ -4358,6 +4458,31 @@ async function declineOffer(){
   clearInterval(window._offerCountdownTimer)
   document.getElementById('offer-banner').style.display = 'none'
   showToast('Offer declined -- batch sent to next runner','info')
+}
+
+async function resumeBatch(batchId){
+  // Reload stops from enriched jobs and resume the active tab flow
+  const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
+  if(batchJobs.length){
+    window.NAV_STOPS = batchJobs.map(j=>({
+      name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.homeowner_email || 'Stop',
+      address:     j.hw?.street_address || '--',
+      gate:        j.hw?.gate_code   || null,
+      pets:        j.hw?.pet_info    || null,
+      binLocation: j.hw?.bin_location|| null,
+      serviceType: j.service_type    || 'Recycling',
+      notes:       j.hw?.service_notes || null,
+      hwEmail:     j.homeowner_email  || null,
+      jobId:       j.id,
+    }))
+    navBatchId     = batchId
+    navVisitType   = batchJobs[0]?.visit_type || 'BIN_OUT'
+    navRouteActive = true
+    // If already in progress, resume at travelling phase
+    if(navPhase === 'idle') navPhase = 'travelling'
+  }
+  switchRouteTab('active')
+  renderActiveRouteTab()
 }
 
 async function startBatch(batchId){
@@ -5435,6 +5560,7 @@ function adNav(el, pg){
   if(pg === 'ad-zone-waitlist')       setTimeout(renderZoneWaitlist, 50)
   if(pg === 'ad-runner-zone-requests') setTimeout(renderRunnerZoneRequests, 50)
   if(pg === 'ad-runner-requests') setTimeout(loadRunnerRequests, 50)
+  if(pg === 'ad-jobs')            setTimeout(loadAdminJobs, 50)
 }
 
 // Admin actions
