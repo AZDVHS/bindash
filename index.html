@@ -7,25 +7,61 @@
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;853&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script data-cfasync="false">
-// ==================================================
-//  SUPABASE CONFIG -- replace with your project keys
-//  Supabase Dashboard -> Settings -> API
-// ==================================================
-const SUPABASE_URL     = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
+// ================================================================
+//  BINDASH CONFIG -- DO NOT MODIFY THIS BLOCK
+//  Last verified: March 22 2026
+//  To update: change values AND update CONFIG_HASH below
+// ================================================================
+const SUPABASE_URL      = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
 const SUPABASE_ANON_KEY = 'sb_publishable_PzQNU1g9t7nH_c8GrK37sQ_2OocnlNQ'
 let _supa
 try {
   _supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 } catch(e) {
   console.error('[BinDash] Supabase init failed:', e)
-  // Fallback stub so app doesn't crash
   _supa = { from: () => ({ select: () => ({ eq: () => ({ single: () => Promise.resolve({}) }) }), insert: () => Promise.resolve({}), update: () => ({ eq: () => Promise.resolve({}) }), upsert: () => Promise.resolve({}) }), auth: { getSession: () => Promise.resolve({data:{session:null}}), signInWithPassword: () => Promise.resolve({error:{message:'Service unavailable'}}), signUp: () => Promise.resolve({}), onAuthStateChange: () => {} } }
 }
 
+// ================================================================
+//  STRIPE CONFIG -- DO NOT MODIFY THIS BLOCK
+//  Price IDs verified against BinDash sandbox March 22 2026
+//  If Stripe breaks: check price IDs in Stripe sandbox -> Products
+// ================================================================
+const STRIPE_PUBLISHABLE_KEY = 'pk_test_51TDRBfKQcgkU1rZoqeHCWLFWmytdbpnvhqhf9rMnUcmkXYkVWuEBOEij3QY8aAWizTxCk7eQPVRQKD9jGn9cnYDW009hn0XV2w'
 
-// -------------------------------------------------------------
-// EMAIL SERVICE -- calls Supabase Edge Function -> Resend API
-// -------------------------------------------------------------
+const STRIPE_PRICES = {
+  plan_a: { name:'1 Can -- Weekly',        monthly:'price_1TDpucKQcgkU1rZozFQNwxJK', callout:'price_1TDpssKQcgkU1rZo2WEDZT8R', monthlyAmt:34.99, splitDays:false, desc:'1 bin . any type . Bin Out + Bin In . 1 collection day/week' },
+  plan_b: { name:'2 Cans -- Same Day',     monthly:'price_1TDptqKQcgkU1rZoEvzOOIES', callout:'price_1TDpssKQcgkU1rZo2WEDZT8R', monthlyAmt:44.99, splitDays:false, desc:'2 bins . Recycling + General Waste . same collection day . Bin Out + Bin In' },
+  plan_c: { name:'2 Cans -- Split Days',   monthly:'price_1TDprRKQcgkU1rZoy9DTYlWg', callout:'price_1TDpssKQcgkU1rZo2WEDZT8R', monthlyAmt:54.99, splitDays:true,  desc:'2 bins . separate collection days . Recycling one day + Waste another . Bin Out + Bin In both days' },
+}
+
+// Config fingerprint -- auto-validates on load, warns if tampered
+const _EXPECTED = {
+  supaUrl:   'vaktkyrtfxlqfzdqfeiq',
+  priceA:    'price_1TDpucKQcgkU1rZozFQNwxJK',
+  priceB:    'price_1TDptqKQcgkU1rZoEvzOOIES',
+  priceC:    'price_1TDprRKQcgkU1rZoy9DTYlWg',
+  callout:   'price_1TDpssKQcgkU1rZo2WEDZT8R',
+}
+;(function _validateConfig(){
+  const errors = []
+  if(!SUPABASE_URL.includes(_EXPECTED.supaUrl))   errors.push('SUPABASE_URL changed')
+  if(STRIPE_PRICES.plan_a.monthly !== _EXPECTED.priceA) errors.push('plan_a price changed: '+STRIPE_PRICES.plan_a.monthly)
+  if(STRIPE_PRICES.plan_b.monthly !== _EXPECTED.priceB) errors.push('plan_b price changed: '+STRIPE_PRICES.plan_b.monthly)
+  if(STRIPE_PRICES.plan_c.monthly !== _EXPECTED.priceC) errors.push('plan_c price changed: '+STRIPE_PRICES.plan_c.monthly)
+  if(STRIPE_PRICES.plan_a.callout !== _EXPECTED.callout) errors.push('callout price changed')
+  if(errors.length){
+    console.error('=== BINDASH CONFIG MISMATCH ===')
+    errors.forEach(e => console.error('  >', e))
+    console.error('================================')
+    // Show visible warning in dev -- won't affect production users
+    if(location.hostname !== 'bindash-eight.vercel.app'){
+      alert('BinDash config mismatch!\n\n' + errors.join('\n') + '\n\nCheck console for details.')
+    }
+  } else {
+    console.log('[BinDash] Config OK -- all keys verified')
+  }
+})()
 async function sendEmail(to, subject, html, type){
   if(!to || to.includes('@lead.'+'bindash')){
     console.log('[BinDash] sendEmail SKIPPED -- bad address:', to)
@@ -62,38 +98,6 @@ async function sendEmail(to, subject, html, type){
 // -------------------------------------------------------------
 
 
-// =============================================================
-// STRIPE PAYMENT CONFIG
-// Replace placeholder keys after creating Stripe account
-// =============================================================
-const STRIPE_PUBLISHABLE_KEY = 'pk_test_51TDRBfKQcgkU1rZoqeHCWLFWmytdbpnvhqhf9rMnUcmkXYkVWuEBOEij3QY8aAWizTxCk7eQPVRQKD9jGn9cnYDW009hn0XV2w'
-
-const STRIPE_PRICES = {
-  plan_a: {
-    name:'1 Can -- Weekly',
-    monthly:'price_1TDpucKQcgkU1rZozFQNwxJK',
-    callout:'price_1TDpssKQcgkU1rZo2WEDZT8R',
-    monthlyAmt:34.99,
-    splitDays: false,
-    desc:'1 bin . any type . Bin Out + Bin In . 1 collection day/week'
-  },
-  plan_b: {
-    name:'2 Cans -- Same Day',
-    monthly:'price_1TDptqKQcgkU1rZoEvzOOIES',
-    callout:'price_1TDpssKQcgkU1rZo2WEDZT8R',
-    monthlyAmt:44.99,
-    splitDays: false,
-    desc:'2 bins . Recycling + General Waste . same collection day . Bin Out + Bin In'
-  },
-  plan_c: {
-    name:'2 Cans -- Split Days',
-    monthly:'price_1TDprRKQcgkU1rZoy9DTYlWg',
-    callout:'price_1TDpssKQcgkU1rZo2WEDZT8R',
-    monthlyAmt:54.99,
-    splitDays: true,
-    desc:'2 bins . separate collection days . Recycling one day + Waste another . Bin Out + Bin In both days'
-  },
-}
 let _checkoutPlanKey = 'plan_a'
 let _obCachedPassword = '' // cached from step 2 so it's available at step 4/5
 
