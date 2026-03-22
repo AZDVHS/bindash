@@ -2913,6 +2913,20 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 </div>
                 <button class="btn btn-cyan btn-full btn-sm" onclick="showReferralLink()">🔗 Share My Referral Link</button>
               </div>
+
+              <!-- HOMEOWNER INTEREST LIST -->
+              <div class="card" style="margin-top:12px;border-color:rgba(251,191,36,.25)" id="rn-interest-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                  <div class="card-ttl" style="margin:0;color:#fbbf24">🏠 Homeowners Near You</div>
+                  <span id="rn-interest-badge" style="display:none;background:rgba(251,191,36,.2);color:#fbbf24;border-radius:99px;font-size:9px;padding:2px 8px;font-weight:700">0</span>
+                </div>
+                <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:10px">
+                  Homeowners in your area who signed up but have no runner yet. Share your referral link to convert them.
+                </div>
+                <div id="rn-interest-list">
+                  <div style="text-align:center;padding:16px;color:var(--muted);font-size:12px">Loading...</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -4472,8 +4486,96 @@ async function populateRNDashboard(){
     const priBadge = document.getElementById('rn-priority-badge')
     if(priBadge) priBadge.style.display = hasPriority ? 'flex' : 'none'
 
+    // Load homeowner interest list for this runner's area
+    loadRNInterestList(merged)
+
   } catch(err){
     console.warn('[BinDash] RN profile load failed:', String(err?.message||err))
+  }
+}
+
+async function loadRNInterestList(runnerRow){
+  const listEl  = document.getElementById('rn-interest-list')
+  const badgeEl = document.getElementById('rn-interest-badge')
+  const cardEl  = document.getElementById('rn-interest-card')
+  if(!listEl) return
+
+  try {
+    // Determine the runner's ZIP(s) to search — use their home ZIP + any zone ZIPs
+    const runnerZip   = runnerRow?.zip_code || ''
+    const prefix      = runnerZip.slice(0,3)
+
+    // Find zones this runner covers
+    const myZoneIds = [runnerRow?.zone_id].filter(Boolean)
+    const zoneZips  = myZoneIds.flatMap(zid => {
+      const z = ADMIN_ZONES.find(z=>z.id===zid)
+      return z?.zips || (z?.zip ? [z.zip] : [])
+    })
+    const allZips = [...new Set([runnerZip, ...zoneZips].filter(Boolean))]
+
+    // Query waitlisted homeowners in matching ZIPs
+    let rows = []
+    try {
+      const { data } = await _supa
+        .from('homeowner_signups')
+        .select('id, first_name, last_name, zip_code, service_type, collection_day, created_at')
+        .eq('status', 'waitlisted')
+        .order('created_at', { ascending: false })
+        .limit(30)
+      // Filter by ZIP prefix (homeowner's ZIP starts with same 3 digits)
+      rows = (data||[]).filter(r => {
+        const rz = r.zip_code||''
+        return allZips.includes(rz) || rz.slice(0,3)===prefix
+      })
+    } catch(e){ console.warn('[BinDash] interest list:', e) }
+
+    if(badgeEl){
+      badgeEl.textContent = rows.length
+      badgeEl.style.display = rows.length ? 'inline' : 'none'
+    }
+
+    if(!rows.length){
+      listEl.innerHTML = `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px">
+        <div style="font-size:22px;margin-bottom:6px">🎉</div>
+        No waitlisted homeowners in your area right now — check back after sharing your referral link!
+      </div>`
+      return
+    }
+
+    const ownCode = runnerRow?.own_ref_code || null
+    listEl.innerHTML = rows.slice(0,8).map((r,i) => {
+      const fn    = r.first_name || ''
+      const ln    = r.last_name  || ''
+      const init  = ((fn[0]||'')+(ln[0]||'')).toUpperCase() || '?'
+      const name  = fn ? fn+(ln?' '+ln[0]+'.':'') : 'Homeowner'
+      const svc   = r.service_type || 'Recycling'
+      const day   = r.collection_day || '--'
+      const since = r.created_at ? new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : ''
+      const isLast = i === Math.min(rows.length,8)-1
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;${isLast?'':'border-bottom:1px solid var(--border)'}">
+        <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#fbbf24,#f97316);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#07090f;flex-shrink:0">${init}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600">${name} <span style="color:var(--muted);font-weight:400;font-size:10px">· ZIP ${r.zip_code||'--'}</span></div>
+          <div style="font-size:10px;color:var(--muted)">${svc} · ${day}${since?' · Signed up '+since:''}</div>
+        </div>
+      </div>`
+    }).join('')
+
+    // If more than shown, add a count
+    if(rows.length > 8){
+      listEl.innerHTML += `<div style="font-size:11px;color:var(--muted);text-align:center;padding-top:8px">+${rows.length-8} more homeowners waiting</div>`
+    }
+
+    // Add share prompt at bottom
+    if(ownCode){
+      listEl.innerHTML += `<div style="margin-top:10px;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);border-radius:7px;padding:8px 10px;font-size:11px;color:#fbbf24;line-height:1.5">
+        💡 Share your code <strong style="font-family:'DM Mono',monospace">${ownCode}</strong> with these homeowners — they enter it at signup and you earn $10 + priority dispatch.
+        <button onclick="navigator.clipboard.writeText('${ownCode}');showToast('Code copied ✅','ok')" style="background:none;border:1px solid rgba(251,191,36,.4);color:#fbbf24;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;margin-left:6px">📋 Copy</button>
+      </div>`
+    }
+
+  } catch(e){
+    if(listEl) listEl.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px">Could not load interest list</div>'
   }
 }
 
@@ -11038,30 +11140,67 @@ function renderPendingRunnerList(){
             ${app.preferredZones?.length ? `<span style="color:var(--cyan);font-weight:400;margin-left:6px">Runner selected: ${app.preferredZones.map(zid=>ADMIN_ZONES.find(z=>z.id===zid)?.name||zid).join(', ')}</span>` : ''}
           </label>
           ${(()=>{
-            // Check if runner has a pending zone request (new_zone type) for their ZIP
-            // We'll surface this as a hint so admin knows what they asked for
-            const hasZoneRequest = false // surfaced below from DB; hint shown statically from app data
-            // Exact ZIP match only — never prefix-match (853xx is too broad, matches wrong zones)
+            // Exact ZIP match only — never prefix-match
             const exactZipMatch = activeZones.find(z =>
               app.preferredZones?.includes(z.id) ||
               z.zips?.includes(app.zip)
             )
             const noZoneForZip = !exactZipMatch && app.zip
 
+            // Check if there's a pending zone request for this runner's ZIP in the loaded requests cache
+            // We surface this inline so admin can approve without leaving the page
+            const pendingZoneReq = (window._cachedZoneRequests||[]).find(r =>
+              r.zip_code === app.zip && r.status === 'pending' &&
+              (r.type === 'new_zone' || r.type === 'waitlist_pending' || !r.type)
+            )
+
             return `
-            ${noZoneForZip ? `<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:7px;padding:8px 11px;margin-bottom:8px;font-size:11px;color:#fbbf24">
-              ⚠️ No existing zone covers ZIP <strong>${app.zip}</strong>.
-              ${app.zip ? `Check Runner Zone Requests — this runner may have submitted a zone request for this ZIP.` : ''}
-              You can create a new zone or assign to the closest existing zone manually.
+            ${noZoneForZip ? `
+            <div style="background:rgba(251,191,36,.06);border:1.5px solid rgba(251,191,36,.3);border-radius:10px;padding:12px 14px;margin-bottom:10px">
+              <div style="font-size:12px;font-weight:700;color:#fbbf24;margin-bottom:6px">
+                ⚠️ No zone covers ZIP ${app.zip}
+              </div>
+              ${pendingZoneReq ? `
+              <div style="font-size:11px;color:var(--sub);margin-bottom:10px;line-height:1.5">
+                This runner submitted a zone request for <strong style="color:var(--text)">${pendingZoneReq.zone_name||('ZIP '+app.zip+' Area')}</strong>.
+                Approve it first, then the zone will appear in the dropdown below.
+              </div>
+              <div style="background:var(--surface);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                  <span style="font-weight:700">📍 ${pendingZoneReq.zone_name||('ZIP '+app.zip+' Area')}</span>
+                  <span style="color:var(--muted)">ZIP ${pendingZoneReq.zip_code}</span>
+                </div>
+                ${pendingZoneReq.notes ? `<div style="font-size:11px;color:var(--muted);font-style:italic;margin-bottom:6px">"${pendingZoneReq.notes}"</div>` : ''}
+                <div style="font-size:10px;color:var(--muted)">Submitted ${new Date(pendingZoneReq.created_at).toLocaleDateString()}</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <div class="field" style="margin:0;flex:1;min-width:160px">
+                  <label style="font-size:10px">Zone Name</label>
+                  <input id="rnpc-newzone-name-${app.id}" value="${pendingZoneReq.zone_name||('ZIP '+app.zip+' Area')}" style="font-size:12px;font-weight:600">
+                </div>
+                <button class="btn btn-cyan btn-sm" style="flex-shrink:0;margin-top:16px"
+                  data-appid="${app.id}" data-reqid="${pendingZoneReq.id}" data-zip="${pendingZoneReq.zip_code}"
+                  onclick="approveZoneReqThenAssignRunner(this.dataset.appid,this.dataset.reqid,this.dataset.zip)">
+                  ✅ Approve Zone &amp; Assign
+                </button>
+              </div>
+              ` : `
+              <div style="font-size:11px;color:var(--sub);margin-bottom:8px;line-height:1.5">
+                No zone request found for this ZIP. Create a new zone or assign to the nearest existing zone manually.
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="adNav(null,'ad-runner-zone-requests')">📍 Check Zone Requests</button>
+                <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="showCreateZone()">+ Create Zone for ZIP ${app.zip}</button>
+              </div>
+              `}
             </div>` : ''}
+
             <select id="rnpc-zone-${app.id}" style="font-size:12px">
               <option value="">-- Select zone --</option>
               ${activeZones.map(z=>{
-                // Priority 1: runner explicitly chose this zone
-                const runnerChose  = app.preferredZones?.includes(z.id)
-                // Priority 2: exact ZIP in zone's zips array (not prefix!)
-                const exactMatch   = z.zips?.includes(app.zip)
-                const autoSelect   = runnerChose || exactMatch
+                const runnerChose = app.preferredZones?.includes(z.id)
+                const exactMatch  = z.zips?.includes(app.zip)
+                const autoSelect  = runnerChose || exactMatch
                 const label = runnerChose ? ' ← Runner chose this' : exactMatch ? ' ← ZIP match' : ''
                 return `<option value="${z.id}" ${autoSelect ? 'selected' : ''}>
                   ${z.name} (ZIP ${z.zips?.join(', ')||z.zip})${label}
@@ -11088,6 +11227,56 @@ function renderPendingRunnerList(){
       </div>
     </div>`
   }).join('')
+}
+
+async function approveZoneReqThenAssignRunner(appId, reqId, zip){
+  const nameInput = document.getElementById('rnpc-newzone-name-'+appId)
+  const zoneName  = nameInput?.value?.trim() || ('ZIP '+zip+' Area')
+  const btn       = document.querySelector(`[data-appid="${appId}"][data-reqid="${reqId}"]`)
+  if(btn){ btn.disabled=true; btn.textContent='Creating zone...' }
+
+  try {
+    // 1. Create the zone
+    const newZoneId = crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()
+    const newZone = {
+      id: newZoneId, name: zoneName,
+      zip: zip.slice(0,3), zips: [zip],
+      status:'waitlist', pilot:false,
+      runners:0, capacity:10, homeowners:0, threshold:3,
+      collection:[], notes:'Created from runner zone request — ZIP '+zip
+    }
+    ADMIN_ZONES.push(newZone)
+    syncZoneData()
+    await dbSaveZone(newZone)
+
+    // 2. Mark the zone request as approved
+    await _supa.from('runner_zone_requests')
+      .update({ status:'approved', zone_id:newZoneId, zone_name:zoneName, updated_at:new Date().toISOString() })
+      .eq('id', reqId)
+
+    // 3. Remove from cache
+    window._cachedZoneRequests = (window._cachedZoneRequests||[]).filter(r=>r.id!==reqId)
+
+    // 4. Auto-select the new zone in the dropdown for this runner
+    const sel = document.getElementById('rnpc-zone-'+appId)
+    if(sel){
+      const opt = document.createElement('option')
+      opt.value = newZoneId
+      opt.textContent = zoneName+' (ZIP '+zip+') ← Just created'
+      opt.selected = true
+      sel.appendChild(opt)
+    }
+
+    // 5. Remove the warning panel — zone now exists
+    const warningDiv = btn?.closest('[style*="rgba(251,191,36"]')
+    if(warningDiv) warningDiv.remove()
+
+    loadRunnerZoneRequestsBadge()
+    showToast('Zone "'+zoneName+'" created ✅ — now select Approve below to assign this runner','ok', 5000)
+  } catch(e){
+    if(btn){ btn.disabled=false; btn.textContent='✅ Approve Zone & Assign' }
+    showToast('Zone creation failed: '+String(e?.message||e),'err')
+  }
 }
 
 async function approveRunner(appId){
@@ -13259,6 +13448,14 @@ async function loadRunnerApplicationsFromSupabase(){
 
     pc = PENDING_RUNNERS.length
     updateOverviewCounts()
+
+    // Cache pending zone requests so pending runner cards can show inline zone approval
+    try {
+      const zrRes = await _supa.from('runner_zone_requests')
+        .select('*').eq('status','pending').order('created_at',{ascending:false})
+      window._cachedZoneRequests = zrRes?.data || []
+    } catch(e){ window._cachedZoneRequests = [] }
+
     renderPendingRunnerList()
     console.log('[BinDash] Runner applications loaded:', PENDING_RUNNERS.length, 'pending')
   } catch(err){
