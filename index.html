@@ -2830,104 +2830,123 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <!-- RN HOME -->
         <div class="pg on" id="rn-home">
 
-          <!-- STRIPE CONNECT SETUP BANNER (shown until connected) -->
+          <!-- STRIPE CONNECT SETUP BANNER -->
           <div id="rn-stripe-setup-banner" style="display:none;background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(139,92,246,.06));border:1.5px solid rgba(99,102,241,.35);border-radius:14px;padding:16px;margin-bottom:18px">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
               <div style="display:flex;align-items:center;gap:12px">
                 <span style="font-size:28px">💳</span>
                 <div>
                   <div style="font-weight:700;font-size:14px;color:#a5b4fc">Set up your payouts to get paid</div>
-                  <div style="font-size:12px;color:var(--muted);margin-top:2px">Connect your bank account via Stripe. Takes 2 minutes -- your SSN and bank info are handled securely by Stripe, not BinDash.</div>
+                  <div style="font-size:12px;color:var(--muted);margin-top:2px">Connect your bank account via Stripe — takes 2 minutes. Your bank info is handled securely by Stripe, not BinDash.</div>
                 </div>
               </div>
-              <button class="btn btn-sm" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;flex-shrink:0" onclick="launchStripeConnect()">
-                Set Up Payouts ->
-              </button>
+              <button class="btn btn-sm" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;flex-shrink:0" onclick="launchStripeConnect()">Set Up Payouts -></button>
             </div>
           </div>
 
           <!-- INCOMING OFFER BANNER -- populated by loadRunnerRoutes() -->
           <div id="offer-banner" style="display:none;background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(251,191,36,.06));border:1.5px solid rgba(245,158,11,.4);border-radius:14px;padding:16px;margin-bottom:18px"></div>
 
-          <div style="margin-bottom:18px">
+          <!-- GREETING + SUBTITLE -->
+          <div style="margin-bottom:16px">
             <div style="font-size:21px;font-weight:700">Runner Dashboard 👋</div>
-            <div style="color:var(--sub);font-size:14px;margin-top:3px" id="rn-home-subtitle">No routes assigned yet -- check back once approved</div>
+            <div style="color:var(--sub);font-size:14px;margin-top:3px" id="rn-home-subtitle">Loading your dashboard...</div>
           </div>
 
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
+          <!-- STAT PILLS ROW — 6 stats -->
+          <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:16px">
             <div class="sc2"><div class="sn" style="color:var(--cyan)" id="rn-stat-visits">0</div><div class="sl2">Total Visits</div></div>
             <div class="sc2"><div class="sn" style="color:var(--green)" id="rn-stat-month">$0</div><div class="sl2">This Month</div></div>
             <div class="sc2"><div class="sn" style="color:var(--amber)" id="rn-stat-rating">--</div><div class="sl2">Rating</div></div>
             <div class="sc2"><div class="sn" style="color:var(--indigo)" id="rn-stat-type">--</div><div class="sl2">Visit Type</div></div>
+            <div class="sc2"><div class="sn" style="color:#f97316" id="rn-stat-bins">0</div><div class="sl2">Bins Moved</div></div>
+            <div class="sc2"><div class="sn" style="color:#c4b5fd" id="rn-stat-streak">0</div><div class="sl2">Day Streak</div></div>
           </div>
 
+          <!-- MAIN 2-COL LAYOUT -->
           <div style="display:grid;grid-template-columns:3fr 2fr;gap:14px">
-            <div id="rn-home-batch-area">
-              <div style="text-align:center;padding:40px 20px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--muted)">
-                <div style="font-size:36px;margin-bottom:10px">📬</div>
-                <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No routes yet</div>
-                <div style="font-size:13px">Once approved, batch offers will appear here before each collection day.</div>
+
+            <!-- LEFT: batch area + zone status + interest list -->
+            <div>
+              <!-- Batch offers / active route -->
+              <div id="rn-home-batch-area">
+                <div style="text-align:center;padding:36px 20px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--muted)">
+                  <div style="font-size:36px;margin-bottom:10px">📬</div>
+                  <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No upcoming routes</div>
+                  <div style="font-size:13px" id="rn-batch-empty-sub">Batch offers appear here before each collection day once homeowners are on your route.</div>
+                </div>
+              </div>
+
+              <!-- ZONE STATUS CARDS -- populated by _renderRNHomeDashZones() -->
+              <div id="rn-home-zones" style="margin-top:14px"></div>
+
+              <!-- HOMEOWNER INTEREST LIST -->
+              <div class="card" style="margin-top:14px;border-color:rgba(251,191,36,.25)" id="rn-interest-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                  <div class="card-ttl" style="margin:0;color:#fbbf24">🏠 Homeowners Near You</div>
+                  <span id="rn-interest-badge" style="display:none;background:rgba(251,191,36,.2);color:#fbbf24;border-radius:99px;font-size:9px;padding:2px 8px;font-weight:700">0</span>
+                </div>
+                <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">
+                  Signed up in your ZIP but no runner assigned yet. Share your code to earn $10/signup.
+                </div>
+                <div id="rn-interest-list">
+                  <div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">Loading...</div>
+                </div>
               </div>
             </div>
 
+            <!-- RIGHT: pay + quick links + growth -->
             <div>
+              <!-- TODAY'S PAY -->
               <div class="earn-card" style="margin-bottom:12px">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
                   <div class="card-ttl" style="margin-bottom:0">Today's Projected Pay</div>
                 </div>
                 <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:853;color:var(--cyan)" id="rn-projected-pay">$0.00</div>
-                <div style="font-size:12px;color:var(--sub);margin-top:2px;margin-bottom:8px" id="rn-projected-sub">No routes assigned</div>
+                <div style="font-size:12px;color:var(--sub);margin-top:2px;margin-bottom:8px" id="rn-projected-sub">No routes today</div>
                 <div style="font-size:11px;color:var(--muted);line-height:1.5;background:rgba(245,158,11,.06);border-radius:6px;padding:8px 10px">
                   Bin In pay unlocks after truck confirms. Pay held <strong style="color:var(--text)">24-48 hrs</strong> pending completion review.
                 </div>
               </div>
-              <div class="card">
+
+              <!-- QUICK LINKS -->
+              <div class="card" style="margin-bottom:12px">
                 <div class="card-ttl">Quick Links</div>
                 <div style="display:flex;flex-direction:column;gap:7px">
                   <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-earnings')">💵 Full Earnings</button>
+                  <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-zones')">📍 My Zones</button>
                   <button class="btn btn-outline btn-full btn-sm" onclick="openStripePortalRunner()">💳 Bank &amp; Tax (Stripe)</button>
                   <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-account')">✏️ Update My Info</button>
                 </div>
               </div>
 
-              <!-- ROUTE GROWTH CARD -->
-              <div class="card" style="margin-top:12px;border-color:rgba(6,214,160,.2)">
-                <div class="card-ttl">My Route Growth</div>
+              <!-- ROUTE GROWTH + REFERRALS -->
+              <div class="card" style="border-color:rgba(6,214,160,.2)">
+                <div class="card-ttl">Route Growth &amp; Referrals</div>
                 <div style="margin-bottom:10px">
-                  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px">
-                    <span style="color:var(--sub)">Stops recruited</span>
-                    <span style="font-weight:700;color:var(--cyan)" id="rn-growth-label">0 / 10 <span style="color:var(--muted);font-weight:400">for Builder tier</span></span>
+                  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                    <span style="color:var(--sub)">HO referrals</span>
+                    <span style="font-weight:700;color:var(--cyan)" id="rn-growth-label">0 referred</span>
                   </div>
-                  <div style="background:var(--surface2);border-radius:99px;height:6px;overflow:hidden">
-                    <div style="width:0%;height:100%;background:var(--cyan);border-radius:99px;transition:width .4s" id="rn-growth-bar"></div>
+                  <div style="background:var(--surface2);border-radius:99px;height:5px;overflow:hidden">
+                    <div style="width:0%;height:100%;background:var(--cyan);border-radius:99px;transition:width .5s" id="rn-growth-bar"></div>
                   </div>
-                  <div style="font-size:10px;color:var(--muted);margin-top:4px" id="rn-growth-sub">Recruit homeowners to grow your route and earn more</div>
+                  <div style="font-size:10px;color:var(--muted);margin-top:3px" id="rn-growth-sub">Share your code to grow your route and earn bonuses</div>
                 </div>
                 <div style="background:rgba(6,214,160,.06);border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12px">
                   <div style="display:flex;justify-content:space-between;margin-bottom:3px">
-                    <span style="color:var(--sub)">Current rate</span><span style="font-weight:700;color:var(--cyan)">$3.25/stop</span>
+                    <span style="color:var(--sub)">Current rate</span>
+                    <span style="font-weight:700;color:var(--cyan)" id="rn-rate-display">$3.25/stop</span>
                   </div>
                   <div style="display:flex;justify-content:space-between">
-                    <span style="color:var(--sub)">Signup bonuses earned</span><span style="font-weight:700;color:var(--green)" id="rn-bonus-earned">$0.00</span>
+                    <span style="color:var(--sub)">Referral bonuses earned</span>
+                    <span style="font-weight:700;color:var(--green)" id="rn-bonus-earned">$0.00</span>
                   </div>
                 </div>
                 <button class="btn btn-cyan btn-full btn-sm" onclick="showReferralLink()">🔗 Share My Referral Link</button>
               </div>
-
-              <!-- HOMEOWNER INTEREST LIST -->
-              <div class="card" style="margin-top:12px;border-color:rgba(251,191,36,.25)" id="rn-interest-card">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                  <div class="card-ttl" style="margin:0;color:#fbbf24">🏠 Homeowners Near You</div>
-                  <span id="rn-interest-badge" style="display:none;background:rgba(251,191,36,.2);color:#fbbf24;border-radius:99px;font-size:9px;padding:2px 8px;font-weight:700">0</span>
-                </div>
-                <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:10px">
-                  Homeowners in your area who signed up but have no runner yet. Share your referral link to convert them.
-                </div>
-                <div id="rn-interest-list">
-                  <div style="text-align:center;padding:16px;color:var(--muted);font-size:12px">Loading...</div>
-                </div>
-              </div>
             </div>
+
           </div>
         </div>
 
@@ -4430,14 +4449,21 @@ async function populateRNDashboard(){
     window._rnRow = merged
 
     if(row.status === 'pending_review'){
-      if(grEl) grEl.textContent = 'Your application is pending review -- we\'ll notify you within 24-48 hrs'
-      // Check if any of their requested zones are now live
+      if(grEl) grEl.textContent = 'Application pending review — we\'ll notify you within 24-48 hrs'
       _checkRunnerWaitlistZones(row)
     } else if(row.status === 'approved'){
-      if(grEl) grEl.textContent = 'Account active . Check your routes below'
+      // Set accurate subtitle based on zone assignment
+      const myZone = ADMIN_ZONES.find(z => z.id === merged.zone_id)
+      if(myZone && (myZone.homeowners||0) > 0){
+        if(grEl) grEl.textContent = `Active in ${myZone.name} · ${myZone.homeowners} homeowner${myZone.homeowners!==1?'s':''} on your route`
+      } else if(myZone){
+        if(grEl) grEl.textContent = `Assigned to ${myZone.name} · Zone building — homeowners coming soon`
+      } else {
+        if(grEl) grEl.textContent = 'Account active · Zone assignment pending — check back soon'
+      }
       await loadRunnerRoutes(merged)
     } else if(row.status === 'rejected'){
-      if(grEl) grEl.textContent = 'Application not approved -- contact support for details'
+      if(grEl) grEl.textContent = 'Application not approved — contact support for details'
     }
 
     // Account page pre-fill
@@ -4447,6 +4473,27 @@ async function populateRNDashboard(){
     setVal('rn-acct-em',   merged.email      || '')
     setVal('rn-acct-ph',   merged.phone      || '')
     setVal('rn-acct-zip',  merged.zip_code   || '')
+
+    // Vehicle dropdown pre-fill
+    const vehicleEl = document.getElementById('rn-acct-vehicle')
+    if(vehicleEl && merged.vehicle_type){
+      const vt = merged.vehicle_type
+      ;[...vehicleEl.options].forEach(o => { o.selected = o.value===vt||o.text===vt })
+    }
+
+    // Status dropdown pre-fill
+    const statusEl = document.getElementById('rn-acct-status')
+    if(statusEl && merged.status){
+      const st = merged.status === 'approved' ? 'AVAILABLE' : merged.status
+      ;[...statusEl.options].forEach(o => { o.selected = o.value===st })
+    }
+
+    // Visit preference pills pre-fill
+    const vpRaw = merged.visit_preference || 'both'
+    const vpId  = vpRaw==='bin_out' ? 'rnvt-out' : vpRaw==='bin_in' ? 'rnvt-in' : 'rnvt-both'
+    document.querySelectorAll('#rn-visit-type-pills .r-opt').forEach(el => el.classList.remove('on'))
+    const vpEl = document.getElementById(vpId)
+    if(vpEl) vpEl.classList.add('on')
 
     // Referral code display in account page
     const ownCode = merged.own_ref_code || row.own_ref_code || null
@@ -4465,6 +4512,27 @@ async function populateRNDashboard(){
     safe('rn-total-earned',  merged.total_earned  ? '$'+parseFloat(merged.total_earned).toFixed(2)  : '$0.00')
     safe('rn-total-stops',   merged.total_stops   || 0)
     safe('rn-rating-display',merged.rating        ? merged.rating+'★' : '--')
+
+    // Visit type pill label for stat
+    const vpLabel = (merged.visit_preference==='bin_out') ? '🌙 Out' : (merged.visit_preference==='bin_in') ? '☀️ In' : '🌙☀️ Both'
+    safe('rn-stat-type', vpLabel)
+
+    // Bins moved = total_stops * bins_per_stop (1 for plan_a, 2 for plan_b/c) — approximate
+    const totalStops = parseInt(merged.total_stops||0)
+    const binsEst    = totalStops  // 1:1 approximation until we track bins per stop
+    safe('rn-stat-bins', binsEst)
+
+    // Streak — days since last completed job (approximate from join date for now)
+    const joinDays = merged.created_at ? Math.floor((Date.now()-new Date(merged.created_at))/86400000) : 0
+    safe('rn-stat-streak', Math.min(totalStops, joinDays) || '--')
+
+    // Loyalty rate display
+    const tierRates = { standard:3.25, builder:3.50, growth:3.75, elite:4.00 }
+    const myRate    = tierRates[merged.loyalty_tier||'standard'] || 3.25
+    safe('rn-rate-display', '$'+myRate.toFixed(2)+'/stop')
+
+    // Render zone status cards on home page
+    _renderRNHomeDashZones(merged)
 
     // Referral bonus & priority dispatch
     const bonusEarned    = parseFloat(merged.bonus_earned||0)
@@ -4492,6 +4560,121 @@ async function populateRNDashboard(){
   } catch(err){
     console.warn('[BinDash] RN profile load failed:', String(err?.message||err))
   }
+}
+
+function _renderRNHomeDashZones(runnerRow){
+  const el = document.getElementById('rn-home-zones')
+  if(!el) return
+
+  const zoneId = runnerRow?.zone_id || null
+  const myZone = zoneId ? ADMIN_ZONES.find(z => z.id === zoneId) : null
+
+  // Also grab any zones from the runners table coverage
+  const allMyZones = ADMIN_ZONES.filter(z =>
+    z.id === zoneId ||
+    (runnerRow?.coverage_zones && (() => { try { return JSON.parse(runnerRow.coverage_zones) } catch(e){ return [] } })().includes(z.id))
+  )
+
+  if(!allMyZones.length){
+    el.innerHTML = `
+    <div style="background:var(--surface2);border:1px dashed var(--border);border-radius:10px;padding:16px;text-align:center;font-size:13px;color:var(--muted)">
+      <div style="font-size:24px;margin-bottom:6px">📍</div>
+      No zone assigned yet — admin will assign you to a zone when your area is ready.
+      <div style="margin-top:10px">
+        <button class="btn btn-outline btn-sm" onclick="rnNav(null,'rn-zones')">View Zone Requests →</button>
+      </div>
+    </div>`
+    return
+  }
+
+  el.innerHTML = allMyZones.map(z => {
+    const isLive     = z.status === 'live'
+    const isWaitlist = z.status === 'waitlist'
+    const isPilot    = z.pilot || z.status === 'pilot'
+    const hwCount    = z.homeowners || 0
+    const needed     = z.threshold  || 3
+    const capacity   = z.capacity   || 10
+    const rnCount    = z.runners    || 0
+    const hwPct      = Math.min(100, Math.round(hwCount / Math.max(needed, 1) * 100))
+    const rnPct      = Math.min(100, Math.round(rnCount / Math.max(capacity, 1) * 100))
+    const dayLabels  = (z.collection||[]).map(d => typeof d==='object' ? d.day||d : d).join(', ') || '--'
+    const wlCount    = WAITLIST_SIGNUPS.filter(s => z.zips?.includes(s.zip) || z.zip===s.zip?.slice(0,3)).length
+
+    const statusBadge = isLive
+      ? `<span style="background:rgba(34,197,94,.15);color:#22c55e;border-radius:99px;font-size:9px;font-weight:700;padding:2px 8px">🟢 Live</span>`
+      : isPilot
+      ? `<span style="background:rgba(165,180,252,.15);color:#a5b4fc;border-radius:99px;font-size:9px;font-weight:700;padding:2px 8px">🔬 Pilot</span>`
+      : `<span style="background:rgba(251,191,36,.15);color:#fbbf24;border-radius:99px;font-size:9px;font-weight:700;padding:2px 8px">⏳ Building</span>`
+
+    const borderCol = isLive ? 'rgba(34,197,94,.3)' : isPilot ? 'rgba(165,180,252,.3)' : 'rgba(251,191,36,.3)'
+    const bgCol     = isLive ? 'rgba(34,197,94,.04)' : isPilot ? 'rgba(165,180,252,.04)' : 'rgba(251,191,36,.04)'
+
+    return `
+    <div style="background:${bgCol};border:1.5px solid ${borderCol};border-radius:12px;padding:14px;margin-bottom:10px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
+        <div>
+          <div style="font-size:14px;font-weight:700">${z.name} ${statusBadge}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">ZIP ${z.zips?.join(', ')||z.zip} · Collection: ${dayLabels}</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px" onclick="rnNav(null,'rn-zones')">Manage →</button>
+      </div>
+
+      <!-- Zone stats row -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px;text-align:center">
+        <div style="background:rgba(255,255,255,.04);border-radius:7px;padding:8px 4px">
+          <div style="font-size:18px;font-weight:800;color:var(--cyan)">${hwCount}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Your HOs</div>
+        </div>
+        <div style="background:rgba(255,255,255,.04);border-radius:7px;padding:8px 4px">
+          <div style="font-size:18px;font-weight:800;color:#a5b4fc">${rnCount}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Runners</div>
+        </div>
+        <div style="background:rgba(255,255,255,.04);border-radius:7px;padding:8px 4px">
+          <div style="font-size:18px;font-weight:800;color:#fbbf24">${wlCount}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Waitlist</div>
+        </div>
+        <div style="background:rgba(255,255,255,.04);border-radius:7px;padding:8px 4px">
+          <div style="font-size:18px;font-weight:800;color:#22c55e">${hwCount>0?Math.round(hwCount/Math.max(rnCount,1)):0}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">HO/Runner</div>
+        </div>
+      </div>
+
+      ${isWaitlist ? `
+      <!-- Waitlist progress bars -->
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px">
+            <span>Homeowners to launch</span>
+            <span style="font-weight:700;color:${hwPct>=100?'#22c55e':'var(--cyan)'}">${hwCount}/${needed}${hwPct>=100?' ✅':''}</span>
+          </div>
+          <div style="background:var(--surface2);border-radius:99px;height:6px">
+            <div style="width:${hwPct}%;height:100%;background:${hwPct>=100?'#22c55e':'var(--cyan)'};border-radius:99px;transition:width .5s"></div>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px">
+            <span>Runner capacity</span>
+            <span style="font-weight:700;color:#a5b4fc">${rnCount}/${capacity}</span>
+          </div>
+          <div style="background:var(--surface2);border-radius:99px;height:6px">
+            <div style="width:${rnPct}%;height:100%;background:#a5b4fc;border-radius:99px;transition:width .5s"></div>
+          </div>
+        </div>
+        ${wlCount ? `<div style="font-size:10px;color:#22c55e;margin-top:2px">✨ ${wlCount} homeowner${wlCount!==1?'s':''} on the waitlist — share your code to bring them in!</div>` : ''}
+      </div>` : isLive ? `
+      <!-- Live zone - show HO/capacity bar -->
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px">
+          <span>Route capacity</span>
+          <span style="font-weight:700;color:var(--cyan)">${hwCount}/${capacity} homeowners</span>
+        </div>
+        <div style="background:var(--surface2);border-radius:99px;height:6px">
+          <div style="width:${Math.min(100,Math.round(hwCount/Math.max(capacity,1)*100))}%;height:100%;background:var(--cyan);border-radius:99px;transition:width .5s"></div>
+        </div>
+        ${hwCount >= capacity ? `<div style="font-size:10px;color:#fbbf24;margin-top:4px">⚡ Route at capacity — request a zone expansion to take on more stops</div>` : ''}
+      </div>` : ''}
+    </div>`
+  }).join('')
 }
 
 async function loadRNInterestList(runnerRow){
@@ -4701,6 +4884,29 @@ async function loadRNEarnings(){
     // Update dashboard stats
     safe('rn-stat-visits', completed.length)
     safe('rn-stat-month',  '$' + sum(monthJobs).toFixed(2))
+    const cachedRating = window._rnRow?.rating
+    safe('rn-stat-rating', cachedRating ? parseFloat(cachedRating).toFixed(1)+'★' : completed.length ? '5.0★' : '--')
+
+    // Bins moved — each job = 1 bin move (out or in), both visits = 2 per stop
+    const binsOut = completed.filter(j => j.visit_type==='BIN_OUT').length
+    const binsIn  = completed.filter(j => j.visit_type==='BIN_IN').length
+    safe('rn-stat-bins', binsOut + binsIn)
+
+    // Active streak — consecutive days with at least 1 completed job
+    if(completed.length){
+      const daySet = new Set(completed.map(j => (j.completed_at||j.scheduled_date||'').slice(0,10)).filter(Boolean))
+      let streak = 0
+      const today = new Date()
+      for(let i=0; i<365; i++){
+        const d = new Date(today); d.setDate(today.getDate()-i)
+        const k = d.toISOString().slice(0,10)
+        if(daySet.has(k)) streak++
+        else if(i>0) break  // gap — streak ends
+      }
+      safe('rn-stat-streak', streak || '--')
+    } else {
+      safe('rn-stat-streak', '--')
+    }
 
     // Pay history -- group by week
     const tbody = document.getElementById('pay-history-tbody')
@@ -7844,13 +8050,23 @@ async function saveRNAccountInfo(){
     const ln  = document.getElementById('rn-acct-ln')?.value.trim()  || ''
     const ph  = document.getElementById('rn-acct-ph')?.value.trim()  || null
     const zip = document.getElementById('rn-acct-zip')?.value.trim() || null
-    const { error } = await _supa.from('runner_applications')
-      .update({ first_name: fn, last_name: ln, phone: ph, zip_code: zip, updated_at: new Date().toISOString() })
-      .eq('email', currentUser.email)
-    if(error) throw new Error(error.message)
+    const upd = { first_name: fn, last_name: ln, phone: ph, zip_code: zip, updated_at: new Date().toISOString() }
+
+    // Update both tables — runner_applications is source of truth for pending,
+    // runners table is the live record once approved
+    const r1 = await _supa.from('runner_applications').update(upd).eq('email', currentUser.email)
+    const r2 = await _supa.from('runners').update(upd).eq('email', currentUser.email)
+    if(r1?.error) console.warn('[BinDash] saveRNAccount app:', r1.error.message)
+    if(r2?.error) console.warn('[BinDash] saveRNAccount runner:', r2.error.message)
+
+    // Update local state
+    if(window._rnRow){ window._rnRow.first_name=fn; window._rnRow.last_name=ln; window._rnRow.phone=ph; window._rnRow.zip_code=zip }
+
     // Update sidebar
     const nameEl = document.getElementById('rn-sidebar-name')
-    if(nameEl) nameEl.textContent = fn + ' ' + ln
+    if(nameEl) nameEl.textContent = (fn+' '+ln).trim()
+    const avEl = document.getElementById('rn-sidebar-avatar')
+    if(avEl) avEl.textContent = ((fn[0]||'')+(ln[0]||'')).toUpperCase()||'RN'
     showToast('Info updated ✅','ok')
   } catch(e){
     if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
@@ -7860,19 +8076,30 @@ async function saveRNAccountInfo(){
 }
 
 async function saveRNPreferences(){
+  const btn = document.querySelector('#rn-account .btn-outline')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
   try {
-    const vtEl = document.querySelector('#rn-visit-type-pills .r-opt.on')
-    const vtMap = { 'rnvt-both':'BOTH', 'rnvt-out':'BIN_OUT', 'rnvt-in':'BIN_IN' }
-    const visitType = vtMap[vtEl?.id] || 'BOTH'
+    const vtEl      = document.querySelector('#rn-visit-type-pills .r-opt.on')
+    const vtMap     = { 'rnvt-both':'both', 'rnvt-out':'bin_out', 'rnvt-in':'bin_in' }
+    const visitPref = vtMap[vtEl?.id] || 'both'
     const vehicle   = document.getElementById('rn-acct-vehicle')?.value || 'Car'
     const status    = document.getElementById('rn-acct-status')?.value  || 'AVAILABLE'
-    const { error } = await _supa.from('runner_applications')
-      .update({ visit_type: visitType, vehicle, status, updated_at: new Date().toISOString() })
-      .eq('email', currentUser.email)
-    if(error) throw new Error(error.message)
+    const upd       = { visit_preference: visitPref, vehicle_type: vehicle, updated_at: new Date().toISOString() }
+
+    // Update both tables
+    const r1 = await _supa.from('runner_applications').update(upd).eq('email', currentUser.email)
+    const r2 = await _supa.from('runners').update({ ...upd, status }).eq('email', currentUser.email)
+
+    if(r1?.error) console.warn('[BinDash] saveRNPrefs app:', r1.error.message)
+    if(r2?.error) console.warn('[BinDash] saveRNPrefs runner:', r2.error.message)
+
+    // Update local merged row
+    if(window._rnRow){ window._rnRow.visit_preference = visitPref; window._rnRow.vehicle_type = vehicle }
     showToast('Preferences saved ✅','ok')
   } catch(e){
     showToast('Save failed: '+String(e?.message||e),'err')
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent='Save Preferences' }
   }
 }
 
@@ -11156,7 +11383,7 @@ function renderPendingRunnerList(){
 
             return `
             ${noZoneForZip ? `
-            <div style="background:rgba(251,191,36,.06);border:1.5px solid rgba(251,191,36,.3);border-radius:10px;padding:12px 14px;margin-bottom:10px">
+            <div id="rnpc-zone-warn-${app.id}" style="background:rgba(251,191,36,.06);border:1.5px solid rgba(251,191,36,.3);border-radius:10px;padding:12px 14px;margin-bottom:10px">
               <div style="font-size:12px;font-weight:700;color:#fbbf24;margin-bottom:6px">
                 ⚠️ No zone covers ZIP ${app.zip}
               </div>
@@ -11268,7 +11495,7 @@ async function approveZoneReqThenAssignRunner(appId, reqId, zip){
     }
 
     // 5. Remove the warning panel — zone now exists
-    const warningDiv = btn?.closest('[style*="rgba(251,191,36"]')
+    const warningDiv = document.getElementById('rnpc-zone-warn-'+appId)
     if(warningDiv) warningDiv.remove()
 
     loadRunnerZoneRequestsBadge()
