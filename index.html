@@ -535,15 +535,19 @@ const EMAIL = {
     <p style="font-size:13px;color:#475569">This code is unique to you -- please don't share it.</p>
   `),
 
-  runnerApproved: (name, zone) => emailBase(`
+  runnerApproved: (name, zone, refCode) => emailBase(`
     <h1>Welcome to BinDash, ${name}! 🚐</h1>
     <p>Your runner application has been approved. You're now active in the dispatch pool and will start receiving route offers for your zone.</p>
     <div class="card">
       <div class="row"><div class="lbl">Service Zone</div><div class="val">${zone||'Assigned zone'}</div></div>
       <div class="row"><div class="lbl">Status</div><div class="val"><span class="tag">Active</span></div></div>
+      ${refCode ? `<div class="row"><div class="lbl">Your Referral Code</div><div class="val" style="font-family:monospace;font-weight:800;color:#06d6a0">${refCode}</div></div>` : ''}
     </div>
     <a href="${BRAND.url}" class="btn">Go to My Dashboard -></a>
     <p>When a route is ready, you'll receive a batch offer with stop details and estimated earnings. You'll have <strong style="color:#1e293b;font-weight:700">25 minutes</strong> to accept before it goes to other runners.</p>
+    ${refCode ? `<p style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px 16px;font-size:13px;color:#166534">
+      🔗 <strong>Share your referral code <span style="font-family:monospace">${refCode}</span></strong> with friends and neighbours. When they sign up as a runner using your code, you'll earn referral bonuses and may unlock higher loyalty tiers.
+    </p>` : ''}
   `),
 
   runnerAppReceived: (name) => emailBase(`
@@ -1633,7 +1637,17 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div class="field"><label>Phone</label><input id="h-ph" placeholder="(555) 000-0000"></div>
           <div class="field"><label>Password *</label><input type="password" id="h-pw" placeholder="Min. 8 characters"></div>
         </div>
-        <div style="display:flex;justify-content:space-between;margin-top:6px">
+        <!-- Referral code from a runner -->
+        <div style="border:1.5px solid var(--border2);border-radius:10px;padding:12px 14px;margin-bottom:4px">
+          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px">🔗 Got a referral code from a runner? <span style="color:var(--muted);font-weight:400">(optional)</span></div>
+          <div style="display:flex;gap:8px;align-items:flex-start">
+            <div style="flex:1">
+              <input id="h-ref-code" placeholder="e.g. BD-PM-A3F2" maxlength="12" style="font-family:'DM Mono',monospace;font-size:14px;text-transform:uppercase" oninput="lookupHWReferralCode(this.value)">
+              <div id="h-ref-result" style="font-size:11px;margin-top:5px;color:var(--muted)">Enter your runner's code to link their referral</div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:14px">
           <button class="btn btn-outline" onclick="hBack(2)"><- Back</button>
           <button class="btn btn-cyan" onclick="hNext(2)">Next: Service -></button>
         </div>
@@ -2152,8 +2166,10 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div class="r-opt" onclick="this.classList.toggle('on')" style="text-align:center;padding:10px 6px;font-size:11px;font-weight:700">SUN</div>
         </div>
         <div class="g2">
-          <div class="field"><label>Hours per week</label><select><option>5-10 hrs</option><option selected>10-20 hrs</option><option>20-30 hrs</option><option>Full time</option></select></div>
-          <div class="field"><label>Preferred start time</label><select><option>6:00 AM</option><option>7:00 AM</option><option selected>8:00 AM</option><option>4:00 PM (evenings)</option><option>5:00 PM (evenings)</option></select></div>
+          <div class="field"><label>Hours per week</label><select id="r-hours-week"><option>5-10 hrs</option><option selected>10-20 hrs</option><option>20-30 hrs</option><option>Full time</option></select></div>
+        </div>
+        <div id="r-start-time-info" style="background:var(--surface2);border-radius:8px;padding:12px 14px;font-size:12px;color:var(--sub);line-height:1.7;margin-top:4px">
+          ⏰ <strong style="color:var(--text)">Recommended start time:</strong> <span id="r-start-time-rec">Select visit type above to see recommendation</span>
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:6px"><button class="btn btn-outline" onclick="rBack(3)"><- Back</button><button class="btn btn-cyan" onclick="rNext(3)">Next: Tax Info -></button></div>
       </div>
@@ -2808,7 +2824,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       </div>
     </div>
     <div class="main">
-      <div class="topbar"><div class="pg-title" id="rn-pg-title">Dashboard</div><div style="display:flex;align-items:center;gap:10px"><button class="btn btn-ghost btn-sm" style="position:relative;padding:6px 10px" onclick="showNotifPanel('rn')"><span style="font-size:16px">🔔</span><span id="rn-notif-badge" style="position:absolute;top:2px;right:2px;width:8px;height:8px;background:#ef4444;border-radius:50%;display:block"></span></button><span class="badge" style="background:#22c55e22;color:#22c55e;font-size:12px;padding:6px 14px">● Available</span></div></div>
+      <div class="topbar"><div class="pg-title" id="rn-pg-title">Dashboard</div><div style="display:flex;align-items:center;gap:10px"><div id="rn-priority-badge" style="display:none;align-items:center;gap:5px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.3);border-radius:99px;padding:4px 10px;font-size:11px;font-weight:700;color:#fbbf24">⚡ Priority</div><button class="btn btn-ghost btn-sm" style="position:relative;padding:6px 10px" onclick="showNotifPanel('rn')"><span style="font-size:16px">🔔</span><span id="rn-notif-badge" style="position:absolute;top:2px;right:2px;width:8px;height:8px;background:#ef4444;border-radius:50%;display:block"></span></button><span class="badge" style="background:#22c55e22;color:#22c55e;font-size:12px;padding:6px 14px">● Available</span></div></div>
       <div class="body">
 
         <!-- RN HOME -->
@@ -4399,6 +4415,26 @@ async function populateRNDashboard(){
     safe('rn-total-stops',   row.total_stops   || 0)
     safe('rn-rating-display',row.rating        ? row.rating+'★' : '--')
 
+    // Referral bonus & priority dispatch
+    const bonusEarned    = parseFloat(row.bonus_earned||0)
+    const hwRefCount     = row.hw_referral_count || 0
+    const hasPriority    = !!row.priority_dispatch
+    safe('rn-bonus-earned', '$'+bonusEarned.toFixed(2))
+
+    // Growth bar — based on HW referrals
+    const growthLabel = document.getElementById('rn-growth-label')
+    const growthBar   = document.getElementById('rn-growth-bar')
+    const growthSub   = document.getElementById('rn-growth-sub')
+    if(growthLabel) growthLabel.innerHTML = `${hwRefCount} homeowner${hwRefCount!==1?'s':''} referred <span style="color:var(--muted);font-weight:400">· $${bonusEarned.toFixed(0)} bonus earned</span>`
+    if(growthBar)   growthBar.style.width = Math.min(100, hwRefCount * 20)+'%'  // 5 referrals = 100%
+    if(growthSub)   growthSub.textContent = hwRefCount > 0
+      ? `Each homeowner referral = $10 bonus + priority dispatch`
+      : 'Share your code with neighbours — earn $10 per homeowner signup'
+
+    // Priority dispatch badge — show on dashboard if active
+    const priBadge = document.getElementById('rn-priority-badge')
+    if(priBadge) priBadge.style.display = hasPriority ? 'flex' : 'none'
+
   } catch(err){
     console.warn('[BinDash] RN profile load failed:', String(err?.message||err))
   }
@@ -5220,7 +5256,16 @@ function startOnboarding(planLetter){
 function rOpt(el){el.closest('.radio-row').querySelectorAll('.r-opt').forEach(o=>o.classList.remove('on'));el.classList.add('on')}
 
 // Visit preference (runner onboarding step 3)
-function setVP(v){['both','out','in'].forEach(x=>document.getElementById('vp-'+x).classList.remove('on'));document.getElementById('vp-'+v).classList.add('on')}
+function setVP(v){
+  ['both','out','in'].forEach(x=>document.getElementById('vp-'+x)?.classList.remove('on'))
+  document.getElementById('vp-'+v)?.classList.add('on')
+  const rec = document.getElementById('r-start-time-rec')
+  if(rec){
+    if(v==='out')  rec.innerHTML = '<strong style="color:var(--cyan)">After 4:00 PM evenings</strong> — bins must be out before collection morning'
+    if(v==='in')   rec.innerHTML = '<strong style="color:var(--cyan)">After 12:00 PM daytime</strong> — wait until the collection truck has passed your area'
+    if(v==='both') rec.innerHTML = '<strong style="color:var(--cyan)">Start after 4:00 PM</strong> — do Bin Out in the evening, Bin In the following afternoon. Combined routes earn <strong>$6.50/stop</strong>'
+  }
+}
 
 // HW onboarding
 // -- COLLECTIONS DATA & RENDERING -----------------
@@ -5737,6 +5782,56 @@ async function submitLead(){
   }
 }
 
+async function lookupHWReferralCode(code){
+  const res  = document.getElementById('h-ref-result')
+  if(!res) return
+  const clean = code.trim().toUpperCase()
+  if(clean.length < 6){ res.textContent = 'Enter your runner\'s code to link their referral'; res.style.color='var(--muted)'; return }
+  res.textContent = 'Checking...'; res.style.color = 'var(--muted)'
+  try {
+    // Look up runner by own_ref_code
+    const { data } = await _supa.from('runners')
+      .select('id, first_name, last_name, own_ref_code')
+      .eq('own_ref_code', clean).limit(1)
+    const runner = data?.[0]
+    if(runner){
+      const name = (runner.first_name+' '+(runner.last_name||'')).trim()
+      res.innerHTML = `<span style="color:#22c55e">✅ Code verified — referred by <strong>${name}</strong>. They'll receive a $10 bonus when your account activates.</span>`
+      window._hwReferralRunner = runner
+    } else {
+      res.innerHTML = `<span style="color:#f59e0b">⚠️ Code not found. Double-check with your runner or leave blank.</span>`
+      window._hwReferralRunner = null
+    }
+  } catch(e){
+    res.textContent = 'Could not verify code right now.'
+    window._hwReferralRunner = null
+  }
+}
+
+async function _creditRunnerReferral(runnerRow){
+  // Credit referring runner $10 bonus + set priority flag
+  if(!runnerRow?.id) return
+  try {
+    const currentBonus = runnerRow.bonus_earned || 0
+    await _supa.from('runners').update({
+      bonus_earned:        currentBonus + 10,
+      hw_referral_count:   (runnerRow.hw_referral_count||0) + 1,
+      priority_dispatch:   true,
+      updated_at:          new Date().toISOString(),
+    }).eq('id', runnerRow.id)
+    // Notify runner of their bonus
+    const fn = runnerRow.first_name || 'there'
+    sendEmail(runnerRow.email||'', '🎉 You earned a $10 referral bonus!',
+      `<p>Hi ${fn},</p>
+       <p>A homeowner signed up using your BinDash referral code — you've earned a <strong style="color:#06d6a0">$10 referral bonus</strong>!</p>
+       <p>This will be added to your next payout. You've also been granted <strong>priority dispatch</strong> status — your routes will be offered to you first.</p>
+       <p>Keep sharing your code: <strong style="font-family:monospace">${runnerRow.own_ref_code||''}</strong></p>
+       <p>— The BinDash Team</p>`,
+      'hw_referral_bonus')
+    console.log('[BinDash] $10 referral bonus credited to runner', runnerRow.id)
+  } catch(e){ console.warn('[BinDash] _creditRunnerReferral:', e) }
+}
+
 async function hSubmit(){
   if(!document.getElementById('h-terms').checked){showToast('Please agree to the Terms of Service','err');return}
   const _fn = document.getElementById('h-fn')?.value.trim()
@@ -5809,10 +5904,18 @@ async function hSubmit(){
       card_last4:        last4,
       card_holder:       cardName,
       card_expiry:       cardExp,
+      referred_by_code:  document.getElementById('h-ref-code')?.value?.trim().toUpperCase() || null,
+      referred_by_runner: window._hwReferralRunner?.id || null,
       status:            'pending_review',
       created_at:        new Date().toISOString(),
     })
     console.log('[BinDash] Homeowner signup saved to Supabase ✅')
+
+    // Credit the referring runner $10 bonus + priority if a valid code was used
+    if(window._hwReferralRunner){
+      await _creditRunnerReferral(window._hwReferralRunner)
+      window._hwReferralRunner = null
+    }
   } catch(err) {
     console.warn('[BinDash] DB write failed (check Supabase config):', err.message)
   } finally {
@@ -10970,18 +11073,25 @@ async function approveRunner(appId){
   if(btn){ btn.disabled=true; btn.textContent='Approving...' }
 
   // Read referral + loyalty from form
-  const refCode    = document.getElementById('rnpc-refcode-'+appId)?.value?.trim() || app.referralCode || null
-  const referredBy = document.getElementById('rnpc-referredby-'+appId)?.value?.trim() || app.referredBy || null
-  const tier       = document.getElementById('rnpc-tier-'+appId)?.value || 'standard'
-  const tierRates  = { standard:3.25, builder:3.50, growth:3.75, elite:4.00 }
-  const loyaltyRate = tierRates[tier] || 3.25
+  const usedRefCode  = document.getElementById('rnpc-refcode-'+appId)?.value?.trim() || app.referralCode || null
+  const referredBy   = document.getElementById('rnpc-referredby-'+appId)?.value?.trim() || app.referredBy || null
+  const tier         = document.getElementById('rnpc-tier-'+appId)?.value || 'standard'
+  const tierRates    = { standard:3.25, builder:3.50, growth:3.75, elite:4.00 }
+  const loyaltyRate  = tierRates[tier] || 3.25
+
+  // Generate THIS runner's own referral code (used to invite others)
+  const nameParts0   = (app.name||app.email||'RN').split(' ')
+  const fnAbbr       = (nameParts0[0]||'RN').slice(0,2).toUpperCase()
+  const lnAbbr       = (nameParts0[1]||'').slice(0,2).toUpperCase() || Math.random().toString(36).slice(2,4).toUpperCase()
+  const ownRefCode   = 'BD-'+fnAbbr+lnAbbr+'-'+Math.random().toString(36).slice(2,6).toUpperCase()
 
   // 1. Update runner_applications status + referral info
   try {
     const res = await _supa.from('runner_applications').update({
       status:         'approved',
       zone_id:        zoneId,
-      referral_code:  refCode,
+      own_ref_code:   ownRefCode,   // this runner's shareable code
+      referral_code:  usedRefCode,  // code they used to sign up (from another runner)
       referred_by:    referredBy,
       loyalty_tier:   tier,
       loyalty_rate:   loyaltyRate,
@@ -11006,7 +11116,8 @@ async function approveRunner(appId){
       visit_preference: app.visitPref || 'both',
       zone_id:          zoneId,
       status:           'active',
-      referral_code:    refCode,
+      own_ref_code:     ownRefCode,    // their shareable referral code
+      referral_code:    usedRefCode,   // code they used at signup
       referred_by:      referredBy,
       loyalty_tier:     tier,
       loyalty_rate:     loyaltyRate,
@@ -11037,7 +11148,9 @@ async function approveRunner(appId){
     status:'AVAILABLE',
     visitType:app.visitPref==='both'?'BOTH':app.visitPref==='bin_out'?'BIN_OUT':'BIN_IN',
     rating:0, visits:0, zoneId, coverageZones:[zoneId],
-    loyaltyTier: tier, loyaltyRate, referralCode: refCode, referredBy, totalReferrals:0,
+    loyaltyTier: tier, loyaltyRate,
+    ownRefCode,            // their shareable referral code
+    referralCode: usedRefCode, referredBy, totalReferrals:0,
     color:colors[RUNNERS.length%colors.length],
   })
 
@@ -11050,8 +11163,9 @@ async function approveRunner(appId){
   renderPendingRunnerList(); renderRunnerList(); syncZoneData(); updateOverviewCounts()
   showToast(app.name+' approved ✅ -- added to runner pool','ok')
   const _rnZoneName = ADMIN_ZONES.find(z=>z.id===zoneId)?.name||'Your zone'
-  sendEmail(app.email, 'Welcome to BinDash! Your runner account is active', EMAIL.runnerApproved(app.name.split(' ')[0], _rnZoneName), 'runner_approved')
-  // Reload from Supabase to confirm status synced and clear pending badge
+  // Send approval email with their own referral code
+  sendEmail(app.email, 'Welcome to BinDash! Your runner account is active',
+    EMAIL.runnerApproved(app.name.split(' ')[0], _rnZoneName, ownRefCode), 'runner_approved')
   setTimeout(()=>{ loadRunnersFromSupabase(); loadRunnerApplicationsFromSupabase() }, 800)
 }
 
@@ -13527,27 +13641,45 @@ function checkZoneAvailability(){
 }
 
 function showReferralLink(){
-  const row  = window._rnRow
-  const name = row ? ((row.first_name||'')+(row.last_name?'-'+row.last_name:'')).toUpperCase().replace(/\s/g,'-') : 'RUNNER'
-  const refCode = (row?.id || '').slice(-4).toUpperCase() || 'XXXX'
-  const refUrl  = `bindash-eight.vercel.app/join?ref=${name}-${refCode}`
-  const fullUrl = `https://bindash-eight.vercel.app/join?ref=${name}-${refCode}`
+  const row     = window._rnRow
+  const ownCode = row?.own_ref_code || row?.ownRefCode || null
+  const refUrl  = ownCode
+    ? `bindash-eight.vercel.app/join?ref=${ownCode}`
+    : null
 
   document.getElementById('modal-box').innerHTML = `
-  <div class="mh"><div style="font-size:15px;font-weight:700">🔗 My Referral Link</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+  <div class="mh"><div style="font-size:15px;font-weight:700">🔗 My Referral Code &amp; Link</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
   <div class="mb">
-    <div style="font-size:13px;color:var(--sub);margin-bottom:16px;line-height:1.6">Share this link with your neighbours. Every homeowner who signs up through it gets routed to your zone.</div>
-    <div style="background:var(--surface2);border-radius:8px;padding:12px 14px;display:flex;align-items:center;gap:10px;margin-bottom:16px">
-      <div style="flex:1;font-family:'DM Mono',monospace;font-size:12px;color:var(--cyan);word-break:break-all">${refUrl}</div>
-      <button class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${fullUrl}');showToast('Link copied ✅','ok')">Copy</button>
+    ${ownCode ? `
+    <div style="font-size:13px;color:var(--sub);margin-bottom:14px;line-height:1.6">Share your code or link with other runners and neighbours. Every runner who signs up with your code earns you referral credit.</div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Your Referral Code</div>
+      <div style="background:var(--surface2);border-radius:8px;padding:12px 16px;display:flex;align-items:center;gap:12px">
+        <div style="font-family:'DM Mono',monospace;font-size:20px;font-weight:700;color:var(--cyan);letter-spacing:.08em;flex:1">${ownCode}</div>
+        <button class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('${ownCode}');showToast('Code copied ✅','ok')">Copy</button>
+      </div>
     </div>
-    <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--sub)">
-      💡 Referral tracking coming soon — your link is live and ready to share.
+
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Your Referral Link</div>
+      <div style="background:var(--surface2);border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px">
+        <div style="flex:1;font-family:'DM Mono',monospace;font-size:11px;color:var(--cyan);word-break:break-all">${refUrl}</div>
+        <button class="btn btn-outline btn-sm" onclick="navigator.clipboard.writeText('https://${refUrl}');showToast('Link copied ✅','ok')">Copy</button>
+      </div>
     </div>
+
+    <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--sub);line-height:1.6">
+      💡 When a new runner signs up and enters your code, they start at Builder tier and you earn referral credit. Admin can see referrals on your profile.
+    </div>` : `
+    <div style="text-align:center;padding:20px;color:var(--muted)">
+      <div style="font-size:32px;margin-bottom:8px">⏳</div>
+      <div style="font-size:13px">Your referral code is generated when your account is approved.</div>
+    </div>`}
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Close</button>
-    <button class="btn btn-cyan" onclick="navigator.clipboard.writeText('${fullUrl}');showToast('Link copied ✅','ok');closeM()">Copy &amp; Share</button>
+    ${ownCode ? `<button class="btn btn-cyan" onclick="navigator.clipboard.writeText('https://${refUrl}');showToast('Link copied ✅','ok');closeM()">Copy &amp; Share Link</button>` : ''}
   </div>`
   openM()
 }
@@ -14075,17 +14207,67 @@ async function renderRunnerZoneRequests(){
       return
     }
 
-    // Split by type
-    const expansions = data.filter(r=>!r.type||r.type==='expansion'||r.type==='waitlist_pending')
+    // Split by type — expansions include new zone requests and general expansion requests
+    const expansions = data.filter(r=>!r.type||r.type==='expansion'||r.type==='waitlist_pending'||r.type==='new_zone')
     const removals   = data.filter(r=>r.type==='removal'||r.type==='removal_only_runner')
 
     let html = ''
 
-    // EXPANSION REQUESTS — group by ZIP
-    if(expansions.length){
-      html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">📍 Zone Expansion Requests (${expansions.length})</div>`
+    // NEW ZONE REQUESTS — runner wants to create a brand new zone for a ZIP
+    const newZoneReqs = expansions.filter(r=>r.type==='new_zone'||r.type==='waitlist_pending')
+    const zoneExpReqs = expansions.filter(r=>!r.type||r.type==='expansion')
+
+    if(newZoneReqs.length){
+      html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">🚀 New Zone Requests (${newZoneReqs.length})</div>`
       const byZip = {}
-      expansions.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
+      newZoneReqs.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
+      html += Object.entries(byZip).map(([zip,group])=>{
+        const suggested  = group[0]?.zone_name || ('ZIP '+zip+' Area')
+        const hwInterest = WAITLIST_SIGNUPS.filter(s=>s.zip===zip||s.zip?.slice(0,3)===zip.slice(0,3)).length
+        const inputId    = 'nzr-name-'+zip.replace(/\D/g,'')
+        const notesText  = group[0]?.notes ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;font-style:italic">Runner notes: "${group[0].notes}"</div>` : ''
+        return `<div class="card" style="margin-bottom:10px;border-left:3px solid #fbbf24">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+            <div>
+              <div style="font-size:14px;font-weight:700">New zone for ZIP ${zip}
+                <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px">${group.length} runner${group.length!==1?'s':''} requested this</span>
+              </div>
+              <div style="font-size:11px;color:var(--sub);margin-top:2px">
+                No zone exists yet · ${hwInterest ? `<span style="color:#22c55e">${hwInterest} homeowner${hwInterest>1?'s':''} also waiting</span>` : 'No homeowners yet'}
+              </div>
+              ${notesText}
+            </div>
+          </div>
+
+          <div class="field" style="margin-bottom:12px">
+            <label style="font-size:11px">Zone Name — edit or accept suggestion</label>
+            <input id="${inputId}" value="${suggested}" style="font-size:13px;font-weight:600" placeholder="e.g. North Peoria">
+            <div style="font-size:10px;color:var(--muted);margin-top:3px">Suggested from runner's input. Edit before approving.</div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:12px">
+            ${group.map(row=>`
+              <div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:12px">
+                <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#ef4444);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">🚐</div>
+                <div style="flex:1"><strong>${row.runner_name}</strong> · ${row.runner_email}
+                  <span style="color:var(--muted);margin-left:6px;font-size:10px">${new Date(row.created_at).toLocaleDateString()}</span>
+                </div>
+              </div>`).join('')}
+          </div>
+
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-cyan btn-sm" onclick="approveNewZoneRequest('${zip}','${inputId}',${JSON.stringify(group.map(r=>r.id))},${JSON.stringify(group.map(r=>({email:r.runner_email,name:r.runner_name})))})">✅ Approve &amp; Create Zone</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="dismissRunnerZoneRequests('${zip}')">Dismiss</button>
+          </div>
+        </div>`
+      }).join('')
+    }
+
+    // EXPANSION REQUESTS — runner wants to join existing zones
+    if(zoneExpReqs.length){
+      html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">📍 Zone Expansion Requests (${zoneExpReqs.length})</div>`
+      const byZip = {}
+      zoneExpReqs.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
       html += Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
         const existingZone = ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip.slice(0,3))
         const hwInterest   = WAITLIST_SIGNUPS.filter(s=>s.zip===zip||s.zip?.slice(0,3)===zip.slice(0,3)).length
@@ -14219,6 +14401,46 @@ async function denyZoneRequest(reqId, runnerName){
     renderRunnerZoneRequests()
     showToast(`${runnerName}'s request denied`, 'info')
   } catch(e){ showToast('Error','err') }
+}
+
+async function approveNewZoneRequest(zip, inputId, reqIds, runners){
+  const nameEl  = document.getElementById(inputId)
+  const zoneName = nameEl?.value?.trim() || ('ZIP '+zip+' Area')
+
+  try {
+    // Create the zone as waitlist
+    const newZoneId = (typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():'z-'+Date.now()
+    const newZone = {
+      id: newZoneId, name: zoneName,
+      zip: zip.slice(0,3), zips:[zip],
+      status:'waitlist', runners:0, capacity:10,
+      homeowners:0, threshold:3,
+      collection:[], notes:'Created from runner zone request for ZIP '+zip
+    }
+    ADMIN_ZONES.push(newZone)
+    syncZoneData()
+    await dbSaveZone(newZone)
+
+    // Mark all requests approved
+    for(const id of reqIds){
+      await _supa.from('runner_zone_requests').update({
+        status:'approved', zone_id:newZoneId, zone_name:zoneName,
+        updated_at:new Date().toISOString()
+      }).eq('id',id)
+    }
+
+    // Email each requesting runner
+    for(const r of runners){
+      const fn = r.name?.split(' ')[0]||'there'
+      sendEmail(r.email, `✅ Zone approved — ${zoneName} is now on the waitlist`,
+        `<p>Hi ${fn},</p><p>Your zone request for ZIP ${zip} has been approved! <strong>${zoneName}</strong> is now in waitlist mode — once 3 homeowners and 1 runner are confirmed, service begins.</p><p>Log in to your runner dashboard to track progress.</p><p>— The BinDash Team</p>`,
+        'new_zone_approved')
+    }
+
+    notifyWaitlistRunners(zip, zoneName)
+    renderRunnerZoneRequests()
+    showToast(`Zone "${zoneName}" created ✅ — ${runners.length} runner${runners.length!==1?'s':''} notified`, 'ok')
+  } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
 }
 
 async function createZoneFromRunnerRequest(zip){
