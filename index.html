@@ -4090,11 +4090,14 @@ async function loadRNEarnings(){
 }
 async function loadRunnerRoutes(runnerRow){
   try {
-    // Load both pending offers AND accepted jobs
+    // Query jobs by runner_id OR by runner_name/email fallback
+    const email = runnerRow.email
+    const rid   = runnerRow.id
+
     const { data: jobs, error } = await _supa
       .from('jobs')
       .select('*, homeowner_signups(first_name, last_name, street_address, zip_code, service_type, bin_location, gate_type, gate_code, pet_info, service_notes)')
-      .eq('runner_id', runnerRow.id)
+      .or(`runner_id.eq.${rid},runner_name.eq.${encodeURIComponent((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).replace(/%20/g,' ')}`)
       .in('status', ['offered','accepted','in_progress','scheduled'])
       .order('scheduled_date', { ascending: true })
 
