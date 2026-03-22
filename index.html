@@ -270,6 +270,12 @@ function handleStripeReturn(){
   } else if(p.get('checkout')==='cancel'){
     window.history.replaceState({},'',' ')
     showToast('Payment cancelled -- try again anytime','info')
+  } else if(p.get('connect')==='return'){
+    window.history.replaceState({},'',' ')
+    window._showConnectReturnToast = true
+  } else if(p.get('connect')==='refresh'){
+    window.history.replaceState({},'',' ')
+    window._showConnectRefreshToast = true
   } else if(p.get('portal')==='return'){
     window.history.replaceState({},'',' ')
     // Will show toast after app loads and user is detected
@@ -2063,10 +2069,30 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div id="r-s4" style="display:none">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Independent Contractor 📄</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:16px">BinDash runners are 1099 independent contractors.</div>
-        <div class="warn-box">⚠️ <strong>Important:</strong> You are an independent contractor, not an employee. You are responsible for your own taxes. BinDash will issue a 1099-NEC if you earn over $600 in a calendar year.</div>
-        <div class="sec-h">Tax Information</div>
-        <div class="field"><label>Legal Full Name (as on tax docs)</label><input placeholder="--"></div>
-        <div class="g2"><div class="field"><label>SSN / Tax ID</label><input type="password" placeholder="XXX-XX-XXXX"></div><div class="field"><label>Business Structure</label><select><option>Individual / Sole Proprietor</option><option>Single-member LLC</option><option>Partnership</option><option>S-Corp</option></select></div></div>
+        <div class="warn-box" style="margin-bottom:14px">⚠️ <strong>Important:</strong> You are an independent contractor, not an employee. You are responsible for your own taxes. BinDash will issue a 1099-NEC if you earn over $600 in a calendar year.</div>
+
+        <!-- STRIPE CONNECT NOTE - replaces SSN collection -->
+        <div style="background:rgba(6,214,160,.06);border:1.5px solid rgba(6,214,160,.2);border-radius:12px;padding:16px;margin-bottom:18px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <span style="font-size:22px">🔒</span>
+            <div style="font-size:14px;font-weight:700;color:var(--cyan)">Tax info collected securely after approval</div>
+          </div>
+          <div style="font-size:13px;color:var(--sub);line-height:1.7">
+            We don't collect your SSN or bank details here. Once your application is approved, you'll set up payouts through <strong style="color:var(--text)">Stripe</strong> — the same secure payment platform used by millions of businesses. Stripe handles all tax identity verification (W-9) and bank setup with full encryption.
+          </div>
+          <div style="display:flex;gap:16px;margin-top:12px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)">
+              <span style="color:var(--cyan)">✓</span> Bank-level encryption
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)">
+              <span style="color:var(--cyan)">✓</span> 1099-NEC issued automatically
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)">
+              <span style="color:var(--cyan)">✓</span> Direct bank deposit
+            </div>
+          </div>
+        </div>
+
         <div class="sec-h">Agreements</div>
         <div style="background:var(--surface2);border-radius:8px;padding:12px;font-size:12px;color:var(--sub);line-height:1.7;max-height:120px;overflow-y:auto;margin-bottom:14px;border:1px solid var(--border)"><strong style="color:var(--text)">BinDash Contractor Agreement (Summary)</strong><br><br>You are an independent contractor. You set your own schedule and may work elsewhere. You are responsible for equipment, insurance, and your own tax obligations. BinDash issues a 1099-NEC for earnings over $600/year. You agree to professional conduct with all homeowners and consent to BinDash's platform policies.</div>
         <div class="field">
@@ -2620,6 +2646,22 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- RN HOME -->
         <div class="pg on" id="rn-home">
+
+          <!-- STRIPE CONNECT SETUP BANNER (shown until connected) -->
+          <div id="rn-stripe-setup-banner" style="display:none;background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(139,92,246,.06));border:1.5px solid rgba(99,102,241,.35);border-radius:14px;padding:16px;margin-bottom:18px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:12px">
+                <span style="font-size:28px">💳</span>
+                <div>
+                  <div style="font-weight:700;font-size:14px;color:#a5b4fc">Set up your payouts to get paid</div>
+                  <div style="font-size:12px;color:var(--muted);margin-top:2px">Connect your bank account via Stripe. Takes 2 minutes -- your SSN and bank info are handled securely by Stripe, not BinDash.</div>
+                </div>
+              </div>
+              <button class="btn btn-sm" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;flex-shrink:0" onclick="launchStripeConnect()">
+                Set Up Payouts ->
+              </button>
+            </div>
+          </div>
 
           <!-- INCOMING OFFER BANNER -->
           <div id="offer-banner" style="background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(251,191,36,.06));border:1.5px solid rgba(245,158,11,.4);border-radius:14px;padding:16px;margin-bottom:18px">
@@ -3926,6 +3968,12 @@ async function populateRNDashboard(){
     if(avEl)   avEl.textContent   = initials
     if(roleEl) roleEl.textContent = 'Runner'
 
+    // Show Stripe Connect setup banner if not yet connected
+    const stripeBanner = document.getElementById('rn-stripe-setup-banner')
+    if(stripeBanner){
+      stripeBanner.style.display = row.stripe_connect_id ? 'none' : 'block'
+    }
+
     // Store for later use
     window._rnRow = row
 
@@ -4381,6 +4429,17 @@ async function initApp(){
       setCurrentUser(user)
       go('S-rn-dash')
       populateRNDashboard()
+      if(window._showConnectReturnToast){
+        window._showConnectReturnToast = false
+        setTimeout(()=>showToast('Stripe payout setup complete ✅ You\'re ready to get paid!','ok',5000),800)
+        // Hide the setup banner
+        const b = document.getElementById('rn-stripe-setup-banner')
+        if(b) b.style.display='none'
+      }
+      if(window._showConnectRefreshToast){
+        window._showConnectRefreshToast = false
+        setTimeout(()=>showToast('Please complete your Stripe payout setup to receive payments','info',5000),800)
+      }
     } else {
       setCurrentUser(user)
       go('S-hw-dash')
@@ -6322,6 +6381,35 @@ async function saveEditPreferences(){
   }
 }
 
+// -- STRIPE CONNECT ONBOARDING FOR RUNNERS ---------
+async function launchStripeConnect(){
+  const row = window._rnRow
+  if(!row){ showToast('Profile not loaded yet -- try again','err'); return }
+
+  const btn = document.querySelector('#rn-stripe-setup-banner button')
+  if(btn){ btn.disabled=true; btn.textContent='Opening Stripe...' }
+
+  try {
+    const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/create-connect-account', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        email:      row.email,
+        name:       ((row.first_name||'') + ' ' + (row.last_name||'')).trim(),
+        runnerId:   row.id,
+        returnUrl:  window.location.origin + '/?connect=return',
+        refreshUrl: window.location.origin + '/?connect=refresh',
+      })
+    })
+    const d = await res.json()
+    if(d.error || !d.url) throw new Error(d.error || 'No onboarding URL')
+    window.location.href = d.url
+  } catch(e){
+    showToast('Could not open Stripe: ' + String(e?.message||e), 'err')
+    if(btn){ btn.disabled=false; btn.textContent='Set Up Payouts ->' }
+  }
+}
+
 // -- RUNNER ACCOUNT SAVE FUNCTIONS -----------------
 async function saveRNAccountInfo(){
   const btn = document.getElementById('rn-acct-save-btn') || document.querySelector('#rn-account .btn-cyan')
@@ -7559,7 +7647,7 @@ async function renderPaymentsPage(){
 
 // -- DATA LOADER ---------------------------------------------------
 async function loadPaymentsData(){
-  // Build HW_PAYMENTS from HOMEOWNERS array + homeowner_signups data
+  // Build HW_PAYMENTS from HOMEOWNERS array
   HW_PAYMENTS = HOMEOWNERS.map(hw => {
     const planPrices = { plan_a:34.99, plan_b:44.99, plan_c:54.99, w1:34.99, w2:44.99, w3:54.99 }
     const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split', w1:'1 Can', w2:'2 Cans Same Day', w3:'2 Cans Split' }
@@ -7579,21 +7667,49 @@ async function loadPaymentsData(){
     }
   })
 
-  // Build RUNNER_PAYOUTS from RUNNERS array
-  RUNNER_PAYOUTS = RUNNERS.filter(r=>r.status!=='INACTIVE').map(r => ({
-    runnerId:       r.id,
-    name:           r.name,
-    zone:           r.zones?.[0] || '--',
-    stopsThisWeek:  r.completedToday || 0,
-    pendingAmt:     ((r.completedToday || 0) * 3.25).toFixed(2),
-    autoPay:        r.autoPay || false,
-    payDay:         r.payDay  || 'Friday',
-    stripeConnectId: r.stripeConnectId || null,
-    lastPaidAt:     r.lastPaidAt  || null,
-    lastPaidAmt:    r.lastPaidAmt || null,
-  }))
+  // Build RUNNER_PAYOUTS -- pull pending amounts from DB
+  try {
+    const { data: payouts } = await _supa
+      .from('runner_payouts')
+      .select('runner_id, runner_name, stops, amount, status, created_at')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
 
-  // Calculate next auto-pay run
+    // Group by runner_id to sum pending amounts
+    const pendingByRunner = {}
+    ;(payouts||[]).forEach(p => {
+      if(!pendingByRunner[p.runner_id]) pendingByRunner[p.runner_id] = { stops:0, amount:0 }
+      pendingByRunner[p.runner_id].stops  += p.stops  || 0
+      pendingByRunner[p.runner_id].amount += parseFloat(p.amount || 0)
+      pendingByRunner[p.runner_id].name    = p.runner_name
+    })
+
+    RUNNER_PAYOUTS = RUNNERS.filter(r=>r.status!=='INACTIVE').map(r => {
+      const pending = pendingByRunner[r.id] || { stops:0, amount:0 }
+      return {
+        runnerId:        r.id,
+        name:            r.name,
+        zone:            r.zones?.[0] || '--',
+        stopsThisWeek:   pending.stops,
+        pendingAmt:      pending.amount.toFixed(2),
+        autoPay:         r.autoPay || false,
+        payDay:          r.payDay  || 'Friday',
+        stripeConnectId: r.stripeConnectId || null,
+        lastPaidAt:      r.lastPaidAt  || null,
+        lastPaidAmt:     r.lastPaidAmt || null,
+      }
+    })
+  } catch(e){
+    console.warn('[BinDash] loadPaymentsData payouts:', e)
+    // Fallback to in-memory
+    RUNNER_PAYOUTS = RUNNERS.filter(r=>r.status!=='INACTIVE').map(r => ({
+      runnerId: r.id, name: r.name, zone: r.zones?.[0]||'--',
+      stopsThisWeek: r.completedToday||0, pendingAmt: ((r.completedToday||0)*3.25).toFixed(2),
+      autoPay: r.autoPay||false, payDay: r.payDay||'Friday',
+      stripeConnectId: r.stripeConnectId||null, lastPaidAt: r.lastPaidAt||null, lastPaidAmt: r.lastPaidAmt||null,
+    }))
+  }
+
   _updateNextAutoPayLabel()
 }
 
@@ -7902,25 +8018,39 @@ function payRunnerNow(runnerId){
   openM()
 }
 
-function _doPayRunner(runnerId){
+async function _doPayRunner(runnerId){
   const r = RUNNER_PAYOUTS.find(x=>x.runnerId===runnerId)
   if(!r) return
-  const now = new Date()
-  PAYOUT_HISTORY.unshift({
-    date:       now.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),
-    runnerName: r.name,
-    stops:      r.stopsThisWeek,
-    amount:     '$'+parseFloat(r.pendingAmt).toFixed(2),
-    method:     'Stripe Connect',
-    status:     'processing',
-    ref:        'tr_'+Math.random().toString(36).slice(2,10).toUpperCase(),
-  })
-  r.lastPaidAt  = now.toISOString()
-  r.lastPaidAmt = r.pendingAmt
-  r.pendingAmt  = '0.00'
-  r.stopsThisWeek = 0
-  renderRunnerPayouts()
-  showToast(r.name+' paid ✅ -- processing via Stripe Connect','ok')
+
+  if(!r.stripeConnectId){
+    showToast(r.name + ' has not set up Stripe Connect yet', 'err')
+    return
+  }
+
+  try {
+    const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/pay-runner', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        runnerId:        r.runnerId,
+        runnerName:      r.name,
+        stripeConnectId: r.stripeConnectId,
+        amount:          parseFloat(r.pendingAmt),
+        stops:           r.stopsThisWeek,
+      })
+    })
+    const d = await res.json()
+    if(d.error) throw new Error(d.error)
+
+    r.lastPaidAt  = new Date().toISOString()
+    r.lastPaidAmt = r.pendingAmt
+    r.pendingAmt  = '0.00'
+    r.stopsThisWeek = 0
+    renderRunnerPayouts()
+    showToast(r.name + ' paid ✅ -- $' + parseFloat(d.amount||r.lastPaidAmt).toFixed(2) + ' sent via Stripe Connect', 'ok')
+  } catch(e){
+    showToast('Payment failed: ' + String(e?.message||e), 'err')
+  }
 }
 
 // -- PROFIT OVERVIEW RENDER ----------------------------------------
@@ -12093,7 +12223,7 @@ async function checkRunnerCode(){
     const res = await _supa
       .from('runner_interest')
       .select('id, invite_code, full_name')
-      .eq('invite_code', val)
+      .ilike('invite_code', val)  // case-insensitive match
       .limit(1)
 
     const rows = res?.data || []
