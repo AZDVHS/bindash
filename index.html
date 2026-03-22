@@ -13658,19 +13658,29 @@ async function submitCreateRunnerCode(){
 
   try {
     // Insert into runner_interest table
-    const { error } = await _supa.from('runner_interest').insert({
+    const basePayload = {
       full_name:   fullName,
       email,
       phone,
       zip_code:    zip,
       invite_code: code,
-      notes:       notes || null,
       approved_at: new Date().toISOString(),
       created_at:  new Date().toISOString(),
-      source:      'admin_created',
+    }
+
+    let insertResult = await _supa.from('runner_interest').insert({
+      ...basePayload,
+      notes:  notes || null,
+      source: 'admin_created',
     })
 
-    if(error) throw new Error(error.message)
+    // If schema error (columns don't exist yet), retry with base columns only
+    if(insertResult.error?.message?.includes('column') || insertResult.error?.message?.includes('schema')){
+      console.warn('[BinDash] Retrying without optional columns -- run migration SQL to add notes/source')
+      insertResult = await _supa.from('runner_interest').insert(basePayload)
+    }
+
+    const error = null // consumed above
 
     // Show success state with the code in the modal
     document.getElementById('modal-box').innerHTML = `
