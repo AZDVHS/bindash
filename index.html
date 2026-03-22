@@ -2633,7 +2633,6 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div class="nav-i on" onclick="rnNav(this,'rn-home')"><span class="ic">📊</span> Dashboard</div>
       <div class="nav-i" onclick="rnNav(this,'rn-routes')"><span class="ic">🗺️</span> My Routes</div>
       <div class="nav-i" onclick="rnNav(this,'rn-earnings')"><span class="ic">💵</span> Earnings &amp; Pay</div>
-      <div class="nav-i" onclick="rnNav(this,'rn-tax')"><span class="ic">📄</span> Tax Documents</div>
       <div class="nav-i" onclick="rnNav(this,'rn-account')"><span class="ic">👤</span> My Info</div>
       <div class="s-bot">
         <div class="u-chip" style="margin-bottom:10px"><div class="avatar" style="background:linear-gradient(135deg,var(--amber),var(--red))" id="rn-sidebar-avatar">--</div><div><div class="u-name" id="rn-sidebar-name">Runner</div><div class="u-role" id="rn-sidebar-role">Pending approval</div></div></div>
@@ -2732,7 +2731,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <div class="card-ttl">Quick Links</div>
                 <div style="display:flex;flex-direction:column;gap:7px">
                   <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-earnings')">💵 Full Earnings</button>
-                  <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-tax')">📄 Tax Documents</button>
+                  <button class="btn btn-outline btn-full btn-sm" onclick="openStripePortalRunner()">💳 Bank &amp; Tax (Stripe)</button>
                   <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-account')">✏️ Update My Info</button>
                 </div>
               </div>
@@ -2850,10 +2849,12 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             </div>
             <div>
               <div class="card" style="margin-bottom:12px">
-                <div class="card-ttl">Pay Method</div>
-                <div style="font-size:13px;font-weight:600;margin-bottom:4px" id="rn-bank-display">No bank account on file</div>
-                <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Add your bank details to receive payouts</div>
-                <button class="btn btn-outline btn-full btn-sm" onclick="showBankModal()">Update Bank Info</button>
+                <div class="card-ttl">Bank &amp; Tax</div>
+                <div style="font-size:13px;color:var(--sub);line-height:1.6;margin-bottom:12px">
+                  Bank account, routing details, tax info (W-9), and 1099-NEC documents are all managed securely through Stripe.
+                </div>
+                <button class="btn btn-outline btn-full btn-sm" style="margin-bottom:8px" onclick="openStripePortalRunner()">💳 Manage Bank &amp; Tax in Stripe →</button>
+                <div style="font-size:11px;color:var(--muted)">🔒 BinDash never stores your bank or tax details.</div>
               </div>
               <div class="card">
                 <div class="card-ttl">Pay Rates</div>
@@ -2869,37 +2870,18 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           </div>
         </div>
 
-        <!-- RN TAX -->
+        <!-- RN TAX - redirects to Stripe -->
         <div class="pg" id="rn-tax">
-          <div class="warn-box">📋 As a 1099 independent contractor you are responsible for reporting and paying your own self-employment taxes. BinDash provides earnings documentation. Consult a tax professional for advice specific to your situation.</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-            <div class="card">
-              <div class="card-ttl">Tax Documents</div>
-              <div style="display:flex;flex-direction:column;gap:8px">
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 13px;background:var(--surface2);border-radius:9px"><div><div style="font-size:13px;font-weight:600">1099-NEC -- 2024</div><div style="font-size:11px;color:var(--muted);margin-top:2px">No earnings on file yet</div></div><button class="btn btn-outline btn-sm" onclick="showToast('Downloading 1099-NEC PDF...','ok')">⬇ Download</button></div>
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 13px;background:var(--surface2);border-radius:9px"><div><div style="font-size:13px;font-weight:600">Earnings Summary -- 2024</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Visit-by-visit breakdown with Out/In split</div></div><button class="btn btn-outline btn-sm" onclick="showToast('Downloading CSV...','ok')">⬇ CSV</button></div>
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 13px;background:var(--surface2);border-radius:9px"><div><div style="font-size:13px;font-weight:600">1099-NEC -- 2023</div><div style="font-size:11px;color:var(--muted);margin-top:2px">No earnings on file yet</div></div><button class="btn btn-outline btn-sm" onclick="showToast('Downloading 1099-NEC PDF...','ok')">⬇ Download</button></div>
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 13px;background:var(--surface2);border-radius:9px"><div><div style="font-size:13px;font-weight:600">Mileage Log</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Available after your first completed route</div></div><button class="btn btn-outline btn-sm" onclick="showToast('Downloading mileage CSV...','ok')">⬇ CSV</button></div>
-              </div>
+          <div style="max-width:520px;margin:40px auto;text-align:center">
+            <div style="font-size:48px;margin-bottom:16px">💳</div>
+            <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;margin-bottom:8px">Tax &amp; Banking in Stripe</div>
+            <div style="font-size:14px;color:var(--sub);line-height:1.7;margin-bottom:24px">
+              Your bank account, tax information (W-9), and 1099-NEC documents are all managed securely through Stripe — the same platform that processes your payouts. BinDash never stores your bank or tax details.
             </div>
-            <div>
-              <div class="card" style="margin-bottom:12px">
-                <div class="card-ttl">Tax Info on File</div>
-                <div class="dl" style="margin-bottom:8px"><div class="dl-l">Legal Name</div><div>--</div></div>
-                <div class="dl" style="margin-bottom:8px"><div class="dl-l">SSN / Tax ID</div><div>--</div></div>
-                <div class="dl" style="margin-bottom:8px"><div class="dl-l">Business Type</div><div>Individual / Sole Proprietor</div></div>
-                <div class="dl"><div class="dl-l">W-9 Status</div><div style="color:var(--green)">⚠️ Not yet submitted</div></div>
-                <button class="btn btn-outline btn-sm" style="margin-top:12px" onclick="showTaxInfoModal()">Update Tax Info</button>
-              </div>
-              <div class="card">
-                <div class="card-ttl">Helpful Resources</div>
-                <div style="display:flex;flex-direction:column;gap:7px">
-                  <button class="btn btn-outline btn-full btn-sm" onclick="window.open('https://www.irs.gov/businesses/small-businesses-self-employed/self-employed-individuals-tax-center','_blank')">🔗 IRS Self-Employment Tax Guide</button>
-                  <button class="btn btn-outline btn-full btn-sm" onclick="window.open('https://www.irs.gov/businesses/small-businesses-self-employed/estimated-taxes','_blank')">🔗 Quarterly Estimated Tax Dates</button>
-                  <button class="btn btn-outline btn-full btn-sm" onclick="showToast('Mileage tracker -- coming soon','info')">🔗 Mileage &amp; Expense Tracker</button>
-                </div>
-              </div>
-            </div>
+            <button class="btn btn-cyan btn-lg" onclick="openStripePortalRunner()" style="margin-bottom:16px">
+              Open Stripe Dashboard →
+            </button>
+            <div style="font-size:12px;color:var(--muted)">🔒 256-bit SSL · Handled entirely by Stripe · BinDash never sees your SSN or bank details</div>
           </div>
         </div>
 
@@ -5315,10 +5297,33 @@ function rnNav(el,pg){
   if(el) el.classList.add('on')
   document.querySelectorAll('#S-rn-dash .pg').forEach(p=>p.classList.remove('on'))
   document.getElementById(pg).classList.add('on')
-  const t={'rn-home':'Dashboard','rn-routes':'My Routes','rn-earnings':'Earnings & Pay','rn-tax':'Tax Documents','rn-account':'My Info'}
+  const t={'rn-home':'Dashboard','rn-routes':'My Routes','rn-earnings':'Earnings & Pay','rn-tax':'Bank & Tax','rn-account':'My Info'}
   document.getElementById('rn-pg-title').textContent = t[pg]
   if(pg==='rn-routes')   initRoutesTabs()
   if(pg==='rn-earnings') loadRNEarnings()
+}
+
+async function openStripePortalRunner(){
+  const row = window._rnRow
+  if(!row?.stripe_connect_id){
+    // Not connected yet -- take them to Connect setup
+    if(row) { await launchStripeConnect(); return }
+    showToast('Please set up Stripe Connect first from your dashboard','info')
+    return
+  }
+  // Open Stripe Express dashboard
+  try {
+    const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/create-connect-login', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SUPABASE_ANON_KEY, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify({ stripeConnectId: row.stripe_connect_id })
+    })
+    const d = await res.json()
+    if(d.url) window.open(d.url, '_blank')
+    else throw new Error(d.error || 'No login URL')
+  } catch(e){
+    showToast('Could not open Stripe: '+String(e?.message||e),'err')
+  }
 }
 function adNav(el, pg){
   // Resolve to the .nav-i container even if a child element (badge/icon span) was clicked
