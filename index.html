@@ -2031,23 +2031,30 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- Zone request for unavailable ZIPs -->
         <div id="r-zip-request" style="display:none;margin-bottom:12px">
-          <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 13px;font-size:12px">
+          <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:14px">
             <div style="font-weight:700;color:#fbbf24;margin-bottom:4px">📍 No active zone for this ZIP yet</div>
-            <div style="color:var(--sub);margin-bottom:8px">You can still enroll -- check below to request we open this area.</div>
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="r-zip-request-check" style="width:auto">
-              <span>Request BinDash launches service in my ZIP -- I want to be a runner here</span>
-            </label>
+            <div style="color:var(--sub);font-size:13px;margin-bottom:10px;line-height:1.5">We don't have a service zone covering your area yet. You can request one — if enough runners and homeowners sign up we'll launch it.</div>
+            <button class="btn btn-cyan btn-sm" onclick="showRunnerZoneRequestModal()">📋 Request a Zone for My Area</button>
           </div>
         </div>
 
         <!-- ZONE PICKER -- shown after ZIP entered -->
         <div id="r-zone-picker" style="display:none;margin-bottom:18px">
-          <div class="sec-h">Available zones near you</div>
-          <div style="font-size:12px;color:var(--sub);margin-bottom:12px">Choose the zone you want to operate in. Your route will be built within this area.</div>
-          <div id="r-zone-list" style="display:flex;flex-direction:column;gap:8px"></div>
-          <div style="font-size:11px;color:var(--muted);margin-top:10px;padding:8px 12px;background:var(--surface2);border-radius:7px">
-            💡 Waitlist zones still need your application -- you'll get first pick when the zone launches.
+          <div class="sec-h" style="display:flex;align-items:center;justify-content:space-between">
+            <span>Available Zones Near You</span>
+            <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--cyan)" onclick="showRunnerZoneRequestModal()">+ Request a new zone</button>
+          </div>
+          <div style="font-size:12px;color:var(--sub);margin-bottom:12px">Select all zones you're willing to cover. More zones = more work. You can update this later.</div>
+          <div id="r-zone-list" style="display:flex;flex-direction:column;gap:10px"></div>
+
+          <!-- Selected zones summary -->
+          <div id="r-zones-summary" style="display:none;background:rgba(6,214,160,.07);border:1px solid rgba(6,214,160,.2);border-radius:8px;padding:10px 14px;font-size:12px;margin-top:10px">
+            <span style="color:var(--cyan);font-weight:700">✓ </span><span id="r-zones-summary-text"></span>
+          </div>
+
+          <!-- Waitlist zone explainer -->
+          <div id="r-waitlist-explainer" style="display:none;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--sub);margin-top:8px;line-height:1.6">
+            ⏳ <strong style="color:#fbbf24">Waitlist zones</strong> are areas where we're building up enough runners and homeowners to launch. Joining the waitlist means you'll be among the first runners assigned when the zone goes live — no work until then, just a reservation.
           </div>
         </div>
 
@@ -4212,7 +4219,45 @@ async function submitServiceConfirmation(){
 }
 
 // -- POPULATE RUNNER DASHBOARD from currentUser + Supabase ----
-async function populateRNDashboard(){
+async function _checkRunnerWaitlistZones(row){
+  try {
+    const { data } = await _supa.from('runner_zone_requests')
+      .select('zone_id, zone_name, zip_code, status')
+      .eq('runner_email', row.email)
+      .in('status', ['notified','waitlist_pending'])
+    if(!data?.length) return
+    // Find any that are now live
+    const liveOnes = data.filter(r => {
+      const zone = ADMIN_ZONES.find(z=>z.id===r.zone_id || z.zips?.includes(r.zip_code))
+      return zone?.status === 'live'
+    })
+    if(!liveOnes.length) return
+    // Show a notification banner in the runner dashboard
+    const homeEl = document.getElementById('rn-home')
+    if(!homeEl) return
+    const existing = document.getElementById('rn-waitlist-zone-notif')
+    if(existing) existing.remove()
+    const notif = document.createElement('div')
+    notif.id = 'rn-waitlist-zone-notif'
+    notif.style.cssText = 'background:linear-gradient(135deg,rgba(34,197,94,.12),rgba(6,214,160,.06));border:1.5px solid rgba(34,197,94,.3);border-radius:12px;padding:14px 16px;margin-bottom:18px'
+    notif.innerHTML = `
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <span style="font-size:24px;flex-shrink:0">🎉</span>
+        <div style="flex:1">
+          <div style="font-weight:700;color:#22c55e;margin-bottom:4px">A zone you requested is now live!</div>
+          <div style="font-size:13px;color:var(--sub);line-height:1.6">
+            <strong style="color:var(--text)">${liveOnes.map(r=>r.zone_name||('ZIP '+r.zip_code)).join(', ')}</strong>
+            is now accepting runners. Contact your admin to get assigned to the zone.
+          </div>
+        </div>
+        <button onclick="this.closest('#rn-waitlist-zone-notif').remove()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0">✕</button>
+      </div>`
+    // Insert at top of rn-home content
+    const firstChild = homeEl.firstElementChild
+    if(firstChild) homeEl.insertBefore(notif, firstChild)
+    else homeEl.appendChild(notif)
+  } catch(e){ console.warn('[BinDash] _checkRunnerWaitlistZones:', e) }
+}
   if(!currentUser) return
 
   const grEl = document.getElementById('rn-home-subtitle')
@@ -4251,6 +4296,8 @@ async function populateRNDashboard(){
 
     if(row.status === 'pending_review'){
       if(grEl) grEl.textContent = 'Your application is pending review -- we\'ll notify you within 24-48 hrs'
+      // Check if any of their requested zones are now live
+      _checkRunnerWaitlistZones(row)
     } else if(row.status === 'approved'){
       if(grEl) grEl.textContent = 'Account active . Check your routes below'
       await loadRunnerRoutes(row)
@@ -5774,6 +5821,10 @@ async function rSubmit(){
     console.warn('[BinDash] Runner application exception:', saveErr)
   }
 
+  // Save selected zone IDs to application
+  const selectedZones = window._selectedZoneIds || (selectedZoneId ? [selectedZoneId] : [])
+  const primaryZoneId = selectedZones[0] || null
+
   if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Submit Application' }
 
   // Email confirmation
@@ -5781,18 +5832,38 @@ async function rSubmit(){
   const _rn_fn = document.getElementById('r-fn')?.value?.trim()||'there'
   if(_rn_em) sendEmail(_rn_em, 'BinDash runner application received', EMAIL.runnerAppReceived(_rn_fn), 'runner_app_received')
 
-  // If runner requested a new zone for their ZIP, save it
-  const zipRequestCheck = document.getElementById('r-zip-request-check')
-  if(zipRequestCheck?.checked && zip){
+  // Save zone preferences (all selected zones + waitlist entries)
+  for(const zId of selectedZones){
+    const zone = ADMIN_ZONES.find(z=>z.id===zId)
+    if(!zone) continue
+    if(zone.status === 'waitlist'){
+      // Save as zone request with waitlist flag
+      try {
+        await _supa.from('runner_zone_requests').insert({
+          runner_name:  fn + ' ' + ln,
+          runner_email: em,
+          zip_code:     zip,
+          zone_id:      zId,
+          zone_name:    zone.name,
+          status:       'waitlist_pending',
+          created_at:   new Date().toISOString(),
+        })
+      } catch(e){ console.warn('[BinDash] Waitlist zone request:', e) }
+    }
+  }
+
+  // If no zones found at all (new ZIP), save a zone request
+  const noZones = !document.getElementById('r-zone-picker') ||
+    document.getElementById('r-zone-picker').style.display === 'none'
+  if(noZones && zip){
     try {
       await _supa.from('runner_zone_requests').insert({
-        runner_name: fn + ' ' + ln,
+        runner_name:  fn + ' ' + ln,
         runner_email: em,
-        zip_code: zip,
-        status: 'pending',
-        created_at: new Date().toISOString(),
+        zip_code:     zip,
+        status:       'pending',
+        created_at:   new Date().toISOString(),
       })
-      console.log('[BinDash] Runner zone request saved for ZIP', zip)
     } catch(e){ console.warn('[BinDash] Zone request save:', String(e?.message||e)) }
   }
 
@@ -10110,6 +10181,9 @@ async function confirmCreateZoneFromWaitlist(zip){
     loadRunnerZoneRequestsBadge()
   } catch(e){}
 
+  // Notify runners who requested this ZIP
+  notifyWaitlistRunners(zip, name)
+
   showToast('Zone "'+name+'" created . '+movedCount+' homeowner'+(movedCount!==1?'s':'')+' notified ✅','ok')
   setTimeout(()=>{ renderZoneWaitlist(); renderRunnerZoneRequests() }, 500)
 }
@@ -10161,6 +10235,7 @@ function createZoneAndApproveHW(appId){
   dbSaveZone(newZone)
   closeM()
   approveHW(appId, newZoneId)
+  notifyWaitlistRunners(app.zip, name)
   showToast(`Zone "${name}" created as Pilot ✅ -- promote to Live when ready`,'info')
 }
 
@@ -12673,51 +12748,180 @@ function lookupRunnerZones(zip){
     picker.style.display = 'none'
     list.innerHTML = ''
     selectedZoneId = null
-    // Show the zone request option
+    window._selectedZoneIds = []
     const reqDiv = document.getElementById('r-zip-request')
     if(reqDiv) reqDiv.style.display = 'block'
     return
   }
-  // Zone found - hide request div
   const reqDiv2 = document.getElementById('r-zip-request')
   if(reqDiv2) reqDiv2.style.display = 'none'
 
+  window._selectedZoneIds = window._selectedZoneIds || []
+  const hasWaitlist = zones.some(z=>z.status==='waitlist')
+  const waitlistExp = document.getElementById('r-waitlist-explainer')
+  if(waitlistExp) waitlistExp.style.display = hasWaitlist ? 'block' : 'none'
+
   picker.style.display = 'block'
   list.innerHTML = zones.map(z => {
-    const cfg = ZONE_STATUS_CONFIG[z.status]
-    const pct = Math.round((z.runners / Math.max(z.capacity,1)) * 100)
-    const runnersNeeded = z.status==='live' ? `${z.capacity - z.runners} runner spot${z.capacity-z.runners!==1?'s':''} remaining` :
-                          z.status==='waitlist' ? `${z.needed} more homeowners needed to launch` : 'Not yet open'
-    return `<div id="rzc-${z.id}" onclick="selectRunnerZone('${z.id}')" style="border:1.5px solid var(--border2);border-radius:10px;padding:13px 15px;cursor:pointer;transition:all .15s" class="zone-choice">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">
+    const cfg    = ZONE_STATUS_CONFIG[z.status]
+    const pct    = Math.round((z.runners / Math.max(z.capacity,1)) * 100)
+    const isLive = z.status === 'live'
+    const isWait = z.status === 'waitlist'
+    const spotsLeft = isLive ? z.capacity - z.runners : null
+
+    const runnersLine = isLive
+      ? `<span style="color:${spotsLeft>5?'var(--green)':spotsLeft>0?'var(--amber)':'#ef4444'};font-weight:600">${spotsLeft} runner spot${spotsLeft!==1?'s':''} remaining</span>`
+      : isWait
+      ? `<span style="color:#fbbf24">Waitlist — launching when capacity is reached</span>`
+      : `<span style="color:var(--muted)">Not yet open</span>`
+
+    const collectionDays = z.collection?.length
+      ? z.collection.map(d=>typeof d==='object'?d.day||d:d).join(', ')
+      : '--'
+
+    return `<div id="rzc-${z.id}"
+      onclick="toggleRunnerZone('${z.id}',this)"
+      style="border:1.5px solid var(--border2);border-radius:12px;padding:14px 16px;cursor:pointer;transition:all .15s;position:relative"
+      class="zone-choice">
+      <!-- Checkbox indicator -->
+      <div id="rzc-check-${z.id}" style="position:absolute;top:12px;right:12px;width:20px;height:20px;border-radius:50%;border:2px solid var(--border2);display:flex;align-items:center;justify-content:center;transition:all .15s;font-size:11px">
+      </div>
+
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;padding-right:28px">
         <div>
-          <div style="font-size:13px;font-weight:700">${z.name}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Collection days: ${z.collection}</div>
+          <div style="font-size:14px;font-weight:700">${z.name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">📅 Collection: ${collectionDays}</div>
         </div>
         <span class="badge" style="${cfg.badge};font-size:10px">
           <span style="width:6px;height:6px;background:${cfg.dot};border-radius:50%;display:inline-block;margin-right:4px"></span>${cfg.label}
         </span>
       </div>
-      <div style="display:flex;gap:16px;font-size:12px;color:var(--sub)">
-        <span>👥 ${z.homeowners} homeowners</span>
-        <span>🚐 ${z.runners}/${z.capacity} runners</span>
-        <span style="color:${z.status==='live'?'var(--green)':z.status==='waitlist'?'var(--amber)':'var(--muted)'}">${runnersNeeded}</span>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+        <div style="background:var(--surface2);border-radius:7px;padding:7px 10px;text-align:center">
+          <div style="font-size:16px;font-weight:700;color:var(--cyan)">${z.homeowners||0}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:1px">Homeowners</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:7px;padding:7px 10px;text-align:center">
+          <div style="font-size:16px;font-weight:700;color:#a5b4fc">${z.runners||0}/${z.capacity||20}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:1px">Runners</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:7px;padding:7px 10px;text-align:center">
+          <div style="font-size:13px;font-weight:700;color:${isLive?'var(--green)':'#fbbf24'}">${isLive?'Active':'Waitlist'}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:1px">Status</div>
+        </div>
       </div>
-      ${z.status==='live' ? `<div style="margin-top:8px;background:var(--surface2);border-radius:5px;height:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:var(--green);border-radius:5px"></div></div>` : ''}
+
+      <div style="font-size:12px">${runnersLine}</div>
+
+      ${isLive ? `<div style="margin-top:8px;background:var(--surface2);border-radius:5px;height:4px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${pct>80?'#ef4444':pct>50?'#f59e0b':'var(--green)'};border-radius:5px;transition:width .4s"></div>
+      </div>` : ''}
+
+      ${isWait ? `<div style="margin-top:8px;font-size:11px;color:#fbbf24;background:rgba(245,158,11,.07);border-radius:6px;padding:5px 8px">
+        🚀 Join waitlist — you'll be notified and auto-assigned when this zone launches
+      </div>` : ''}
     </div>`
   }).join('')
+
+  _updateZonesSummary()
 }
 
-function selectRunnerZone(zId){
-  selectedZoneId = zId
-  document.querySelectorAll('.zone-choice').forEach(el=>{
-    el.style.borderColor = 'var(--border2)'
-    el.style.background = 'transparent'
+function toggleRunnerZone(zId, el){
+  window._selectedZoneIds = window._selectedZoneIds || []
+  const idx = window._selectedZoneIds.indexOf(zId)
+  if(idx >= 0){
+    window._selectedZoneIds.splice(idx,1)
+  } else {
+    window._selectedZoneIds.push(zId)
+    selectedZoneId = zId // keep last selected as primary
+  }
+  // Update visuals for all cards
+  document.querySelectorAll('.zone-choice').forEach(card => {
+    const cardId = card.id.replace('rzc-','')
+    const isSelected = window._selectedZoneIds.includes(cardId)
+    card.style.borderColor    = isSelected ? 'var(--cyan)' : 'var(--border2)'
+    card.style.background     = isSelected ? 'rgba(6,214,160,.05)' : 'transparent'
+    const chk = document.getElementById('rzc-check-'+cardId)
+    if(chk){
+      chk.style.background  = isSelected ? 'var(--cyan)'   : 'transparent'
+      chk.style.borderColor = isSelected ? 'var(--cyan)'   : 'var(--border2)'
+      chk.textContent       = isSelected ? '✓' : ''
+      chk.style.color       = '#07090f'
+    }
   })
-  const el = document.getElementById('rzc-'+zId)
-  if(el){
-    el.style.borderColor = 'var(--cyan)'
-    el.style.background = 'rgba(6,214,160,.05)'
+  _updateZonesSummary()
+}
+
+function _updateZonesSummary(){
+  const ids  = window._selectedZoneIds || []
+  const summary   = document.getElementById('r-zones-summary')
+  const summaryTx = document.getElementById('r-zones-summary-text')
+  if(!summary) return
+  if(!ids.length){ summary.style.display='none'; return }
+  const names = ids.map(id => {
+    const z = ADMIN_ZONES.find(x=>x.id===id)
+    return z ? z.name : id
+  })
+  summary.style.display = 'block'
+  const waitlistSelected = ids.some(id=>ADMIN_ZONES.find(z=>z.id===id)?.status==='waitlist')
+  summaryTx.textContent = `${ids.length} zone${ids.length!==1?'s':''} selected: ${names.join(', ')}${waitlistSelected?' (includes waitlist)':''}`
+}
+
+function showRunnerZoneRequestModal(){
+  const zip  = document.getElementById('r-zip')?.value?.trim() || ''
+  const fn   = document.getElementById('r-fn')?.value?.trim()  || ''
+  const ln   = document.getElementById('r-ln')?.value?.trim()  || ''
+  const em   = document.getElementById('r-em')?.value?.trim()  || ''
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh" style="background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(99,102,241,.06))">
+    <div>
+      <div style="font-size:15px;font-weight:700">📋 Request a New Service Zone</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:2px">We'll review your area and add it to the roadmap</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15);border-radius:8px;padding:12px 14px;font-size:13px;color:var(--sub);margin-bottom:16px;line-height:1.6">
+      Once enough runners <em>and</em> homeowners express interest in an area, we create a <strong style="color:var(--text)">waitlist zone</strong>. When it reaches threshold, it goes live and everyone gets notified automatically.
+    </div>
+    <div class="g2">
+      <div class="field"><label>Your Name</label><input id="rzr-name" value="${(fn+' '+ln).trim()}" placeholder="Full name"></div>
+      <div class="field"><label>Email</label><input id="rzr-email" value="${em}" placeholder="your@email.com"></div>
+    </div>
+    <div class="field">
+      <label>ZIP Code / Area *</label>
+      <input id="rzr-zip" value="${zip}" placeholder="85301" maxlength="5">
+    </div>
+    <div class="field">
+      <label>Why should BinDash launch here?</label>
+      <textarea id="rzr-notes" placeholder="e.g. Dense suburban area, lots of families, neighbours interested..." rows="3" style="resize:vertical"></textarea>
+    </div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan" onclick="submitRunnerZoneRequest()">📋 Submit Request</button>
+  </div>`
+  openM()
+}
+
+async function submitRunnerZoneRequest(){
+  const name  = document.getElementById('rzr-name')?.value?.trim()  || ''
+  const email = document.getElementById('rzr-email')?.value?.trim() || ''
+  const zip   = document.getElementById('rzr-zip')?.value?.trim()   || ''
+  const notes = document.getElementById('rzr-notes')?.value?.trim() || ''
+  if(!zip || zip.length < 5){ showToast('Please enter a valid ZIP code','err'); return }
+  if(!name){ showToast('Please enter your name','err'); return }
+  try {
+    const payload = { runner_name:name, runner_email:email, zip_code:zip, status:'pending', created_at:new Date().toISOString() }
+    // Try with notes field, fallback without
+    let res = await _supa.from('runner_zone_requests').insert({ ...payload, notes })
+    if(res.error) res = await _supa.from('runner_zone_requests').insert(payload)
+    if(res.error) throw new Error(res.error.message)
+    closeM()
+    showToast('Zone request submitted ✅ — we\'ll review and notify you', 'ok', 5000)
+  } catch(e){
+    showToast('Could not submit: '+String(e?.message||e), 'err')
   }
 }
 
@@ -13343,6 +13547,35 @@ async function createZoneFromRunnerRequest(zip){
     const nameEl = document.getElementById('cz-name')
     if(nameEl) nameEl.value = suggestZoneName(zip)
   }, 100)
+}
+
+async function notifyWaitlistRunners(zip, zoneName){
+  // Notify all runners who requested this ZIP that the zone is now live
+  try {
+    const { data: requests } = await _supa.from('runner_zone_requests')
+      .select('runner_name, runner_email')
+      .eq('zip_code', zip)
+      .in('status', ['pending','waitlist_pending'])
+    if(!requests?.length) return
+    for(const req of requests){
+      if(!req.runner_email) continue
+      const firstName = req.runner_name?.split(' ')[0] || 'there'
+      sendEmail(req.runner_email,
+        `🎉 Good news — BinDash is launching in your area!`,
+        `<p>Hi ${firstName},</p>
+         <p>You requested a BinDash service zone near ZIP ${zip} — we're excited to let you know it's been created as <strong>${zoneName}</strong>!</p>
+         <p>This zone is currently building up runners and homeowners. Once it reaches capacity, service will begin and you'll be among the first runners assigned.</p>
+         <p><strong>Next step:</strong> If you haven't already submitted your runner application, log in to BinDash and complete your profile to secure your spot.</p>
+         <p>— The BinDash Team</p>`,
+        'zone_created_notify')
+    }
+    // Mark notified
+    await _supa.from('runner_zone_requests')
+      .update({ status:'notified', updated_at:new Date().toISOString() })
+      .eq('zip_code', zip)
+      .in('status', ['pending','waitlist_pending'])
+    showToast(`${requests.length} runner${requests.length!==1?'s':''} notified about new zone ✅`, 'ok', 4000)
+  } catch(e){ console.warn('[BinDash] notifyWaitlistRunners:', e) }
 }
 
 async function dismissRunnerZoneRequests(zip){
