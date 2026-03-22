@@ -4407,55 +4407,50 @@ async function populateRNDashboard(){
   const grEl = document.getElementById('rn-home-subtitle')
 
   try {
-    const res = await _supa
-      .from('runner_applications')
-      .select('*')
-      .eq('email', currentUser.email)
-      .single()
+    // Fetch runner data + zones in parallel — don't serialize
+    let rnRow = null, appRow = null
+    const zoneLoadPromise = ADMIN_ZONES.length === 0 ? loadZonesFromSupabase().catch(e=>console.warn('[BinDash] zone load:', e)) : Promise.resolve()
 
-    const row = res?.data
-    if(!row){ console.warn('[BinDash] No runner record for', currentUser.email); return }
+    const [rnRes, appRes] = await Promise.all([
+      _supa.from('runners').select('*').eq('email', currentUser.email).maybeSingle().catch(e=>{ console.warn('[BinDash] runners query:', e); return null }),
+      _supa.from('runner_applications').select('*').eq('email', currentUser.email).maybeSingle().catch(e=>{ console.warn('[BinDash] app query:', e); return null }),
+    ])
+    rnRow  = rnRes?.data  || null
+    appRow = appRes?.data || null
 
-    // Also load from runners table for fields only stored there (own_ref_code, priority_dispatch, hw_referral_count, bonus_earned)
-    let rnRow = null
-    try {
-      const rRes = await _supa.from('runners').select('*').eq('email', currentUser.email).single()
-      rnRow = rRes?.data || null
-    } catch(e){}
+    await zoneLoadPromise
+    const merged = {
+      first_name:        currentUser.user_metadata?.first_name || '',
+      last_name:         currentUser.user_metadata?.last_name  || '',
+      email:             currentUser.email || '',
+      status:            'pending_review',
+      ...(appRow || {}),
+      ...(rnRow  || {}),
+    }
 
-    // Merge: runners table fields take precedence for referral/payout data
-    const merged = { ...row, ...(rnRow || {}) }
+    console.log('[BinDash] populateRNDashboard — runners row:', !!rnRow, '— app row:', !!appRow, '— email:', merged.email)
 
-    // Use DB row for name
     const fn = merged.first_name || currentUser.user_metadata?.first_name || currentUser.email?.split('@')[0] || 'Runner'
     const ln = merged.last_name  || currentUser.user_metadata?.last_name  || ''
     const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'RN'
 
-    // Sidebar name + avatar
+    // Sidebar
     const nameEl = document.getElementById('rn-sidebar-name')
     const avEl   = document.getElementById('rn-sidebar-avatar')
-    if(nameEl) nameEl.textContent = fn + ' ' + ln
+    if(nameEl) nameEl.textContent = (fn + ' ' + ln).trim() || currentUser.email
     if(avEl)   avEl.textContent   = initials
 
-    // Show Stripe Connect setup banner if not yet connected
+    // Stripe Connect banner
     const stripeBanner = document.getElementById('rn-stripe-setup-banner')
-    if(stripeBanner){
-      stripeBanner.style.display = (merged.stripe_connect_id || rnRow?.stripe_connect_id) ? 'none' : 'block'
-    }
+    if(stripeBanner) stripeBanner.style.display = merged.stripe_connect_id ? 'none' : 'block'
 
-    // Store merged row for later use (earnings, routes, etc.)
+    // Store for later use
     window._rnRow = merged
 
-    // Ensure zones are loaded — needed for subtitle + zone cards
-    if(ADMIN_ZONES.length === 0){
-      try { await loadZonesFromSupabase() } catch(e){}
-    }
-
-    // Determine true approval status:
-    // A runner can be in runners table (approved) even if runner_applications still says pending_review
-    const isApproved = (row.status === 'approved') || (rnRow !== null)
-    const isPending  = !isApproved && (row.status === 'pending_review' || row.status === 'pending')
-    const isRejected = !isApproved && row.status === 'rejected'
+    // Determine approval: in runners table = approved
+    const isApproved = (rnRow !== null) || (merged.status === 'approved')
+    const isPending  = !isApproved && (merged.status === 'pending_review' || merged.status === 'pending' || (!rnRow && !appRow))
+    const isRejected = !isApproved && merged.status === 'rejected'
 
     // Find zone — try merged.zone_id first, then fall back to Supabase lookup
     let myZone = merged.zone_id ? ADMIN_ZONES.find(z => z.id === merged.zone_id) : null
@@ -4470,7 +4465,7 @@ async function populateRNDashboard(){
 
     if(isPending){
       if(grEl) grEl.textContent = 'Application pending review — we\'ll notify you within 24-48 hrs'
-      _checkRunnerWaitlistZones(row)
+      _checkRunnerWaitlistZones(appRow || merged)
     } else if(isApproved){
       if(myZone && (myZone.homeowners||0) > 0){
         if(grEl) grEl.textContent = `Active in ${myZone.name} · ${myZone.homeowners} homeowner${myZone.homeowners!==1?'s':''} on your route`
@@ -4521,7 +4516,7 @@ async function populateRNDashboard(){
     if(vpEl) vpEl.classList.add('on')
 
     // Referral code display in account page
-    const ownCode = merged.own_ref_code || row.own_ref_code || null
+    const ownCode = merged.own_ref_code || null
     const refCodeEl = document.getElementById('rn-acct-ref-code-display')
     if(refCodeEl){
       if(ownCode){
@@ -5434,9 +5429,25 @@ async function initApp(){
     if(!session) return // No session -- stay on landing page
 
     const user = session.user
-    const role = user?.user_metadata?.role
+    let role   = user?.user_metadata?.role || ''
     const fn   = user?.user_metadata?.first_name || ''
     const ln   = user?.user_metadata?.last_name  || ''
+
+    // If role missing from metadata, check DB tables — same logic as doLogin
+    if(!role || role === 'hw'){
+      try {
+        const email = user?.email || ''
+        // Check runners table first — fastest approval signal
+        const [rnTableRes, appRes, adminRes] = await Promise.all([
+          _supa.from('runners').select('id').eq('email', email).maybeSingle(),
+          _supa.from('runner_applications').select('id').eq('email', email).maybeSingle(),
+          _supa.from('admins').select('role,is_active').eq('email', email).maybeSingle(),
+        ])
+        if(adminRes?.data?.is_active) role = adminRes.data.role || 'admin'
+        else if(rnTableRes?.data || appRes?.data) role = 'rn'
+        else role = role || 'hw'
+      } catch(e){ console.warn('[BinDash] initApp role check:', e) }
+    }
     const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || '--'
 
     if(role === 'admin' || role === 'super_admin' || role === 'ops'){
@@ -5570,18 +5581,24 @@ async function doLogin(){
 
     // If no role in metadata, check which table this email is in
     if(!role){
-      const [hwRes, rnRes] = await Promise.all([
-        _supa.from('homeowner_signups').select('id').eq('email', email).single(),
-        _supa.from('runner_applications').select('id').eq('email', email).single()
-      ])
-      if(rnRes?.data) role = 'rn'
-      else role = 'hw'
+      try {
+        const [rnTableRes, appRes, adminRes] = await Promise.all([
+          _supa.from('runners').select('id').eq('email', email).maybeSingle(),
+          _supa.from('runner_applications').select('id').eq('email', email).maybeSingle(),
+          _supa.from('admins').select('role,is_active').eq('email', email).maybeSingle(),
+        ])
+        if(adminRes?.data?.is_active) role = adminRes.data.role || 'admin'
+        else if(rnTableRes?.data || appRes?.data) role = 'rn'
+        else role = 'hw'
+      } catch(e){ role = 'hw' }
     }
 
-    // Also check admin table
-    if(!role || role === 'hw'){
-      const adminRes = await _supa.from('admins').select('role,is_active').eq('email', email).single()
-      if(adminRes?.data?.is_active) role = adminRes.data.role || 'admin'
+    // Check admin even if role was set (in case metadata is stale)
+    if(role === 'hw'){
+      try {
+        const adminRes = await _supa.from('admins').select('role,is_active').eq('email', email).maybeSingle()
+        if(adminRes?.data?.is_active) role = adminRes.data.role || 'admin'
+      } catch(e){}
     }
 
     document.getElementById('l-email').value = ''
@@ -6475,24 +6492,35 @@ async function loadRNZones(){
   try {
     // 1. Ensure we have a runner row — fetch directly if not cached yet
     let row = window._rnRow
-    if(!row && currentUser){
-      try {
-        // Try runners table first (approved runners)
-        const rRes = await _supa.from('runners').select('*').eq('email', currentUser.email).single()
-        if(rRes?.data){
-          row = rRes.data
-          window._rnRow = row
-        } else {
-          // Fall back to runner_applications
-          const aRes = await _supa.from('runner_applications').select('*').eq('email', currentUser.email).single()
-          row = aRes?.data || null
-          if(row) window._rnRow = row
+    if(!row){
+      // currentUser might not be set yet if tab was clicked before populateRNDashboard finished
+      let email = currentUser?.email
+      if(!email){
+        try {
+          const { data: { user } } = await _supa.auth.getUser()
+          email = user?.email
+        } catch(e){}
+      }
+      if(email){
+        try {
+          const rRes = await _supa.from('runners').select('*').eq('email', email).maybeSingle()
+          if(rRes?.data){ row = rRes.data; window._rnRow = row }
+        } catch(e){}
+        if(!row){
+          try {
+            const aRes = await _supa.from('runner_applications').select('*').eq('email', email).maybeSingle()
+            if(aRes?.data){ row = aRes.data; window._rnRow = row }
+          } catch(e){}
         }
-      } catch(e){ console.warn('[BinDash] loadRNZones row fetch:', e) }
+      }
     }
 
     if(!row){
-      el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">Sign in to see your zones.</div>'
+      el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">
+        <div style="font-size:28px;margin-bottom:8px">⏳</div>
+        Dashboard still loading — please wait a moment then click My Zones again.
+        <div style="margin-top:12px"><button class="btn btn-outline btn-sm" onclick="loadRNZones()">↺ Retry</button></div>
+      </div>`
       return
     }
 
