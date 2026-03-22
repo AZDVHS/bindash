@@ -4120,6 +4120,9 @@ async function loadRunnerRoutes(runnerRow){
       hw: hwMap[j.homeowner_email] || null
     }))
 
+    // Store enriched jobs for startBatch stop list
+    window._lastEnrichedJobs = enriched
+
     const batchArea    = document.getElementById('rn-home-batch-area')
     const offerBanner  = document.getElementById('offer-banner')
     const pendingOffers = enriched.filter(j => j.status === 'offered')
@@ -4251,7 +4254,7 @@ async function loadRunnerRoutes(runnerRow){
         </div>
         <div style="padding:10px 16px 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           ${addrs.length ? `<a href="${mapsUrl}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#1a73e8;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;color:#fff;text-decoration:none">📍 Open in Google Maps</a>` : ''}
-          ${isToday&&batch.status!=='in_progress' ? `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>` : ''}
+          ${batch.status==='accepted' ? `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>` : ''}
           ${batch.status==='in_progress' ? `<button class="btn btn-green btn-sm" onclick="completeBatch('${batch.id}')">✓ Mark Complete</button>` : ''}
           <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600">$${earn}</span>
         </div>
@@ -4259,6 +4262,19 @@ async function loadRunnerRoutes(runnerRow){
     }).join('')
 
     if(batchArea) batchArea.innerHTML = batchCards
+
+    // Also populate the My Routes > Upcoming tab with the same cards
+    const upcomingList = document.getElementById('upcoming-batch-list')
+    if(upcomingList) upcomingList.innerHTML = batchCards || `
+      <div style="text-align:center;padding:40px 20px;color:var(--muted)">
+        <div style="font-size:40px;margin-bottom:12px">📬</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No upcoming routes</div>
+        <div style="font-size:13px">Batch offers will appear here before each collection day.</div>
+      </div>`
+
+    // Update badge counts on route tabs
+    const upcomingBadge = document.getElementById('rtab-upcoming-count')
+    if(upcomingBadge) upcomingBadge.textContent = activeJobs.length
 
     // Update projected pay
     const todayJobs = activeJobs.filter(j => j.scheduled_date && new Date(j.scheduled_date).toDateString()===new Date().toDateString())
@@ -4300,22 +4316,30 @@ async function acceptOffer(){
   if(btn){ btn.disabled=true; btn.textContent='Accepting...' }
 
   try {
-    // Update all jobs in this batch to 'accepted'
+    // Update by batch_id only (runner_id may be null for existing jobs)
     const { error } = await _supa.from('jobs')
-      .update({ status:'accepted', runner_accepted:true, updated_at:new Date().toISOString() })
+      .update({ 
+        status:         'accepted', 
+        runner_accepted: true, 
+        runner_id:       runnerRow.id,  // backfill runner_id on accept
+        runner_name:     ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim(),
+        updated_at:      new Date().toISOString() 
+      })
       .eq('batch_id', offerId)
-      .eq('runner_id', runnerRow.id)
 
     if(error) throw error
 
     clearInterval(window._offerCountdownTimer)
     document.getElementById('offer-banner').style.display = 'none'
-    showToast('Batch accepted ✅ -- you\'ll be notified when Bin In unlocks','ok', 5000)
+    showToast('Route accepted ✅ -- check My Routes to start when ready', 'ok', 5000)
 
-    // Reload routes to show in active list
     await loadRunnerRoutes(runnerRow)
+
+    // Also switch to routes tab so runner sees it immediately
+    rnNav(document.querySelector('#S-rn-dash .nav-i:nth-child(2)'), 'rn-routes')
+
   } catch(e){
-    showToast('Accept failed: '+String(e?.message||e),'err')
+    showToast('Accept failed: '+String(e?.message||e), 'err')
     if(btn){ btn.disabled=false; btn.textContent='✓ Accept' }
   }
 }
@@ -4329,7 +4353,6 @@ async function declineOffer(){
     await _supa.from('jobs')
       .update({ status:'declined', updated_at:new Date().toISOString() })
       .eq('batch_id', offerId)
-      .eq('runner_id', runnerRow.id)
   } catch(e){ console.warn('Decline error:', e) }
 
   clearInterval(window._offerCountdownTimer)
@@ -4338,12 +4361,30 @@ async function declineOffer(){
 }
 
 async function startBatch(batchId){
+  const runnerRow = window._currentRunnerRow
   try {
     await _supa.from('jobs')
       .update({ status:'in_progress', updated_at:new Date().toISOString() })
       .eq('batch_id', batchId)
-    showToast('Route started ▶ -- stops are live','ok')
-    await loadRunnerRoutes(window._currentRunnerRow)
+    showToast('Route started ▶ -- good luck out there!', 'ok')
+
+    // Store stop list for active nav
+    const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
+    if(batchJobs.length){
+      window.NAV_STOPS = batchJobs.map(j=>({
+        name:    (j.hw?.first_name||'')+' '+(j.hw?.last_name||j.homeowner_email||'Stop'),
+        address: j.hw?.street_address||'--',
+        gate:    j.hw?.gate_code||null,
+        pets:    j.hw?.pet_info||null,
+        jobId:   j.id,
+      }))
+      navBatchId = batchId
+      navStop = 0
+      navRouteActive = true
+    }
+
+    await loadRunnerRoutes(runnerRow)
+    switchRouteTab('active')
   } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
 }
 
