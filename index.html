@@ -71,24 +71,24 @@ const STRIPE_PUBLISHABLE_KEY = 'pk_test_51TDRBfKQcgkU1rZoqeHCWLFWmytdbpnvhqhf9rM
 const STRIPE_PRICES = {
   plan_a: {
     name:'1 Can -- Weekly',
-    monthly:'price_1TDRNCKQcgkU1rZoZ2Fj53FW',
-    callout:'price_1TDROMKQcgkU1rZodSHTE51N',
+    monthly:'price_1TDpucKQcgkU1rZozFQNwxJK',
+    callout:'price_1TDpssKQcgkU1rZo2WEDZT8R',
     monthlyAmt:34.99,
     splitDays: false,
     desc:'1 bin . any type . Bin Out + Bin In . 1 collection day/week'
   },
   plan_b: {
     name:'2 Cans -- Same Day',
-    monthly:'price_1TDRNdKQcgkU1rZoNzhZLAEq',
-    callout:'price_1TDROMKQcgkU1rZodSHTE51N',
+    monthly:'price_1TDptqKQcgkU1rZoEvzOOIES',
+    callout:'price_1TDpssKQcgkU1rZo2WEDZT8R',
     monthlyAmt:44.99,
     splitDays: false,
     desc:'2 bins . Recycling + General Waste . same collection day . Bin Out + Bin In'
   },
   plan_c: {
     name:'2 Cans -- Split Days',
-    monthly:'price_1TDRNvKQcgkU1rZoVJQwiQ68',
-    callout:'price_1TDROMKQcgkU1rZodSHTE51N',
+    monthly:'price_1TDprRKQcgkU1rZoy9DTYlWg',
+    callout:'price_1TDpssKQcgkU1rZo2WEDZT8R',
     monthlyAmt:54.99,
     splitDays: true,
     desc:'2 bins . separate collection days . Recycling one day + Waste another . Bin Out + Bin In both days'
@@ -6554,7 +6554,7 @@ function adjCans(d) {
 async function savePlan(){
   const subId = window._hwStripeSubId
   const labels   = {a:'1 Can -- $34.99/mo', b:'2 Cans Same Day -- $'+(44.99+(window.extraCans||0)*8).toFixed(2)+'/mo', c:'2 Cans Split Days -- $54.99/mo'}
-  const priceIds = { a:'price_1TDRNCKQcgkU1rZoZ2Fj53FW', b:'price_1TDRNdKQcgkU1rZoNzhZLAEq', c:'price_1TDRNvKQcgkU1rZoVJQwiQ68' }
+  const priceIds = { a:'price_1TDpucKQcgkU1rZozFQNwxJK', b:'price_1TDptqKQcgkU1rZoEvzOOIES', c:'price_1TDprRKQcgkU1rZoy9DTYlWg' }
   const planKeys = { a:'plan_a', b:'plan_b', c:'plan_c' }
 
   if(!subId){
