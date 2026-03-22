@@ -3647,6 +3647,66 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 
 // -- TOAST NOTIFICATIONS --------------------------------------
+async function lookupReferralCode(code, appId){
+  const resultEl  = document.getElementById('rnpc-refcode-result-'+appId)
+  const refByEl   = document.getElementById('rnpc-referredby-'+appId)
+  const tierInput = document.getElementById('rnpc-tier-'+appId)
+  if(!code || code.length < 4){
+    if(resultEl) resultEl.textContent = 'Enter a referral code to look up the referring runner'
+    if(refByEl)  refByEl.value = ''
+    return
+  }
+  if(resultEl) resultEl.innerHTML = '<span style="color:var(--muted)">Looking up...</span>'
+  try {
+    // Check runner_applications first
+    const { data } = await _supa.from('runner_applications')
+      .select('first_name, last_name, email, invite_code')
+      .ilike('invite_code', code).limit(1)
+    const found = data?.[0]
+    if(found){
+      const name = (found.first_name+' '+found.last_name).trim()||found.email
+      if(resultEl) resultEl.innerHTML = `<span style="color:#22c55e">✅ Referred by <strong>${name}</strong></span>`
+      if(refByEl)  refByEl.value = name
+      if(tierInput && tierInput.value==='standard'){ tierInput.value='builder'; selectLoyaltyTier(appId,'builder') }
+      return
+    }
+    // Also check runners table
+    const { data: rData } = await _supa.from('runners')
+      .select('first_name, last_name, email').ilike('referral_code', code).limit(1)
+    const found2 = rData?.[0]
+    if(found2){
+      const name = (found2.first_name+' '+found2.last_name).trim()||found2.email
+      if(resultEl) resultEl.innerHTML = `<span style="color:#22c55e">✅ Referred by <strong>${name}</strong></span>`
+      if(refByEl)  refByEl.value = name
+      if(tierInput && tierInput.value==='standard'){ tierInput.value='builder'; selectLoyaltyTier(appId,'builder') }
+      return
+    }
+    if(resultEl) resultEl.innerHTML = '<span style="color:#f59e0b">⚠️ Code not found — verify manually or leave blank</span>'
+    if(refByEl)  refByEl.value = ''
+  } catch(e){
+    if(resultEl) resultEl.innerHTML = '<span style="color:#ef4444">Error looking up code</span>'
+  }
+}
+
+function selectLoyaltyTier(appId, tier, _el){
+  const inp = document.getElementById('rnpc-tier-'+appId)
+  if(inp) inp.value = tier
+  document.querySelectorAll('#rnpc-'+appId+' .loyalty-tier-opt').forEach(t=>{
+    const sel = t.getAttribute('data-tier') === tier
+    t.style.borderColor = sel ? 'var(--cyan)' : 'var(--border2)'
+    t.style.background  = sel ? 'rgba(6,214,160,.08)' : 'transparent'
+    t.style.opacity     = '1'
+  })
+  const notes = {
+    standard: '💡 Standard — $3.25/stop. Default for organic signups.',
+    builder:  '🌱 Builder — $3.50/stop. Default starting tier for referred runners.',
+    growth:   '📈 Growth — $3.75/stop. Top performers and early adopters.',
+    elite:    '⭐ Elite — $4.00/stop + bonuses. Reserved for exceptional runners.',
+  }
+  const noteEl = document.getElementById('rnpc-tier-note-'+appId)
+  if(noteEl) noteEl.textContent = notes[tier] || ''
+}
+
 function showPhotoLightbox(src){
   const lb = document.createElement('div')
   lb.id = 'photo-lightbox'
@@ -5781,11 +5841,24 @@ const VISIT_LABEL = {
 function renderRunnerCard(r){
   const [bg,col,lbl] = STATUS_BADGE[r.status] || STATUS_BADGE.AVAILABLE
   const inactive = r.status === 'INACTIVE'
+  const tierColors = { standard:'var(--muted)', builder:'#6ee7b7', growth:'#a5b4fc', elite:'#fbbf24' }
+  const tierIcons  = { standard:'', builder:'🌱', growth:'📈', elite:'⭐' }
+  const tier     = r.loyaltyTier || 'standard'
+  const tierCol  = tierColors[tier] || 'var(--muted)'
+  const tierIcon = tierIcons[tier] || ''
+  const rate     = r.loyaltyRate || 3.25
+  const refBadge = r.referredBy
+    ? `<span class="badge" style="background:rgba(139,92,246,.12);color:#c4b5fd;font-size:9px">🎯 via ${r.referredBy.split(' ')[0]}</span>`
+    : ''
+
   return `<div class="cc" id="rcard-${r.id}" style="${inactive?'opacity:.55':''}">
     <div class="cc-head">
       <div style="display:flex;align-items:center;gap:10px">
         <div class="cc-av" style="background:${r.color}">${r.initials}</div>
-        <div><div class="cc-nm">${r.name}</div><div class="cc-id">${r.email}${r.zip ? " . ZIP " + r.zip : ""}</div></div>
+        <div>
+          <div class="cc-nm">${r.name} ${refBadge}</div>
+          <div class="cc-id">${r.email}${r.zip ? ' . ZIP '+r.zip : ''}</div>
+        </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <span class="badge" style="background:${bg};color:${col}">${lbl}</span>
@@ -5794,7 +5867,7 @@ function renderRunnerCard(r){
       </div>
     </div>
     <div class="cc-grid">
-      <div class="dl"><div class="dl-l">Area</div><div>${r.area||r.zip||"--"}</div></div>
+      <div class="dl"><div class="dl-l">Area</div><div>${r.area||r.zip||'--'}</div></div>
       <div class="dl"><div class="dl-l">Coverage Zones</div><div style="display:flex;flex-direction:column;gap:3px">
         ${(r.coverageZones?.length ? r.coverageZones : (r.zoneId ? [r.zoneId] : [])).map(zid=>{
           const z=ADMIN_ZONES.find(x=>x.id===zid)
@@ -5805,7 +5878,23 @@ function renderRunnerCard(r){
       <div class="dl"><div class="dl-l">Vehicle</div><div>${r.vehicle}</div></div>
       <div class="dl"><div class="dl-l">Total Visits</div><div>${r.visits}</div></div>
       <div class="dl"><div class="dl-l">Rating</div><div>${r.rating}★</div></div>
-      <div class="dl"><div class="dl-l">Status</div><div>${inactive?'<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" onclick="reactivateRunner(\''+r.id+'\')">Reactivate</button>':'<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px;color:#f59e0b" onclick="deactivateRunner(\''+r.id+'\')">Deactivate</button>'}</div></div>
+      <div class="dl"><div class="dl-l">Loyalty Tier</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="color:${tierCol};font-weight:700;font-size:12px">${tierIcon} ${tier.charAt(0).toUpperCase()+tier.slice(1)}</span>
+          <span style="color:var(--muted);font-size:11px">$${rate.toFixed(2)}/stop</span>
+          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px" onclick="showEditLoyalty('${r.id}')">Edit</button>
+        </div>
+      </div>
+      <div class="dl"><div class="dl-l">Referrals</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-weight:600">${r.totalReferrals||0}</span>
+          ${r.referredBy ? `<span style="font-size:11px;color:var(--muted)">via ${r.referredBy}</span>` : ''}
+        </div>
+      </div>
+      <div class="dl"><div class="dl-l">Status</div><div>${inactive
+        ? `<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" onclick="reactivateRunner('${r.id}')">Reactivate</button>`
+        : `<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px;color:#f59e0b" onclick="deactivateRunner('${r.id}')">Deactivate</button>`
+      }</div></div>
     </div>
   </div>`
 }
@@ -6090,6 +6179,113 @@ function saveAddRunner(){
   closeM()
   renderRunnerList()
   showToast(name + ' added to runner pool ✅','ok')
+}
+
+function showEditLoyalty(runnerId){
+  const r = RUNNERS.find(x=>x.id===runnerId); if(!r) return
+  const tierColors = { standard:'var(--muted)', builder:'#6ee7b7', growth:'#a5b4fc', elite:'#fbbf24' }
+  const tiers = [
+    { val:'standard', label:'Standard', rate:3.25, desc:'Default organic rate' },
+    { val:'builder',  label:'Builder',  rate:3.50, desc:'Referred signup default' },
+    { val:'growth',   label:'Growth',   rate:3.75, desc:'Top performers' },
+    { val:'elite',    label:'Elite',    rate:4.00, desc:'Exceptional runners' },
+  ]
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh">
+    <div>
+      <div style="font-size:15px;font-weight:700">🎯 Edit Loyalty — ${r.name}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">Changes apply to next payout calculation</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Loyalty Tier</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        ${tiers.map(t=>`
+          <div onclick="document.querySelectorAll('.loyalty-edit-opt').forEach(x=>{x.style.borderColor='var(--border2)';x.style.background='transparent'});this.style.borderColor='var(--cyan)';this.style.background='rgba(6,214,160,.08)';document.getElementById('loyalty-edit-tier').value='${t.val}';document.getElementById('loyalty-edit-rate').value='${t.rate}'"
+            class="loyalty-edit-opt"
+            style="border:1.5px solid ${r.loyaltyTier===t.val?'var(--cyan)':'var(--border2)'};background:${r.loyaltyTier===t.val?'rgba(6,214,160,.08)':'transparent'};border-radius:8px;padding:10px 12px;cursor:pointer;transition:all .15s">
+            <div style="font-size:13px;font-weight:700;color:${tierColors[t.val]}">${t.label}</div>
+            <div style="font-size:11px;color:var(--text);margin-top:1px">$${t.rate.toFixed(2)}/stop</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">${t.desc}</div>
+          </div>`).join('')}
+      </div>
+      <input type="hidden" id="loyalty-edit-tier" value="${r.loyaltyTier||'standard'}">
+      <input type="hidden" id="loyalty-edit-rate" value="${r.loyaltyRate||3.25}">
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div class="field" style="margin:0">
+        <label style="font-size:11px">Referral Code Used</label>
+        <input id="loyalty-edit-refcode" value="${r.referralCode||''}" placeholder="Code that got them here" style="font-size:12px;font-family:'DM Mono',monospace">
+      </div>
+      <div class="field" style="margin:0">
+        <label style="font-size:11px">Referred By</label>
+        <input id="loyalty-edit-referredby" value="${r.referredBy||''}" placeholder="Referring runner name" style="font-size:12px">
+      </div>
+    </div>
+
+    <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.15);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--sub)">
+      💡 Tier changes are permanent until manually updated. Runner is notified by email when their tier upgrades.
+    </div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan" onclick="saveLoyaltyEdit('${runnerId}')">Save Changes</button>
+  </div>`
+  openM()
+}
+
+async function saveLoyaltyEdit(runnerId){
+  const r = RUNNERS.find(x=>x.id===runnerId); if(!r) return
+  const tier       = document.getElementById('loyalty-edit-tier')?.value || 'standard'
+  const rate       = parseFloat(document.getElementById('loyalty-edit-rate')?.value || 3.25)
+  const refCode    = document.getElementById('loyalty-edit-refcode')?.value?.trim() || null
+  const referredBy = document.getElementById('loyalty-edit-referredby')?.value?.trim() || null
+  const oldTier    = r.loyaltyTier || 'standard'
+
+  // Update in-memory
+  r.loyaltyTier   = tier
+  r.loyaltyRate   = rate
+  r.referralCode  = refCode
+  r.referredBy    = referredBy
+
+  // Save to DB
+  try {
+    await _supa.from('runners').update({
+      loyalty_tier:  tier,
+      loyalty_rate:  rate,
+      referral_code: refCode,
+      referred_by:   referredBy,
+      updated_at:    new Date().toISOString(),
+    }).eq('id', runnerId)
+    // Also update runner_applications if it exists
+    await _supa.from('runner_applications').update({
+      loyalty_tier:  tier,
+      loyalty_rate:  rate,
+      referral_code: refCode,
+      referred_by:   referredBy,
+    }).eq('id', runnerId)
+  } catch(e){ console.warn('[BinDash] loyalty save:', e) }
+
+  closeM()
+  renderRunnerList()
+  const upgraded = ['standard','builder','growth','elite'].indexOf(tier) > ['standard','builder','growth','elite'].indexOf(oldTier)
+  showToast(`${r.name} loyalty updated → ${tier.charAt(0).toUpperCase()+tier.slice(1)} ($${rate.toFixed(2)}/stop) ${upgraded?'⬆️ Upgraded':''}`, 'ok', 5000)
+
+  // Notify runner by email if upgraded
+  if(upgraded){
+    const tierNames = { builder:'Builder', growth:'Growth', elite:'Elite' }
+    sendEmail(r.email, `🎉 Your BinDash rate just increased!`,
+      `<p>Hi ${r.name.split(' ')[0]},</p>
+       <p>Great news — you've been upgraded to <strong>${tierNames[tier]||tier} tier</strong> on BinDash!</p>
+       <p>Your new rate is <strong>$${rate.toFixed(2)} per stop</strong>, effective immediately.</p>
+       <p>Keep up the great work!</p>
+       <p>— The BinDash Team</p>`,
+      'loyalty_upgrade')
+  }
 }
 
 function confirmRemoveRunner(rId, name){
@@ -9823,46 +10019,108 @@ function renderPendingRunnerList(){
   el.innerHTML = PENDING_RUNNERS.map(app => {
     const vpLabel = app.visitPref==='both' ? '🌙☀️ Both visits' : app.visitPref==='bin_out' ? '🌙 Bin Out only' : '☀️ Bin In only'
     const vpColor = app.visitPref==='bin_in' ? '#6ee7b7' : '#a5b4fc'
-    // Re-read ADMIN_ZONES each render so zones loaded async are included
     const activeZones = ADMIN_ZONES.filter(z=>z.status!=='inactive')
-    if(!activeZones.length){
-      // Zones not loaded yet -- wait and retry
-      setTimeout(renderPendingRunnerList, 500)
-      return
-    }
-    const zoneOptions = activeZones
-      .map(z=>`<option value="${z.id}">${z.name} (ZIP ${z.zips?.join(', ')||z.zip})</option>`).join('')
+    if(!activeZones.length){ setTimeout(renderPendingRunnerList, 500); return '' }
+    const zoneOptions = activeZones.map(z=>`<option value="${z.id}">${z.name} (ZIP ${z.zips?.join(', ')||z.zip})</option>`).join('')
+
+    // Referral detection
+    const hasReferral = !!(app.referralCode || app.referredBy)
+    const referralBar = hasReferral
+      ? `<div style="background:linear-gradient(90deg,rgba(139,92,246,.15),transparent);padding:6px 14px;font-size:11px;font-weight:700;color:#c4b5fd;display:flex;align-items:center;gap:6px;border-radius:8px 8px 0 0">
+           🎯 Referred signup — loyalty benefits apply on approval
+         </div>`
+      : `<div style="background:linear-gradient(90deg,rgba(99,102,241,.07),transparent);padding:6px 14px;font-size:11px;color:var(--muted);border-radius:8px 8px 0 0">
+           🌱 Organic signup — no loyalty applied unless you assign it below
+         </div>`
+
+    // Loyalty tier options
+    const tierOptions = [
+      { val:'standard',  label:'Standard — $3.25/stop',         color:'var(--muted)' },
+      { val:'builder',   label:'Builder — $3.50/stop',           color:'#6ee7b7' },
+      { val:'growth',    label:'Growth — $3.75/stop',            color:'#a5b4fc' },
+      { val:'elite',     label:'Elite — $4.00/stop + bonuses',   color:'#fbbf24' },
+    ]
+
     return `
-    <div class="pc" id="rnpc-${app.id}">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div class="avatar" style="width:44px;height:44px;font-size:16px;background:linear-gradient(135deg,#8b5cf6,#3b82f6)">${app.initials}</div>
-          <div>
-            <div style="font-size:15px;font-weight:700">${app.name}</div>
-            <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">${app.id.slice(0,8)} . ${app.submittedAt}</div>
+    <div class="pc" id="rnpc-${app.id}" style="border-radius:10px;overflow:hidden;padding:0;margin-bottom:14px">
+      ${referralBar}
+      <div style="padding:14px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="avatar" style="width:44px;height:44px;font-size:16px;background:linear-gradient(135deg,#8b5cf6,#3b82f6)">${app.initials}</div>
+            <div>
+              <div style="font-size:15px;font-weight:700">${app.name}
+                ${hasReferral ? `<span class="badge" style="background:rgba(139,92,246,.15);color:#c4b5fd;margin-left:6px;font-size:10px">🎯 Referred</span>` : ''}
+              </div>
+              <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">${app.id.slice(0,8)} . ${app.submittedAt}</div>
+            </div>
+          </div>
+          <span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending</span>
+        </div>
+
+        <div class="cc-grid" style="margin-bottom:12px">
+          <div class="dl"><div class="dl-l">Email</div><div>${app.email}</div></div>
+          <div class="dl"><div class="dl-l">Phone</div><div>${app.phone}</div></div>
+          <div class="dl"><div class="dl-l">ZIP</div><div>${app.zip}</div></div>
+          <div class="dl"><div class="dl-l">Vehicle</div><div>${app.vehicle}</div></div>
+          <div class="dl"><div class="dl-l">Visit Pref.</div><div style="color:${vpColor}">${vpLabel}</div></div>
+          <div class="dl"><div class="dl-l">BGC Consent</div><div>${app.bgcConsent ? '✅ Consented' : '<span style="color:#f59e0b">⚠️ Not consented</span>'}</div></div>
+        </div>
+
+        <!-- REFERRAL + LOYALTY SECTION -->
+        <div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px 14px;margin-bottom:12px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:6px">
+            🎯 Referral &amp; Loyalty
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+            <div class="field" style="margin:0">
+              <label style="font-size:10px;color:var(--muted)">Referral Code Used</label>
+              <input id="rnpc-refcode-${app.id}" value="${app.referralCode||''}" placeholder="e.g. BD-JACK-ZB"
+                style="font-size:12px;font-family:'DM Mono',monospace"
+                oninput="lookupReferralCode(this.value,'${app.id}')">
+              <div id="rnpc-refcode-result-${app.id}" style="font-size:10px;margin-top:3px;color:var(--muted)">
+                ${hasReferral ? `✅ Referred by ${app.referredBy||'unknown runner'}` : 'Enter code to look up referring runner'}
+              </div>
+            </div>
+            <div class="field" style="margin:0">
+              <label style="font-size:10px;color:var(--muted)">Referring Runner</label>
+              <input id="rnpc-referredby-${app.id}" value="${app.referredBy||''}" placeholder="Runner name or leave blank"
+                style="font-size:12px" readonly>
+            </div>
+          </div>
+
+          <div class="field" style="margin:0">
+            <label style="font-size:10px;color:var(--muted)">Loyalty Tier on Approval</label>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:4px">
+              ${tierOptions.map(t=>`
+                <div onclick="selectLoyaltyTier('${app.id}','${t.val}',this)"
+                  data-tier="${t.val}"
+                  class="loyalty-tier-opt"
+                  style="border:1.5px solid var(--border2);border-radius:8px;padding:8px 6px;text-align:center;cursor:pointer;transition:all .15s;${!hasReferral && t.val!=='standard' ? 'opacity:.5' : ''}">
+                  <div style="font-size:10px;font-weight:700;color:${t.color}">${t.val.charAt(0).toUpperCase()+t.val.slice(1)}</div>
+                  <div style="font-size:9px;color:var(--muted);margin-top:2px">${t.label.split('—')[1]?.trim()}</div>
+                </div>`).join('')}
+            </div>
+            <input type="hidden" id="rnpc-tier-${app.id}" value="${hasReferral ? 'builder' : 'standard'}">
+            <div style="font-size:10px;color:var(--muted);margin-top:6px" id="rnpc-tier-note-${app.id}">
+              ${hasReferral ? '💡 Referred runners start at Builder tier by default' : '💡 Organic signups default to Standard. Upgrade manually if earned.'}
+            </div>
           </div>
         </div>
-        <span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending</span>
-      </div>
-      <div class="cc-grid" style="margin-bottom:12px">
-        <div class="dl"><div class="dl-l">Email</div><div>${app.email}</div></div>
-        <div class="dl"><div class="dl-l">Phone</div><div>${app.phone}</div></div>
-        <div class="dl"><div class="dl-l">ZIP</div><div>${app.zip}</div></div>
-        <div class="dl"><div class="dl-l">Vehicle</div><div>${app.vehicle}</div></div>
-        <div class="dl"><div class="dl-l">Visit Pref.</div><div style="color:${vpColor}">${vpLabel}</div></div>
-        <div class="dl"><div class="dl-l">BGC Consent</div><div>${app.bgcConsent ? '✅ Consented' : '<span style="color:#f59e0b">⚠️ Not consented</span>'}</div></div>
-      </div>
-      <div class="field" style="margin-bottom:10px">
-        <label style="font-size:11px">Assign Service Zone</label>
-        <select id="rnpc-zone-${app.id}" style="font-size:12px">
-          <option value="">-- Select zone --</option>
-          ${zoneOptions}
-        </select>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-green btn-sm" onclick="approveRunner('${app.id}')">✅ Approve</button>
-        <button class="btn btn-outline btn-sm" onclick="showToast('Email sent to ${app.name}','info')">📧 Request Info</button>
-        <button class="btn btn-red btn-sm" onclick="rejectRunner('${app.id}','${app.name}')">✕ Reject</button>
+
+        <div class="field" style="margin-bottom:10px">
+          <label style="font-size:11px">Assign Service Zone</label>
+          <select id="rnpc-zone-${app.id}" style="font-size:12px">
+            <option value="">-- Select zone --</option>
+            ${zoneOptions}
+          </select>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-green btn-sm" onclick="approveRunner('${app.id}')">✅ Approve</button>
+          <button class="btn btn-outline btn-sm" onclick="showToast('Email sent to ${app.name}','info')">📧 Request Info</button>
+          <button class="btn btn-red btn-sm" onclick="rejectRunner('${app.id}','${app.name}')">✕ Reject</button>
+        </div>
       </div>
     </div>`
   }).join('')
@@ -9871,7 +10129,6 @@ function renderPendingRunnerList(){
 async function approveRunner(appId){
   const app = PENDING_RUNNERS.find(x=>x.id===appId); if(!app) return
   let zoneId = document.getElementById('rnpc-zone-'+appId)?.value || ''
-  // If no zone selected, try to auto-match from runner's ZIP
   if(!zoneId && app.zip){
     const autoZone = findZoneForZip(app.zip) || ADMIN_ZONES.find(z=>z.status!=='inactive')
     if(autoZone) zoneId = autoZone.id
@@ -9881,20 +10138,32 @@ async function approveRunner(appId){
     return
   }
   const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
-
   const btn = document.querySelector('#rnpc-'+appId+' .btn-green')
   if(btn){ btn.disabled=true; btn.textContent='Approving...' }
 
-  // 1. Update runner_applications status
+  // Read referral + loyalty from form
+  const refCode    = document.getElementById('rnpc-refcode-'+appId)?.value?.trim() || app.referralCode || null
+  const referredBy = document.getElementById('rnpc-referredby-'+appId)?.value?.trim() || app.referredBy || null
+  const tier       = document.getElementById('rnpc-tier-'+appId)?.value || 'standard'
+  const tierRates  = { standard:3.25, builder:3.50, growth:3.75, elite:4.00 }
+  const loyaltyRate = tierRates[tier] || 3.25
+
+  // 1. Update runner_applications status + referral info
   try {
     const res = await _supa.from('runner_applications').update({
-      status:'approved', zone_id:zoneId,
-      reviewed_at:new Date().toISOString(), updated_at:new Date().toISOString(),
+      status:         'approved',
+      zone_id:        zoneId,
+      referral_code:  refCode,
+      referred_by:    referredBy,
+      loyalty_tier:   tier,
+      loyalty_rate:   loyaltyRate,
+      reviewed_at:    new Date().toISOString(),
+      updated_at:     new Date().toISOString(),
     }).eq('id', appId)
     if(res?.error?.message) console.warn('[BinDash] runner_applications update:', res.error.message)
   } catch(e){ console.warn('[BinDash] runner_applications update exception:', String(e?.message||e)) }
 
-  // 2. Insert into runners table
+  // 2. Insert into runners table with referral + loyalty
   try {
     const nameParts = (app.name||'').split(' ')
     const res = await _supa.from('runners').insert({
@@ -9909,10 +10178,24 @@ async function approveRunner(appId){
       visit_preference: app.visitPref || 'both',
       zone_id:          zoneId,
       status:           'active',
+      referral_code:    refCode,
+      referred_by:      referredBy,
+      loyalty_tier:     tier,
+      loyalty_rate:     loyaltyRate,
       created_at:       new Date().toISOString(),
     })
     if(res?.error?.message) console.warn('[BinDash] runners insert:', res.error.message)
-    else console.log('[BinDash] Runner added to runners table ✅')
+    else {
+      console.log('[BinDash] Runner added to runners table ✅ tier:', tier)
+      // Credit referring runner's referral count
+      if(referredBy){
+        const referring = RUNNERS.find(r=>r.name===referredBy||r.email===referredBy)
+        if(referring){
+          _supa.from('runners').update({ total_referrals: (referring.totalReferrals||0)+1 }).eq('id', referring.id)
+            .then(()=>console.log('[BinDash] Referral count updated for', referredBy))
+        }
+      }
+    }
   } catch(e){ console.warn('[BinDash] runners insert exception:', String(e?.message||e)) }
 
   // 3. Update zone count
@@ -9926,6 +10209,7 @@ async function approveRunner(appId){
     status:'AVAILABLE',
     visitType:app.visitPref==='both'?'BOTH':app.visitPref==='bin_out'?'BIN_OUT':'BIN_IN',
     rating:0, visits:0, zoneId, coverageZones:[zoneId],
+    loyaltyTier: tier, loyaltyRate, referralCode: refCode, referredBy, totalReferrals:0,
     color:colors[RUNNERS.length%colors.length],
   })
 
@@ -11754,18 +12038,21 @@ async function loadRunnerApplicationsFromSupabase(){
     PENDING_RUNNERS.length = 0
     data.filter(row => !approvedEmails.has(row.email)).forEach(row => {
       PENDING_RUNNERS.push({
-        id:          row.id,
-        name:        (row.first_name + ' ' + row.last_name).trim(),
-        initials:    ((row.first_name?.[0]||'') + (row.last_name?.[0]||'')).toUpperCase() || '?',
-        email:       row.email,
-        phone:       row.phone || '--',
-        zip:         row.zip_code || '--',
-        vehicle:     row.vehicle_type || '--',
-        visitPref:   row.visit_preference || 'both',
-        bgcConsent:  row.bgc_consent || false,
-        submittedAt:   new Date(row.created_at).toLocaleString(),
-        status:        'pending',
-        auth_user_id:  row.auth_user_id || null,
+        id:           row.id,
+        name:         (row.first_name + ' ' + row.last_name).trim(),
+        initials:     ((row.first_name?.[0]||'') + (row.last_name?.[0]||'')).toUpperCase() || '?',
+        email:        row.email,
+        phone:        row.phone || '--',
+        zip:          row.zip_code || '--',
+        vehicle:      row.vehicle_type || '--',
+        visitPref:    row.visit_preference || 'both',
+        bgcConsent:   row.bgc_consent || false,
+        submittedAt:  new Date(row.created_at).toLocaleString(),
+        status:       'pending',
+        auth_user_id: row.auth_user_id || null,
+        referralCode: row.referral_code || null,   // code they used to sign up
+        referredBy:   row.referred_by   || null,   // name/id of referring runner
+        loyaltyTier:  row.loyalty_tier  || null,   // set by admin on approval
       })
     })
 
@@ -11912,6 +12199,13 @@ async function loadRunnersFromSupabase(){
         lastPaidAt:      row.last_paid_at     || null,
         lastPaidAmt:     row.last_paid_amt    || null,
         completedToday:  row.completed_today  || 0,
+        // Referral & loyalty
+        referralCode:    row.referral_code    || null,
+        referredBy:      row.referred_by      || null,
+        loyaltyTier:     row.loyalty_tier     || 'standard',
+        loyaltyRate:     row.loyalty_rate     || 3.25,
+        totalReferrals:  row.total_referrals  || 0,
+        bonusEarned:     row.bonus_earned     || 0,
       }
     }
 
