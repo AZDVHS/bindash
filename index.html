@@ -4431,13 +4431,11 @@ async function populateRNDashboard(){
     const ln = merged.last_name  || currentUser.user_metadata?.last_name  || ''
     const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'RN'
 
-    // Sidebar
+    // Sidebar name + avatar
     const nameEl = document.getElementById('rn-sidebar-name')
     const avEl   = document.getElementById('rn-sidebar-avatar')
-    const roleEl = document.getElementById('rn-sidebar-role')
     if(nameEl) nameEl.textContent = fn + ' ' + ln
     if(avEl)   avEl.textContent   = initials
-    if(roleEl) roleEl.textContent = 'Runner'
 
     // Show Stripe Connect setup banner if not yet connected
     const stripeBanner = document.getElementById('rn-stripe-setup-banner')
@@ -4448,12 +4446,32 @@ async function populateRNDashboard(){
     // Store merged row for later use (earnings, routes, etc.)
     window._rnRow = merged
 
-    if(row.status === 'pending_review'){
+    // Ensure zones are loaded — needed for subtitle + zone cards
+    if(ADMIN_ZONES.length === 0){
+      try { await loadZonesFromSupabase() } catch(e){}
+    }
+
+    // Determine true approval status:
+    // A runner can be in runners table (approved) even if runner_applications still says pending_review
+    const isApproved = (row.status === 'approved') || (rnRow !== null)
+    const isPending  = !isApproved && (row.status === 'pending_review' || row.status === 'pending')
+    const isRejected = !isApproved && row.status === 'rejected'
+
+    // Find zone — try merged.zone_id first, then fall back to Supabase lookup
+    let myZone = merged.zone_id ? ADMIN_ZONES.find(z => z.id === merged.zone_id) : null
+    if(!myZone && merged.zone_id && ADMIN_ZONES.length > 0){
+      // Zone exists in DB but not in local cache — try name match as fallback
+      console.log('[BinDash] zone_id not found in ADMIN_ZONES:', merged.zone_id)
+    }
+    // Also check if runner's ZIP matches a zone (for runners assigned to waitlist zones)
+    if(!myZone && merged.zip_code){
+      myZone = ADMIN_ZONES.find(z => z.zips?.includes(merged.zip_code))
+    }
+
+    if(isPending){
       if(grEl) grEl.textContent = 'Application pending review — we\'ll notify you within 24-48 hrs'
       _checkRunnerWaitlistZones(row)
-    } else if(row.status === 'approved'){
-      // Set accurate subtitle based on zone assignment
-      const myZone = ADMIN_ZONES.find(z => z.id === merged.zone_id)
+    } else if(isApproved){
       if(myZone && (myZone.homeowners||0) > 0){
         if(grEl) grEl.textContent = `Active in ${myZone.name} · ${myZone.homeowners} homeowner${myZone.homeowners!==1?'s':''} on your route`
       } else if(myZone){
@@ -4462,9 +4480,16 @@ async function populateRNDashboard(){
         if(grEl) grEl.textContent = 'Account active · Zone assignment pending — check back soon'
       }
       await loadRunnerRoutes(merged)
-    } else if(row.status === 'rejected'){
+    } else if(isRejected){
       if(grEl) grEl.textContent = 'Application not approved — contact support for details'
+    } else {
+      if(grEl) grEl.textContent = 'Account active · Loading your zone...'
+      await loadRunnerRoutes(merged)
     }
+
+    // Update sidebar role text to reflect actual status
+    const roleEl = document.getElementById('rn-sidebar-role')
+    if(roleEl) roleEl.textContent = isApproved ? 'Runner' : isPending ? 'Application pending' : 'Runner'
 
     // Account page pre-fill
     const setVal = (id,v) => { const el=document.getElementById(id); if(el) el.value=v||'' }
@@ -4566,16 +4591,22 @@ function _renderRNHomeDashZones(runnerRow){
   const el = document.getElementById('rn-home-zones')
   if(!el) return
 
-  const zoneId = runnerRow?.zone_id || null
-  const myZone = zoneId ? ADMIN_ZONES.find(z => z.id === zoneId) : null
+  const zoneId  = runnerRow?.zone_id || null
+  const runnerZip = runnerRow?.zip_code || ''
 
-  // Also grab any zones from the runners table coverage
+  // Find zones: by assigned zone_id, by ZIP exact match, or by coverage zones
+  const coverageIds = (() => { try { return runnerRow?.coverage_zones ? JSON.parse(runnerRow.coverage_zones) : [] } catch(e){ return [] } })()
   const allMyZones = ADMIN_ZONES.filter(z =>
-    z.id === zoneId ||
-    (runnerRow?.coverage_zones && (() => { try { return JSON.parse(runnerRow.coverage_zones) } catch(e){ return [] } })().includes(z.id))
+    (zoneId && z.id === zoneId) ||
+    coverageIds.includes(z.id) ||
+    (runnerZip && z.zips?.includes(runnerZip))
   )
 
-  if(!allMyZones.length){
+  // Deduplicate
+  const seen = new Set()
+  const uniqueZones = allMyZones.filter(z => { if(seen.has(z.id)) return false; seen.add(z.id); return true })
+
+  if(!uniqueZones.length){
     el.innerHTML = `
     <div style="background:var(--surface2);border:1px dashed var(--border);border-radius:10px;padding:16px;text-align:center;font-size:13px;color:var(--muted)">
       <div style="font-size:24px;margin-bottom:6px">📍</div>
@@ -4587,7 +4618,7 @@ function _renderRNHomeDashZones(runnerRow){
     return
   }
 
-  el.innerHTML = allMyZones.map(z => {
+  el.innerHTML = uniqueZones.map(z => {
     const isLive     = z.status === 'live'
     const isWaitlist = z.status === 'waitlist'
     const isPilot    = z.pilot || z.status === 'pilot'
@@ -5425,6 +5456,7 @@ async function initApp(){
     } else if(role === 'rn'){
       setCurrentUser(user)
       go('S-rn-dash')
+      await loadZonesFromSupabase()   // must be before populateRNDashboard uses ADMIN_ZONES
       populateRNDashboard()
       if(window._showConnectReturnToast){
         window._showConnectReturnToast = false
@@ -5559,6 +5591,7 @@ async function doLogin(){
     setCurrentUser(data.user)
     if(role === 'rn'){
       go('S-rn-dash')
+      await loadZonesFromSupabase()   // must be before populateRNDashboard uses ADMIN_ZONES
       populateRNDashboard()
       showToast('Welcome back, ' + name + ' 👋', 'ok')
     } else if(role === 'admin' || role === 'super_admin' || role === 'ops'){
