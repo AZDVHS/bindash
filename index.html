@@ -2767,6 +2767,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div class="s-logo">🗑️ BIN<em>DASH</em></div>
       <div class="nav-i on" onclick="rnNav(this,'rn-home')"><span class="ic">📊</span> Dashboard</div>
       <div class="nav-i" onclick="rnNav(this,'rn-routes')"><span class="ic">🗺️</span> My Routes</div>
+      <div class="nav-i" onclick="rnNav(this,'rn-zones')"><span class="ic">📍</span> My Zones</div>
       <div class="nav-i" onclick="rnNav(this,'rn-earnings')"><span class="ic">💵</span> Earnings &amp; Pay</div>
       <div class="nav-i" onclick="rnNav(this,'rn-account')"><span class="ic">👤</span> My Info</div>
       <div class="s-bot">
@@ -2923,6 +2924,13 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           </div>
 
         </div><!-- end rn-routes -->
+
+        <!-- RN ZONES -->
+        <div class="pg" id="rn-zones">
+          <div id="rn-zones-content">
+            <div style="text-align:center;padding:32px;color:var(--muted)">Loading zones...</div>
+          </div>
+        </div>
 
         <!-- RN EARNINGS -->
         <div class="pg" id="rn-earnings">
@@ -5977,13 +5985,340 @@ function rnNav(el,pg){
   if(el) el.classList.add('on')
   document.querySelectorAll('#S-rn-dash .pg').forEach(p=>p.classList.remove('on'))
   document.getElementById(pg).classList.add('on')
-  const t={'rn-home':'Dashboard','rn-routes':'My Routes','rn-earnings':'Earnings & Pay','rn-tax':'Bank & Tax','rn-account':'My Info'}
-  document.getElementById('rn-pg-title').textContent = t[pg]
+  const t={'rn-home':'Dashboard','rn-routes':'My Routes','rn-zones':'My Zones','rn-earnings':'Earnings & Pay','rn-tax':'Bank & Tax','rn-account':'My Info'}
+  document.getElementById('rn-pg-title').textContent = t[pg] || pg
   if(pg==='rn-routes')   initRoutesTabs()
   if(pg==='rn-earnings') loadRNEarnings()
+  if(pg==='rn-zones')    loadRNZones()
 }
 
-async function openStripePortalRunner(){
+async function loadRNZones(){
+  const el = document.getElementById('rn-zones-content')
+  if(!el) return
+  el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted)">⏳ Loading your zones...</div>'
+
+  const row = window._rnRow
+  if(!row){ el.innerHTML = '<div style="padding:20px;color:var(--muted)">No runner session.</div>'; return }
+
+  try {
+    // Load all zones from Supabase if not loaded
+    if(ADMIN_ZONES.length === 0) await loadZonesFromSupabase()
+
+    // Get runner's assigned zone + any zone requests
+    const primaryZoneId = row.zone_id || null
+    const preferredIds  = (() => { try { return row.preferred_zones ? JSON.parse(row.preferred_zones) : [] } catch(e){ return [] } })()
+
+    // Load any pending zone requests for this runner
+    let zoneRequests = []
+    try {
+      const { data } = await _supa.from('runner_zone_requests')
+        .select('*')
+        .eq('runner_email', row.email)
+        .order('created_at', { ascending: false })
+      zoneRequests = data || []
+    } catch(e){ console.warn('zone requests load:', e) }
+
+    // Build zone lists
+    const myActiveZones  = ADMIN_ZONES.filter(z => z.id === primaryZoneId || preferredIds.includes(z.id))
+    const waitlistZones  = zoneRequests.filter(r => r.status === 'waitlist_pending' || r.status === 'notified')
+    const pendingExpansion = zoneRequests.filter(r => r.status === 'pending' && r.type === 'expansion')
+    const pendingRemoval   = zoneRequests.filter(r => r.status === 'pending' && r.type === 'removal')
+
+    el.innerHTML = `
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-size:14px;color:var(--sub)">Manage where you work. Request new zones or leave ones that don't work for you.</div>
+        </div>
+        <button class="btn btn-cyan btn-sm" onclick="showRequestZoneExpansion()">+ Request a Zone</button>
+      </div>
+
+      <!-- ACTIVE ZONES -->
+      <div style="margin-bottom:24px">
+        <div style="font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Active Zones</div>
+        ${myActiveZones.length ? myActiveZones.map(z => _renderRNZoneCard(z, 'active', row, zoneRequests)).join('') : `
+          <div style="background:var(--surface2);border-radius:10px;padding:20px;text-align:center;color:var(--muted);font-size:13px">
+            No active zones yet — your zone is assigned when your application is approved.
+          </div>`}
+      </div>
+
+      <!-- WAITLIST ZONES -->
+      ${waitlistZones.length ? `
+      <div style="margin-bottom:24px">
+        <div style="font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Waitlist Zones</div>
+        ${waitlistZones.map(req => {
+          const zone = ADMIN_ZONES.find(z=>z.id===req.zone_id || z.zips?.includes(req.zip_code))
+          return _renderRNWaitlistCard(req, zone)
+        }).join('')}
+      </div>` : ''}
+
+      <!-- PENDING REQUESTS -->
+      ${(pendingExpansion.length || pendingRemoval.length) ? `
+      <div style="margin-bottom:24px">
+        <div style="font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Pending Requests</div>
+        ${pendingExpansion.map(r=>`
+          <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div>
+              <div style="font-size:13px;font-weight:600">📍 Zone expansion — ${r.zone_name||('ZIP '+r.zip_code)}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:3px">Submitted ${new Date(r.created_at).toLocaleDateString()} · Awaiting admin approval</div>
+            </div>
+            <span class="badge" style="background:rgba(245,158,11,.15);color:#f59e0b;flex-shrink:0">⏳ Pending</span>
+          </div>`).join('')}
+        ${pendingRemoval.map(r=>`
+          <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div>
+              <div style="font-size:13px;font-weight:600">🚪 Leave zone — ${r.zone_name||('ZIP '+r.zip_code)}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:3px">Submitted ${new Date(r.created_at).toLocaleDateString()} · Awaiting admin review</div>
+            </div>
+            <span class="badge" style="background:rgba(239,68,68,.15);color:#fca5a5;flex-shrink:0">⏳ Review</span>
+          </div>`).join('')}
+      </div>` : ''}
+
+      <!-- HOW ZONES WORK -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px 16px;font-size:12px;color:var(--sub);line-height:1.7">
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px">How zones work</div>
+        📍 Your primary zone is assigned when you're approved. You can request additional zones at any time — each needs admin approval before you're added.<br>
+        ⏳ Waitlist zones are areas building towards launch — you're reserved when it goes live.<br>
+        🚪 To leave a zone, submit a removal request. If you're the only runner covering it, admin may ask you to stay until a replacement is found.
+      </div>`
+  } catch(e){
+    el.innerHTML = `<div style="padding:20px;color:#fca5a5">Error loading zones: ${e.message}</div>`
+  }
+}
+
+function _renderRNZoneCard(zone, type, row, zoneRequests){
+  const pct       = Math.round((zone.runners / Math.max(zone.capacity,1)) * 100)
+  const isOnly    = zone.runners <= 1
+  const dayLabels = (zone.collection||[]).map(d=>typeof d==='object'?d.day||d:d).join(', ') || '--'
+  const hasRemovalPending = zoneRequests.some(r=>r.zone_id===zone.id && r.type==='removal' && r.status==='pending')
+
+  return `<div style="background:var(--surface);border:1.5px solid rgba(6,214,160,.25);border-radius:12px;overflow:hidden;margin-bottom:12px">
+    <div style="background:rgba(6,214,160,.06);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:20px">📍</span>
+        <div>
+          <div style="font-size:14px;font-weight:700">${zone.name}</div>
+          <div style="font-size:11px;color:var(--muted)">ZIP ${zone.zips?.join(', ')||zone.zip} · Collection: ${dayLabels}</div>
+        </div>
+      </div>
+      <span class="badge" style="background:#22c55e22;color:#22c55e">● Active</span>
+    </div>
+    <div style="padding:14px 16px">
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
+        <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:18px;font-weight:700;color:var(--cyan)">${zone.homeowners||0}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Homeowners</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:18px;font-weight:700;color:#a5b4fc">${zone.runners||0}/${zone.capacity||20}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Runners</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:18px;font-weight:700;color:var(--green)">${Math.round((zone.homeowners||0)/(zone.runners||1))} avg</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Stops/Runner</div>
+        </div>
+      </div>
+      <div style="background:var(--surface2);border-radius:5px;height:6px;margin-bottom:12px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${pct>80?'#ef4444':pct>50?'#f59e0b':'var(--green)'};border-radius:5px;transition:width .4s"></div>
+      </div>
+      ${isOnly ? `<div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:7px;padding:8px 12px;font-size:11px;color:#fbbf24;margin-bottom:10px">
+        ⚠️ You're the only runner in this zone. Leaving will require admin review to ensure coverage is maintained.
+      </div>` : ''}
+      <div style="display:flex;gap:8px">
+        ${!hasRemovalPending
+          ? `<button class="btn btn-ghost btn-sm" style="color:#ef4444;font-size:11px" onclick="showLeaveZone('${zone.id}','${zone.name}',${isOnly})">🚪 Request to Leave</button>`
+          : `<span style="font-size:11px;color:var(--muted);padding:4px 0">Removal request pending admin review</span>`
+        }
+      </div>
+    </div>
+  </div>`
+}
+
+function _renderRNWaitlistCard(req, zone){
+  const name       = zone?.name || req.zone_name || ('ZIP '+req.zip_code)
+  const homeowners = zone?.homeowners || 0
+  const threshold  = zone?.threshold  || 5
+  const pct        = Math.min(100, Math.round((homeowners/threshold)*100))
+  const remaining  = Math.max(0, threshold - homeowners)
+
+  return `<div style="background:var(--surface);border:1.5px solid rgba(245,158,11,.25);border-radius:12px;overflow:hidden;margin-bottom:12px">
+    <div style="background:rgba(245,158,11,.06);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:20px">⏳</span>
+        <div>
+          <div style="font-size:14px;font-weight:700">${name}</div>
+          <div style="font-size:11px;color:var(--muted)">ZIP ${req.zip_code} · Building capacity</div>
+        </div>
+      </div>
+      <span class="badge" style="background:rgba(245,158,11,.15);color:#fbbf24">⏳ Waitlist</span>
+    </div>
+    <div style="padding:14px 16px">
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px">
+          <span style="color:var(--sub)">Progress to launch</span>
+          <span style="font-weight:600;color:${pct>=80?'var(--green)':'#fbbf24'}">${homeowners}/${threshold} homeowners</span>
+        </div>
+        <div style="background:var(--surface2);border-radius:5px;height:8px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${pct>=80?'var(--green)':'#f59e0b'};border-radius:5px;transition:width .4s"></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">
+          ${remaining > 0 ? `${remaining} more homeowner${remaining!==1?'s':''} needed to launch` : '🎉 Ready to launch — awaiting admin activation'}
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--sub);line-height:1.6">
+        💡 Share BinDash with neighbours in ZIP ${req.zip_code} to fill this zone faster. You'll be notified the moment it goes live.
+      </div>
+    </div>
+  </div>`
+}
+
+function showRequestZoneExpansion(){
+  const row  = window._rnRow
+  if(!row){ showToast('Session error','err'); return }
+  // Build list of zones runner isn't already in
+  const primaryZoneId = row.zone_id || null
+  const preferredIds  = (() => { try { return row.preferred_zones ? JSON.parse(row.preferred_zones) : [] } catch(e){ return [] } })()
+  const myZoneIds     = [primaryZoneId, ...preferredIds].filter(Boolean)
+  const available     = ADMIN_ZONES.filter(z=>z.status!=='inactive' && !myZoneIds.includes(z.id))
+
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh">
+    <div>
+      <div style="font-size:15px;font-weight:700">📍 Request a New Zone</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:2px">Admin reviews all zone expansions</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    ${available.length ? `
+    <div style="font-size:12px;color:var(--sub);margin-bottom:12px">Select a zone you'd like to work in. Your request goes to admin for approval — once approved you'll be added to the dispatch pool for that zone.</div>
+    <div style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto;margin-bottom:14px">
+      ${available.map(z=>{
+        const isWait = z.status==='waitlist'
+        const dayLabels = (z.collection||[]).map(d=>typeof d==='object'?d.day||d:d).join(', ')||'--'
+        return `<div onclick="this.closest('.mb').querySelectorAll('.zone-req-opt').forEach(x=>x.style.borderColor='var(--border2)');this.style.borderColor='var(--cyan)';document.getElementById('rzexp-zone-id').value='${z.id}';document.getElementById('rzexp-zone-name').value='${z.name}'"
+          class="zone-req-opt"
+          style="border:1.5px solid var(--border2);border-radius:10px;padding:12px 14px;cursor:pointer;transition:border-color .15s">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+            <span style="font-weight:600;font-size:13px">${z.name}</span>
+            <span class="badge" style="${isWait?'background:rgba(245,158,11,.15);color:#fbbf24':'background:#22c55e22;color:#22c55e'};font-size:10px">${isWait?'⏳ Waitlist':'● Live'}</span>
+          </div>
+          <div style="font-size:11px;color:var(--muted)">ZIP ${z.zips?.join(', ')||z.zip} · ${dayLabels} · ${z.homeowners||0} homeowners · ${z.runners||0}/${z.capacity||20} runners</div>
+        </div>`
+      }).join('')}
+    </div>` : ''}
+    <div style="margin-bottom:12px">
+      <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:6px">Or request a ZIP code not listed above</div>
+      <input id="rzexp-zip" placeholder="e.g. 85308" maxlength="5" style="font-size:13px;margin-bottom:6px">
+    </div>
+    <div class="field" style="margin:0">
+      <label style="font-size:11px">Why do you want to work this area? <span style="color:var(--muted)">(optional)</span></label>
+      <textarea id="rzexp-notes" placeholder="e.g. I live nearby, familiar with the neighbourhood..." rows="2" style="resize:none;font-size:12px"></textarea>
+    </div>
+    <input type="hidden" id="rzexp-zone-id" value="">
+    <input type="hidden" id="rzexp-zone-name" value="">
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan" onclick="submitZoneExpansionRequest()">📋 Submit Request</button>
+  </div>`
+  openM()
+}
+
+async function submitZoneExpansionRequest(){
+  const row      = window._rnRow
+  const zoneId   = document.getElementById('rzexp-zone-id')?.value   || ''
+  const zoneName = document.getElementById('rzexp-zone-name')?.value  || ''
+  const zip      = document.getElementById('rzexp-zip')?.value?.trim() || ''
+  const notes    = document.getElementById('rzexp-notes')?.value?.trim()|| ''
+  const targetZone = ADMIN_ZONES.find(z=>z.id===zoneId)
+  const targetZip  = targetZone?.zips?.[0] || targetZone?.zip || zip
+
+  if(!zoneId && !zip){ showToast('Select a zone or enter a ZIP code','err'); return }
+
+  try {
+    const payload = {
+      runner_name:  ((row.first_name||'')+' '+(row.last_name||'')).trim(),
+      runner_email: row.email,
+      zip_code:     targetZip || zip,
+      zone_id:      zoneId || null,
+      zone_name:    zoneName || ('ZIP '+zip),
+      status:       'pending',
+      type:         'expansion',
+      created_at:   new Date().toISOString(),
+    }
+    let res = await _supa.from('runner_zone_requests').insert({...payload, notes})
+    if(res.error) res = await _supa.from('runner_zone_requests').insert(payload)
+    if(res.error) throw new Error(res.error.message)
+    closeM()
+    showToast('Zone request submitted ✅ — admin will review shortly', 'ok', 5000)
+    loadRNZones()
+  } catch(e){ showToast('Error: '+String(e?.message||e), 'err') }
+}
+
+function showLeaveZone(zoneId, zoneName, isOnly){
+  const row = window._rnRow
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh" style="background:rgba(239,68,68,.06)">
+    <div>
+      <div style="font-size:15px;font-weight:700">🚪 Request to Leave Zone</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:2px">${zoneName}</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    ${isOnly ? `<div style="background:rgba(245,158,11,.08);border:1.5px solid rgba(245,158,11,.3);border-radius:10px;padding:12px 14px;font-size:13px;color:#fbbf24;margin-bottom:14px;line-height:1.6">
+      ⚠️ <strong>You're the only runner in this zone.</strong> Leaving will mean homeowners in ${zoneName} have no coverage. Admin will need to find a replacement before your request can be approved — we'll be in touch.
+    </div>` : `<div style="font-size:13px;color:var(--sub);margin-bottom:14px;line-height:1.6">
+      Your removal request will be reviewed by admin. You'll continue to receive routes in ${zoneName} until your request is approved.
+    </div>`}
+    <div class="field">
+      <label>Reason for leaving <span style="color:var(--muted);font-weight:400">(helps us improve)</span></label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px">
+        ${['Too far from home','Schedule conflict','Not enough work','Moving area','Taking a break','Other'].map(r=>`
+          <div onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on');document.getElementById('leave-reason').value='${r}'"
+            class="r-opt" style="text-align:center;padding:8px;font-size:12px">${r}</div>`).join('')}
+      </div>
+      <input type="hidden" id="leave-reason" value="">
+      <textarea id="leave-notes" placeholder="Any additional details..." rows="2" style="resize:none;font-size:12px;margin-top:6px"></textarea>
+    </div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn ${isOnly?'btn-outline':'btn-red'} btn-sm" onclick="submitLeaveZone('${zoneId}','${zoneName}',${isOnly})">
+      ${isOnly ? '📋 Submit Special Request' : '🚪 Submit Removal Request'}
+    </button>
+  </div>`
+  openM()
+}
+
+async function submitLeaveZone(zoneId, zoneName, isOnly){
+  const row    = window._rnRow
+  const reason = document.getElementById('leave-reason')?.value || ''
+  const notes  = document.getElementById('leave-notes')?.value?.trim() || ''
+  try {
+    const payload = {
+      runner_name:  ((row.first_name||'')+' '+(row.last_name||'')).trim(),
+      runner_email: row.email,
+      zip_code:     ADMIN_ZONES.find(z=>z.id===zoneId)?.zip || '',
+      zone_id:      zoneId,
+      zone_name:    zoneName,
+      status:       'pending',
+      type:         isOnly ? 'removal_only_runner' : 'removal',
+      created_at:   new Date().toISOString(),
+    }
+    let res = await _supa.from('runner_zone_requests').insert({...payload, notes: reason+(notes?'\n'+notes:'')})
+    if(res.error) res = await _supa.from('runner_zone_requests').insert(payload)
+    if(res.error) throw new Error(res.error.message)
+    closeM()
+    if(isOnly){
+      showToast('Special request submitted — admin will reach out to arrange coverage before approving', 'info', 7000)
+    } else {
+      showToast('Removal request submitted ✅ — you\'ll keep receiving routes until approved', 'ok', 5000)
+    }
+    loadRNZones()
+  } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
+}
   const row = window._rnRow
   if(!row?.stripe_connect_id){
     // Not connected yet -- take them to Connect setup
@@ -13695,62 +14030,165 @@ async function renderRunnerZoneRequests(){
   try {
     let data = [], err = null
     try {
-      const res = await _supa.from('runner_zone_requests').select('*').eq('status','pending').order('created_at',{ascending:false})
+      const res = await _supa.from('runner_zone_requests')
+        .select('*').eq('status','pending').order('created_at',{ascending:false})
       data = res?.data || []
       err  = res?.error?.message || null
     } catch(e){ err = String(e?.message||e) }
 
-    // Update badge
     const badge = document.getElementById('rzr-badge')
     if(badge){ badge.textContent=data.length; badge.style.display=data.length?'inline':'none' }
 
     if(!data.length){
-      el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No runner zone requests yet.</div>'
+      el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No runner zone requests.</div>'
       return
     }
 
-    // Group by ZIP
-    const byZip = {}
-    data.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
+    // Split by type
+    const expansions = data.filter(r=>!r.type||r.type==='expansion'||r.type==='waitlist_pending')
+    const removals   = data.filter(r=>r.type==='removal'||r.type==='removal_only_runner')
 
-    el.innerHTML = Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
-      const existingZone = ADMIN_ZONES.find(z=>
-        z.zips?.includes(zip) ||
-        z.zips?.some(zz=>zz.slice(0,3)===zip.slice(0,3)) ||
-        z.zip===zip ||
-        z.zip===zip.slice(0,3)
-      )
-      const hwInterest = WAITLIST_SIGNUPS.filter(s=>s.zip===zip||s.zip?.slice(0,3)===zip.slice(0,3)).length
-      return `<div class="card" style="margin-bottom:0">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-          <div>
-            <div style="font-size:15px;font-weight:700">ZIP ${zip}
-              <span style="font-size:12px;color:var(--muted);font-weight:400;margin-left:8px">${group.length} runner${group.length!==1?'s':''} want to service this area</span>
+    let html = ''
+
+    // EXPANSION REQUESTS — group by ZIP
+    if(expansions.length){
+      html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">📍 Zone Expansion Requests (${expansions.length})</div>`
+      const byZip = {}
+      expansions.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
+      html += Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
+        const existingZone = ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip.slice(0,3))
+        const hwInterest   = WAITLIST_SIGNUPS.filter(s=>s.zip===zip||s.zip?.slice(0,3)===zip.slice(0,3)).length
+        const zoneName     = existingZone?.name || group[0]?.zone_name || ('ZIP '+zip+' Area')
+        return `<div class="card" style="margin-bottom:10px;border-left:3px solid var(--cyan)">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+            <div>
+              <div style="font-size:14px;font-weight:700">${zoneName}
+                <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px">${group.length} runner${group.length!==1?'s':''} requesting</span>
+              </div>
+              <div style="font-size:11px;color:var(--sub);margin-top:3px">
+                ${existingZone
+                  ? `<span style="color:#f59e0b">Zone exists: ${existingZone.status}</span>`
+                  : '<span style="color:var(--muted)">No zone yet</span>'}
+                ${hwInterest ? ` · <span style="color:#22c55e">${hwInterest} homeowners also waiting</span>` : ''}
+              </div>
             </div>
-            <div style="font-size:12px;color:var(--sub);margin-top:3px">
-              ${existingZone ? `<span style="color:#f59e0b">Zone exists: ${existingZone.name} (${existingZone.status})</span>` : '<span style="color:var(--muted)">No zone yet</span>'}
-              ${hwInterest ? ` . <span style="color:#22c55e">${hwInterest} homeowner${hwInterest>1?'s':''} also waiting</span>` : ''}
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn btn-cyan btn-sm" style="font-size:11px" onclick="approveZoneExpansionRequests('${zip}','${zoneName}')">✅ Approve All for ZIP</button>
+              <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="createZoneFromRunnerRequest('${zip}')">+ Create Zone</button>
+              <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--muted)" onclick="dismissRunnerZoneRequests('${zip}')">Dismiss</button>
             </div>
           </div>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-cyan btn-sm" style="font-size:11px" onclick="createZoneFromRunnerRequest('${zip}')">+ Create Zone</button>
-            <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--muted)" onclick="dismissRunnerZoneRequests('${zip}')">Dismiss</button>
+          <div style="display:flex;flex-direction:column;gap:5px">
+            ${group.map(row=>`
+              <div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:12px">
+                <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#8b5cf6,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">🚐</div>
+                <div style="flex:1">
+                  <strong>${row.runner_name}</strong> · ${row.runner_email}
+                  ${row.notes ? `<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic">"${row.notes}"</div>` : ''}
+                </div>
+                <div style="display:flex;gap:4px;flex-shrink:0">
+                  <button class="btn btn-green btn-sm" style="font-size:10px;padding:3px 8px" onclick="approveZoneExpansionRequest('${row.id}','${row.runner_email}','${row.runner_name}','${row.zone_id||''}','${row.zone_name||zoneName}')">✓</button>
+                  <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px;color:#ef4444" onclick="denyZoneRequest('${row.id}','${row.runner_name}')">✕</button>
+                </div>
+              </div>`).join('')}
           </div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:5px">
-          ${group.map(row=>`
-            <div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:8px;padding:8px 12px;font-size:12px">
-              <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#8b5cf6,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">🚐</div>
-              <div style="flex:1"><strong>${row.runner_name}</strong> . ${row.runner_email}</div>
-              <span style="color:var(--muted);font-size:10px">${new Date(row.created_at).toLocaleDateString()}</span>
-            </div>`).join('')}
-        </div>
-      </div>`
-    }).join('')
+        </div>`
+      }).join('')
+    }
+
+    // REMOVAL REQUESTS
+    if(removals.length){
+      html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:16px 0 8px">🚪 Zone Removal Requests (${removals.length})</div>`
+      html += removals.map(row=>{
+        const isOnly = row.type === 'removal_only_runner'
+        const zone   = ADMIN_ZONES.find(z=>z.id===row.zone_id)
+        return `<div class="card" style="margin-bottom:10px;border-left:3px solid ${isOnly?'#ef4444':'#f59e0b'}">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
+            <div>
+              <div style="font-size:14px;font-weight:700">${row.runner_name} wants to leave ${row.zone_name||'a zone'}</div>
+              <div style="font-size:11px;color:var(--sub);margin-top:3px">${row.runner_email} · ${new Date(row.created_at).toLocaleDateString()}</div>
+              ${row.notes ? `<div style="font-size:11px;color:var(--muted);margin-top:3px;font-style:italic">Reason: "${row.notes}"</div>` : ''}
+              ${isOnly ? `<div style="margin-top:6px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:6px;padding:6px 10px;font-size:11px;color:#fca5a5">
+                ⚠️ <strong>Only runner in zone.</strong> Approving will leave ${row.zone_name} without coverage. Ensure a replacement is lined up first.
+              </div>` : ''}
+              ${zone ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">Zone currently: ${zone.runners||0} runner${(zone.runners||0)!==1?'s':''} · ${zone.homeowners||0} homeowners</div>` : ''}
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              <button class="btn btn-${isOnly?'outline':'red'} btn-sm" style="font-size:11px" onclick="approveZoneRemoval('${row.id}','${row.runner_name}','${row.runner_email}','${row.zone_id}','${row.zone_name}',${isOnly})">
+                ${isOnly ? '⚠️ Approve (special)' : '✅ Approve Removal'}
+              </button>
+              <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="denyZoneRequest('${row.id}','${row.runner_name}')">Deny</button>
+            </div>
+          </div>
+        </div>`
+      }).join('')
+    }
+
+    el.innerHTML = html
   } catch(e){ el.innerHTML='<div style="padding:20px;color:#ef4444">Error: '+String(e?.message||e)+'</div>' }
 }
 
-async function createZoneFromRunnerRequest(zip){
+async function approveZoneExpansionRequest(reqId, runnerEmail, runnerName, zoneId, zoneName){
+  try {
+    await _supa.from('runner_zone_requests').update({ status:'approved', updated_at:new Date().toISOString() }).eq('id', reqId)
+    // If zone exists, add runner to it
+    if(zoneId){
+      const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+      if(zone){ zone.runners=(zone.runners||0)+1; dbSaveZone(zone) }
+      // Update runner record with new zone
+      await _supa.from('runners').update({ zone_id:zoneId, updated_at:new Date().toISOString() }).eq('email', runnerEmail).is('zone_id', null)
+    }
+    sendEmail(runnerEmail, `✅ Zone approved — ${zoneName}`,
+      `<p>Hi ${runnerName?.split(' ')[0]||'there'},</p><p>Your request to work in <strong>${zoneName}</strong> has been approved. You'll receive batch offers for this zone going forward.</p><p>— The BinDash Team</p>`,
+      'zone_expansion_approved')
+    renderRunnerZoneRequests()
+    showToast(`${runnerName} approved for ${zoneName} ✅`, 'ok')
+  } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
+}
+
+async function approveZoneExpansionRequests(zip, zoneName){
+  // Approve all pending expansion requests for a ZIP at once
+  try {
+    await _supa.from('runner_zone_requests')
+      .update({ status:'approved', updated_at:new Date().toISOString() })
+      .eq('zip_code', zip).eq('status','pending')
+    renderRunnerZoneRequests()
+    showToast(`All expansion requests for ZIP ${zip} approved ✅`, 'ok')
+  } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
+}
+
+async function approveZoneRemoval(reqId, runnerName, runnerEmail, zoneId, zoneName, isOnly){
+  if(isOnly){
+    // Confirm admin understands the coverage risk
+    if(!confirm(`⚠️ ${runnerName} is the only runner in ${zoneName}. Approving removes all coverage for this zone. Are you sure?`)) return
+  }
+  try {
+    await _supa.from('runner_zone_requests').update({ status:'approved', updated_at:new Date().toISOString() }).eq('id', reqId)
+    // Remove runner from zone in runners table
+    const runner = RUNNERS.find(r=>r.email===runnerEmail)
+    if(runner && runner.zoneId===zoneId){
+      runner.zoneId = null; runner.coverageZones = runner.coverageZones?.filter(z=>z!==zoneId)||[]
+    }
+    const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+    if(zone){ zone.runners=Math.max(0,(zone.runners||1)-1); dbSaveZone(zone) }
+    // If only runner, flag zone as needing coverage
+    if(isOnly && zone){ zone.status='waitlist'; syncZoneData(); dbSaveZone(zone) }
+    await _supa.from('runners').update({ zone_id:null, updated_at:new Date().toISOString() }).eq('email', runnerEmail)
+    sendEmail(runnerEmail, `Zone removal confirmed — ${zoneName}`,
+      `<p>Hi ${runnerName?.split(' ')[0]||'there'},</p><p>Your request to leave <strong>${zoneName}</strong> has been approved. You won't receive routes for this zone going forward.</p><p>— The BinDash Team</p>`,
+      'zone_removal_approved')
+    renderRunnerZoneRequests()
+    showToast(`${runnerName} removed from ${zoneName}${isOnly?' — zone returned to waitlist':''}`, 'ok')
+  } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
+}
+
+async function denyZoneRequest(reqId, runnerName){
+  try {
+    await _supa.from('runner_zone_requests').update({ status:'dismissed', updated_at:new Date().toISOString() }).eq('id', reqId)
+    renderRunnerZoneRequests()
+    showToast(`${runnerName}'s request denied`, 'info')
+  } catch(e){ showToast('Error','err') }
+}
   // Pre-fill the create zone modal with this ZIP
   showCreateZone()
   setTimeout(()=>{
