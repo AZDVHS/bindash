@@ -3186,8 +3186,13 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- AD RUNNER REQUESTS -->
         <div class="pg" id="ad-runner-requests">
-          <div style="color:var(--sub);font-size:13px;margin-bottom:14px">
-            People who requested a runner invite code. Review their details, approve to generate a unique code -- it will display here and can be shared with them directly.
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+            <div style="color:var(--sub);font-size:13px">
+              People who requested a runner invite code. Review their details, approve to generate a unique code -- it will display here and can be shared with them directly.
+            </div>
+            <button class="btn btn-cyan btn-sm" onclick="showCreateRunnerCode()" style="flex-shrink:0">
+              🎟️ Create Code
+            </button>
           </div>
           <div id="runner-request-list" style="display:flex;flex-direction:column;gap:12px">
             <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No runner requests yet.</div>
@@ -13559,6 +13564,147 @@ async function denyRunnerRequest(id, name){
     showToast((name||'Request') + ' removed', 'info')
   } catch(err){
     showToast('Could not remove request', 'err')
+  }
+}
+
+function showCreateRunnerCode(){
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh" style="background:linear-gradient(135deg,rgba(6,214,160,.08),rgba(99,102,241,.06))">
+    <div>
+      <div style="font-size:15px;font-weight:700">🎟️ Create Runner Invite Code</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:2px">Admin-issued code — bypasses the request queue</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div class="g2">
+      <div class="field">
+        <label>First Name *</label>
+        <input id="crc-fn" placeholder="Jack">
+      </div>
+      <div class="field">
+        <label>Last Name *</label>
+        <input id="crc-ln" placeholder="Mehoff">
+      </div>
+    </div>
+    <div class="field">
+      <label>Email Address *</label>
+      <input id="crc-email" type="email" placeholder="jack@email.com" oninput="crcValidate()">
+      <div id="crc-email-err" style="font-size:11px;color:#ef4444;margin-top:3px;display:none">Please enter a valid email address</div>
+    </div>
+    <div class="field">
+      <label>Phone Number *</label>
+      <input id="crc-phone" type="tel" placeholder="(602) 555-0123" oninput="crcValidate()">
+      <div id="crc-phone-err" style="font-size:11px;color:#ef4444;margin-top:3px;display:none">Please enter a valid phone number (10 digits)</div>
+    </div>
+    <div class="field">
+      <label>ZIP Code *</label>
+      <input id="crc-zip" placeholder="85301" maxlength="5" oninput="crcValidate()">
+      <div id="crc-zip-err" style="font-size:11px;color:#ef4444;margin-top:3px;display:none">Please enter a valid 5-digit ZIP code</div>
+    </div>
+    <div class="field">
+      <label>Notes <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+      <input id="crc-notes" placeholder="e.g. Referred by admin, met at event, etc.">
+    </div>
+    <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.15);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--sub);line-height:1.6">
+      💡 A unique invite code will be generated immediately and displayed here. You can copy it and share directly, or an email will be sent automatically if you wish.
+    </div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan" id="crc-submit-btn" onclick="submitCreateRunnerCode()">🎟️ Generate Code</button>
+  </div>`
+  openM()
+}
+
+function crcValidate(){
+  const email = document.getElementById('crc-email')?.value?.trim() || ''
+  const phone = document.getElementById('crc-phone')?.value?.replace(/\D/g,'') || ''
+  const zip   = document.getElementById('crc-zip')?.value?.trim() || ''
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  const phoneOk = phone.length >= 10
+  const zipOk   = /^\d{5}$/.test(zip)
+  const emailErr = document.getElementById('crc-email-err')
+  const phoneErr = document.getElementById('crc-phone-err')
+  const zipErr   = document.getElementById('crc-zip-err')
+  if(emailErr) emailErr.style.display = email && !emailOk ? 'block' : 'none'
+  if(phoneErr) phoneErr.style.display = phone && !phoneOk ? 'block' : 'none'
+  if(zipErr)   zipErr.style.display   = zip   && !zipOk   ? 'block' : 'none'
+  return emailOk && phoneOk && zipOk
+}
+
+async function submitCreateRunnerCode(){
+  const fn    = document.getElementById('crc-fn')?.value?.trim()    || ''
+  const ln    = document.getElementById('crc-ln')?.value?.trim()    || ''
+  const email = document.getElementById('crc-email')?.value?.trim() || ''
+  const phone = document.getElementById('crc-phone')?.value?.trim() || ''
+  const zip   = document.getElementById('crc-zip')?.value?.trim()   || ''
+  const notes = document.getElementById('crc-notes')?.value?.trim() || ''
+
+  // Validate required fields
+  if(!fn || !ln){ showToast('Please enter first and last name', 'err'); return }
+  if(!crcValidate()){
+    if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ showToast('Please enter a valid email address', 'err'); return }
+    if((phone.replace(/\D/g,'')).length < 10){ showToast('Please enter a valid phone number', 'err'); return }
+    if(!/^\d{5}$/.test(zip)){ showToast('Please enter a valid 5-digit ZIP code', 'err'); return }
+    return
+  }
+
+  const btn = document.getElementById('crc-submit-btn')
+  if(btn){ btn.disabled = true; btn.textContent = 'Generating...' }
+
+  const code     = generateInviteCode()
+  const fullName = (fn + ' ' + ln).trim()
+
+  try {
+    // Insert into runner_interest table
+    const { error } = await _supa.from('runner_interest').insert({
+      full_name:   fullName,
+      email,
+      phone,
+      zip_code:    zip,
+      invite_code: code,
+      notes:       notes || null,
+      approved_at: new Date().toISOString(),
+      created_at:  new Date().toISOString(),
+      source:      'admin_created',
+    })
+
+    if(error) throw new Error(error.message)
+
+    // Show success state with the code in the modal
+    document.getElementById('modal-box').innerHTML = `
+    <div class="mh" style="background:linear-gradient(135deg,rgba(6,214,160,.1),rgba(99,102,241,.06))">
+      <div style="font-size:15px;font-weight:700">✅ Code Created — ${fullName}</div>
+      <button class="btn btn-ghost btn-sm" onclick="closeM();loadRunnerRequests()">✕</button>
+    </div>
+    <div class="mb">
+      <div style="background:rgba(6,214,160,.07);border:1.5px solid rgba(6,214,160,.3);border-radius:12px;padding:20px;text-align:center;margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">Invite Code</div>
+        <div style="font-family:'DM Mono',monospace;font-size:28px;font-weight:800;color:var(--cyan);letter-spacing:.1em;margin-bottom:12px">${code}</div>
+        <button onclick="navigator.clipboard.writeText('${code}');this.textContent='✅ Copied!';setTimeout(()=>this.textContent='📋 Copy Code',2000)"
+          style="background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer">
+          📋 Copy Code
+        </button>
+      </div>
+      <div style="font-size:13px;color:var(--sub);text-align:center;line-height:1.7">
+        Share with <strong style="color:var(--text)">${fullName}</strong> at <strong style="color:var(--text)">${email}</strong><br>
+        They enter this on the BinDash runner enrollment screen.
+      </div>
+    </div>
+    <div class="mf" style="justify-content:center;gap:10px">
+      <button class="btn btn-outline" onclick="sendEmail('${email}', 'Your BinDash Runner Invite Code', EMAIL.runnerInvite('${fn}','${code}'), 'runner_invite');showToast('Invite email sent to ${email} ✅','ok')">
+        📧 Send Email to ${fn}
+      </button>
+      <button class="btn btn-cyan" onclick="closeM();loadRunnerRequests()">Done</button>
+    </div>`
+
+    // Reload the list in the background
+    setTimeout(loadRunnerRequests, 500)
+
+  } catch(e){
+    showToast('Error creating code: ' + String(e?.message||e), 'err')
+    if(btn){ btn.disabled = false; btn.textContent = '🎟️ Generate Code' }
   }
 }
 
