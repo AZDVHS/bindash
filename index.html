@@ -11037,17 +11037,38 @@ function renderPendingRunnerList(){
           <label style="font-size:11px">Assign Service Zone
             ${app.preferredZones?.length ? `<span style="color:var(--cyan);font-weight:400;margin-left:6px">Runner selected: ${app.preferredZones.map(zid=>ADMIN_ZONES.find(z=>z.id===zid)?.name||zid).join(', ')}</span>` : ''}
           </label>
-          <select id="rnpc-zone-${app.id}" style="font-size:12px">
-            <option value="">-- Select zone --</option>
-            ${activeZones.map(z=>{
-              // Auto-select: prefer runner's chosen zone, then ZIP match
-              const runnerChose = app.preferredZones?.includes(z.id)
-              const zipMatch    = !app.preferredZones?.length && (z.zips?.includes(app.zip) || z.zip===app.zip.slice(0,3))
-              return `<option value="${z.id}" ${(runnerChose || zipMatch) ? 'selected' : ''}>
-                ${z.name} (ZIP ${z.zips?.join(', ')||z.zip})${runnerChose?' ← Runner chose this':''}
-              </option>`
-            }).join('')}
-          </select>
+          ${(()=>{
+            // Check if runner has a pending zone request (new_zone type) for their ZIP
+            // We'll surface this as a hint so admin knows what they asked for
+            const hasZoneRequest = false // surfaced below from DB; hint shown statically from app data
+            // Exact ZIP match only — never prefix-match (853xx is too broad, matches wrong zones)
+            const exactZipMatch = activeZones.find(z =>
+              app.preferredZones?.includes(z.id) ||
+              z.zips?.includes(app.zip)
+            )
+            const noZoneForZip = !exactZipMatch && app.zip
+
+            return `
+            ${noZoneForZip ? `<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:7px;padding:8px 11px;margin-bottom:8px;font-size:11px;color:#fbbf24">
+              ⚠️ No existing zone covers ZIP <strong>${app.zip}</strong>.
+              ${app.zip ? `Check Runner Zone Requests — this runner may have submitted a zone request for this ZIP.` : ''}
+              You can create a new zone or assign to the closest existing zone manually.
+            </div>` : ''}
+            <select id="rnpc-zone-${app.id}" style="font-size:12px">
+              <option value="">-- Select zone --</option>
+              ${activeZones.map(z=>{
+                // Priority 1: runner explicitly chose this zone
+                const runnerChose  = app.preferredZones?.includes(z.id)
+                // Priority 2: exact ZIP in zone's zips array (not prefix!)
+                const exactMatch   = z.zips?.includes(app.zip)
+                const autoSelect   = runnerChose || exactMatch
+                const label = runnerChose ? ' ← Runner chose this' : exactMatch ? ' ← ZIP match' : ''
+                return `<option value="${z.id}" ${autoSelect ? 'selected' : ''}>
+                  ${z.name} (ZIP ${z.zips?.join(', ')||z.zip})${label}
+                </option>`
+              }).join('')}
+            </select>`
+          })()}
         </div>
 
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -11072,12 +11093,11 @@ function renderPendingRunnerList(){
 async function approveRunner(appId){
   const app = PENDING_RUNNERS.find(x=>x.id===appId); if(!app) return
   let zoneId = document.getElementById('rnpc-zone-'+appId)?.value || ''
-  if(!zoneId && app.zip){
-    const autoZone = findZoneForZip(app.zip) || ADMIN_ZONES.find(z=>z.status!=='inactive')
-    if(autoZone) zoneId = autoZone.id
-  }
+  // Do NOT auto-guess by ZIP prefix — admin must explicitly choose the zone
   if(!zoneId){
-    showToast('Please select a zone -- go to Zones and create one for ZIP '+app.zip+' first','err')
+    showToast('Please select a service zone before approving — check Runner Zone Requests if their ZIP has no zone yet','err')
+    const sel = document.getElementById('rnpc-zone-'+appId)
+    if(sel){ sel.style.borderColor='rgba(239,68,68,.6)'; setTimeout(()=>sel.style.borderColor='',2000) }
     return
   }
   const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
@@ -11358,14 +11378,27 @@ function renderPendingHWList(){
 
       <div class="field" style="margin-bottom:10px">
         <label style="font-size:11px">Service Zone <span style="color:var(--muted);font-weight:400">(ZIP ${app.zip})</span></label>
-        <select id="hwpc-zone-${app.id}" style="font-size:12px">
-          <option value="">-- Select zone --</option>
-          ${ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>`
-            <option value="${z.id}" ${(app.zoneId===z.id || (!app.zoneId && (z.zips?.includes(app.zip)||z.zip===app.zip.slice(0,3))))?'selected':''}>
-              ${z.name} (ZIP ${z.zips?.join(', ')||z.zip})
-            </option>`).join('')}
-          <option value="_new">+ Create new zone for ZIP ${app.zip}</option>
-        </select>
+        ${(()=>{
+          const exactMatch = ADMIN_ZONES.filter(z=>z.status!=='inactive').find(z=>
+            app.zoneId===z.id || z.zips?.includes(app.zip)
+          )
+          const noMatch = !exactMatch && app.zip
+          return `
+          ${noMatch ? `<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:7px;padding:7px 10px;margin-bottom:6px;font-size:11px;color:#fbbf24">
+            ⚠️ No zone covers ZIP ${app.zip} exactly — assign manually or create a new zone below.
+          </div>` : ''}
+          <select id="hwpc-zone-${app.id}" style="font-size:12px">
+            <option value="">-- Select zone --</option>
+            ${ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>{
+              const isAssigned = app.zoneId===z.id
+              const isExact    = !app.zoneId && z.zips?.includes(app.zip)
+              return `<option value="${z.id}" ${(isAssigned||isExact)?'selected':''}>
+                ${z.name} (ZIP ${z.zips?.join(', ')||z.zip})${isExact?' ← ZIP match':''}
+              </option>`
+            }).join('')}
+            <option value="_new">+ Create new zone for ZIP ${app.zip}</option>
+          </select>`
+        })()}
       </div>
 
       <div class="field" style="margin-bottom:12px">
