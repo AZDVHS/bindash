@@ -6500,241 +6500,193 @@ async function loadRNZones(){
   el.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted)">⏳ Loading your zones...</div>'
 
   try {
-    // 1. Ensure we have a runner row — fetch directly if not cached yet
+    // 1. Get runner identity
     let row = window._rnRow
-    if(!row){
-      // currentUser might not be set yet if tab was clicked before populateRNDashboard finished
-      let email = currentUser?.email
-      if(!email){
-        try {
-          const { data: { user } } = await _supa.auth.getUser()
-          email = user?.email
-        } catch(e){}
-      }
-      if(email){
-        try {
-          const rRes = await _supa.from('runners').select('*').eq('email', email).maybeSingle()
-          if(rRes?.data){ row = rRes.data; window._rnRow = row }
-        } catch(e){}
-        if(!row){
-          try {
-            const aRes = await _supa.from('runner_applications').select('*').eq('email', email).maybeSingle()
-            if(aRes?.data){ row = aRes.data; window._rnRow = row }
-          } catch(e){}
-        }
+    let runnerEmail = row?.email || currentUser?.email
+    if(!runnerEmail){
+      try { const { data: { user } } = await _supa.auth.getUser(); runnerEmail = user?.email } catch(e){}
+    }
+    if(!runnerEmail){ el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Please log in to view your zones.</div>'; return }
+
+    if(!row || !row.id){
+      const rRes = await safeQuery(_supa.from('runners').select('*').eq('email', runnerEmail).maybeSingle())
+      if(rRes?.data){ row = rRes.data; window._rnRow = { ...(window._rnRow||{}), ...row } }
+      else {
+        const aRes = await safeQuery(_supa.from('runner_applications').select('*').eq('email', runnerEmail).maybeSingle())
+        if(aRes?.data){ row = aRes.data; window._rnRow = { ...(window._rnRow||{}), ...row } }
       }
     }
+    row = window._rnRow || row || {}
 
-    if(!row){
-      el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">
-        <div style="font-size:28px;margin-bottom:8px">⏳</div>
-        Dashboard still loading — please wait a moment then click My Zones again.
-        <div style="margin-top:12px"><button class="btn btn-outline btn-sm" onclick="loadRNZones()">↺ Retry</button></div>
-      </div>`
-      return
-    }
+    const runnerId  = row.id       || null
+    const runnerZip = row.zip_code || ''
 
-    // 2. Ensure zones are loaded
     if(ADMIN_ZONES.length === 0) await loadZonesFromSupabase()
 
-    const runnerZip   = row.zip_code || ''
-    const zoneId      = row.zone_id  || null
-    const runnerEmail = row.email    || currentUser?.email || ''
-    const runnerName  = ((row.first_name||'') + ' ' + (row.last_name||'')).trim()
+    // 2. Find zones via 4 strategies — all Supabase-first, no in-memory RUNNERS dependency
 
-    // Parse coverage_zones from DB (JSON column or zone_id fallback)
-    const dbCoverageZones = (() => {
+    // A: coverage_zones JSON on runner row
+    const coverageFromRow = (() => {
       try {
-        if(row.coverage_zones){
-          const parsed = typeof row.coverage_zones === 'string' ? JSON.parse(row.coverage_zones) : row.coverage_zones
-          if(Array.isArray(parsed) && parsed.length) return parsed
-        }
+        const raw = row.coverage_zones
+        if(raw){ const p = typeof raw==='string' ? JSON.parse(raw) : raw; if(Array.isArray(p) && p.length) return p }
       } catch(e){}
-      return zoneId ? [zoneId] : []
+      return row.zone_id ? [row.zone_id] : []
     })()
 
-    console.log('[BinDash] loadRNZones — email:', runnerEmail, '— zone_id:', zoneId, '— coverage_zones:', dbCoverageZones, '— zip:', runnerZip)
+    // B: zones.assigned_runner = runner.id
+    let zonesByAssignment = []
+    if(runnerId){
+      const res = await safeQuery(_supa.from('zones').select('id').eq('assigned_runner', runnerId))
+      zonesByAssignment = (res?.data||[]).map(z=>z.id)
+    }
 
-    // Find ALL zones this runner is associated with:
-    // a) by zone_id FK
-    // b) by coverage_zones JSON column (admin-assigned zones)
-    // c) by ZIP exact match in zone's zips array
-    // d) by any zone found via RUNNERS in-memory array
-    const assignedViaRunners = RUNNERS.filter(r =>
-      r.email === runnerEmail || r.name === runnerName
-    ).flatMap(r => r.coverageZones?.length ? r.coverageZones : (r.zoneId ? [r.zoneId] : []))
+    // C: runner_zone_requests approved
+    let zonesByRequest = []
+    try {
+      const { data: reqs } = await _supa.from('runner_zone_requests')
+        .select('zone_id').eq('runner_email', runnerEmail).eq('status','approved')
+      zonesByRequest = (reqs||[]).map(r=>r.zone_id).filter(Boolean)
+    } catch(e){}
 
-    const allCoverageIds = [...new Set([...dbCoverageZones, ...assignedViaRunners])]
+    // D: ZIP match (fallback only)
+    const zonesByZip = runnerZip
+      ? ADMIN_ZONES.filter(z => z.zips?.includes(runnerZip) || z.zip===runnerZip.slice(0,3)).map(z=>z.id)
+      : []
 
-    const seen = new Set()
-    const myZones = ADMIN_ZONES.filter(z => {
-      if(seen.has(z.id)) return false
-      const match = allCoverageIds.includes(z.id) ||
-                    (runnerZip && z.zips?.includes(runnerZip))
-      if(match) seen.add(z.id)
-      return match
-    })
+    const primaryIds = [...new Set([...coverageFromRow, ...zonesByAssignment, ...zonesByRequest])]
+    const finalIds   = primaryIds.length > 0 ? primaryIds : zonesByZip
 
-    console.log('[BinDash] loadRNZones — found', myZones.length, 'zones:', myZones.map(z=>z.name).join(', '))
+    console.log('[BinDash] loadRNZones — email:', runnerEmail, '| id:', runnerId,
+      '| coverageFromRow:', coverageFromRow, '| byAssignment:', zonesByAssignment,
+      '| byRequest:', zonesByRequest, '| byZip:', zonesByZip, '| using:', finalIds)
 
-    // 4. Load zone requests for this runner
+    const myZones = [...new Map(finalIds
+      .map(id => ADMIN_ZONES.find(z=>z.id===id))
+      .filter(Boolean)
+      .map(z=>[z.id,z])).values()]
+
+    console.log('[BinDash] loadRNZones — matched', myZones.length, 'zones:', myZones.map(z=>z.name).join(', '))
+
+    // 3. Zone requests for this runner
     let zoneRequests = []
     try {
       const { data } = await _supa.from('runner_zone_requests')
-        .select('*').eq('runner_email', runnerEmail).order('created_at', { ascending: false })
+        .select('*').eq('runner_email', runnerEmail).order('created_at',{ascending:false})
       zoneRequests = data || []
     } catch(e){}
 
-    // 5. Load homeowners assigned to this runner from DB
-    let myHomeowners = []
-    try {
-      const { data: hwData } = await _supa
-        .from('homeowner_signups')
-        .select('id, first_name, last_name, street_address, zip_code, collection_day, service_type, plan_id, status')
-        .eq('status', 'approved')
-        .limit(50)
-      // Filter to homeowners in this runner's zones
-      const myZips = [...new Set(myZones.flatMap(z => z.zips || [z.zip]).filter(Boolean))]
-      myHomeowners = (hwData||[]).filter(h => myZips.includes(h.zip_code) || (zoneId && true))
-    } catch(e){ console.warn('[BinDash] loadRNZones HO fetch:', e) }
+    // 4. Homeowners — query DB directly, no in-memory dependency
+    let myHomeowners = [], waitlistedHOs = []
+    const myZips = [...new Set(myZones.flatMap(z=>z.zips||(z.zip?[z.zip]:[])).concat(runnerZip?[runnerZip]:[]))]
 
-    const pendingZoneReqs = zoneRequests.filter(r => r.status === 'pending')
-    const approvedReqs    = zoneRequests.filter(r => r.status === 'approved')
-
-    // 6. Render
-    const statusMeta = {
-      live:     { label:'🟢 Live',     border:'rgba(34,197,94,.35)',  bg:'rgba(34,197,94,.06)',    col:'#22c55e' },
-      pilot:    { label:'🔬 Pilot',    border:'rgba(165,180,252,.35)',bg:'rgba(165,180,252,.06)',  col:'#a5b4fc' },
-      waitlist: { label:'⏳ Building', border:'rgba(251,191,36,.35)', bg:'rgba(251,191,36,.06)',   col:'#fbbf24' },
+    // Approved HOs assigned to this runner by runner ID
+    if(runnerId){
+      const res = await safeQuery(_supa.from('homeowner_signups')
+        .select('id,first_name,last_name,street_address,zip_code,collection_day,service_type,plan_id,status')
+        .eq('assigned_runner', runnerId).eq('status','approved').limit(50))
+      myHomeowners = res?.data || []
+    }
+    // Fallback: approved HOs in runner's zone ZIPs
+    if(!myHomeowners.length && myZips.length){
+      const res = await safeQuery(_supa.from('homeowner_signups')
+        .select('id,first_name,last_name,street_address,zip_code,collection_day,service_type,plan_id,status')
+        .in('zip_code', myZips).eq('status','approved').limit(50))
+      myHomeowners = res?.data || []
+    }
+    // Waitlisted HOs in runner's area (growth opportunities)
+    if(myZips.length){
+      const res = await safeQuery(_supa.from('homeowner_signups')
+        .select('id,first_name,last_name,zip_code,service_type,collection_day,created_at')
+        .in('zip_code', myZips).eq('status','waitlisted').limit(20))
+      waitlistedHOs = res?.data || []
     }
 
+    // 5. Render
+    const pendingReqs = zoneRequests.filter(r=>r.status==='pending')
+    const statusMeta = {
+      live:     {label:'🟢 Live',     border:'rgba(34,197,94,.35)',  bg:'rgba(34,197,94,.06)',   col:'#22c55e'},
+      pilot:    {label:'🔬 Pilot',    border:'rgba(165,180,252,.35)',bg:'rgba(165,180,252,.06)', col:'#a5b4fc'},
+      waitlist: {label:'⏳ Building', border:'rgba(251,191,36,.35)', bg:'rgba(251,191,36,.06)',  col:'#fbbf24'},
+    }
+    const planLabels = {plan_a:'1 Can',plan_b:'2 Cans',plan_c:'2 Cans Split'}
+
     const zoneCards = myZones.map(z => {
-      const st       = statusMeta[z.status] || statusMeta.waitlist
-      const dayLabels= (z.collection||[]).map(d=>typeof d==='object'?d.day||d:d).join(', ')||'--'
-      const needed   = z.threshold || 3
-      const hwCount  = z.homeowners || 0
-      const hwPct    = Math.min(100, Math.round(hwCount/Math.max(needed,1)*100))
-      const rnCount  = z.runners  || 0
-      const capPct   = Math.min(100, Math.round(rnCount/Math.max(z.capacity||4,1)*100))
-      const wlCount  = WAITLIST_SIGNUPS.filter(s => z.zips?.includes(s.zip)||z.zip===s.zip?.slice(0,3)).length
+      const st      = statusMeta[z.status] || statusMeta.waitlist
+      const days    = (z.collection||[]).map(d=>typeof d==='object'?d.day||d:d).join(', ')||'--'
+      const hwCount = z.homeowners||0
+      const rnCount = z.runners||0
+      const needed  = z.threshold||3
+      const hwPct   = Math.min(100,Math.round(hwCount/Math.max(needed,1)*100))
+      const capPct  = Math.min(100,Math.round(rnCount/Math.max(z.capacity||4,1)*100))
+      const zoneHOs = myHomeowners.filter(h => z.zips?.includes(h.zip_code)||h.zip_code?.slice(0,3)===z.zip)
+      const zoneWL  = waitlistedHOs.filter(h => z.zips?.includes(h.zip_code)||h.zip_code?.slice(0,3)===z.zip)
+      const hasPendingRemoval = zoneRequests.some(r=>r.zone_id===z.id&&r.type==='removal'&&r.status==='pending')
 
-      // Homeowners in this zone assigned to this runner
-      const zoneHOs = myHomeowners.filter(h =>
-        z.zips?.includes(h.zip_code) || h.zip_code?.slice(0,3)===z.zip
-      )
-
-      const hasRemovalPending = zoneRequests.some(r=>r.zone_id===z.id&&r.type==='removal'&&r.status==='pending')
-
-      const planLabels = { plan_a:'1 Can', plan_b:'2 Cans', plan_c:'2 Cans Split' }
-
-      return `
-      <div style="border:1.5px solid ${st.border};border-radius:14px;overflow:hidden;margin-bottom:14px">
-
-        <!-- Zone header -->
+      return `<div style="border:1.5px solid ${st.border};border-radius:14px;overflow:hidden;margin-bottom:14px">
         <div style="background:${st.bg};padding:14px 16px;display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px">
           <div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               <span style="font-size:15px;font-weight:800">${z.name}</span>
-              <span style="background:${st.bg};border:1px solid ${st.border};color:${st.col};border-radius:99px;font-size:9px;font-weight:700;padding:2px 9px">${st.label}</span>
+              <span style="border:1px solid ${st.border};color:${st.col};border-radius:99px;font-size:9px;font-weight:700;padding:2px 9px">${st.label}</span>
             </div>
-            <div style="font-size:11px;color:var(--muted);margin-top:3px">ZIP ${z.zips?.join(', ')||z.zip} · Collection: ${dayLabels}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">ZIP ${z.zips?.join(', ')||z.zip} · Collection: ${days}</div>
           </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
-            ${!hasRemovalPending ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;color:#ef4444" onclick="showLeaveZone('${z.id}','${z.name}',${rnCount<=1})">Leave Zone</button>` : `<span style="font-size:11px;color:var(--muted);padding:4px 8px">Removal pending</span>`}
-          </div>
+          ${hasPendingRemoval
+            ? '<span style="font-size:11px;color:var(--muted);padding:4px 8px">Removal pending</span>'
+            : `<button class="btn btn-ghost btn-sm" style="font-size:11px;color:#ef4444" onclick="showLeaveZone('${z.id}','${z.name}',${rnCount<=1})">Leave Zone</button>`}
         </div>
 
-        <!-- Zone stats -->
-        <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border-bottom:1px solid var(--border)">
-          <div style="text-align:center">
-            <div style="font-size:20px;font-weight:800;color:var(--cyan)">${hwCount}</div>
-            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Total HOs</div>
-          </div>
-          <div style="text-align:center">
-            <div style="font-size:20px;font-weight:800;color:#22c55e">${zoneHOs.length}</div>
-            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Your Route</div>
-          </div>
-          <div style="text-align:center">
-            <div style="font-size:20px;font-weight:800;color:#a5b4fc">${rnCount}</div>
-            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Runners</div>
-          </div>
-          <div style="text-align:center">
-            <div style="font-size:20px;font-weight:800;color:#fbbf24">${wlCount}</div>
-            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Waitlisted</div>
-          </div>
+        <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border-bottom:1px solid var(--border);text-align:center">
+          <div><div style="font-size:20px;font-weight:800;color:var(--cyan)">${hwCount}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Zone HOs</div></div>
+          <div><div style="font-size:20px;font-weight:800;color:#22c55e">${zoneHOs.length}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Your Route</div></div>
+          <div><div style="font-size:20px;font-weight:800;color:#a5b4fc">${rnCount}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Runners</div></div>
+          <div><div style="font-size:20px;font-weight:800;color:#fbbf24">${zoneWL.length}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Waitlisted</div></div>
         </div>
 
-        ${z.status === 'waitlist' ? `
-        <!-- Waitlist progress -->
-        <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+        ${z.status==='waitlist' ? `<div style="padding:12px 16px;border-bottom:1px solid var(--border)">
           <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Zone Launch Progress</div>
           <div style="margin-bottom:6px">
-            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
-              <span>Homeowners to launch</span>
-              <span style="font-weight:700;color:${hwPct>=100?'#22c55e':'var(--cyan)'}">${hwCount}/${needed}${hwPct>=100?' ✅':''}</span>
-            </div>
-            <div style="background:var(--surface2);border-radius:99px;height:6px">
-              <div style="width:${hwPct}%;height:100%;background:${hwPct>=100?'#22c55e':'var(--cyan)'};border-radius:99px;transition:width .5s"></div>
-            </div>
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px"><span>Homeowners to launch</span><span style="font-weight:700;color:${hwPct>=100?'#22c55e':'var(--cyan)'}">${hwCount}/${needed}${hwPct>=100?' ✅':''}</span></div>
+            <div style="background:var(--surface2);border-radius:99px;height:6px"><div style="width:${hwPct}%;height:100%;background:${hwPct>=100?'#22c55e':'var(--cyan)'};border-radius:99px"></div></div>
           </div>
           <div>
-            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
-              <span>Runner capacity</span>
-              <span style="font-weight:700;color:#a5b4fc">${rnCount}/${z.capacity||4}</span>
-            </div>
-            <div style="background:var(--surface2);border-radius:99px;height:6px">
-              <div style="width:${capPct}%;height:100%;background:#a5b4fc;border-radius:99px;transition:width .5s"></div>
-            </div>
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px"><span>Runner capacity</span><span style="font-weight:700;color:#a5b4fc">${rnCount}/${z.capacity||4}</span></div>
+            <div style="background:var(--surface2);border-radius:99px;height:6px"><div style="width:${capPct}%;height:100%;background:#a5b4fc;border-radius:99px"></div></div>
           </div>
-          ${wlCount ? `<div style="font-size:11px;color:#fbbf24;margin-top:8px">✨ ${wlCount} homeowner${wlCount!==1?'s':''} waitlisted — share your code to convert them!</div>` : ''}
+          ${zoneWL.length ? `<div style="font-size:11px;color:#fbbf24;margin-top:8px">✨ ${zoneWL.length} homeowner${zoneWL.length!==1?'s':''} waitlisted — share your code to convert them!</div>` : ''}
         </div>` : ''}
 
-        <!-- Assigned homeowners -->
         <div style="padding:12px 16px">
-          <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
-            Your Stops${zoneHOs.length ? ` (${zoneHOs.length})` : ''}
-            ${zoneHOs.length ? `<span style="font-weight:400;color:var(--muted);margin-left:6px;text-transform:none;letter-spacing:0">· priority dispatch order</span>` : ''}
-          </div>
-          ${zoneHOs.length ? zoneHOs.slice(0,8).map((h, i) => {
-            const name  = ((h.first_name||'') + ' ' + (h.last_name||'')).trim() || 'Homeowner'
-            const addr  = h.street_address || 'ZIP '+h.zip_code
-            const svc   = h.service_type || 'Recycling'
-            const day   = h.collection_day || '--'
-            const plan  = planLabels[h.plan_id] || h.plan_id || ''
-            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;${i<zoneHOs.length-1&&i<7?'border-bottom:1px solid var(--border)':''}">
-              <div style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,var(--cyan),var(--blue));display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#07090f;flex-shrink:0">${i+1}</div>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</div>
-                <div style="font-size:11px;color:var(--muted)">${addr} · ${day} · ${svc}${plan?' · '+plan:''}</div>
-              </div>
-              <span style="font-size:10px;color:var(--muted);flex-shrink:0">Stop ${i+1}</span>
-            </div>`
-          }).join('') : `
-          <div style="text-align:center;padding:16px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted)">
-            ${z.status==='waitlist'
-              ? 'No homeowners yet — zone is building. Share your referral code to bring them in.'
-              : 'No homeowners assigned to you in this zone yet.'}
-            <div style="margin-top:8px"><button class="btn btn-outline btn-sm" onclick="showReferralLink()">🔗 Share Referral Link</button></div>
-          </div>`}
-          ${zoneHOs.length > 8 ? `<div style="font-size:11px;color:var(--muted);text-align:center;padding-top:8px">+${zoneHOs.length-8} more stops</div>` : ''}
+          <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Your Stops${zoneHOs.length ? ` (${zoneHOs.length})` : ''}</div>
+          ${zoneHOs.length
+            ? zoneHOs.slice(0,8).map((h,i)=>{
+                const name = ((h.first_name||'')+(h.last_name?' '+h.last_name:'')).trim()||'Homeowner'
+                return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;${i<Math.min(zoneHOs.length,8)-1?'border-bottom:1px solid var(--border)':''}">
+                  <div style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,var(--cyan),var(--blue));display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#07090f;flex-shrink:0">${i+1}</div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:600">${name}</div>
+                    <div style="font-size:11px;color:var(--muted)">${h.street_address||'ZIP '+h.zip_code} · ${h.collection_day||'--'} · ${h.service_type||'Recycling'}${planLabels[h.plan_id]?' · '+planLabels[h.plan_id]:''}</div>
+                  </div>
+                </div>`
+              }).join('') + (zoneHOs.length>8 ? `<div style="font-size:11px;color:var(--muted);text-align:center;padding-top:8px">+${zoneHOs.length-8} more stops</div>` : '')
+            : `<div style="text-align:center;padding:16px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--muted)">
+                No homeowners assigned yet.
+                <div style="margin-top:8px"><button class="btn btn-outline btn-sm" onclick="showReferralLink()">🔗 Share Referral Link</button></div>
+              </div>`}
         </div>
 
+        ${zoneWL.length ? `<div style="padding:10px 16px;background:rgba(251,191,36,.04);border-top:1px solid rgba(251,191,36,.2)">
+          <div style="font-size:11px;font-weight:700;color:#fbbf24;margin-bottom:6px">📋 ${zoneWL.length} Waitlisted in This Zone — Grow Your Route</div>
+          ${zoneWL.slice(0,4).map(h=>`<div style="display:flex;gap:8px;padding:3px 0;font-size:12px;color:var(--sub)">
+            <span style="color:#fbbf24">⏳</span>
+            <span>${h.first_name||'Homeowner'} · ZIP ${h.zip_code||'--'} · ${h.service_type||'Recycling'}</span>
+          </div>`).join('')}
+          <div style="font-size:11px;color:var(--sub);margin-top:6px">Share your code to convert them — earn <strong style="color:#fbbf24">$10/signup</strong>.</div>
+          <button class="btn btn-sm" style="margin-top:8px;background:rgba(251,191,36,.15);border:1px solid rgba(251,191,36,.3);color:#fbbf24;width:100%" onclick="showReferralLink()">🔗 Share My Referral Link</button>
+        </div>` : ''}
       </div>`
     }).join('')
-
-    const pendingSection = pendingZoneReqs.length ? `
-    <div style="margin-top:16px">
-      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">⏳ Pending Zone Requests</div>
-      ${pendingZoneReqs.map(r=>`
-        <div style="background:var(--surface2);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:12px">
-          <div>
-            <div style="font-size:13px;font-weight:600">${r.type==='new_zone'?'🚀 New zone':'📍 Zone expansion'} — ${r.zone_name||('ZIP '+r.zip_code)}</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px">Submitted ${new Date(r.created_at).toLocaleDateString()} · Awaiting admin review</div>
-            ${r.notes?`<div style="font-size:10px;color:var(--muted);font-style:italic;margin-top:2px">"${r.notes}"</div>`:''}
-          </div>
-          <span style="background:rgba(245,158,11,.15);color:#fbbf24;border-radius:99px;font-size:9px;font-weight:700;padding:2px 9px;flex-shrink:0">⏳ Pending</span>
-        </div>`).join('')}
-    </div>` : ''
 
     el.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
@@ -6742,26 +6694,43 @@ async function loadRNZones(){
       <button class="btn btn-cyan btn-sm" onclick="showRequestZoneExpansion()">+ Request a Zone</button>
     </div>
 
-    ${myZones.length ? zoneCards : `
-    <div style="background:var(--surface2);border:1px dashed var(--border);border-radius:12px;padding:32px;text-align:center;color:var(--muted)">
+    ${myZones.length ? zoneCards : `<div style="background:var(--surface2);border:1px dashed var(--border);border-radius:12px;padding:32px;text-align:center;color:var(--muted)">
       <div style="font-size:32px;margin-bottom:10px">📍</div>
-      <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No zones assigned yet</div>
-      <div style="font-size:13px;margin-bottom:16px">Your zone will be assigned when your area has enough runners and homeowners. You can request a zone below.</div>
+      <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No zones found</div>
+      <div style="font-size:12px;margin-bottom:4px">ZIP: <strong>${runnerZip||'unknown'}</strong> · ID: <strong>${runnerId||'not found'}</strong></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Ask admin to assign you via the Runners tab, or request a zone below.</div>
       <button class="btn btn-cyan btn-sm" onclick="showRequestZoneExpansion()">+ Request a Zone</button>
     </div>`}
 
-    ${pendingSection}
+    ${pendingReqs.length ? `<div style="margin-top:16px">
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">⏳ Pending Zone Requests</div>
+      ${pendingReqs.map(r=>`<div style="background:var(--surface2);border-radius:10px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <div>
+          <div style="font-size:13px;font-weight:600">${r.type==='new_zone'?'🚀 New zone':'📍 Zone expansion'} — ${r.zone_name||('ZIP '+r.zip_code)}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Submitted ${new Date(r.created_at).toLocaleDateString()} · Awaiting admin review</div>
+        </div>
+        <span style="background:rgba(245,158,11,.15);color:#fbbf24;border-radius:99px;font-size:9px;font-weight:700;padding:2px 9px;flex-shrink:0">⏳ Pending</span>
+      </div>`).join('')}
+    </div>` : ''}
+
+    ${waitlistedHOs.length && !myZones.length ? `<div style="margin-top:16px;background:rgba(251,191,36,.06);border:1.5px solid rgba(251,191,36,.3);border-radius:12px;padding:14px 16px">
+      <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:8px">🏠 ${waitlistedHOs.length} Homeowners Waiting in Your Area</div>
+      <div style="font-size:12px;color:var(--sub);margin-bottom:10px">Signed up but no runner yet. Once you're assigned, they appear on your route.</div>
+      ${waitlistedHOs.slice(0,5).map(h=>`<div style="display:flex;gap:8px;padding:5px 0;font-size:12px;border-bottom:1px solid rgba(251,191,36,.1)">
+        <span style="color:#fbbf24">⏳</span><span style="flex:1">${h.first_name||'Homeowner'} · ZIP ${h.zip_code||'--'} · ${h.service_type||'Recycling'}</span>
+      </div>`).join('')}
+      <button class="btn btn-sm" style="margin-top:12px;background:rgba(251,191,36,.15);border:1px solid rgba(251,191,36,.3);color:#fbbf24;width:100%" onclick="showReferralLink()">🔗 Share Referral Link to Convert Them</button>
+    </div>` : ''}
 
     <div style="background:var(--surface2);border-radius:10px;padding:14px 16px;font-size:12px;color:var(--sub);line-height:1.7;margin-top:16px">
       <div style="font-weight:700;color:var(--text);margin-bottom:4px">How zones work</div>
-      📍 Your primary zone is assigned by admin. Zone status progresses: Building → Pilot → Live.<br>
-      🏠 Homeowners listed are in your zone — you'll receive dispatch offers for them each collection day.<br>
-      ⏳ Pending zone requests are reviewed by admin within 24-48 hrs.<br>
-      🔗 Share your referral code with waitlisted homeowners to grow your route faster.
+      📍 Zone assignment is managed by admin — zones appear here automatically once assigned.<br>
+      🏠 Homeowners in your zone are your stops — you get dispatch offers each collection day.<br>
+      ⏳ Pending requests reviewed within 24-48 hrs · 🔗 Share your code to grow your route and earn $10/signup.
     </div>`
 
   } catch(e){
-    el.innerHTML = `<div style="padding:20px;color:#fca5a5;font-size:13px">Error loading zones: ${String(e?.message||e)}</div>`
+    el.innerHTML = `<div style="padding:20px;color:#fca5a5;font-size:13px">Error: ${String(e?.message||e)}<br><button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="loadRNZones()">↺ Retry</button></div>`
     console.warn('[BinDash] loadRNZones error:', e)
   }
 }
