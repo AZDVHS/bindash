@@ -13040,7 +13040,31 @@ function renderDispatchPipeline(){
   if(titleEl) titleEl.textContent = 'Route Preview — ' + (dayFil||'All Days') + (allPreview ? ' · Not sent yet' : '')
   if(badgeEl) badgeEl.textContent = batches.length+' batch'+(batches.length!==1?'es':'')+' · '+RUNNERS.filter(r=>r.status==='AVAILABLE').length+' runners available'
 
-  pipeline.innerHTML = batches.map(b=>{
+  // Check for merge opportunities — same runner assigned to multiple batches
+  const runnerBatches = {}
+  batches.forEach(b => {
+    if(b.runner?.id){
+      if(!runnerBatches[b.runner.id]) runnerBatches[b.runner.id] = []
+      runnerBatches[b.runner.id].push(b)
+    }
+  })
+  const mergeSuggestions = Object.entries(runnerBatches).filter(([,bs]) => bs.length > 1)
+  const mergeHtml = mergeSuggestions.length ? `
+  <div style="background:rgba(6,214,160,.07);border:1px solid rgba(6,214,160,.25);border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div style="flex:1">
+      <div style="font-size:12px;font-weight:700;color:var(--cyan);margin-bottom:2px">💡 Merge opportunity</div>
+      ${mergeSuggestions.map(([rid, bs]) => {
+        const name = bs[0].runner.name
+        const ids = bs.map(b=>b.id).join('|')
+        const totalStops = bs.reduce((s,b)=>s+b.stops.length,0)
+        return `<div style="font-size:11px;color:var(--sub)">${name} has ${bs.length} separate routes (${totalStops} stops total) — merge into one?
+          <button onclick="mergeBatches('${ids}')" style="margin-left:6px;background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:5px;padding:2px 10px;font-size:10px;cursor:pointer">Merge</button>
+        </div>`
+      }).join('')}
+    </div>
+  </div>` : ''
+
+  pipeline.innerHTML = mergeHtml + batches.map(b=>{
     const isPreview  = b.status === 'preview'
     const borderCol  = isPreview ? '#a5b4fc'
       : b.status==='accepted' ? '#22c55e'
@@ -13087,6 +13111,12 @@ function renderDispatchPipeline(){
       if(h.storage && h.storage!=='--') alerts.push('📦 '+h.storage)
       const addr = h.address && h.address!=='--' ? h.address+(h.zip?' · '+h.zip:'') : (h.zip||'No address')
 
+      // Other batches this stop could move to
+      const otherBatches = generatedBatches.filter(ob => ob.id !== b.id)
+      const moveOpts = otherBatches.map(ob =>
+        `<option value="${ob.id}">${ob.runner?.name||'Unassigned'} · ${ob.zoneName} (${ob.stops.length} stops)</option>`
+      ).join('')
+
       return `<div style="padding:8px 0;border-bottom:1px solid var(--border);${idx===b.stops.length-1?'border-bottom:none':''}">
         <div style="display:flex;align-items:center;gap:8px">
           <div style="width:20px;height:20px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${idx+1}</div>
@@ -13100,6 +13130,13 @@ function renderDispatchPipeline(){
             ${alerts.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:3px">${alerts.map(a=>`<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;padding:1px 6px;border-radius:4px">${a}</span>`).join('')}</div>` : ''}
             ${h.svcNotes ? `<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic">📝 ${h.svcNotes}</div>` : ''}
           </div>
+          ${isPreview ? `<div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
+            ${otherBatches.length ? `<select style="font-size:10px;padding:2px 4px;border-radius:5px;background:var(--surface2);border:1px solid var(--border);color:var(--text);max-width:130px" onchange="moveStopToBatch('${b.id}',${idx},this.value);this.value=''" title="Move to another route">
+              <option value="">↔ Move to...</option>
+              ${moveOpts}
+            </select>` : ''}
+            <button onclick="removeStopFromBatch('${b.id}',${idx})" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:5px;padding:2px 6px;font-size:10px;cursor:pointer;flex-shrink:0" title="Remove stop">✕</button>
+          </div>` : ''}
         </div>
       </div>`
     }).join('')
@@ -13124,6 +13161,7 @@ function renderDispatchPipeline(){
           <div style="font-size:13px;font-weight:700;color:var(--green)">$${b.earnTotal}</div>
           <div style="font-size:10px;color:var(--muted)">both visits</div>
         </div>
+        ${isPreview ? `<button onclick="deleteBatchFromPreview('${b.id}')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;flex-shrink:0" title="Remove this batch">🗑</button>` : ''}
       </div>
 
       <div style="padding:6px 14px 2px;background:var(--surface2);border-top:1px solid var(--border);max-height:280px;overflow-y:auto">
@@ -13163,6 +13201,87 @@ function swapBatchRunner(batchId, runnerId){
   b.status    = 'preview'
   renderDispatchPipeline()
   if(r) showToast(`Runner changed to ${r.name} ✅`, 'ok')
+}
+
+function moveStopToBatch(fromBatchId, stopIdx, toBatchId){
+  const from = generatedBatches.find(x=>x.id===fromBatchId)
+  const to   = generatedBatches.find(x=>x.id===toBatchId)
+  if(!from || !to) return
+  const stop = from.stops.splice(stopIdx, 1)[0]
+  to.stops.push(stop)
+  // Recalculate earnings
+  from.earnOut  = (from.stops.length * 3.25).toFixed(2)
+  from.earnTotal = (from.stops.length * 6.50).toFixed(2)
+  to.earnOut    = (to.stops.length * 3.25).toFixed(2)
+  to.earnTotal  = (to.stops.length * 6.50).toFixed(2)
+  // Remove empty batches
+  const idx = generatedBatches.findIndex(x=>x.id===fromBatchId)
+  if(from.stops.length === 0 && idx >= 0){
+    generatedBatches.splice(idx, 1)
+    showToast(`Stop moved to ${to.runner?.name||'unassigned'} route — empty route removed ✅`, 'ok')
+  } else {
+    showToast(`Stop moved to ${to.runner?.name||'unassigned'} route ✅`, 'ok')
+  }
+  renderDispatchPipeline()
+  updateLaunchButton()
+}
+
+function removeStopFromBatch(batchId, stopIdx){
+  const b = generatedBatches.find(x=>x.id===batchId)
+  if(!b) return
+  const removed = b.stops.splice(stopIdx, 1)[0]
+  b.earnOut   = (b.stops.length * 3.25).toFixed(2)
+  b.earnTotal = (b.stops.length * 6.50).toFixed(2)
+  if(b.stops.length === 0){
+    const idx = generatedBatches.findIndex(x=>x.id===batchId)
+    if(idx >= 0) generatedBatches.splice(idx, 1)
+    showToast(`${removed?.name||'Stop'} removed — empty route deleted`, 'info')
+  } else {
+    showToast(`${removed?.name||'Stop'} removed from route`, 'info')
+  }
+  renderDispatchPipeline()
+  updateLaunchButton()
+}
+
+function deleteBatchFromPreview(batchId){
+  const idx = generatedBatches.findIndex(x=>x.id===batchId)
+  if(idx < 0) return
+  const b = generatedBatches[idx]
+  generatedBatches.splice(idx, 1)
+  showToast(`Route ${b.id} removed (${b.stops.length} stops dropped)`, 'info')
+  renderDispatchPipeline()
+  updateLaunchButton()
+}
+
+function mergeBatches(idsStr){
+  const ids = idsStr.split('|')
+  const batches = ids.map(id => generatedBatches.find(x=>x.id===id)).filter(Boolean)
+  if(batches.length < 2) return
+
+  const primary = batches[0]
+  // Move all stops from other batches into primary
+  for(let i = 1; i < batches.length; i++){
+    primary.stops.push(...batches[i].stops)
+    const idx = generatedBatches.findIndex(x=>x.id===batches[i].id)
+    if(idx >= 0) generatedBatches.splice(idx, 1)
+  }
+  primary.earnOut   = (primary.stops.length * 3.25).toFixed(2)
+  primary.earnTotal = (primary.stops.length * 6.50).toFixed(2)
+  primary.hasSplit  = primary.stops.some(h=>h.service==='SPLIT')
+  showToast(`Routes merged into one — ${primary.stops.length} stops for ${primary.runner?.name||'runner'} ✅`, 'ok')
+  renderDispatchPipeline()
+  updateLaunchButton()
+}
+
+function updateLaunchButton(){
+  const btn = document.getElementById('dispatch-launch-btn')
+  if(!btn) return
+  if(generatedBatches.length > 0){
+    btn.style.display = 'block'
+    btn.textContent = `🚀 Launch ${generatedBatches.length} Route${generatedBatches.length!==1?'s':''} to Runners`
+  } else {
+    btn.style.display = 'none'
+  }
 }
 
 function initDispatchPage(){
