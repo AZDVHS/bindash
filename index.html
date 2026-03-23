@@ -4452,13 +4452,23 @@ async function populateRNDashboard(){
     const isPending  = !isApproved && (merged.status === 'pending_review' || merged.status === 'pending' || (!rnRow && !appRow))
     const isRejected = !isApproved && merged.status === 'rejected'
 
-    // Find zone — try merged.zone_id first, then fall back to Supabase lookup
-    let myZone = merged.zone_id ? ADMIN_ZONES.find(z => z.id === merged.zone_id) : null
-    if(!myZone && merged.zone_id && ADMIN_ZONES.length > 0){
-      // Zone exists in DB but not in local cache — try name match as fallback
-      console.log('[BinDash] zone_id not found in ADMIN_ZONES:', merged.zone_id)
-    }
-    // Also check if runner's ZIP matches a zone (for runners assigned to waitlist zones)
+    // Find zone — check coverage_zones first (admin-assigned), then zone_id, then ZIP
+    const mergedCoverageZones = (() => {
+      try {
+        if(merged.coverage_zones){
+          const p = typeof merged.coverage_zones === 'string' ? JSON.parse(merged.coverage_zones) : merged.coverage_zones
+          if(Array.isArray(p) && p.length) return p
+        }
+      } catch(e){}
+      return merged.zone_id ? [merged.zone_id] : []
+    })()
+
+    console.log('[BinDash] populateRNDashboard — coverage_zones:', mergedCoverageZones, '— zone_id:', merged.zone_id, '— zip:', merged.zip_code)
+
+    let myZone = mergedCoverageZones.length
+      ? ADMIN_ZONES.find(z => mergedCoverageZones.includes(z.id))
+      : null
+    // ZIP fallback
     if(!myZone && merged.zip_code){
       myZone = ADMIN_ZONES.find(z => z.zips?.includes(merged.zip_code))
     }
@@ -6532,23 +6542,40 @@ async function loadRNZones(){
     const runnerEmail = row.email    || currentUser?.email || ''
     const runnerName  = ((row.first_name||'') + ' ' + (row.last_name||'')).trim()
 
-    // 3. Find ALL zones this runner is associated with:
-    //    a) by zone_id FK
-    //    b) by ZIP exact match (handles waitlist zones created from their request)
-    //    c) by any zone that has them as a runner via RUNNERS array
+    // Parse coverage_zones from DB (JSON column or zone_id fallback)
+    const dbCoverageZones = (() => {
+      try {
+        if(row.coverage_zones){
+          const parsed = typeof row.coverage_zones === 'string' ? JSON.parse(row.coverage_zones) : row.coverage_zones
+          if(Array.isArray(parsed) && parsed.length) return parsed
+        }
+      } catch(e){}
+      return zoneId ? [zoneId] : []
+    })()
+
+    console.log('[BinDash] loadRNZones — email:', runnerEmail, '— zone_id:', zoneId, '— coverage_zones:', dbCoverageZones, '— zip:', runnerZip)
+
+    // Find ALL zones this runner is associated with:
+    // a) by zone_id FK
+    // b) by coverage_zones JSON column (admin-assigned zones)
+    // c) by ZIP exact match in zone's zips array
+    // d) by any zone found via RUNNERS in-memory array
     const assignedViaRunners = RUNNERS.filter(r =>
       r.email === runnerEmail || r.name === runnerName
     ).flatMap(r => r.coverageZones?.length ? r.coverageZones : (r.zoneId ? [r.zoneId] : []))
 
+    const allCoverageIds = [...new Set([...dbCoverageZones, ...assignedViaRunners])]
+
     const seen = new Set()
     const myZones = ADMIN_ZONES.filter(z => {
       if(seen.has(z.id)) return false
-      const match = (zoneId && z.id === zoneId) ||
-                    (runnerZip && z.zips?.includes(runnerZip)) ||
-                    assignedViaRunners.includes(z.id)
+      const match = allCoverageIds.includes(z.id) ||
+                    (runnerZip && z.zips?.includes(runnerZip))
       if(match) seen.add(z.id)
       return match
     })
+
+    console.log('[BinDash] loadRNZones — found', myZones.length, 'zones:', myZones.map(z=>z.name).join(', '))
 
     // 4. Load zone requests for this runner
     let zoneRequests = []
@@ -7351,13 +7378,14 @@ async function saveRnEdit(rId){
   renderRunnerList()
   syncZoneData()
 
-  // Persist to Supabase runners table
+  // Persist to Supabase runners table — save zone_id + coverage_zones JSON
   try {
     await _supa.from('runners').update({
-      zone_id:    r.zoneId,
-      status:     r.status.toLowerCase(),
-      vehicle_type: r.vehicle,
-      updated_at: new Date().toISOString(),
+      zone_id:        r.zoneId,
+      coverage_zones: r.coverageZones.length ? JSON.stringify(r.coverageZones) : null,
+      status:         r.status.toLowerCase(),
+      vehicle_type:   r.vehicle,
+      updated_at:     new Date().toISOString(),
     }).eq('id', rId)
   } catch(e){ console.warn('[BinDash] Runner update:', String(e?.message||e)) }
 
@@ -14026,7 +14054,16 @@ async function loadRunnersFromSupabase(){
         status:        'AVAILABLE',
         rating:        parseFloat(row.rating)||0,
         visits:        row.total_visits||0,
-        coverageZones: row.zone_id?[row.zone_id]:[],
+        coverageZones: (() => {
+          // Read from coverage_zones JSON column first, fall back to zone_id
+          try {
+            if(row.coverage_zones){
+              const parsed = typeof row.coverage_zones === 'string' ? JSON.parse(row.coverage_zones) : row.coverage_zones
+              if(Array.isArray(parsed) && parsed.length) return parsed
+            }
+          } catch(e){}
+          return row.zone_id ? [row.zone_id] : []
+        })(),
         color:         colors[i%colors.length],
         // Payout fields
         autoPay:         row.auto_pay         || false,
