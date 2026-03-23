@@ -9611,7 +9611,11 @@ function getHWServiceLabel(hw){
 }
 
 function getHWDayLabel(hw){
-  if(hw.service==='SPLIT') return `♻️ ${hw.dayRecycling} . 🗑️ ${hw.dayWaste}`
+  if(hw.service==='SPLIT'){
+    const r = hw.dayRecycling || '--'
+    const w = hw.dayWaste     || '--'
+    return `♻️ ${r} · 🗑️ ${w}`
+  }
   return hw.day || '--'
 }
 
@@ -9644,7 +9648,11 @@ function renderHomeownerCard(hw){
         <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="showReassignZone('${hw.id}')">↔</button>
       </div></div>
       <div class="dl"><div class="dl-l">Service</div><div>${getHWServiceLabel(hw)}</div></div>
-      <div class="dl"><div class="dl-l">Collection</div><div>${hw.freq} . ${getHWDayLabel(hw)}</div></div>
+      <div class="dl"><div class="dl-l">Collection</div><div>
+        ${hw.service==='SPLIT'
+          ? `${hw.freq||'weekly'} <span style="margin-left:4px">♻️ <strong>${hw.dayRecycling||'--'}</strong> · 🗑️ <strong>${hw.dayWaste||'--'}</strong></span>`
+          : `${hw.freq||'weekly'} · <strong>${hw.day||'--'}</strong>`}
+      </div></div>
       <div class="dl"><div class="dl-l">Runner</div><div style="display:flex;align-items:center;gap:6px">
         ${runner ? runner.name : '<span style="color:#ef4444">Unassigned</span>'}
         <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="showReassignRunner('${hw.id}')">↔</button>
@@ -10184,18 +10192,64 @@ function renderProfitOverview(){
 function showHWDetail(hwId){
   const hw = HOMEOWNERS.find(x=>x.id===hwId); if(!hw) return
   const availRunners = RUNNERS.filter(r=>r.status!=='INACTIVE')
+  const isSplit = hw.service === 'SPLIT'
+  const isMultiBin = hw.service === 'SPLIT' || hw.service === 'BOTH'
+  const days = ['Mon','Tue','Wed','Thu','Fri']
+
+  const daySelect = (id, val, label) => `
+    <div class="field">
+      <label>${label}</label>
+      <select id="${id}">
+        <option value="">-- Not set --</option>
+        ${days.map(d=>`<option value="${d}" ${(val||''===d||val===d)?'selected':''}>${d}</option>`).join('')}
+      </select>
+    </div>`
+
+  // Service type selector
+  const svcOpts = [
+    { val:'RECYCLING', label:'♻️ Recycling only',         split:false },
+    { val:'GENERAL',   label:'🗑 General Waste only',     split:false },
+    { val:'BOTH',      label:'♻️🗑 Both bins — same day', split:false },
+    { val:'SPLIT',     label:'♻️🗑 Split days — different days', split:true },
+  ]
+
   document.getElementById('modal-box').innerHTML=`
-  <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit -- ${hw.name}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
-  <div class="mb">
+  <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit — ${hw.name}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+  <div class="mb" style="max-height:70vh;overflow-y:auto">
+
+    <!-- Personal -->
     <div class="g2">
       <div class="field"><label>Name</label><input id="hwd-name" value="${hw.name}"></div>
       <div class="field"><label>Email</label><input id="hwd-email" value="${hw.email}"></div>
     </div>
     <div class="g2">
-      <div class="field"><label>Phone</label><input id="hwd-phone" value="${hw.phone}"></div>
-      <div class="field"><label>ZIP</label><input id="hwd-zip" value="${hw.zip}"></div>
+      <div class="field"><label>Phone</label><input id="hwd-phone" value="${hw.phone||''}"></div>
+      <div class="field"><label>ZIP</label><input id="hwd-zip" value="${hw.zip||''}"></div>
     </div>
-    <div class="field"><label>Address</label><input id="hwd-addr" value="${hw.address}"></div>
+    <div class="field"><label>Address</label><input id="hwd-addr" value="${hw.address||''}"></div>
+
+    <!-- Service type -->
+    <div class="field">
+      <label>Service Type</label>
+      <select id="hwd-service" onchange="hwDetailToggleSplit('${hwId}')">
+        ${svcOpts.map(o=>`<option value="${o.val}" ${hw.service===o.val?'selected':''}>${o.label}</option>`).join('')}
+      </select>
+    </div>
+
+    <!-- Collection days — shows 1 or 2 depending on service type -->
+    <div id="hwd-days-block">
+      ${isSplit ? `
+      <div class="g2">
+        ${daySelect('hwd-day-recycling', hw.dayRecycling, '♻️ Recycling Day')}
+        ${daySelect('hwd-day-waste', hw.dayWaste, '🗑 Waste Day')}
+      </div>` : `
+      <div class="g2">
+        ${daySelect('hwd-day', hw.day, 'Collection Day')}
+        <div class="field"><label style="color:var(--muted)">Day 2</label><input disabled placeholder="Only for split plans" style="opacity:.4"></div>
+      </div>`}
+    </div>
+
+    <!-- Zone + Runner -->
     <div class="g2">
       <div class="field"><label>Zone</label>
         <select id="hwd-zone">
@@ -10203,33 +10257,31 @@ function showHWDetail(hwId){
           ${ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>`<option value="${z.id}" ${hw.zoneId===z.id?'selected':''}>${z.name}</option>`).join('')}
         </select>
       </div>
-      <div class="field"><label>Assigned Runner</label>
+      <div class="field">
+        <label>Assigned Runner <span style="color:var(--muted);font-weight:400;font-size:10px">— gets first dispatch offer</span></label>
         <select id="hwd-runner">
-          <option value="">-- Unassigned --</option>
-          ${availRunners.map(r=>`<option value="${r.id}" ${hw.assignedRunner===r.id?'selected':''}>${r.name} . ${r.visitType}</option>`).join('')}
+          <option value="">— Unassigned —</option>
+          ${availRunners.map(r=>`<option value="${r.id}" ${hw.assignedRunner===r.id?'selected':''}>${r.name} · ${r.visitType}</option>`).join('')}
         </select>
       </div>
     </div>
-    <div class="g2">
-      <div class="field"><label>Status</label>
-        <select id="hwd-status">
-          <option value="active" ${hw.status==='active'?'selected':''}>Active</option>
-          <option value="paused" ${hw.status==='paused'?'selected':''}>Paused</option>
-          <option value="inactive" ${hw.status==='inactive'?'selected':''}>Inactive</option>
-        </select>
-      </div>
-      <div class="field"><label>Collection Day</label>
-        <select id="hwd-day">
-          ${['Mon','Tue','Wed','Thu','Fri'].map(d=>`<option ${hw.day===d?'selected':''}>${d}</option>`).join('')}
-        </select>
-      </div>
+
+    <!-- Status -->
+    <div class="field"><label>Status</label>
+      <select id="hwd-status">
+        <option value="active"   ${hw.status==='active'  ?'selected':''}>Active</option>
+        <option value="paused"   ${hw.status==='paused'  ?'selected':''}>Paused</option>
+        <option value="inactive" ${hw.status==='inactive'?'selected':''}>Inactive</option>
+      </select>
     </div>
-    <div class="field"><label>Internal Notes</label><input id="hwd-notes" value="${hw.notes||''}"></div>
-    ${hw.binPhotos && hw.binPhotos.length ? `
+
+    <div class="field"><label>Internal Notes</label><input id="hwd-notes" value="${hw.svcNotes||hw.notes||''}"></div>
+
+    ${hw.binPhotos?.length ? `
     <div style="margin-top:10px">
       <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Bin Photos (${hw.binPhotos.length})</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${hw.binPhotos.map((p,i)=>`<img src="${p}" onclick="window.open('${p}')" style="width:80px;height:80px;object-fit:cover;border-radius:8px;cursor:zoom-in;border:1px solid var(--border2)" title="Click to enlarge">`).join('')}
+        ${hw.binPhotos.map(p=>`<img src="${p}" onclick="window.open('${p}')" style="width:80px;height:80px;object-fit:cover;border-radius:8px;cursor:zoom-in;border:1px solid var(--border2)">`).join('')}
       </div>
     </div>` : ''}
   </div>
@@ -10240,20 +10292,112 @@ function showHWDetail(hwId){
   openM()
 }
 
-function saveHWDetail(hwId){
+// Toggle split-day fields when service type changes in edit modal
+function hwDetailToggleSplit(hwId){
+  const hw = HOMEOWNERS.find(x=>x.id===hwId) || {}
+  const svc = document.getElementById('hwd-service')?.value || ''
+  const block = document.getElementById('hwd-days-block')
+  if(!block) return
+  const days = ['Mon','Tue','Wed','Thu','Fri']
+  const daySelect = (id, val, label) =>
+    `<div class="field"><label>${label}</label><select id="${id}">
+      <option value="">-- Not set --</option>
+      ${days.map(d=>`<option value="${d}" ${val===d?'selected':''}>${d}</option>`).join('')}
+    </select></div>`
+
+  if(svc === 'SPLIT'){
+    block.innerHTML = `<div class="g2">
+      ${daySelect('hwd-day-recycling', hw.dayRecycling||'', '♻️ Recycling Day')}
+      ${daySelect('hwd-day-waste', hw.dayWaste||'', '🗑 Waste Day')}
+    </div>`
+  } else {
+    block.innerHTML = `<div class="g2">
+      ${daySelect('hwd-day', hw.day||'', 'Collection Day')}
+      <div class="field"><label style="color:var(--muted)">Day 2</label><input disabled placeholder="Split plans only" style="opacity:.4"></div>
+    </div>`
+  }
+}
+
+async function saveHWDetail(hwId){
   const hw = HOMEOWNERS.find(x=>x.id===hwId); if(!hw) return
-  hw.name    = document.getElementById('hwd-name').value
-  hw.email   = document.getElementById('hwd-email').value
-  hw.phone   = document.getElementById('hwd-phone').value
-  hw.zip     = document.getElementById('hwd-zip').value
-  hw.address = document.getElementById('hwd-addr').value
-  hw.zoneId  = document.getElementById('hwd-zone').value
-  hw.assignedRunner = document.getElementById('hwd-runner').value
-  hw.status  = document.getElementById('hwd-status').value
-  hw.day     = document.getElementById('hwd-day').value
-  hw.notes   = document.getElementById('hwd-notes').value
-  hw.initials = hw.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
-  closeM(); renderHomeownerList(); showToast(hw.name+' updated ✅','ok')
+  const btn = document.querySelector('#modal-box .btn-cyan')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+
+  const newName    = document.getElementById('hwd-name')?.value?.trim()    || hw.name
+  const newEmail   = document.getElementById('hwd-email')?.value?.trim()   || hw.email
+  const newPhone   = document.getElementById('hwd-phone')?.value?.trim()   || hw.phone
+  const newZip     = document.getElementById('hwd-zip')?.value?.trim()     || hw.zip
+  const newAddr    = document.getElementById('hwd-addr')?.value?.trim()    || hw.address
+  const newZone    = document.getElementById('hwd-zone')?.value            || hw.zoneId
+  const newRunner  = document.getElementById('hwd-runner')?.value          || null
+  const newStatus  = document.getElementById('hwd-status')?.value          || hw.status
+  const newNotes   = document.getElementById('hwd-notes')?.value?.trim()   || ''
+  const newService = document.getElementById('hwd-service')?.value         || hw.service
+
+  // Collection days — depends on service type
+  let newDay = hw.day, newDay2 = null, newDayR = null, newDayW = null
+  if(newService === 'SPLIT'){
+    newDayR  = document.getElementById('hwd-day-recycling')?.value || hw.dayRecycling || ''
+    newDayW  = document.getElementById('hwd-day-waste')?.value     || hw.dayWaste     || ''
+    newDay   = newDayR   // primary day = recycling day
+    newDay2  = newDayW
+  } else {
+    newDay   = document.getElementById('hwd-day')?.value || hw.day || ''
+    newDay2  = null; newDayR = null; newDayW = null
+  }
+
+  // Update in-memory
+  hw.name           = newName
+  hw.email          = newEmail
+  hw.phone          = newPhone
+  hw.zip            = newZip
+  hw.address        = newAddr
+  hw.zoneId         = newZone
+  hw.assignedRunner = newRunner || null
+  hw.status         = newStatus
+  hw.service        = newService
+  hw.day            = newDay
+  hw.dayRecycling   = newService==='SPLIT' ? newDayR : null
+  hw.dayWaste       = newService==='SPLIT' ? newDayW : null
+  hw.bins           = (newService==='SPLIT'||newService==='BOTH') ? 2 : 1
+  hw.svcNotes       = newNotes
+  hw.initials       = newName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
+
+  closeM()
+  renderHomeownerList()
+  showToast(newName + ' updated ✅', 'ok')
+
+  // Persist to BOTH Supabase tables by email (most reliable key)
+  const upd = {
+    first_name:       newName.split(' ')[0] || '',
+    last_name:        newName.split(' ').slice(1).join(' ') || '',
+    email:            newEmail,
+    phone:            newPhone || null,
+    zip_code:         newZip   || null,
+    street_address:   newAddr  || null,
+    zone_id:          newZone  || null,
+    assigned_runner:  newRunner || null,
+    status:           newStatus,
+    service_type:     newService === 'SPLIT' ? 'Split days'
+                    : newService === 'BOTH'  ? 'Recycling + General Waste'
+                    : newService === 'GENERAL' ? 'General Waste' : 'Recycling',
+    collection_day:   newDay   || null,
+    collection_day_2: newDay2  || null,
+    service_notes:    newNotes || null,
+    updated_at:       new Date().toISOString(),
+  }
+
+  try {
+    const r1 = await _supa.from('homeowners').update(upd).eq('email', newEmail)
+    const r2 = await _supa.from('homeowner_signups').update(upd).eq('email', newEmail)
+    if(r1?.error) console.warn('[BinDash] saveHWDetail homeowners:', r1.error.message)
+    if(r2?.error) console.warn('[BinDash] saveHWDetail signups:', r2.error.message)
+    console.log('[BinDash] Homeowner saved ✅', newName)
+  } catch(e){ console.warn('[BinDash] saveHWDetail:', String(e?.message||e)) }
+
+  // Refresh dispatch stats if panel is open
+  updateDispatchStats()
+  syncZoneData()
 }
 
 function showReassignZone(hwId){
@@ -14057,12 +14201,26 @@ async function loadHomeownersFromSupabase(){
       const fn = fromSignup ? (row.first_name||row.full_name?.split(' ')[0]||'') : (row.first_name||'')
       const ln = fromSignup ? (row.last_name||row.full_name?.split(' ').slice(1).join(' ')||'') : (row.last_name||'')
       const initials = ((fn[0]||'')+(ln[0]||'')).toUpperCase()||'?'
-      const day  = row.collection_day || '--'
+      const day  = row.collection_day   || null
       const day2 = row.collection_day_2 || null
-      const isSplit = (row.plan_id === 'plan_c') || (day2 && day2 !== day)
+      const svcRaw = (row.service_type||'').toLowerCase()
+
+      // Detect split: plan_c OR explicit 'split' in service_type string OR two distinct days set
+      const isSplit = row.plan_id === 'plan_c'
+        || svcRaw.includes('split')
+        || (day && day2 && day2 !== day)
+
+      // Detect service category
+      const service = isSplit ? 'SPLIT'
+        : (row.plan_id==='plan_b'||row.plan_id==='w2'||row.plan_id==='b2'||row.plan_id==='m2'
+           || svcRaw.includes('both') || svcRaw.includes('recycling + general') || svcRaw.includes('general waste + recycling'))
+          ? 'BOTH'
+        : (svcRaw.includes('general') || svcRaw.includes('waste')) ? 'GENERAL'
+        : 'RECYCLING'
+
       return {
         id:             row.id,
-        signupId:       fromSignup ? row.id : row.signup_id,
+        signupId:       fromSignup ? row.id : (row.signup_id||null),
         name:           (fn+' '+ln).trim()||row.email,
         initials,
         email:          row.email,
@@ -14071,26 +14229,24 @@ async function loadHomeownersFromSupabase(){
         city:           row.city||'--',
         zip:            row.zip_code||'',
         zoneId:         row.zone_id||null,
-        service:        isSplit ? 'SPLIT' :
-                        (row.plan_id==='plan_b'||row.plan_id==='w2'||row.plan_id==='b2'||row.plan_id==='m2') ? 'BOTH' :
-                        ((row.service_type||'').toLowerCase().includes('general')||
-                         (row.service_type||'').toLowerCase().includes('waste')) ? 'GENERAL' : 'RECYCLING',
+        service,
         freq:           row.frequency||'weekly',
-        day,
-        dayRecycling:   isSplit ? day  : null,
-        dayWaste:       isSplit ? day2 : null,
+        day:            day || '--',
+        dayRecycling:   isSplit ? (day  || null) : null,
+        dayWaste:       isSplit ? (day2 || null) : null,
         plan:           row.plan_id||'plan_a',
         assignedRunner: row.assigned_runner||null,
         status:         'active',
-        bins:     isSplit ? 2 : (row.plan_id==='plan_b'||row.plan_id==='w2'||row.plan_id==='b2'||row.plan_id==='m2') ? 2 : 1,
-        storage:  row.bin_location  || '--',
-        gate:     row.gate_type     || '--',
-        gateCode: row.gate_code     || '',
-        pets:     row.pet_info      || 'None',
-        curb:     row.curb_notes    || '--',
-        svcNotes: row.service_notes || '',
-        binPhotos: (() => { try { return row.bin_photos ? JSON.parse(row.bin_photos) : [] } catch(e){ return [] } })(),
-        color:'linear-gradient(135deg,var(--cyan),var(--blue))',
+        bins:           isSplit || service==='BOTH' ? 2 : 1,
+        storage:        row.bin_location  || '--',
+        gate:           row.gate_type     || '--',
+        gateCode:       row.gate_code     || '',
+        pets:           row.pet_info      || 'None',
+        curb:           row.curb_notes    || '--',
+        svcNotes:       row.service_notes || '',
+        notes:          row.service_notes || '',
+        binPhotos:      (() => { try { return row.bin_photos ? JSON.parse(row.bin_photos) : [] } catch(e){ return [] } })(),
+        color:          'linear-gradient(135deg,var(--cyan),var(--blue))',
       }
     }
 
