@@ -10389,22 +10389,23 @@ async function saveHWDetail(hwId){
     updated_at:       new Date().toISOString(),
   }
 
-  // homeowners table — ONLY columns from the confirmed schema (no service_notes, no collection_day_2)
+  // homeowners table — confirmed schema columns only
   const updHomeowners = {
-    first_name:      updSignups.first_name,
-    last_name:       updSignups.last_name,
-    email:           newEmail,
-    phone:           newPhone || null,
-    zip_code:        newZip   || null,
-    street_address:  newAddr  || null,
-    city:            hw.city  || null,
-    zone_id:         newZone  || null,
-    assigned_runner: newRunner || null,
-    service_type:    updSignups.service_type,
-    collection_day:  newDay   || null,
-    plan_id:         hw.plan  || null,
-    status:          newStatus,
-    updated_at:      new Date().toISOString(),
+    first_name:       updSignups.first_name,
+    last_name:        updSignups.last_name,
+    email:            newEmail,
+    phone:            newPhone || null,
+    zip_code:         newZip   || null,
+    street_address:   newAddr  || null,
+    city:             hw.city  || null,
+    zone_id:          newZone  || null,
+    assigned_runner:  newRunner || null,
+    service_type:     updSignups.service_type,
+    collection_day:   newDay   || null,
+    collection_day_2: newDay2  || null,
+    plan_id:          hw.plan  || null,
+    status:           newStatus,
+    updated_at:       new Date().toISOString(),
   }
 
   try {
@@ -14328,19 +14329,33 @@ async function loadHomeownersFromSupabase(){
       }
     }
 
-    // Merge: homeowners table takes precedence per email, then signups fill the gaps
+    // Build lookup of signups by email for merging
+    const signupsByEmail = {}
+    signupData.forEach(row => {
+      if(row.email) signupsByEmail[row.email.toLowerCase()] = row
+    })
+
     const seenEmails = new Set()
 
-    // First pass: homeowners table
+    // First pass: homeowners table — merge with signup data for extra fields
     hwData.forEach(row => {
       if(!row.email) return
       const key = row.email.toLowerCase()
       if(seenEmails.has(key)) return
       seenEmails.add(key)
-      HOMEOWNERS.push(toRow(row, false))
+      // Merge: supplement homeowners row with signup row for fields only in signups
+      const signup = signupsByEmail[key] || {}
+      const merged = {
+        ...signup,   // signup fields as base (has collection_day_2, service_notes etc)
+        ...row,      // homeowners fields override (more authoritative for status, zone etc)
+        // Explicitly prefer signup values for split-day fields if homeowners row is blank
+        collection_day_2: row.collection_day_2 || signup.collection_day_2 || null,
+        service_notes:    row.service_notes    || signup.service_notes    || null,
+      }
+      HOMEOWNERS.push(toRow(merged, false))
     })
 
-    // Second pass: signups — add anyone NOT already in homeowners table
+    // Second pass: signups not already covered by homeowners table
     signupData.forEach(row => {
       if(!row.email) return
       const key = row.email.toLowerCase()
