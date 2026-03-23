@@ -4006,6 +4006,9 @@ function setCurrentUser(supabaseUser){
 }
 
 // -- POPULATE HW DASHBOARD from currentUser + Supabase --------
+// Global helper — wraps Supabase queries that may throw (e.g. maybeSingle on empty)
+async function safeQuery(q){ try { return await q } catch(e){ console.warn('[BinDash] safeQuery:', String(e?.message||e)); return null } }
+
 async function populateHWDashboard(){
   if(!currentUser) return
 
@@ -4407,8 +4410,6 @@ async function populateRNDashboard(){
   const grEl = document.getElementById('rn-home-subtitle')
 
   try {
-    // Fetch runner data + zones in parallel
-    const safeQuery = async (q) => { try { const r = await q; return r } catch(e){ return null } }
     const zoneLoadPromise = ADMIN_ZONES.length === 0 ? loadZonesFromSupabase().catch(e=>console.warn('[BinDash] zone load:', e)) : Promise.resolve()
 
     const [rnRes, appRes] = await Promise.all([
@@ -6509,14 +6510,30 @@ async function loadRNZones(){
     if(!runnerEmail){ el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Please log in to view your zones.</div>'; return }
 
     if(!row || !row.id){
+      // Try runners table first
       const rRes = await safeQuery(_supa.from('runners').select('*').eq('email', runnerEmail).maybeSingle())
       if(rRes?.data){ row = rRes.data; window._rnRow = { ...(window._rnRow||{}), ...row } }
       else {
+        // Try runner_applications by email
         const aRes = await safeQuery(_supa.from('runner_applications').select('*').eq('email', runnerEmail).maybeSingle())
         if(aRes?.data){ row = aRes.data; window._rnRow = { ...(window._rnRow||{}), ...row } }
+        else {
+          // Ultimate fallback: build row from auth metadata
+          try {
+            const { data: { user } } = await _supa.auth.getUser()
+            row = {
+              email:      user?.email || runnerEmail,
+              first_name: user?.user_metadata?.first_name || '',
+              last_name:  user?.user_metadata?.last_name  || '',
+              zip_code:   user?.user_metadata?.zip_code   || '',
+              zone_id:    null, coverage_zones: null,
+            }
+            window._rnRow = { ...(window._rnRow||{}), ...row }
+          } catch(e){}
+        }
       }
     }
-    row = window._rnRow || row || {}
+    row = window._rnRow || row || { email: runnerEmail }
 
     const runnerId  = row.id       || null
     const runnerZip = row.zip_code || ''
@@ -6537,8 +6554,11 @@ async function loadRNZones(){
     // B: zones.assigned_runner = runner.id
     let zonesByAssignment = []
     if(runnerId){
-      const res = await safeQuery(_supa.from('zones').select('id').eq('assigned_runner', runnerId))
-      zonesByAssignment = (res?.data||[]).map(z=>z.id)
+      try {
+        const res = await _supa.from('zones').select('id').eq('assigned_runner', runnerId)
+        if(!res?.error) zonesByAssignment = (res?.data||[]).map(z=>z.id)
+        else console.warn('[BinDash] zones.assigned_runner query:', res.error.message)
+      } catch(e){ console.warn('[BinDash] zones assignment query:', e) }
     }
 
     // C: runner_zone_requests approved
@@ -6581,11 +6601,15 @@ async function loadRNZones(){
     const myZips = [...new Set(myZones.flatMap(z=>z.zips||(z.zip?[z.zip]:[])).concat(runnerZip?[runnerZip]:[]))]
 
     // Approved HOs assigned to this runner by runner ID
+    // NOTE: assigned_runner column may not exist yet — wrapped in try/catch
     if(runnerId){
-      const res = await safeQuery(_supa.from('homeowner_signups')
-        .select('id,first_name,last_name,street_address,zip_code,collection_day,service_type,plan_id,status')
-        .eq('assigned_runner', runnerId).eq('status','approved').limit(50))
-      myHomeowners = res?.data || []
+      try {
+        const res = await _supa.from('homeowner_signups')
+          .select('id,first_name,last_name,street_address,zip_code,collection_day,service_type,plan_id,status')
+          .eq('assigned_runner', runnerId).eq('status','approved').limit(50)
+        if(!res?.error) myHomeowners = res?.data || []
+        else console.warn('[BinDash] assigned_runner query (may need SQL migration):', res.error.message)
+      } catch(e){ console.warn('[BinDash] assigned_runner query:', e) }
     }
     // Fallback: approved HOs in runner's zone ZIPs
     if(!myHomeowners.length && myZips.length){
