@@ -10389,7 +10389,7 @@ async function saveHWDetail(hwId){
     updated_at:       new Date().toISOString(),
   }
 
-  // homeowners table — only columns confirmed to exist in this table
+  // homeowners table — ONLY columns from the confirmed schema (no service_notes, no collection_day_2)
   const updHomeowners = {
     first_name:      updSignups.first_name,
     last_name:       updSignups.last_name,
@@ -10397,11 +10397,12 @@ async function saveHWDetail(hwId){
     phone:           newPhone || null,
     zip_code:        newZip   || null,
     street_address:  newAddr  || null,
+    city:            hw.city  || null,
     zone_id:         newZone  || null,
     assigned_runner: newRunner || null,
     service_type:    updSignups.service_type,
     collection_day:  newDay   || null,
-    service_notes:   newNotes || null,
+    plan_id:         hw.plan  || null,
     status:          newStatus,
     updated_at:      new Date().toISOString(),
   }
