@@ -4865,7 +4865,11 @@ function filterAdminJobs(){
       <td style="font-size:12px">${j.runner_name||'<span style="color:var(--muted)">Unassigned</span>'}</td>
       <td><span style="background:${col}22;color:${col};font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">${icon} ${j.status||'--'}</span></td>
       <td style="font-size:12px;color:var(--green);font-weight:600">$${parseFloat(j.amount||3.25).toFixed(2)}</td>
-      <td>${['accepted','in_progress'].includes(j.status)?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fbbf24" onclick="adminMarkJobLate('${j.id}')">⚠️ Flag</button>`:''}${j.status==='complete'?'<span style="color:#22c55e;font-size:11px">✓</span>':''}</td>
+      <td style="display:flex;gap:4px;align-items:center">
+        ${['accepted','in_progress'].includes(j.status)?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fbbf24" onclick="adminMarkJobLate('${j.id}')">⚠️ Flag</button>`:''}
+        ${j.status==='complete'?'<span style="color:#22c55e;font-size:11px">✓</span>':''}
+        <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#ef4444;padding:3px 6px" onclick="confirmDeleteJob('${j.id}','${(j.homeowner_email||'').replace(/'/g,'')}')" title="Delete job">🗑</button>
+      </td>
     </tr>`
   }).join('')
 }
@@ -4876,6 +4880,33 @@ async function adminMarkJobLate(jobId){
     showToast('Job flagged as late', 'info')
     await loadAdminJobs()
   } catch(e){ showToast('Error: '+e.message,'err') }
+}
+
+function confirmDeleteJob(jobId, hwEmail){
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh" style="background:rgba(239,68,68,.06)">
+    <div style="font-size:15px;font-weight:700;color:#fca5a5">🗑 Delete Job</div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div style="font-size:14px;margin-bottom:8px">Delete this job for <strong>${hwEmail||'homeowner'}</strong>?</div>
+    <div style="font-size:12px;color:var(--muted)">This permanently removes the job record. Completed jobs should be archived instead — use this only for test data or errors.</div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-red" onclick="closeM();deleteJob('${jobId}')">🗑 Delete</button>
+  </div>`
+  openM()
+}
+
+async function deleteJob(jobId){
+  try {
+    await _supa.from('jobs').delete().eq('id', jobId)
+    // Remove from cache
+    _adminJobsCache = _adminJobsCache.filter(j => j.id !== jobId)
+    filterAdminJobs()
+    showToast('Job deleted ✅', 'ok')
+  } catch(e){ showToast('Delete failed: '+String(e?.message||e), 'err') }
 }
 
 // -- LOAD RUNNER EARNINGS FROM SUPABASE ------------
@@ -10277,14 +10308,15 @@ async function assignHWRunner(hwId, runnerId){
   hw.assignedRunner=runnerId
   renderHomeownerList()
   const rn=RUNNERS.find(r=>r.id===runnerId)
-  showToast(hw.name+' assigned to '+(rn?.name||runnerId)+' ✅','ok')
-  // Persist to Supabase -- try homeowners table first, then homeowner_signups
+  showToast(hw.name+' assigned to '+(rn?.name||'runner')+' ✅','ok')
+  // Persist to Supabase — update all matching rows by email (most reliable key)
   try {
-    const r1 = await _supa.from('homeowners').update({assigned_runner:runnerId,updated_at:new Date().toISOString()}).eq('id',hwId)
-    if(r1?.error){
-      // fallback: might be signup id
-      await _supa.from('homeowner_signups').update({assigned_runner:runnerId,updated_at:new Date().toISOString()}).eq('id',hwId)
-    }
+    const upd = { assigned_runner: runnerId, updated_at: new Date().toISOString() }
+    // Update homeowners table
+    await _supa.from('homeowners').update(upd).eq('email', hw.email)
+    // Update homeowner_signups table (keep in sync)
+    await _supa.from('homeowner_signups').update(upd).eq('email', hw.email)
+    console.log('[BinDash] Runner assignment saved ✅', hw.name, '→', rn?.name||runnerId)
   } catch(e){ console.warn('[BinDash] assignHWRunner save:', String(e?.message||e)) }
 }
 
@@ -12701,7 +12733,6 @@ async function _adGenerateBatchesAsync(){
     generatedBatches.forEach(batch => {
       const expiresAt = new Date(now.getTime() + batch.windowMins * 60 * 1000).toISOString()
       const scheduledDate = (() => {
-        // Find next occurrence of the collection day
         const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
         const targetIdx = dayNames.findIndex(d => d.toLowerCase() === (batch.day||'').toLowerCase())
         if(targetIdx < 0) return now.toISOString().slice(0,10)
@@ -12711,6 +12742,18 @@ async function _adGenerateBatchesAsync(){
       })()
 
       batch.stops.forEach(hw => {
+        // For split-day homeowners: only create job if this batch day matches their relevant day
+        // (recycling day → recycling job, waste day → waste job)
+        let serviceType = hw.service === 'BOTH' ? 'Recycling + General Waste'
+          : hw.service === 'GENERAL' ? 'General Waste' : 'Recycling'
+
+        if(hw.service === 'SPLIT'){
+          const batchDay   = (batch.day||'').toLowerCase()
+          const recycDay   = (hw.dayRecycling||'').toLowerCase()
+          const wasteDay   = (hw.dayWaste||'').toLowerCase()
+          serviceType      = batchDay === recycDay ? 'Recycling' : batchDay === wasteDay ? 'General Waste' : 'Recycling'
+        }
+
         jobRows.push({
           batch_id:          batch.id,
           homeowner_email:   hw.email,
@@ -12718,7 +12761,7 @@ async function _adGenerateBatchesAsync(){
           runner_name:       batch.runner?.name || null,
           visit_type:        'BIN_OUT',
           job_type:          'subscription',
-          service_type:      hw.service === 'BOTH' ? 'Recycling + General Waste' : hw.service === 'GENERAL' ? 'General Waste' : 'Recycling',
+          service_type:      serviceType,
           status:            batch.runner ? 'offered' : 'unassigned',
           offer_type:        batch.offerType || 'zone',
           offer_expires_at:  expiresAt,
@@ -14051,9 +14094,19 @@ async function loadHomeownersFromSupabase(){
       }
     }
 
-    hwData.forEach(row => HOMEOWNERS.push(toRow(row, false)))
+    // Deduplicate by email — homeowners table takes precedence, skip signups with same email
+    const seenEmails = new Set()
+    hwData.forEach(row => {
+      if(!row.email || seenEmails.has(row.email.toLowerCase())) return
+      seenEmails.add(row.email.toLowerCase())
+      HOMEOWNERS.push(toRow(row, false))
+    })
     if(useSignupFallback){
-      signupData.forEach(row => HOMEOWNERS.push(toRow(row, true)))
+      signupData.forEach(row => {
+        if(!row.email || seenEmails.has(row.email.toLowerCase())) return
+        seenEmails.add(row.email.toLowerCase())
+        HOMEOWNERS.push(toRow(row, true))
+      })
     }
     console.log('[BinDash] Homeowners loaded:', HOMEOWNERS.length, '-- source:', useSignupFallback ? 'signups fallback' : 'homeowners table')
     updateOverviewCounts()
