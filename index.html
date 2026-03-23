@@ -4413,8 +4413,8 @@ async function populateRNDashboard(){
     const zoneLoadPromise = ADMIN_ZONES.length === 0 ? loadZonesFromSupabase().catch(e=>console.warn('[BinDash] zone load:', e)) : Promise.resolve()
 
     const [rnRes, appRes] = await Promise.all([
-      safeQuery(_supa.from('runners').select('*').eq('email', currentUser.email).maybeSingle()),
-      safeQuery(_supa.from('runner_applications').select('*').eq('email', currentUser.email).maybeSingle()),
+      safeQuery(_supa.from('runners').select('*').ilike('email', currentUser.email).maybeSingle()),
+      safeQuery(_supa.from('runner_applications').select('*').ilike('email', currentUser.email).maybeSingle()),
     ])
     const rnRow  = rnRes?.data  || null
     const appRow = appRes?.data || null
@@ -5450,8 +5450,8 @@ async function initApp(){
         const email = user?.email || ''
         // Check runners table first — fastest approval signal
         const [rnTableRes, appRes, adminRes] = await Promise.all([
-          _supa.from('runners').select('id').eq('email', email).maybeSingle(),
-          _supa.from('runner_applications').select('id').eq('email', email).maybeSingle(),
+          _supa.from('runners').select('id').ilike('email', email).maybeSingle(),
+          _supa.from('runner_applications').select('id').ilike('email', email).maybeSingle(),
           _supa.from('admins').select('role,is_active').eq('email', email).maybeSingle(),
         ])
         if(adminRes?.data?.is_active) role = adminRes.data.role || 'admin'
@@ -5594,8 +5594,8 @@ async function doLogin(){
     if(!role){
       try {
         const [rnTableRes, appRes, adminRes] = await Promise.all([
-          _supa.from('runners').select('id').eq('email', email).maybeSingle(),
-          _supa.from('runner_applications').select('id').eq('email', email).maybeSingle(),
+          _supa.from('runners').select('id').ilike('email', email).maybeSingle(),
+          _supa.from('runner_applications').select('id').ilike('email', email).maybeSingle(),
           _supa.from('admins').select('role,is_active').eq('email', email).maybeSingle(),
         ])
         if(adminRes?.data?.is_active) role = adminRes.data.role || 'admin'
@@ -6508,14 +6508,15 @@ async function loadRNZones(){
       try { const { data: { user } } = await _supa.auth.getUser(); runnerEmail = user?.email } catch(e){}
     }
     if(!runnerEmail){ el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Please log in to view your zones.</div>'; return }
+    runnerEmail = runnerEmail.trim().toLowerCase()
 
     if(!row || !row.id){
-      // Try runners table first
-      const rRes = await safeQuery(_supa.from('runners').select('*').eq('email', runnerEmail).maybeSingle())
+      // Try runners table first — use ilike for case-insensitive email match
+      const rRes = await safeQuery(_supa.from('runners').select('*').ilike('email', runnerEmail).maybeSingle())
       if(rRes?.data){ row = rRes.data; window._rnRow = { ...(window._rnRow||{}), ...row } }
       else {
         // Try runner_applications by email
-        const aRes = await safeQuery(_supa.from('runner_applications').select('*').eq('email', runnerEmail).maybeSingle())
+        const aRes = await safeQuery(_supa.from('runner_applications').select('*').ilike('email', runnerEmail).maybeSingle())
         if(aRes?.data){ row = aRes.data; window._rnRow = { ...(window._rnRow||{}), ...row } }
         else {
           // Ultimate fallback: build row from auth metadata
@@ -6565,7 +6566,7 @@ async function loadRNZones(){
     let zonesByRequest = []
     try {
       const { data: reqs } = await _supa.from('runner_zone_requests')
-        .select('zone_id').eq('runner_email', runnerEmail)
+        .select('zone_id').ilike('runner_email', runnerEmail)
         .in('status', ['approved', 'approved_via_runner'])
       zonesByRequest = (reqs||[]).map(r=>r.zone_id).filter(Boolean)
       console.log('[BinDash] loadRNZones — zone_requests found:', reqs?.length, 'zones:', zonesByRequest)
@@ -7388,19 +7389,18 @@ async function saveRnEdit(rId){
   // This is the table runners can read from their own session (no RLS blocker)
   // Upsert each assigned zone as 'approved' so runner dashboard shows them
   if(r.email && r.coverageZones.length){
+    const rEmail = r.email.trim().toLowerCase()
     try {
-      // First clear old approved requests for this runner (remove deassigned zones)
       await _supa.from('runner_zone_requests')
         .update({ status: 'removed', updated_at: new Date().toISOString() })
-        .eq('runner_email', r.email)
+        .ilike('runner_email', rEmail)
         .eq('status', 'approved')
 
-      // Insert new approved entries for each assigned zone
       const zoneInserts = r.coverageZones.map(zId => {
         const zone = ADMIN_ZONES.find(z => z.id === zId)
         return {
           runner_name:  r.name,
-          runner_email: r.email,
+          runner_email: rEmail,
           zip_code:     zone?.zips?.[0] || zone?.zip || r.zip || '',
           zone_id:      zId,
           zone_name:    zone?.name || zId,
@@ -7415,11 +7415,11 @@ async function saveRnEdit(rId){
       console.log('[BinDash] Zone assignments written to runner_zone_requests ✅', r.coverageZones.length, 'zones')
     } catch(e){ console.warn('[BinDash] Zone request write:', String(e?.message||e)) }
   } else if(r.email && !r.coverageZones.length){
-    // Runner removed from all zones — clear their approved requests
+    const rEmail = r.email.trim().toLowerCase()
     try {
       await _supa.from('runner_zone_requests')
         .update({ status: 'removed', updated_at: new Date().toISOString() })
-        .eq('runner_email', r.email).eq('status', 'approved')
+        .ilike('runner_email', rEmail).eq('status', 'approved')
     } catch(e){}
   }
 
