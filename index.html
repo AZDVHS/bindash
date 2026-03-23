@@ -10370,8 +10370,8 @@ async function saveHWDetail(hwId){
   renderHomeownerList()
   showToast(newName + ' updated ✅', 'ok')
 
-  // Persist to BOTH Supabase tables by email (most reliable key)
-  const upd = {
+  // homeowner_signups has all columns including collection_day_2
+  const updSignups = {
     first_name:       newName.split(' ')[0] || '',
     last_name:        newName.split(' ').slice(1).join(' ') || '',
     email:            newEmail,
@@ -10380,7 +10380,6 @@ async function saveHWDetail(hwId){
     street_address:   newAddr  || null,
     zone_id:          newZone  || null,
     assigned_runner:  newRunner || null,
-    status:           newStatus,
     service_type:     newService === 'SPLIT' ? 'Split days'
                     : newService === 'BOTH'  ? 'Recycling + General Waste'
                     : newService === 'GENERAL' ? 'General Waste' : 'Recycling',
@@ -10390,15 +10389,34 @@ async function saveHWDetail(hwId){
     updated_at:       new Date().toISOString(),
   }
 
+  // homeowners table — only columns confirmed to exist in this table
+  const updHomeowners = {
+    first_name:      updSignups.first_name,
+    last_name:       updSignups.last_name,
+    email:           newEmail,
+    phone:           newPhone || null,
+    zip_code:        newZip   || null,
+    street_address:  newAddr  || null,
+    zone_id:         newZone  || null,
+    assigned_runner: newRunner || null,
+    service_type:    updSignups.service_type,
+    collection_day:  newDay   || null,
+    service_notes:   newNotes || null,
+    status:          newStatus,
+    updated_at:      new Date().toISOString(),
+  }
+
   try {
-    const r1 = await _supa.from('homeowners').update(upd).eq('email', originalEmail)
-    const r2 = await _supa.from('homeowner_signups').update(upd).eq('email', originalEmail)
-    if(r1?.error) console.warn('[BinDash] saveHWDetail homeowners:', r1.error.message)
-    if(r2?.error) console.warn('[BinDash] saveHWDetail signups:', r2.error.message)
-    console.log('[BinDash] Homeowner saved ✅', newName, '| day:', newDay, '| runner:', newRunner)
-    // Reload from DB so changes propagate globally (dispatch, zone data, etc.)
+    const [r1, r2] = await Promise.all([
+      _supa.from('homeowners').update(updHomeowners).eq('email', originalEmail),
+      _supa.from('homeowner_signups').update(updSignups).eq('email', originalEmail),
+    ])
+    if(r1?.error) console.warn('[BinDash] homeowners update error:', r1.error.message)
+    if(r2?.error) console.warn('[BinDash] signups update error:', r2.error.message)
+    const ok1 = !r1?.error, ok2 = !r2?.error
+    console.log('[BinDash] HW save — homeowners:', ok1?'✅':'❌', '| signups:', ok2?'✅':'❌', '| day:', newDay, '| runner:', newRunner, '| email match:', originalEmail)
     await loadHomeownersFromSupabase()
-  } catch(e){ console.warn('[BinDash] saveHWDetail:', String(e?.message||e)) }
+  } catch(e){ console.warn('[BinDash] saveHWDetail exception:', String(e?.message||e)) }
 
   updateDispatchStats()
   syncZoneData()
