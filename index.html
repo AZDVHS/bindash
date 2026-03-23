@@ -6561,13 +6561,15 @@ async function loadRNZones(){
       } catch(e){ console.warn('[BinDash] zones assignment query:', e) }
     }
 
-    // C: runner_zone_requests approved
+    // C: runner_zone_requests — all approved statuses (includes admin-assigned and via approval flow)
     let zonesByRequest = []
     try {
       const { data: reqs } = await _supa.from('runner_zone_requests')
-        .select('zone_id').eq('runner_email', runnerEmail).eq('status','approved')
+        .select('zone_id').eq('runner_email', runnerEmail)
+        .in('status', ['approved', 'approved_via_runner'])
       zonesByRequest = (reqs||[]).map(r=>r.zone_id).filter(Boolean)
-    } catch(e){}
+      console.log('[BinDash] loadRNZones — zone_requests found:', reqs?.length, 'zones:', zonesByRequest)
+    } catch(e){ console.warn('[BinDash] zone requests query:', e) }
 
     // D: ZIP match (fallback only)
     const zonesByZip = runnerZip
@@ -7381,6 +7383,45 @@ async function saveRnEdit(rId){
       updated_at:     new Date().toISOString(),
     }).eq('id', rId)
   } catch(e){ console.warn('[BinDash] Runner update:', String(e?.message||e)) }
+
+  // CRITICAL: Also write zone assignments to runner_zone_requests (keyed by email)
+  // This is the table runners can read from their own session (no RLS blocker)
+  // Upsert each assigned zone as 'approved' so runner dashboard shows them
+  if(r.email && r.coverageZones.length){
+    try {
+      // First clear old approved requests for this runner (remove deassigned zones)
+      await _supa.from('runner_zone_requests')
+        .update({ status: 'removed', updated_at: new Date().toISOString() })
+        .eq('runner_email', r.email)
+        .eq('status', 'approved')
+
+      // Insert new approved entries for each assigned zone
+      const zoneInserts = r.coverageZones.map(zId => {
+        const zone = ADMIN_ZONES.find(z => z.id === zId)
+        return {
+          runner_name:  r.name,
+          runner_email: r.email,
+          zip_code:     zone?.zips?.[0] || zone?.zip || r.zip || '',
+          zone_id:      zId,
+          zone_name:    zone?.name || zId,
+          status:       'approved',
+          type:         'expansion',
+          notes:        'Admin-assigned',
+          created_at:   new Date().toISOString(),
+          updated_at:   new Date().toISOString(),
+        }
+      })
+      await _supa.from('runner_zone_requests').insert(zoneInserts)
+      console.log('[BinDash] Zone assignments written to runner_zone_requests ✅', r.coverageZones.length, 'zones')
+    } catch(e){ console.warn('[BinDash] Zone request write:', String(e?.message||e)) }
+  } else if(r.email && !r.coverageZones.length){
+    // Runner removed from all zones — clear their approved requests
+    try {
+      await _supa.from('runner_zone_requests')
+        .update({ status: 'removed', updated_at: new Date().toISOString() })
+        .eq('runner_email', r.email).eq('status', 'approved')
+    } catch(e){}
+  }
 
   showToast(r.name + ' updated ✅', 'ok')
 }
@@ -11844,13 +11885,31 @@ async function approveRunner(appId){
   showToast(app.name+' approved ✅ -- added to runner pool','ok')
 
   // Clear any pending zone requests from this runner (they now have an assigned zone)
+  // Also write an 'approved' entry so runner dashboard can read zone by email
   try {
     await _supa.from('runner_zone_requests')
       .update({ status:'approved_via_runner', updated_at:new Date().toISOString() })
       .eq('runner_email', app.email)
       .eq('status','pending')
+
+    // Write the assigned zone as an approved entry readable by the runner
+    const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+    if(zone){
+      await _supa.from('runner_zone_requests').upsert({
+        runner_name:  app.name,
+        runner_email: app.email,
+        zip_code:     zone.zips?.[0] || zone.zip || app.zip || '',
+        zone_id:      zoneId,
+        zone_name:    zone.name,
+        status:       'approved',
+        type:         'expansion',
+        notes:        'Admin-approved',
+        created_at:   new Date().toISOString(),
+        updated_at:   new Date().toISOString(),
+      }, { onConflict: 'runner_email,zone_id', ignoreDuplicates: false })
+    }
     loadRunnerZoneRequestsBadge()
-  } catch(e){ console.warn('[BinDash] zone request clear:', e) }
+  } catch(e){ console.warn('[BinDash] zone request clear/write:', e) }
   const _rnZoneName = ADMIN_ZONES.find(z=>z.id===zoneId)?.name||'Your zone'
   // Send approval email with their own referral code
   sendEmail(app.email, 'Welcome to BinDash! Your runner account is active',
