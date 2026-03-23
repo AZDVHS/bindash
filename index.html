@@ -10324,6 +10324,8 @@ async function saveHWDetail(hwId){
   const btn = document.querySelector('#modal-box .btn-cyan')
   if(btn){ btn.disabled=true; btn.textContent='Saving...' }
 
+  const originalEmail = hw.email  // capture before any edit
+
   const newName    = document.getElementById('hwd-name')?.value?.trim()    || hw.name
   const newEmail   = document.getElementById('hwd-email')?.value?.trim()   || hw.email
   const newPhone   = document.getElementById('hwd-phone')?.value?.trim()   || hw.phone
@@ -10389,14 +10391,15 @@ async function saveHWDetail(hwId){
   }
 
   try {
-    const r1 = await _supa.from('homeowners').update(upd).eq('email', newEmail)
-    const r2 = await _supa.from('homeowner_signups').update(upd).eq('email', newEmail)
+    const r1 = await _supa.from('homeowners').update(upd).eq('email', originalEmail)
+    const r2 = await _supa.from('homeowner_signups').update(upd).eq('email', originalEmail)
     if(r1?.error) console.warn('[BinDash] saveHWDetail homeowners:', r1.error.message)
     if(r2?.error) console.warn('[BinDash] saveHWDetail signups:', r2.error.message)
-    console.log('[BinDash] Homeowner saved ✅', newName)
+    console.log('[BinDash] Homeowner saved ✅', newName, '| day:', newDay, '| runner:', newRunner)
+    // Reload from DB so changes propagate globally (dispatch, zone data, etc.)
+    await loadHomeownersFromSupabase()
   } catch(e){ console.warn('[BinDash] saveHWDetail:', String(e?.message||e)) }
 
-  // Refresh dispatch stats if panel is open
   updateDispatchStats()
   syncZoneData()
 }
@@ -10457,11 +10460,10 @@ async function assignHWRunner(hwId, runnerId){
   // Persist to Supabase — update all matching rows by email (most reliable key)
   try {
     const upd = { assigned_runner: runnerId, updated_at: new Date().toISOString() }
-    // Update homeowners table
     await _supa.from('homeowners').update(upd).eq('email', hw.email)
-    // Update homeowner_signups table (keep in sync)
     await _supa.from('homeowner_signups').update(upd).eq('email', hw.email)
     console.log('[BinDash] Runner assignment saved ✅', hw.name, '→', rn?.name||runnerId)
+    await loadHomeownersFromSupabase()
   } catch(e){ console.warn('[BinDash] assignHWRunner save:', String(e?.message||e)) }
 }
 
@@ -14243,26 +14245,17 @@ async function loadHomeownersFromSupabase(){
   try {
     HOMEOWNERS.length = 0
 
-    // Primary: homeowners table (new approvals)
-    let hwData = [], hwErr = null
-    try {
-      const res = await _supa.from('homeowners').select('*').eq('status','active').order('created_at',{ascending:false})
-      hwData = res?.data || []
-      hwErr  = res?.error?.message || null
-    } catch(e){ hwErr = String(e?.message||e) }
+    // Load from BOTH tables simultaneously — homeowners table takes precedence per email
+    let hwData = [], signupData = []
+    const [hwRes, sigRes] = await Promise.all([
+      safeQuery(_supa.from('homeowners').select('*').eq('status','active').order('created_at',{ascending:false})),
+      safeQuery(_supa.from('homeowner_signups').select('*').eq('status','approved').order('created_at',{ascending:false})),
+    ])
+    hwData     = hwRes?.data     || []
+    signupData = sigRes?.data    || []
 
-    // Fallback: homeowner_signups with status=approved (existing approvals)
-    let signupData = [], signupErr = null
-    try {
-      const res = await _supa.from('homeowner_signups').select('*').eq('status','approved').order('created_at',{ascending:false})
-      signupData = res?.data || []
-      signupErr  = res?.error?.message || null
-    } catch(e){ signupErr = String(e?.message||e) }
-
-    // If homeowners table has records, use it exclusively (avoids duplicates)
-    // Only fall back to signups if homeowners table is empty
-    const useSignupFallback = hwData.length === 0
-    const hwEmails = new Set(hwData.map(r=>r.email))
+    if(hwRes?.error)  console.warn('[BinDash] homeowners table error:', hwRes.error.message)
+    if(sigRes?.error) console.warn('[BinDash] homeowner_signups error:', sigRes.error.message)
 
     const toRow = (row, fromSignup=false) => {
       const fn = fromSignup ? (row.first_name||row.full_name?.split(' ')[0]||'') : (row.first_name||'')
@@ -14272,12 +14265,10 @@ async function loadHomeownersFromSupabase(){
       const day2 = row.collection_day_2 || null
       const svcRaw = (row.service_type||'').toLowerCase()
 
-      // Detect split: plan_c OR explicit 'split' in service_type string OR two distinct days set
       const isSplit = row.plan_id === 'plan_c'
         || svcRaw.includes('split')
         || (day && day2 && day2 !== day)
 
-      // Detect service category
       const service = isSplit ? 'SPLIT'
         : (row.plan_id==='plan_b'||row.plan_id==='w2'||row.plan_id==='b2'||row.plan_id==='m2'
            || svcRaw.includes('both') || svcRaw.includes('recycling + general') || svcRaw.includes('general waste + recycling'))
@@ -14314,24 +14305,34 @@ async function loadHomeownersFromSupabase(){
         notes:          row.service_notes || '',
         binPhotos:      (() => { try { return row.bin_photos ? JSON.parse(row.bin_photos) : [] } catch(e){ return [] } })(),
         color:          'linear-gradient(135deg,var(--cyan),var(--blue))',
+        _source:        fromSignup ? 'signup' : 'homeowners',
       }
     }
 
-    // Deduplicate by email — homeowners table takes precedence, skip signups with same email
+    // Merge: homeowners table takes precedence per email, then signups fill the gaps
     const seenEmails = new Set()
+
+    // First pass: homeowners table
     hwData.forEach(row => {
-      if(!row.email || seenEmails.has(row.email.toLowerCase())) return
-      seenEmails.add(row.email.toLowerCase())
+      if(!row.email) return
+      const key = row.email.toLowerCase()
+      if(seenEmails.has(key)) return
+      seenEmails.add(key)
       HOMEOWNERS.push(toRow(row, false))
     })
-    if(useSignupFallback){
-      signupData.forEach(row => {
-        if(!row.email || seenEmails.has(row.email.toLowerCase())) return
-        seenEmails.add(row.email.toLowerCase())
-        HOMEOWNERS.push(toRow(row, true))
-      })
-    }
-    console.log('[BinDash] Homeowners loaded:', HOMEOWNERS.length, '-- source:', useSignupFallback ? 'signups fallback' : 'homeowners table')
+
+    // Second pass: signups — add anyone NOT already in homeowners table
+    signupData.forEach(row => {
+      if(!row.email) return
+      const key = row.email.toLowerCase()
+      if(seenEmails.has(key)) return
+      seenEmails.add(key)
+      HOMEOWNERS.push(toRow(row, true))
+    })
+
+    console.log('[BinDash] Homeowners loaded:', HOMEOWNERS.length,
+      '(', hwData.length, 'from homeowners table,', signupData.length, 'from signups,',
+      HOMEOWNERS.length, 'total after dedup)')
     updateOverviewCounts()
     renderHomeownerList()
   } catch(e){ console.warn('[BinDash] loadHomeowners exception:', String(e?.message||e)) }
