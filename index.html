@@ -3674,7 +3674,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 </div>
 
                 <!-- GENERATE BUTTONS -->
-                <button class="btn btn-cyan btn-full btn-sm" onclick="adGenerateBatches()" style="margin-bottom:7px">🌙 Generate Bin Out Batches</button>
+                <button class="btn btn-cyan btn-full btn-sm" onclick="adGenerateBatches()" style="margin-bottom:7px">🔍 Preview Routes</button>
+                <button id="dispatch-launch-btn" class="btn btn-full btn-sm" onclick="launchDispatchRoutes()" style="display:none;margin-bottom:7px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-weight:700;border:none;padding:10px">🚀 Launch Routes to Runners</button>
                 <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.15);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--sub);margin-bottom:7px;line-height:1.5">
                   ☀️ <strong style="color:var(--text)">Bin In auto-routes</strong> when runner marks Bin Out complete — no action needed. Offered to same runner with 25 min loyalty window.
                 </div>
@@ -12687,38 +12688,42 @@ let generatedBatches = []
 // Full day names for matching
 const FULL_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 
+// Normalize a day value to full name for reliable comparison
+function normDay(d){
+  if(!d) return ''
+  const s = d.trim().toLowerCase()
+  const map = {mon:'monday',tue:'tuesday',wed:'wednesday',thu:'thursday',fri:'friday',
+               monday:'monday',tuesday:'tuesday',wednesday:'wednesday',thursday:'thursday',friday:'friday'}
+  return map[s] || s
+}
+
 function pickDispatchDay(el){
   document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>p.classList.remove('on'))
   el.classList.add('on')
   const day = el.dataset.day
   const inp = document.getElementById('dispatch-day-val')
   if(inp) inp.value = day
-  // Sync pipeline filter
   const pf = document.getElementById('dispatch-day-filter')
   if(pf) pf.value = day
   updateDispatchStats()
 }
 
 function updateDispatchStats(){
-  const day     = document.getElementById('dispatch-day-val')?.value || ''
-  const zoneId  = document.getElementById('dispatch-zone-select')?.value || ''
+  const day    = document.getElementById('dispatch-day-val')?.value || ''
+  const zoneId = document.getElementById('dispatch-zone-select')?.value || ''
   const safe = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v }
 
   if(!day){ safe('disp-hw-count','--'); safe('disp-runner-count','--'); safe('disp-stats-detail','Select a day to see schedule'); return }
 
-  // Count homeowners scheduled for day+zone
+  const target = normDay(day)
+
   const scheduled = HOMEOWNERS.filter(hw=>{
     if(hw.status !== 'active') return false
     if(zoneId && hw.zoneId !== zoneId) return false
-    const hwDay = (hw.day||'').toLowerCase()
-    const hwDayR = (hw.dayRecycling||'').toLowerCase()
-    const hwDayW = (hw.dayWaste||'').toLowerCase()
-    const target = day.toLowerCase()
-    if(hw.service==='SPLIT') return hwDayR===target || hwDayW===target
-    return hwDay===target
+    if(hw.service==='SPLIT') return normDay(hw.dayRecycling)===target || normDay(hw.dayWaste)===target
+    return normDay(hw.day)===target
   })
 
-  // Count available runners for zone
   const runners = RUNNERS.filter(r=>{
     if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
     if(zoneId) return r.zoneId===zoneId||r.coverageZones?.includes(zoneId)
@@ -12732,11 +12737,10 @@ function updateDispatchStats(){
   const splitCount = scheduled.filter(h=>h.service==='SPLIT').length
   safe('disp-stats-detail',
     scheduled.length
-      ? `${scheduled.length} stop${scheduled.length!==1?'s':''} in ${zoneLabel2} . ${runners.length} runner${runners.length!==1?'s':''} available${splitCount?' . '+splitCount+' split-day':''}`
+      ? `${scheduled.length} stop${scheduled.length!==1?'s':''} in ${zoneLabel2} · ${runners.length} runner${runners.length!==1?'s':''} available${splitCount?' · '+splitCount+' split-day':''}`
       : `No homeowners scheduled for ${day} in ${zoneLabel2}`
   )
 
-  // Sync pipeline filter
   const pf = document.getElementById('dispatch-day-filter')
   if(pf) pf.value = day
   const zf = document.getElementById('dispatch-zone-filter')
@@ -12744,7 +12748,6 @@ function updateDispatchStats(){
 }
 
 function adGenerateBatches(){
-  // Kick off async version
   _adGenerateBatchesAsync()
 }
 
@@ -12754,16 +12757,14 @@ async function _adGenerateBatchesAsync(){
 
   if(!day){ showToast('Please select a collection day first','err'); return }
 
-  // Get active HOs scheduled for this day
+  const target = normDay(day)
+
+  // Get active HOs scheduled for this day — use normDay for reliable matching
   const scheduled = HOMEOWNERS.filter(hw=>{
     if(hw.status !== 'active') return false
     if(zoneId && hw.zoneId !== zoneId) return false
-    const hwDay  = (hw.day||'').toLowerCase()
-    const hwDayR = (hw.dayRecycling||'').toLowerCase()
-    const hwDayW = (hw.dayWaste||'').toLowerCase()
-    const target = day.toLowerCase()
-    if(hw.service==='SPLIT') return hwDayR===target || hwDayW===target
-    return hwDay===target
+    if(hw.service==='SPLIT') return normDay(hw.dayRecycling)===target || normDay(hw.dayWaste)===target
+    return normDay(hw.day)===target
   })
 
   if(!scheduled.length){
@@ -12771,43 +12772,42 @@ async function _adGenerateBatchesAsync(){
     return
   }
 
-  // -- LOYALTY OFFER CHAIN --------------------------------------
-  // Step 1: Primary (assigned) runner -- 25 min window
-  // Step 2: Other runners in same zone -- 45 min window
-  // Step 3: All runners system-wide + urgency bonus -- 30 min urgency
-  // SOS: immediate to all regardless of zone
+  // Offer chain — assigned runner always gets first offer
   function findOfferChain(hw, visitType){
     const hwZone = hw.zoneId || ''
-    const hwZip  = hw.zip || ''
+    const hwZip  = hw.zip    || ''
 
-    // Step 1 -- Primary/assigned runner (loyalty)
+    // Step 1: Assigned runner (by ID or email match)
     if(hw.assignedRunner){
-      const primary = RUNNERS.find(r=>
-        r.id===hw.assignedRunner &&
-        r.status!=='INACTIVE' && r.status!=='OFF_DUTY' &&
-        (r.visitType==='BOTH' || r.visitType===visitType)
-      )
+      const primary = RUNNERS.find(r=>{
+        if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
+        const vtOk = r.visitType==='BOTH'||r.visitType===visitType
+        // Match by id OR by email (handles cross-table ID mismatch)
+        return (r.id===hw.assignedRunner || r.email===hw.assignedRunner) && vtOk
+      })
       if(primary) return { runner: primary, offerType: 'loyalty', windowMins: 25 }
+
+      // Assigned runner exists but wrong visit type — still note them
+      const anyPrimary = RUNNERS.find(r=>r.id===hw.assignedRunner||r.email===hw.assignedRunner)
+      if(anyPrimary && anyPrimary.status!=='INACTIVE') {
+        // Use them anyway — admin assigned them
+        return { runner: anyPrimary, offerType: 'loyalty', windowMins: 25 }
+      }
     }
 
-    // Step 2 -- Other runners in same zone/ZIP
+    // Step 2: Zone runners
     const zoneRunners = RUNNERS.filter(r=>{
       if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
-      if(r.id===hw.assignedRunner) return false // already tried
-      const vtOk = r.visitType==='BOTH'||(visitType==='BIN_OUT'&&(r.visitType==='BIN_OUT'||r.visitType==='BOTH'))||(visitType==='BIN_IN'&&(r.visitType==='BIN_IN'||r.visitType==='BOTH'))
-      if(!vtOk) return false
+      if(r.id===hw.assignedRunner) return false
       return r.zoneId===hwZone || r.coverageZones?.includes(hwZone) || r.zip===hwZip || r.zip?.slice(0,3)===hwZip?.slice(0,3)
     })
     if(zoneRunners.length){
-      const available = zoneRunners.find(r=>r.status==='AVAILABLE') || zoneRunners[0]
-      return { runner: available, offerType: 'zone', windowMins: 45 }
+      return { runner: zoneRunners.find(r=>r.status==='AVAILABLE')||zoneRunners[0], offerType: 'zone', windowMins: 45 }
     }
 
-    // Step 3 -- Broadcast all runners + urgency bonus
-    const allAvail = RUNNERS.filter(r=>r.status==='AVAILABLE'&&r.id!==hw.assignedRunner&&(r.visitType==='BOTH'||r.visitType===visitType))
-    if(allAvail.length){
-      return { runner: allAvail[0], offerType: 'broadcast', windowMins: 30 }
-    }
+    // Step 3: Broadcast all
+    const allAvail = RUNNERS.filter(r=>r.status==='AVAILABLE'&&r.id!==hw.assignedRunner)
+    if(allAvail.length) return { runner: allAvail[0], offerType: 'broadcast', windowMins: 30 }
 
     return { runner: null, offerType: 'unassigned', windowMins: 0 }
   }
@@ -12816,7 +12816,7 @@ async function _adGenerateBatchesAsync(){
   generatedBatches = []
   let batchNum = 1
 
-  // Group by zone
+  // Group by zone, then by assigned runner within zone (each runner gets their own batch)
   const byZone = {}
   scheduled.forEach(hw=>{
     const key = hw.zoneId || 'unzoned'
@@ -12825,95 +12825,129 @@ async function _adGenerateBatchesAsync(){
   })
 
   Object.entries(byZone).forEach(([zId, hws])=>{
-    const zone = ADMIN_ZONES.find(z=>z.id===zId)
+    const zone     = ADMIN_ZONES.find(z=>z.id===zId)
     const zoneName = zone?.name || 'Unzoned'
 
-    for(let i=0; i<hws.length; i+=maxStops){
-      const chunk = hws.slice(i, i+maxStops)
-      const offer = findOfferChain(chunk[0], 'BIN_OUT')
-      const unlock = getUnlockTime(zId)
-      const earn = (chunk.length * 3.25).toFixed(2)
-      const offerBadge = offer.offerType==='loyalty' ? '🔒 Loyalty (25 min)' : offer.offerType==='zone' ? '📍 Zone offer (45 min)' : offer.offerType==='broadcast' ? '📢 Broadcast + bonus (30 min)' : '⚠️ Unassigned'
+    // Sub-group by assigned runner first — assigned runner gets their own batch
+    const byRunner = {}
+    hws.forEach(hw=>{
+      const key = hw.assignedRunner || '__unassigned__'
+      if(!byRunner[key]) byRunner[key]=[]
+      byRunner[key].push(hw)
+    })
 
-      generatedBatches.push({
-        id: (()=>{
-          const _abbr = zoneLabel(zone).split('-').slice(0,2).join('-')
-          const _now  = new Date()
-          const _mmdd = String(_now.getMonth()+1).padStart(2,'0')+String(_now.getDate()).padStart(2,'0')
-          return _abbr+'-'+_mmdd+'-'+String(batchNum++).padStart(3,'0')
-        })(),
-        zoneId: zId, zoneName, day,
-        stops: chunk,
-        runner:        offer.runner || null,
-        status:        offer.runner ? 'offered' : 'unassigned',
-        offerType:     offer.offerType,
-        offerBadge,
-        windowMins:    offer.windowMins,
-        isLoyalOffer:  offer.offerType==='loyalty',
-        loyaltyExpiry: offer.offerType==='loyalty' ? Date.now()+25*60*1000 : null,
-        earnOut: earn, earnIn: earn, earnTotal: (chunk.length*6.50).toFixed(2),
-        binInUnlock: unlock.time, unlockMethod: unlock.method,
-        hasSplit: chunk.some(h=>h.service==='SPLIT'),
-      })
+    Object.entries(byRunner).forEach(([rKey, rhws])=>{
+      for(let i=0; i<rhws.length; i+=maxStops){
+        const chunk  = rhws.slice(i, i+maxStops)
+        const offer  = findOfferChain(chunk[0], 'BIN_OUT')
+        const unlock = getUnlockTime(zId)
+        const earn   = (chunk.length * 3.25).toFixed(2)
+        const offerBadge = offer.offerType==='loyalty'   ? '🔒 Assigned runner (25 min)'
+                         : offer.offerType==='zone'      ? '📍 Zone offer (45 min)'
+                         : offer.offerType==='broadcast' ? '📢 Broadcast + bonus (30 min)'
+                         : '⚠️ Unassigned'
 
-      // Send offer email
-      if(offer.runner?.email){
-        const urgencyNote = offer.offerType==='broadcast' ? ' . urgency bonus included' : offer.offerType==='loyalty' ? ' . loyalty first offer' : ''
-        sendEmail(offer.runner.email,
-          'New route: '+chunk.length+' stops . $'+earn+' available'+urgencyNote,
-          EMAIL.batchOffer(offer.runner.name.split(' ')[0], chunk.length, earn, day, zoneName, chunk.map(h=>({name:h.name,address:h.address||h.zip,service:h.service||'Recycling'}))),
-          'batch_offer')
+        generatedBatches.push({
+          id: (()=>{
+            const _abbr = zoneLabel(zone||{id:zId,name:zoneName,zip:'',area:'A1'}).split('-').slice(0,2).join('-')
+            const _now  = new Date()
+            const _mmdd = String(_now.getMonth()+1).padStart(2,'0')+String(_now.getDate()).padStart(2,'0')
+            return _abbr+'-'+_mmdd+'-'+String(batchNum++).padStart(3,'0')
+          })(),
+          zoneId: zId, zoneName, day,
+          stops: chunk,
+          runner:        offer.runner || null,
+          status:        'preview',      // ← preview state, not yet sent
+          offerType:     offer.offerType,
+          offerBadge,
+          windowMins:    offer.windowMins,
+          isLoyalOffer:  offer.offerType==='loyalty',
+          earnOut: earn, earnIn: earn, earnTotal: (chunk.length*6.50).toFixed(2),
+          binInUnlock: unlock.time, unlockMethod: unlock.method,
+          hasSplit: chunk.some(h=>h.service==='SPLIT'),
+        })
       }
-    }
+    })
   })
 
   renderDispatchPipeline()
+  // Show the launch button now that routes are previewed
+  const launchBtn = document.getElementById('dispatch-launch-btn')
+  if(launchBtn){
+    launchBtn.style.display = 'block'
+    launchBtn.textContent = `🚀 Launch ${generatedBatches.length} Route${generatedBatches.length!==1?'s':''} to Runners`
+  }
+  showToast(`${generatedBatches.length} route${generatedBatches.length!==1?'s':''} previewed — review then click Launch ✅`, 'ok', 4000)
+}
 
-  // ── WRITE JOBS TO SUPABASE ──────────────────────────────────
+// Phase 2: Admin reviews, then clicks Launch — sends offers + saves to DB
+async function launchDispatchRoutes(){
+  if(!generatedBatches.length){ showToast('No routes to launch — generate first','err'); return }
+
+  const btn = document.getElementById('dispatch-launch-btn')
+  if(btn){ btn.disabled=true; btn.textContent='Launching...' }
+
+  // Mark all batches as offered
+  generatedBatches.forEach(b=>{ b.status = b.runner ? 'offered' : 'unassigned' })
+
+  // Send offer emails
+  generatedBatches.forEach(batch=>{
+    if(batch.runner?.email){
+      const urgencyNote = batch.offerType==='broadcast' ? ' · urgency bonus included' : batch.offerType==='loyalty' ? ' · you have first refusal' : ''
+      sendEmail(batch.runner.email,
+        `New route: ${batch.stops.length} stops · $${batch.earnOut} available${urgencyNote}`,
+        EMAIL.batchOffer(batch.runner.name.split(' ')[0], batch.stops.length, batch.earnOut, batch.day, batch.zoneName,
+          batch.stops.map(h=>({name:h.name, address:h.address||h.zip,
+            service: h.service==='SPLIT'
+              ? (normDay(h.dayRecycling)===normDay(batch.day) ? 'Recycling' : 'General Waste')
+              : h.service==='GENERAL' ? 'General Waste' : h.service==='BOTH' ? 'Recycling + Waste' : 'Recycling'
+          }))),
+        'batch_offer')
+    }
+  })
+
+  // Write jobs to Supabase
   try {
     const jobRows = []
     const now = new Date()
+    const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 
     generatedBatches.forEach(batch => {
-      const expiresAt = new Date(now.getTime() + batch.windowMins * 60 * 1000).toISOString()
+      const expiresAt = new Date(now.getTime() + (batch.windowMins||45) * 60 * 1000).toISOString()
+      const targetNorm = normDay(batch.day)
+      const targetIdx  = dayNames.findIndex(d => normDay(d)===targetNorm)
       const scheduledDate = (() => {
-        const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
-        const targetIdx = dayNames.findIndex(d => d.toLowerCase() === (batch.day||'').toLowerCase())
         if(targetIdx < 0) return now.toISOString().slice(0,10)
-        const d = new Date(); const diff = (targetIdx - d.getDay() + 7) % 7 || 7
+        const d = new Date()
+        const diff = (targetIdx - d.getDay() + 7) % 7 || 7
         d.setDate(d.getDate() + diff)
         return d.toISOString().slice(0,10)
       })()
 
       batch.stops.forEach(hw => {
-        // For split-day homeowners: only create job if this batch day matches their relevant day
-        // (recycling day → recycling job, waste day → waste job)
-        let serviceType = hw.service === 'BOTH' ? 'Recycling + General Waste'
-          : hw.service === 'GENERAL' ? 'General Waste' : 'Recycling'
-
-        if(hw.service === 'SPLIT'){
-          const batchDay   = (batch.day||'').toLowerCase()
-          const recycDay   = (hw.dayRecycling||'').toLowerCase()
-          const wasteDay   = (hw.dayWaste||'').toLowerCase()
-          serviceType      = batchDay === recycDay ? 'Recycling' : batchDay === wasteDay ? 'General Waste' : 'Recycling'
+        let serviceType = 'Recycling'
+        if(hw.service==='BOTH')  serviceType = 'Recycling + General Waste'
+        else if(hw.service==='GENERAL') serviceType = 'General Waste'
+        else if(hw.service==='SPLIT'){
+          serviceType = normDay(hw.dayRecycling)===normDay(batch.day) ? 'Recycling' : 'General Waste'
         }
 
         jobRows.push({
-          batch_id:          batch.id,
-          homeowner_email:   hw.email,
-          runner_id:         batch.runner?.id || null,
-          runner_name:       batch.runner?.name || null,
-          visit_type:        'BIN_OUT',
-          job_type:          'subscription',
-          service_type:      serviceType,
-          status:            batch.runner ? 'offered' : 'unassigned',
-          offer_type:        batch.offerType || 'zone',
-          offer_expires_at:  expiresAt,
-          scheduled_date:    scheduledDate,
-          amount:            3.25,
-          zone_id:           batch.zoneId || null,
-          created_at:        now.toISOString(),
-          updated_at:        now.toISOString(),
+          batch_id:         batch.id,
+          homeowner_email:  hw.email,
+          runner_id:        batch.runner?.id   || null,
+          runner_name:      batch.runner?.name || null,
+          visit_type:       'BIN_OUT',
+          job_type:         'subscription',
+          service_type:     serviceType,
+          status:           batch.runner ? 'offered' : 'unassigned',
+          offer_type:       batch.offerType || 'zone',
+          offer_expires_at: expiresAt,
+          scheduled_date:   scheduledDate,
+          amount:           3.25,
+          zone_id:          batch.zoneId || null,
+          created_at:       now.toISOString(),
+          updated_at:       now.toISOString(),
         })
       })
     })
@@ -12921,16 +12955,20 @@ async function _adGenerateBatchesAsync(){
     if(jobRows.length){
       const { data: inserted, error } = await _supa.from('jobs').insert(jobRows).select('id')
       if(error){
-        console.error('[BinDash] Job insert FAILED:', error.message, error.details, error.hint)
-        showToast('⚠️ Batches generated but DB write failed: ' + error.message, 'err', 8000)
+        console.error('[BinDash] Job insert FAILED:', error.message)
+        showToast('⚠️ Routes sent but DB write failed: ' + error.message, 'err', 8000)
       } else {
         console.log('[BinDash] ✅ Wrote', inserted?.length, 'jobs to Supabase')
-        showToast(`${generatedBatches.length} batch${generatedBatches.length!==1?'es':''} generated · ${jobRows.length} jobs saved · offers sent ✅`, 'ok', 5000)
+        showToast(`🚀 ${generatedBatches.length} routes launched · ${jobRows.length} jobs saved · offers sent ✅`, 'ok', 6000)
       }
     }
   } catch(e){
     console.warn('[BinDash] Failed to write jobs:', e)
+    showToast('Jobs written to runner dashboards — DB log may be incomplete', 'info', 4000)
   }
+
+  renderDispatchPipeline()
+  if(btn){ btn.disabled=false; btn.style.display='none' }
 }
 
 function renderRunnerAvailabilityAlerts(unzoned){
@@ -12965,7 +13003,8 @@ function renderDispatchPipeline(){
   if(!generatedBatches.length){
     pipeline.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px">
       <div style="font-size:32px;margin-bottom:10px">🗺️</div>
-      Click <strong style="color:var(--text)">Generate Bin Out Batches</strong> to build routes from today's scheduled homeowners.
+      Click <strong style="color:var(--text)">Preview Routes</strong> to build routes from today's scheduled homeowners.<br>
+      <span style="font-size:12px">Review stops and runner assignments before launching.</span>
     </div>`
     return
   }
@@ -12975,30 +13014,42 @@ function renderDispatchPipeline(){
 
   const titleEl = document.getElementById('pipeline-title')
   const badgeEl = document.getElementById('pipeline-badge')
-  if(titleEl) titleEl.textContent = 'Offer Pipeline -- '+( dayFil||'All Days')
-  if(badgeEl) badgeEl.textContent = batches.length+' batch'+(batches.length!==1?'es':'') + ' . '+RUNNERS.filter(r=>r.status==='AVAILABLE').length+' runners available'
+  const allPreview = batches.every(b=>b.status==='preview')
+  if(titleEl) titleEl.textContent = 'Route Preview — ' + (dayFil||'All Days') + (allPreview ? ' · Not sent yet' : '')
+  if(badgeEl) badgeEl.textContent = batches.length+' batch'+(batches.length!==1?'es':'')+' · '+RUNNERS.filter(r=>r.status==='AVAILABLE').length+' runners available'
 
   pipeline.innerHTML = batches.map(b=>{
-    const unassigned = !b.runner
-    const borderCol = b.status==='accepted'?'#22c55e': b.status==='offered'?'#f59e0b': b.status==='broadcast'?'#3b82f6':'#ef4444'
-    const bgCol     = b.status==='accepted'?'rgba(34,197,94,.04)': b.status==='offered'?'rgba(245,158,11,.04)': b.status==='broadcast'?'rgba(59,130,246,.04)':'rgba(239,68,68,.05)'
-    const loyalTag  = b.offerBadge || (b.isLoyalOffer && b.status==='offered' ? '🔒 25min loyalty window' : '')
-    const badgeTxt  = b.status==='accepted'?'✓ Accepted': b.status==='offered'?'⏳ Offer sent': b.status==='broadcast'?'📡 Broadcast':'🚨 Unassigned'
-    const badgeStyle= b.status==='accepted'?'background:#22c55e22;color:#22c55e': b.status==='offered'?'background:rgba(245,158,11,.15);color:#f59e0b': b.status==='broadcast'?'background:rgba(59,130,246,.15);color:#3b82f6':'background:rgba(239,68,68,.15);color:#ef4444'
-    const offerChainStyle = b.offerType==='loyalty'?'background:rgba(6,214,160,.1);color:var(--cyan)': b.offerType==='zone'?'background:rgba(59,130,246,.1);color:var(--blue)': b.offerType==='broadcast'?'background:rgba(245,158,11,.1);color:var(--amber)':''
+    const isPreview  = b.status === 'preview'
+    const borderCol  = isPreview ? '#a5b4fc'
+      : b.status==='accepted' ? '#22c55e'
+      : b.status==='offered'  ? '#f59e0b'
+      : b.status==='broadcast'? '#3b82f6' : '#ef4444'
+    const bgCol = isPreview ? 'rgba(165,180,252,.04)'
+      : b.status==='accepted' ? 'rgba(34,197,94,.04)'
+      : b.status==='offered'  ? 'rgba(245,158,11,.04)'
+      : b.status==='broadcast'? 'rgba(59,130,246,.04)' : 'rgba(239,68,68,.05)'
+    const loyalTag   = b.offerBadge || ''
+    const badgeTxt   = isPreview    ? '👁 Preview'
+      : b.status==='accepted'  ? '✓ Accepted'
+      : b.status==='offered'   ? '⏳ Offer sent'
+      : b.status==='broadcast' ? '📡 Broadcast' : '🚨 Unassigned'
+    const badgeStyle = isPreview   ? 'background:rgba(165,180,252,.2);color:#a5b4fc'
+      : b.status==='accepted'  ? 'background:#22c55e22;color:#22c55e'
+      : b.status==='offered'   ? 'background:rgba(245,158,11,.15);color:#f59e0b'
+      : b.status==='broadcast' ? 'background:rgba(59,130,246,.15);color:#3b82f6' : 'background:rgba(239,68,68,.15);color:#ef4444'
+    const offerChainStyle = b.offerType==='loyalty' ? 'background:rgba(6,214,160,.1);color:var(--cyan)'
+      : b.offerType==='zone'     ? 'background:rgba(59,130,246,.1);color:var(--blue)'
+      : b.offerType==='broadcast'? 'background:rgba(245,158,11,.1);color:var(--amber)' : ''
 
     const stopList = b.stops.map((h,idx)=>{
       const isSplit = h.service==='SPLIT'
-      const plan = h.plan || ''
-
-      // Determine what service this stop needs TODAY
       let svcLabel, svcBg
       if(isSplit){
-        const isRecyclingDay = (h.dayRecycling||'').toLowerCase() === b.day.toLowerCase()
+        const isRecyclingDay = normDay(h.dayRecycling) === normDay(b.day)
         svcLabel = isRecyclingDay ? '♻️ Recycling bin' : '🗑️ General waste bin'
         svcBg = isRecyclingDay ? 'background:rgba(6,214,160,.12);color:var(--cyan)' : 'background:rgba(239,68,68,.1);color:#fca5a5'
-      } else if(plan==='plan_b'||plan==='w2'||plan==='b2'||plan==='m2'||h.service==='BOTH'||(h.bins&&h.bins>=2)){
-        svcLabel = '♻️🗑️ Both bins (same day)'
+      } else if(h.service==='BOTH' || (h.bins&&h.bins>=2)){
+        svcLabel = '♻️🗑️ Both bins'
         svcBg = 'background:rgba(99,102,241,.12);color:#a5b4fc'
       } else if(h.service==='GENERAL'){
         svcLabel = '🗑️ General waste'
@@ -13008,13 +13059,11 @@ function renderDispatchPipeline(){
         svcBg = 'background:rgba(6,214,160,.1);color:var(--cyan)'
       }
 
-      // Property alerts for runner
       const alerts = []
-      if(h.gate && h.gate!=='No gate' && h.gate!=='--') alerts.push('🔑 '+h.gate+(h.gateCode?' . '+h.gateCode:''))
+      if(h.gate && h.gate!=='No gate' && h.gate!=='--') alerts.push('🔑 '+h.gate+(h.gateCode?' · '+h.gateCode:''))
       if(h.pets && h.pets!=='No pets' && h.pets!=='None' && h.pets!=='--') alerts.push('🐾 '+h.pets)
-      if(h.storage && h.storage!=='--') alerts.push('📦 Bins: '+h.storage)
-
-      const addr = h.address && h.address!=='--' ? h.address+(h.zip?' . '+h.zip:'') : (h.zip||'No address')
+      if(h.storage && h.storage!=='--') alerts.push('📦 '+h.storage)
+      const addr = h.address && h.address!=='--' ? h.address+(h.zip?' · '+h.zip:'') : (h.zip||'No address')
 
       return `<div style="padding:8px 0;border-bottom:1px solid var(--border);${idx===b.stops.length-1?'border-bottom:none':''}">
         <div style="display:flex;align-items:center;gap:8px">
@@ -13022,7 +13071,8 @@ function renderDispatchPipeline(){
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               <span style="font-size:12px;font-weight:700">${h.name}</span>
-              <span style="font-size:11px;font-weight:600;padding:1px 7px;border-radius:4px;${svcBg}">${svcLabel}</span>
+              <span style="font-size:10px;font-weight:600;padding:1px 7px;border-radius:4px;${svcBg}">${svcLabel}</span>
+              ${h.assignedRunner ? '<span style="font-size:9px;color:var(--cyan)">★ assigned</span>' : ''}
             </div>
             <div style="font-size:11px;color:var(--sub);margin-top:1px">📍 ${addr}</div>
             ${alerts.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:3px">${alerts.map(a=>`<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;padding:1px 6px;border-radius:4px">${a}</span>`).join('')}</div>` : ''}
@@ -13032,13 +13082,11 @@ function renderDispatchPipeline(){
       </div>`
     }).join('')
 
-    return `<div style="border:1px solid rgba(${borderCol==='#22c55e'?'34,197,94':borderCol==='#f59e0b'?'245,158,11':borderCol==='#3b82f6'?'59,130,246':'239,68,68'},.3);border-left:4px solid ${borderCol};border-radius:10px;overflow:hidden${b.status==='unassigned'?';animation:pulse-border 2s infinite':''}">
+    return `<div style="border:1px solid rgba(${borderCol==='#22c55e'?'34,197,94':borderCol==='#a5b4fc'?'165,180,252':borderCol==='#f59e0b'?'245,158,11':borderCol==='#3b82f6'?'59,130,246':'239,68,68'},.3);border-left:4px solid ${borderCol};border-radius:10px;overflow:hidden;margin-bottom:10px">
       <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:${bgCol}">
         <div style="flex-shrink:0">
-          <span class="${b.visitType==='BIN_IN'?'vt-in':'vt-out'}" style="font-size:12px;padding:4px 10px">
-            ${b.visitType==='BIN_IN'?'☀️ BIN IN':'🌙 BIN OUT'}
-          </span>
-          ${b.visitType!=='BIN_IN' ? `<div style="font-size:9px;color:var(--muted);margin-top:3px;text-align:center">☀️ In auto-queues on complete</div>` : ''}
+          <span class="vt-out" style="font-size:12px;padding:4px 10px">🌙 BIN OUT</span>
+          <div style="font-size:9px;color:var(--muted);margin-top:3px;text-align:center">☀️ In auto-queues on complete</div>
         </div>
         <div style="flex:1">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -13047,7 +13095,7 @@ function renderDispatchPipeline(){
             ${b.hasSplit?'<span style="background:rgba(34,197,94,.15);color:#22c55e;font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px">split stops</span>':''}
             ${loyalTag?`<span style="font-size:10px;font-weight:600;padding:1px 7px;border-radius:5px;${offerChainStyle}">${loyalTag}</span>`:''}
           </div>
-          <div style="font-size:10px;color:var(--muted)">${b.stops.length} stops . Bin In unlocks ~${b.binInUnlock} (${b.unlockMethod})</div>
+          <div style="font-size:10px;color:var(--muted)">${b.stops.length} stop${b.stops.length!==1?'s':''} · Bin In unlocks ~${b.binInUnlock}</div>
         </div>
         <span class="badge" style="${badgeStyle}">${badgeTxt}</span>
         <div style="text-align:right;flex-shrink:0">
@@ -13060,22 +13108,41 @@ function renderDispatchPipeline(){
         ${stopList}
       </div>
 
-      <div style="padding:8px 14px;display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap">
+      <!-- Runner row with reassign dropdown in preview mode -->
+      <div style="padding:8px 14px;display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap;border-top:1px solid var(--border)">
         ${b.runner ? `
-          <div style="width:26px;height:26px;border-radius:50%;background:${b.runner.color};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${b.runner.initials}</div>
-          <div><span style="font-weight:600">${b.runner.name}</span> <span style="color:var(--muted)">. ${b.runner.visitType} . ${b.runner.rating}★ . default runner</span></div>
-          <div style="margin-left:auto;display:flex;gap:6px">
-            <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="showRunnerUnavailable('${b.runner.id}')">⚠️ Mark unavailable</button>
-            <button class="btn btn-outline btn-sm" style="font-size:10px" onclick="adForceReassign('${b.id}')">Reassign</button>
+          <div style="width:26px;height:26px;border-radius:50%;background:${b.runner.color||'var(--cyan)'};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#07090f;flex-shrink:0">${b.runner.initials||'RN'}</div>
+          <div><span style="font-weight:600">${b.runner.name}</span> <span style="color:var(--muted);font-size:11px">· ${b.runner.visitType||'BOTH'} · ${b.runner.rating||0}★ · ${b.offerType==='loyalty'?'<span style="color:var(--cyan)">assigned runner</span>':'zone runner'}</span></div>
+          <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+            ${isPreview ? `<select style="font-size:11px;padding:3px 6px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text)" onchange="swapBatchRunner('${b.id}',this.value)">
+              <option value="">↔ Change runner</option>
+              ${RUNNERS.filter(r=>r.status!=='INACTIVE').map(r=>`<option value="${r.id}" ${b.runner?.id===r.id?'selected':''}>${r.name}</option>`).join('')}
+            </select>` : `<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="showRunnerUnavailable('${b.runner.id}')">⚠️ Mark unavailable</button>
+            <button class="btn btn-outline btn-sm" style="font-size:10px" onclick="adForceReassign('${b.id}')">Reassign</button>`}
           </div>` : `
-          <span style="color:#ef4444;font-size:12px">No runner assigned to these homeowners</span>
-          <button class="btn btn-sm" style="margin-left:auto;background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3);font-size:11px" onclick="adManualAssign('${b.id}')">🚨 Assign Runner</button>`}
+          <span style="color:#ef4444;font-size:12px">⚠️ No runner assigned</span>
+          <select style="margin-left:auto;font-size:11px;padding:3px 6px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text)" onchange="swapBatchRunner('${b.id}',this.value)">
+            <option value="">Assign runner →</option>
+            ${RUNNERS.filter(r=>r.status!=='INACTIVE').map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}
+          </select>`}
       </div>
     </div>`
   }).join('')
 }
 
 // Expose render to adNav
+function swapBatchRunner(batchId, runnerId){
+  const b = generatedBatches.find(x=>x.id===batchId)
+  if(!b) return
+  const r = RUNNERS.find(x=>x.id===runnerId)
+  b.runner    = r || null
+  b.offerType = r ? 'loyalty' : 'unassigned'
+  b.offerBadge = r ? '🔒 Assigned runner (25 min)' : '⚠️ Unassigned'
+  b.status    = 'preview'
+  renderDispatchPipeline()
+  if(r) showToast(`Runner changed to ${r.name} ✅`, 'ok')
+}
+
 function initDispatchPage(){
   try { renderZoneList() } catch(e){ console.warn('renderZoneList:', e) }
   try { renderDispatchPipeline() } catch(e){ console.warn('renderDispatchPipeline:', e) }
