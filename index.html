@@ -4407,16 +4407,16 @@ async function populateRNDashboard(){
   const grEl = document.getElementById('rn-home-subtitle')
 
   try {
-    // Fetch runner data + zones in parallel — don't serialize
-    let rnRow = null, appRow = null
+    // Fetch runner data + zones in parallel
+    const safeQuery = async (q) => { try { const r = await q; return r } catch(e){ return null } }
     const zoneLoadPromise = ADMIN_ZONES.length === 0 ? loadZonesFromSupabase().catch(e=>console.warn('[BinDash] zone load:', e)) : Promise.resolve()
 
     const [rnRes, appRes] = await Promise.all([
-      _supa.from('runners').select('*').eq('email', currentUser.email).maybeSingle().catch(e=>{ console.warn('[BinDash] runners query:', e); return null }),
-      _supa.from('runner_applications').select('*').eq('email', currentUser.email).maybeSingle().catch(e=>{ console.warn('[BinDash] app query:', e); return null }),
+      safeQuery(_supa.from('runners').select('*').eq('email', currentUser.email).maybeSingle()),
+      safeQuery(_supa.from('runner_applications').select('*').eq('email', currentUser.email).maybeSingle()),
     ])
-    rnRow  = rnRes?.data  || null
-    appRow = appRes?.data || null
+    const rnRow  = rnRes?.data  || null
+    const appRow = appRes?.data || null
 
     await zoneLoadPromise
     const merged = {
