@@ -4900,8 +4900,6 @@ function _renderRNHomeDashZones(runnerRow){
         </div>
         <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px" onclick="rnNav(null,'rn-zones')">Manage →</button>
       </div>
-
-      <!-- Zone stats row -->
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px;text-align:center">
         <div style="background:rgba(255,255,255,.04);border-radius:7px;padding:8px 4px">
           <div style="font-size:18px;font-weight:800;color:var(--cyan)">${hwCount}</div>
@@ -4922,7 +4920,6 @@ function _renderRNHomeDashZones(runnerRow){
       </div>
 
       ${isWaitlist ? `
-      <!-- Waitlist progress bars -->
       <div style="display:flex;flex-direction:column;gap:6px">
         <div>
           <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px">
@@ -4944,7 +4941,6 @@ function _renderRNHomeDashZones(runnerRow){
         </div>
         ${wlCount ? `<div style="font-size:10px;color:#22c55e;margin-top:2px">✨ ${wlCount} homeowner${wlCount!==1?'s':''} on the waitlist — share your code to bring them in!</div>` : ''}
       </div>` : isLive ? `
-      <!-- Live zone - show HO/capacity bar -->
       <div>
         <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px">
           <span>Route capacity</span>
@@ -5128,7 +5124,7 @@ function filterAdminJobs(){
       <td style="font-size:12px">${runnerDisplay}</td>
       <td>
         <span style="background:${col}22;color:${col};font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap">${icon} ${j.status||'--'}</span>
-        ${offerExpired?'<div style="color:#ef4444;font-size:10px;font-weight:800;margin-top:2px">⚠️ ALL TIMERS EXPIRED</div>':''}
+        ${offerExpired?`<div onclick="event.stopPropagation();showExpiredJobActions(this)" data-jobid="${j.id}" data-email="${(j.homeowner_email||'').replace(/"/g,'&quot;')}" data-runner="${(j.runner_name||'').replace(/"/g,'&quot;')}" data-batch="${j.batch_id||j.id}" style="color:#ef4444;font-size:10px;font-weight:800;margin-top:2px;cursor:pointer;text-decoration:underline;text-underline-offset:2px">⚠️ ALL TIMERS EXPIRED — Fix →</div>`:''}
         ${offerExpiresIn!==null?`<div style="color:#fbbf24;font-size:10px;margin-top:2px">⏳ ${offerExpiresIn}m left</div>`:''}
       </td>
       <td style="font-size:12px;color:var(--green);font-weight:600">$${parseFloat(j.amount||3.25).toFixed(2)}</td>
@@ -5159,6 +5155,152 @@ function _adminNavToRunner(runnerName){
     const search = document.getElementById('runner-search')
     if(search){ search.value = runnerName; filterRunners(runnerName) }
   }, 100)
+}
+
+function showExpiredJobActions(el){
+  const jobId   = el.dataset.jobid
+  const hwEmail = el.dataset.email
+  const runnerName = el.dataset.runner
+  const batchId = el.dataset.batch
+  const hw = HOMEOWNERS.find(h=>h.email===hwEmail)
+  const hwName = hw?.name || hwEmail?.split('@')[0] || 'Homeowner'
+
+  // Build runner options for reassign dropdown
+  const availableRunners = RUNNERS.filter(r=>r.status==='AVAILABLE'||r.status==='ON_ROUTE')
+  const runnerOpts = availableRunners.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')
+
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh" style="background:rgba(239,68,68,.06)">
+    <div>
+      <div style="font-size:15px;font-weight:700;color:#fca5a5">⚠️ Expired Offer — ${hwName}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">No runner accepted within the offer window. Choose how to proceed.</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div onclick="document.getElementById('ejr-action').value='broadcast'" id="ejr-opt-broadcast"
+         style="border:1.5px solid rgba(59,130,246,.4);background:rgba(59,130,246,.06);border-radius:12px;padding:14px 16px;cursor:pointer;margin-bottom:10px;transition:all .15s"
+         onmouseover="this.style.background='rgba(59,130,246,.12)'" onmouseout="this.style.background='rgba(59,130,246,.06)'">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="font-size:22px">📡</div>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#3b82f6">Re-broadcast to All Runners</div>
+          <div style="font-size:12px;color:var(--sub);margin-top:2px">Send to every available runner in the zone with an urgency bonus. First to accept gets it.</div>
+        </div>
+      </div>
+    </div>
+    <div onclick="document.getElementById('ejr-action').value='reassign'" id="ejr-opt-reassign"
+         style="border:1.5px solid rgba(245,158,11,.3);background:rgba(245,158,11,.05);border-radius:12px;padding:14px 16px;cursor:pointer;margin-bottom:10px;transition:all .15s"
+         onmouseover="this.style.background='rgba(245,158,11,.1)'" onmouseout="this.style.background='rgba(245,158,11,.05)'">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="font-size:22px">🎯</div>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#fbbf24">Assign to Specific Runner</div>
+          <div style="font-size:12px;color:var(--sub);margin-top:2px">Offer directly to one runner with a fresh 30-minute window.</div>
+        </div>
+      </div>
+      <select id="ejr-runner-select" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;color:var(--text)">
+        <option value="">— Select a runner —</option>
+        ${runnerOpts||'<option disabled>No runners available</option>'}
+      </select>
+    </div>
+    <div onclick="document.getElementById('ejr-action').value='cancel'" id="ejr-opt-cancel"
+         style="border:1.5px solid rgba(239,68,68,.25);background:rgba(239,68,68,.04);border-radius:12px;padding:14px 16px;cursor:pointer;transition:all .15s"
+         onmouseover="this.style.background='rgba(239,68,68,.09)'" onmouseout="this.style.background='rgba(239,68,68,.04)'">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="font-size:22px">✕</div>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#ef4444">Cancel & Notify Homeowner</div>
+          <div style="font-size:12px;color:var(--sub);margin-top:2px">Mark as cancelled and email ${hwName} that no runner was available. They can rebook.</div>
+        </div>
+      </div>
+    </div>
+
+    <input type="hidden" id="ejr-action" value="broadcast">
+    <div id="ejr-error" style="display:none;color:#fca5a5;font-size:12px;margin-top:8px"></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Back</button>
+    <button class="btn btn-red" id="ejr-confirm-btn" 
+            data-jobid="${jobId}" data-email="${hwEmail}" data-batch="${batchId}" data-hwname="${hwName.replace(/"/g,'&quot;')}"
+            onclick="resolveExpiredJob(this)">Confirm Action →</button>
+  </div>`
+  openM()
+}
+
+async function resolveExpiredJob(btn){
+  const jobId  = btn.dataset.jobid
+  const hwEmail= btn.dataset.email
+  const batchId= btn.dataset.batch
+  const hwName = btn.dataset.hwname || hwEmail?.split('@')[0] || 'Homeowner'
+  const action = document.getElementById('ejr-action')?.value || 'broadcast'
+  const errEl  = document.getElementById('ejr-error')
+  if(btn){ btn.disabled=true; btn.textContent='Processing...' }
+
+  try {
+    if(action === 'broadcast'){
+      // Re-broadcast — reset status to broadcast, clear expiry, add urgency note
+      const { error } = await _supa.from('jobs').update({
+        status:           'broadcast',
+        offer_type:       'broadcast',
+        offer_expires_at: new Date(Date.now() + 60*60*1000).toISOString(), // 1hr window
+        runner_id:        null,
+        runner_name:      null,
+        service_notes:    'URGENCY REBROADCAST — all runners eligible',
+        updated_at:       new Date().toISOString(),
+      }).eq('id', jobId)
+      if(error) throw error
+
+      // Email all available runners in zone
+      const hw = HOMEOWNERS.find(h=>h.email===hwEmail)
+      const zoneRunners = RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===hw?.zoneId||r.coverageZones?.includes(hw?.zoneId)))
+      zoneRunners.forEach(r=>{
+        if(r.email) sendEmail(r.email,
+          '📡 Urgent Route Available — Urgency Bonus!',
+          `<p>Hi ${r.first_name||'Runner'},</p><p>A route for <strong>${hwName}</strong> needs a runner urgently. The original offer window expired — you can still accept it now with an urgency bonus added to your payout.</p><p>Log in to BinDash to accept.</p>`,
+          'broadcast_urgent')
+      })
+      showToast(`📡 Re-broadcast sent to ${zoneRunners.length} runner${zoneRunners.length!==1?'s':''} with urgency bonus`, 'ok', 5000)
+
+    } else if(action === 'reassign'){
+      const runnerId = document.getElementById('ejr-runner-select')?.value
+      if(!runnerId){ if(errEl){errEl.textContent='Please select a runner';errEl.style.display='block'} if(btn){btn.disabled=false;btn.textContent='Confirm Action →'} return }
+      const runner = RUNNERS.find(r=>r.id===runnerId)
+      const { error } = await _supa.from('jobs').update({
+        status:           'offered',
+        offer_type:       'loyalty',
+        runner_id:        runnerId,
+        runner_name:      runner?.name || '',
+        offer_expires_at: new Date(Date.now() + 30*60*1000).toISOString(), // fresh 30min
+        updated_at:       new Date().toISOString(),
+      }).eq('id', jobId)
+      if(error) throw error
+      if(runner?.email) sendEmail(runner.email,
+        `🎯 Route assigned to you — ${hwName}`,
+        `<p>Hi ${runner.name?.split(' ')[0]||'Runner'},</p><p>Admin has assigned you a route for <strong>${hwName}</strong>. You have <strong>30 minutes</strong> to accept in your BinDash app.</p>`,
+        'direct_assign')
+      showToast(`✅ Route offered directly to ${runner?.name||'runner'} — 30 min window`, 'ok', 5000)
+
+    } else if(action === 'cancel'){
+      const { error } = await _supa.from('jobs').update({
+        status:     'cancelled',
+        updated_at: new Date().toISOString(),
+      }).eq('id', jobId)
+      if(error) throw error
+      sendEmail(hwEmail,
+        'No runner available for your scheduled visit',
+        `<p>Hi ${hwName?.split(' ')[0]||'there'},</p><p>We were unable to find an available runner for your scheduled Bin Out visit. We apologise for the inconvenience.</p><p>Please log into your BinDash account to rebook, or contact us and we will prioritise your next collection.</p><p>— BinDash Team</p>`,
+        'no_runner_cancel')
+      showToast(`✕ Job cancelled — ${hwName} notified by email`, 'info', 5000)
+    }
+
+    closeM()
+    await loadAdminJobs() // refresh the jobs table
+
+  } catch(e){
+    if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='Confirm Action →' }
+  }
 }
 
 async function adminMarkJobLate(jobId){
@@ -7500,7 +7642,6 @@ function renderRunnerCard(r){
   }).filter(Boolean)
 
   return `<div class="cc" id="rcard-${r.id}" style="${inactive?'opacity:.55':''}">
-    <!-- Header — always visible -->
     <div class="cc-head" onclick="toggleRunnerExpand('${r.id}')" style="cursor:pointer">
       <div style="display:flex;align-items:center;gap:10px">
         <div class="cc-av" style="background:${r.color}">${r.initials}</div>
@@ -7523,11 +7664,7 @@ function renderRunnerCard(r){
         <span style="font-size:16px;color:var(--muted)" id="rcard-chevron-${r.id}">›</span>
       </div>
     </div>
-
-    <!-- Expandable stats section -->
     <div id="rcard-detail-${r.id}" style="display:none;border-top:1px solid var(--border);padding:14px">
-
-      <!-- Quick stats row -->
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;text-align:center">
         <div style="background:var(--surface2);border-radius:8px;padding:10px">
           <div style="font-size:18px;font-weight:800;color:#22c55e">${completed}</div>
@@ -7577,8 +7714,6 @@ function renderRunnerCard(r){
           : `<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#f59e0b" onclick="deactivateRunner('${r.id}')">Deactivate</button>`
         }</div></div>
       </div>
-
-      <!-- Recent jobs for this runner -->
       ${rJobs.length ? `
       <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
         <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Recent Activity</div>
@@ -8768,8 +8903,6 @@ function showEditPreferences(){
   document.getElementById('modal-box').innerHTML=`
   <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit Service Preferences</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
   <div class="mb" style="max-height:70vh;overflow-y:auto">
-
-    <!-- SERVICE TYPE -->
     <div class="sec-h" style="margin-top:0">Which bins does your runner handle?</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
       <div id="ep-svc-recycling" onclick="epSelectSvc('recycling')" style="border:1.5px solid ${!curSvc.includes('Waste')&&!curSvc.includes('Split')?'var(--cyan)':'var(--border2)'};background:${!curSvc.includes('Waste')&&!curSvc.includes('Split')?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
@@ -8787,14 +8920,8 @@ function showEditPreferences(){
       </div>
     </div>
     <input type="hidden" id="ep-svc-val" value="${isSplitCurrent?'split':curSvc.includes('General')&&!curSvc.includes('Both')?'waste':curSvc.includes('Both')?'both':'recycling'}">
-
-    <!-- PLAN CHANGE NOTICE -->
     <div id="ep-plan-notice" style="display:none;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#fbbf24"></div>
-
-    <!-- COLLECTION DAY(S) -->
     <div class="sec-h">Collection schedule</div>
-
-    <!-- Single day (shown when not split) -->
     <div id="ep-day-single" style="${isSplitCurrent?'display:none':''}">
       <div class="field"><label>Collection day</label>
         <select id="ep-day">
@@ -8802,8 +8929,6 @@ function showEditPreferences(){
         </select>
       </div>
     </div>
-
-    <!-- Split days (shown when split service selected) -->
     <div id="ep-day-split" style="${isSplitCurrent?'':'display:none'}">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="field"><label>♻️ Recycling day</label>
@@ -8819,14 +8944,10 @@ function showEditPreferences(){
       </div>
       <div id="ep-split-warn" style="display:none;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:7px;padding:8px 12px;font-size:12px;color:#fbbf24;margin-top:4px">⚠️ Both days can't be the same — please choose different days.</div>
     </div>
-
-    <!-- SPECIAL INSTRUCTIONS -->
     <div class="sec-h">Special instructions for runner</div>
     <div class="field">
       <textarea id="ep-svc-notes" placeholder="e.g. Side gate is usually unlocked, bins are behind the lemon tree">${curNotes==='--'?'':curNotes}</textarea>
     </div>
-
-    <!-- PLAN CHANGE (only show if service type changes warrant it) -->
     <div id="ep-plan-section" style="display:none">
       <div class="sec-h">Your plan</div>
       <div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--sub);margin-bottom:8px">
@@ -9460,8 +9581,6 @@ function showStopDetail(stopIdx){
       <div class="dl"><div class="dl-l">Bins</div><div>${s.bins}</div></div>
       ${s.notes ? `<div class="dl"><div class="dl-l">Notes</div><div>${s.notes}</div></div>` : ''}
     </div>
-
-    <!-- IN-APP CONTACT -- no direct number shown -->
     <div style="background:rgba(6,214,160,.05);border:1px solid rgba(6,214,160,.2);border-radius:10px;padding:14px">
       <div style="font-size:12px;font-weight:700;margin-bottom:4px">📩 Contact Homeowner</div>
       <div style="font-size:11px;color:var(--sub);line-height:1.5;margin-bottom:12px">
@@ -10403,7 +10522,6 @@ function renderHomeownerCard(hw){
     oan_a:'Bin Out As Needed — 1 Can · $19.99/mo+usage', oan_b:'Bin Out As Needed — 2 Cans Same Day · $19.99/mo+usage', oan_c:'Bin Out As Needed — 2 Cans Split · $19.99/mo+usage' }
 
   return `<div class="cc" id="hwcard-${hw.id}">
-    <!-- Header — always visible, click to expand -->
     <div class="cc-head" onclick="toggleHWExpand('${hw.id}')" style="cursor:pointer">
       <div style="display:flex;align-items:center;gap:10px">
         <div class="cc-av" style="background:${hw.color}">${hw.initials}</div>
@@ -10425,11 +10543,7 @@ function renderHomeownerCard(hw){
         <span style="font-size:16px;color:var(--muted)" id="hwcard-chevron-${hw.id}">›</span>
       </div>
     </div>
-
-    <!-- Expandable detail section -->
     <div id="hwcard-detail-${hw.id}" style="display:none;border-top:1px solid var(--border);padding:14px">
-
-      <!-- Stats row -->
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;text-align:center">
         <div style="background:var(--surface2);border-radius:8px;padding:10px">
           <div style="font-size:18px;font-weight:800;color:#22c55e">${completed}</div>
@@ -10448,8 +10562,6 @@ function renderHomeownerCard(hw){
           <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Runner Paid</div>
         </div>
       </div>
-
-      <!-- Full details grid -->
       <div class="cc-grid">
         <div class="dl"><div class="dl-l">Address</div><div>${hw.address}, ${hw.city||''} ${hw.zip||''}</div></div>
         <div class="dl"><div class="dl-l">Zone</div><div style="display:flex;align-items:center;gap:6px">
@@ -10475,8 +10587,6 @@ function renderHomeownerCard(hw){
         <div class="dl"><div class="dl-l">Phone</div><div>${hw.phone||'--'}</div></div>
         <div class="dl"><div class="dl-l">Bins</div><div>${hw.bins||1} bin${(hw.bins||1)>1?'s':''} · ${hw.storage||'--'}</div></div>
       </div>
-
-      <!-- Active route status -->
       ${activeJob ? `<div style="margin-top:10px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;font-size:12px">
         ⏳ <strong>Active route</strong> — ${activeJob.status} · ${activeJob.runner_name||'runner'} · ${activeJob.scheduled_date?new Date(activeJob.scheduled_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'today'}
       </div>` : ''}
@@ -11049,8 +11159,6 @@ function showHWDetail(hwId){
   document.getElementById('modal-box').innerHTML=`
   <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit — ${hw.name}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
   <div class="mb" style="max-height:70vh;overflow-y:auto">
-
-    <!-- Personal -->
     <div class="g2">
       <div class="field"><label>Name</label><input id="hwd-name" value="${hw.name}"></div>
       <div class="field"><label>Email</label><input id="hwd-email" value="${hw.email}"></div>
@@ -11060,16 +11168,12 @@ function showHWDetail(hwId){
       <div class="field"><label>ZIP</label><input id="hwd-zip" value="${hw.zip||''}"></div>
     </div>
     <div class="field"><label>Address</label><input id="hwd-addr" value="${hw.address||''}"></div>
-
-    <!-- Service type -->
     <div class="field">
       <label>Service Type</label>
       <select id="hwd-service" onchange="hwDetailToggleSplit('${hwId}')">
         ${svcOpts.map(o=>`<option value="${o.val}" ${hw.service===o.val?'selected':''}>${o.label}</option>`).join('')}
       </select>
     </div>
-
-    <!-- Collection days — shows 1 or 2 depending on service type -->
     <div id="hwd-days-block">
       ${isSplit ? `
       <div class="g2">
@@ -11081,8 +11185,6 @@ function showHWDetail(hwId){
         <div class="field"><label style="color:var(--muted)">Day 2</label><input disabled placeholder="Only for split plans" style="opacity:.4"></div>
       </div>`}
     </div>
-
-    <!-- Zone + Runner -->
     <div class="g2">
       <div class="field"><label>Zone</label>
         <select id="hwd-zone">
@@ -11098,8 +11200,6 @@ function showHWDetail(hwId){
         </select>
       </div>
     </div>
-
-    <!-- Status -->
     <div class="field"><label>Status</label>
       <select id="hwd-status">
         <option value="active"   ${hw.status==='active'  ?'selected':''}>Active</option>
@@ -11441,8 +11541,6 @@ function renderActiveRouteTab(){
             <div style="font-size:12px;color:var(--sub)">${s?.name} · ${s?.address}</div>
           </div>
         </div>
-
-        <!-- Task instruction -->
         <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
           <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Your Task</div>
           <div style="font-size:14px;font-weight:600;color:var(--text)">${visitInstr}</div>
@@ -11453,8 +11551,6 @@ function renderActiveRouteTab(){
         ${s?.gate ? `<div style="background:rgba(245,158,11,.1);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:13px;font-weight:600;color:#fbbf24">🔑 Gate code: ${s.gate}</div>` : ''}
         ${s?.pets && s.pets !== 'None' ? `<div style="background:rgba(245,158,11,.08);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#fbbf24">🐾 Pets: ${s.pets} — use caution when opening gate</div>` : ''}
         ${s?.notes ? `<div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--sub)">📝 ${s.notes}</div>` : ''}
-
-        <!-- Message homeowner -->
         <div style="border:1px solid var(--border);border-radius:10px;margin-bottom:14px;overflow:hidden">
           <div style="padding:10px 12px;background:var(--surface2);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;display:flex;align-items:center;gap:6px">
             💬 Message Homeowner
@@ -11472,10 +11568,7 @@ function renderActiveRouteTab(){
             </div>
           </div>
         </div>
-
-        <!-- Photo capture / Bin Out As Needed Check-Bin -->
         ${s?.isOAN ? `
-        <!-- BIN OUT AS NEEDED CHECK-BIN TASK -->
         <div style="background:rgba(139,92,246,.07);border:1.5px solid rgba(139,92,246,.3);border-radius:12px;padding:16px;margin-bottom:14px">
           <div style="font-size:12px;font-weight:700;color:#a5b4fc;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">
             ✈️ Bin Out As Needed Check — Tier ${STRIPE_PRICES[s.planId||'oan_b']?.oanTier||'B'}
@@ -11497,7 +11590,6 @@ function renderActiveRouteTab(){
             Usage fee billed via Stripe metered billing · Homeowner notified by email
           </div>
         </div>` : `
-        <!-- Standard photo capture -->
         <div style="margin-bottom:14px">
           <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px">📸 Photo confirmation required</div>
           <div style="font-size:11px;color:var(--sub);margin-bottom:10px">Take a photo showing the bins — this confirms the job and notifies the homeowner.</div>
@@ -12781,8 +12873,6 @@ function renderPendingRunnerList(){
           <div class="dl"><div class="dl-l">Visit Pref.</div><div style="color:${vpColor}">${vpLabel}</div></div>
           <div class="dl"><div class="dl-l">BGC Consent</div><div>${app.bgcConsent ? '✅ Consented' : '<span style="color:#f59e0b">⚠️ Not consented</span>'}</div></div>
         </div>
-
-        <!-- REFERRAL + LOYALTY SECTION -->
         <div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px 14px;margin-bottom:12px">
           <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px;display:flex;align-items:center;gap:6px">
             🎯 Referral &amp; Loyalty
@@ -14390,8 +14480,6 @@ function renderDispatchPipeline(){
       <div style="padding:6px 14px 2px;background:var(--surface2);border-top:1px solid var(--border);max-height:280px;overflow-y:auto">
         ${stopList}
       </div>
-
-      <!-- Runner row with reassign dropdown in preview mode -->
       <div style="padding:8px 14px;display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap;border-top:1px solid var(--border)">
         ${b.runner ? `
           <div style="width:26px;height:26px;border-radius:50%;background:${b.runner.color||'var(--cyan)'};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#07090f;flex-shrink:0">${b.runner.initials||'RN'}</div>
@@ -14747,21 +14835,15 @@ function renderAdminZones(){
     return `<div style="border:1px solid rgba(255,255,255,.06);border-left:4px solid ${sc};border-radius:10px;background:var(--surface);padding:14px 16px;margin-bottom:0">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div style="flex:1;min-width:0">
-
-          <!-- Name + status -->
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
             <span style="font-size:15px;font-weight:700">${z.name}</span>
             <span style="background:rgba(99,102,241,.12);color:#a5b4fc;border-radius:6px;padding:2px 7px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.04em">${zoneLabel(z)}</span>
             <span style="background:${sc}22;color:${sc};border-radius:99px;padding:2px 8px;font-size:10px;font-weight:700">${sl}</span>
           </div>
-
-          <!-- ZIPs -->
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap">
             <span style="font-size:11px;color:var(--muted)">ZIP codes:</span>
             ${zipTags}
           </div>
-
-          <!-- Stats -->
           <div style="display:flex;gap:16px;font-size:12px;color:var(--sub);flex-wrap:wrap;margin-bottom:8px">
             <span>🏠 <strong style="color:var(--text)">${hwCount}</strong> homeowners</span>
             <span>🚐 <strong style="color:var(--text)">${rnList.length}</strong> enrolled${uniqueAssigned.length ? ' . <strong style="color:#22c55e">'+uniqueAssigned.length+' assigned</strong>' : ''}</span>
@@ -14774,8 +14856,6 @@ function renderAdminZones(){
             <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px"><span>Interest</span><span>${hwCount}/${z.threshold}</span></div>
             <div style="background:rgba(0,0,0,.2);border-radius:99px;height:4px"><div style="width:${pct}%;height:100%;background:#f59e0b;border-radius:99px"></div></div>
           </div>` : ''}
-
-          <!-- Runners -->
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <span style="font-size:11px;color:var(--muted)">Runners:</span>
             ${rnList.length ? rnList.map(r=>`<span style="background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.2);border-radius:99px;padding:2px 8px;font-size:11px;color:#a5b4fc">${r.name.split(' ')[0]} . ZIP ${r.zip||'--'}</span>`).join('') : '<span style="font-size:11px;color:var(--muted)">None assigned</span>'}
@@ -14784,8 +14864,6 @@ function renderAdminZones(){
 
           ${z.notes ? `<div style="margin-top:6px;font-size:11px;color:var(--muted);font-style:italic">${z.notes}</div>` : ''}
         </div>
-
-        <!-- Action buttons -->
         <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;flex-shrink:0">
           ${z.status==='waitlist' ? `<button class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3);font-size:11px" onclick="activateZone('${z.id}')">⚡ Activate</button>` : ''}
           ${z.pilot ? `<button class="btn btn-sm" style="background:#22c55e22;color:#22c55e;border:1px solid rgba(34,197,94,.3);font-size:11px" onclick="promoteToLive('${z.id}')">↑ Go Live</button>` : ''}
@@ -16721,8 +16799,6 @@ function _renderZoneHealthOverview(){
     <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800">Zone Management Overview</div>
     <button class="btn btn-cyan btn-sm" onclick="showCreateZone()">+ New Zone</button>
   </div>
-
-  <!-- KPI ROW -->
   <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:16px">
     ${[
       { label:'Live Zones',    val:liveZones.length,  col:'var(--cyan)',   icon:'🟢' },
@@ -16738,8 +16814,6 @@ function _renderZoneHealthOverview(){
         <div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">${k.label}</div>
       </div>`).join('')}
   </div>
-
-  <!-- REFERRAL + RUNNER SUMMARY ROW -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
     <div style="background:linear-gradient(135deg,rgba(139,92,246,.08),rgba(99,102,241,.04));border:1px solid rgba(139,92,246,.25);border-radius:10px;padding:14px">
       <div style="font-size:11px;font-weight:700;color:#c4b5fd;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">🔗 Runner Referral Pipeline</div>
@@ -16822,7 +16896,6 @@ function _renderZoneGrid(){
       const scoreCol = launchScore>=80?'#22c55e':launchScore>=50?'#fbbf24':'#f97316'
 
       return `<div style="background:${st.bg};border:1.5px solid ${st.border};border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px">
-        <!-- Header -->
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div>
             <div style="font-size:13px;font-weight:700">${z.name}</div>
@@ -16833,8 +16906,6 @@ function _renderZoneGrid(){
             ${z.status==='waitlist'?`<span style="font-size:10px;font-weight:800;color:${scoreCol}">${launchScore}% ready</span>`:''}
           </div>
         </div>
-
-        <!-- Stats row -->
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center">
           <div style="background:rgba(255,255,255,.04);border-radius:6px;padding:6px 4px">
             <div style="font-size:16px;font-weight:800;color:var(--cyan)">${z.homeowners||0}</div>
@@ -16855,7 +16926,6 @@ function _renderZoneGrid(){
         </div>
 
         ${z.status==='waitlist'?`
-        <!-- Launch progress bars -->
         <div style="display:flex;flex-direction:column;gap:5px">
           <div>
             <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:2px">
@@ -16876,7 +16946,6 @@ function _renderZoneGrid(){
         </div>`:``}
 
         ${assignedRunners.length?`
-        <!-- Assigned runners -->
         <div style="display:flex;flex-wrap:wrap;gap:4px">
           ${assignedRunners.slice(0,3).map(r=>`
             <span style="background:rgba(255,255,255,.07);border-radius:99px;font-size:10px;padding:2px 8px;display:flex;align-items:center;gap:4px">
@@ -16885,8 +16954,6 @@ function _renderZoneGrid(){
             </span>`).join('')}
           ${assignedRunners.length>3?`<span style="font-size:10px;color:var(--muted)">+${assignedRunners.length-3} more</span>`:''}
         </div>`:``}
-
-        <!-- Actions -->
         <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:2px">
           ${z.status==='waitlist'&&hwPct>=80?`<button class="btn btn-green btn-sm" style="font-size:10px;padding:3px 9px" onclick="promoteToLive('${z.id}')">🚀 Go Live</button>`:''}
           <button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 9px" onclick="showZoneDetail('${z.id}')">📋 Details</button>
