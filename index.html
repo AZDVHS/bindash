@@ -4426,7 +4426,7 @@ async function _populateHWDashData(row, fn, ln, initials){
   }
 
   // Subscription banner
-  const planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split Days · $54.99/mo', oan_a:'OAN 1-Can · $19.99/mo+usage', oan_b:'OAN 2-Can · $19.99/mo+usage', oan_c:'OAN 2-Can Split · $19.99/mo+usage' }
+  const planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split Days · $54.99/mo', oan_a:'Bin Out As Needed — 1 Can · $19.99/mo+usage', oan_b:'Bin Out As Needed — 2 Cans Same Day · $19.99/mo+usage', oan_c:'Bin Out As Needed — 2 Cans Split · $19.99/mo+usage' }
   const planIcons  = { plan_a:'🗑️', plan_b:'🗑️🗑️', plan_c:'♻️🗑️' }
   const planKey = row.plan_id || 'plan_a'
   safe('acct-plan-name', planLabels[planKey] || planLabels.plan_a)
@@ -5973,7 +5973,7 @@ function buildScheduleFromRow(row){
   const isSplit = row.plan_id === 'plan_c' || row.collection_day_2
   const colDay  = row.collection_day || ''
   const colDay2 = row.collection_day_2 || ''
-  const planLabels = { plan_a:'1 Can', plan_b:'2 Cans', plan_c:'2 Cans Split', oan_a:'OAN 1-Can', oan_b:'OAN 2-Can', oan_c:'OAN 2-Can Split' }
+  const planLabels = { plan_a:'1 Can', plan_b:'2 Cans', plan_c:'2 Cans Split', oan_a:'Bin Out As Needed — 1 Can', oan_b:'Bin Out As Needed — 2 Cans Same Day', oan_c:'Bin Out As Needed — 2 Cans Split Days' }
   const planLabel = planLabels[row.plan_id] || '1 Can'
 
   if(scheduleTitleEl){
@@ -7378,6 +7378,7 @@ function renderRunnerCard(r){
             ${active ? `<span style="font-size:10px;color:#fbbf24">⏳ ${active} active</span>` : ''}
             ${declined ? `<span style="font-size:10px;color:#ef4444">✕ ${declined} declined</span>` : ''}
             <span style="font-size:10px;color:var(--green)">$${earnings.toFixed(2)} earned</span>
+            ${r.totalReferrals > 0 ? `<span style="font-size:10px;background:rgba(139,92,246,.15);color:#c4b5fd;border-radius:4px;padding:1px 6px;font-weight:600">🎯 ${r.totalReferrals} referral${r.totalReferrals!==1?'s':''}</span>` : ''}
           </div>
         </div>
       </div>
@@ -7431,7 +7432,12 @@ function renderRunnerCard(r){
               <button onclick="navigator.clipboard.writeText('${r.ownRefCode}');showToast('Copied','ok')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px">📋</button>` : '<span style="color:var(--muted);font-size:11px">Not assigned</span>'}
           </div>
         </div>
-        <div class="dl"><div class="dl-l">Referrals</div><div>${r.totalReferrals||0} HOs referred</div></div>
+        <div class="dl"><div class="dl-l">Referrals</div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:${r.totalReferrals>0?'#c4b5fd':'var(--muted)'}">${r.totalReferrals||0} HO${(r.totalReferrals||0)!==1?'s':''} referred</div>
+            ${r.totalReferrals>0?`<div style="font-size:10px;color:var(--muted);margin-top:2px">$${((r.totalReferrals||0)*10).toFixed(0)} in referral bonuses earned</div>`:''}
+          </div>
+        </div>
         <div class="dl"><div class="dl-l">Status</div><div>${inactive
           ? `<button class="btn btn-outline btn-sm" style="font-size:10px" onclick="reactivateRunner('${r.id}')">Reactivate</button>`
           : `<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#f59e0b" onclick="deactivateRunner('${r.id}')">Deactivate</button>`
@@ -10079,7 +10085,7 @@ function renderHomeownerCard(hw){
   const totalPaid = hwJobs.filter(j=>j.status==='complete').reduce((s,j)=>s+(parseFloat(j.amount)||3.25),0)
 
   const planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split · $54.99/mo',
-    oan_a:'OAN 1-Can · $19.99+usage', oan_b:'OAN 2-Can · $19.99+usage', oan_c:'OAN Split · $19.99+usage' }
+    oan_a:'Bin Out As Needed — 1 Can · $19.99/mo+usage', oan_b:'Bin Out As Needed — 2 Cans Same Day · $19.99/mo+usage', oan_c:'Bin Out As Needed — 2 Cans Split · $19.99/mo+usage' }
 
   return `<div class="cc" id="hwcard-${hw.id}">
     <!-- Header — always visible, click to expand -->
@@ -10249,7 +10255,7 @@ async function loadPaymentsData(){
       .order('created_at', { ascending: false })
 
     const planPrices = { plan_a:34.99, plan_b:44.99, plan_c:54.99, w1:34.99, w2:44.99, w3:54.99 }
-    const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split', oan_a:'OAN 1-Can', oan_b:'OAN 2-Can Same Day', oan_c:'OAN 2-Can Split', w1:'1 Can', w2:'2 Cans Same Day', w3:'2 Cans Split' }
+    const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split', oan_a:'Bin Out As Needed — 1 Can', oan_b:'Bin Out As Needed — 2 Cans Same Day', oan_c:'Bin Out As Needed — 2 Cans Split Days', w1:'1 Can', w2:'2 Cans Same Day', w3:'2 Cans Split' }
     HW_PAYMENTS = (hwRows||[]).map(hw => {
       const planKey = hw.plan || 'plan_a'
       return {
@@ -13173,6 +13179,49 @@ async function approveHW(appId, directZoneId){
       if(res?.error?.message) console.warn('[BinDash] homeowners insert:', res.error.message)
       else console.log('[BinDash] Homeowner approved + saved to homeowners table ✅')
 
+      // ── REFERRAL CREDIT ──────────────────────────────────────────────────
+      // If this homeowner was referred by a runner, increment their referral count
+      const refCode = app.referredByCode || app.referral_code || null
+      if(refCode){
+        try {
+          // Find the runner who owns this ref code
+          const { data: refRunner } = await _supa.from('runners')
+            .select('id, first_name, last_name, email, total_referrals')
+            .ilike('own_ref_code', refCode).maybeSingle()
+
+          if(refRunner){
+            const newCount = (refRunner.total_referrals || 0) + 1
+            await _supa.from('runners').update({
+              total_referrals: newCount,
+              updated_at: new Date().toISOString(),
+            }).eq('id', refRunner.id)
+
+            // Update in-memory RUNNERS array too
+            const rnObj = RUNNERS.find(r => r.id === refRunner.id)
+            if(rnObj) rnObj.totalReferrals = newCount
+
+            // Notify the runner of the successful referral + $10 bonus
+            const runnerName = (refRunner.first_name||'') + ' ' + (refRunner.last_name||'')
+            sendEmail(
+              refRunner.email,
+              '🎉 Referral activated — $10 bonus earned!',
+              `<p>Hi ${refRunner.first_name||'there'},</p>
+               <p>Your referral <strong>${app.name}</strong> just had their account activated!</p>
+               <p>Your <strong>$10 referral bonus</strong> will be added to your next payout.</p>
+               <p>You now have <strong>${newCount} successful referral${newCount!==1?'s':''}</strong> total.</p>
+               <p>— BinDash Team</p>`,
+              'referral_bonus'
+            )
+            console.log('[BinDash] Referral credited to', runnerName, '— new count:', newCount)
+
+            // Re-render runner list so the card updates immediately
+            renderRunnerList()
+            showToast(`🎯 Referral bonus triggered — ${runnerName} notified of $10 credit`, 'ok', 4000)
+          }
+        } catch(e){ console.warn('[BinDash] Referral credit failed:', e) }
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       if(zone) dbSaveZone(zone)
     } catch(err){ console.warn('[BinDash] Approval save failed:', String(err?.message||err)) }
   })()
@@ -13183,8 +13232,14 @@ async function approveHW(appId, directZoneId){
   const _dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   const _colDayIdx = _dayNames.findIndex(d=>d.toLowerCase()===(app.day||'').toLowerCase())
   const _binOutNight = _colDayIdx >= 0 ? _dayNames[(_colDayIdx+6)%7]+' evening' : 'evening before collection'
-  const _planLabels = { plan_a:'1 Can . $34.99/mo', plan_b:'2 Cans Same Day . $44.99/mo', plan_c:'2 Cans Split Days . $54.99/mo', w1:'1 Can . $34.99/mo', w2:'2 Cans Same Day . $44.99/mo', w3:'2 Cans Split Days . $54.99/mo' }
-  const _planLabel = _planLabels[app.plan] || app.plan || ''
+  const _planLabels = {
+    plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split Days · $54.99/mo',
+    w1:'1 Can · $34.99/mo', w2:'2 Cans Same Day · $44.99/mo', w3:'2 Cans Split Days · $54.99/mo',
+    oan_a:'Bin Out As Needed — 1 Can · $19.99/mo+usage',
+    oan_b:'Bin Out As Needed — 2 Cans Same Day · $19.99/mo+usage',
+    oan_c:'Bin Out As Needed — 2 Cans Split Days · $19.99/mo+usage',
+  }
+  const _planLabel = _planLabels[app.plan] || STRIPE_PRICES[app.plan]?.name || app.plan || ''
   sendEmail(app.email, 'Welcome to BinDash -- your account is active! 🎉', EMAIL.hwApproved(app.name.split(' ')[0], app.day||'Tuesday', _approveZoneName, autoRunner?.name||null, _planLabel, _binOutNight), 'hw_approved')
 
   // Reload from Supabase to sync and remove from pending
