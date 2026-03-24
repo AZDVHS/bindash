@@ -3942,6 +3942,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
                 <div style="font-size:13px;font-weight:700" id="pipeline-title">Offer Pipeline</div>
                 <span class="badge" style="background:rgba(245,158,11,.15);color:#f59e0b" id="pipeline-badge">--</span>
+                <button onclick="loadLiveJobsIntoPipeline()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer" title="Refresh live status">⟳ Refresh</button>
                 <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
                   <select id="dispatch-zone-filter" style="font-size:11px;padding:3px 8px" onchange="renderDispatchPipeline()">
                     <option value="">All Zones</option>
@@ -13890,6 +13891,13 @@ function pickDispatchDay(el){
 
   // Load live job status for this day and show in dispatch sidebar
   _showDispatchDayStatus(day, scheduledDateStr, dateStr)
+
+  // If no preview batches exist, reload live jobs for this day into pipeline
+  if(!generatedBatches.length){
+    window._livePipelineBatches = null
+    renderDispatchPipeline() // show loading state first
+    loadLiveJobsIntoPipeline()
+  }
 }
 
 async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
@@ -13913,6 +13921,7 @@ async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
     const total     = jobs.length
     const now = new Date()
     const expired   = jobs.filter(j=>j.status==='offered'&&j.offer_expires_at&&new Date(j.offer_expires_at)<now).length
+    const active    = jobs.filter(j=>j.status==='offered'&&(!j.offer_expires_at||new Date(j.offer_expires_at)>now)).length
 
     statusEl.innerHTML = `
     <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">📋 ${dateStr} Route Status</div>
@@ -13921,8 +13930,8 @@ async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
         <div style="font-size:16px;font-weight:800;color:#22c55e">${accepted+inProg}</div>
         <div style="font-size:9px;color:var(--muted)">Accepted</div>
       </div>` : ''}
-      ${offered ? `<div style="background:rgba(245,158,11,.1);border-radius:7px;padding:7px 10px;text-align:center">
-        <div style="font-size:16px;font-weight:800;color:#fbbf24">${offered}</div>
+      ${active ? `<div style="background:rgba(245,158,11,.1);border-radius:7px;padding:7px 10px;text-align:center">
+        <div style="font-size:16px;font-weight:800;color:#fbbf24">${active}</div>
         <div style="font-size:9px;color:var(--muted)">Awaiting</div>
       </div>` : ''}
       ${complete ? `<div style="background:rgba(99,102,241,.1);border-radius:7px;padding:7px 10px;text-align:center">
@@ -13936,6 +13945,7 @@ async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
     </div>
     <div style="font-size:11px;color:var(--sub)">${accepted+inProg} of ${total} stops accepted</div>
     ${expired ? `<div style="font-size:11px;color:#ef4444;font-weight:700;margin-top:4px">⚠️ ${expired} offer${expired!==1?'s':''} expired — no runner accepted yet</div>` : ''}
+    ${expired===total&&total>0 ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">These are from a previous dispatch — use Jobs tab to resolve or re-broadcast.</div>` : ''}
     <div style="height:6px;background:var(--surface3);border-radius:99px;margin-top:8px;overflow:hidden">
       <div style="height:100%;width:${total?Math.round((accepted+inProg+complete)*100/total):0}%;background:linear-gradient(90deg,#22c55e,#06d6a0);border-radius:99px;transition:width .4s"></div>
     </div>`
@@ -14335,7 +14345,11 @@ function renderDispatchPipeline(){
     })
   }
 
-  if(!generatedBatches.length){
+  // Use live DB batches if no preview batches have been generated
+  const batchSource = generatedBatches.length ? generatedBatches : (window._livePipelineBatches || [])
+  const isLiveView  = !generatedBatches.length && batchSource.length > 0
+
+  if(!batchSource.length){
     pipeline.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px">
       <div style="font-size:32px;margin-bottom:10px">🗺️</div>
       Click <strong style="color:var(--text)">Preview Routes</strong> to build routes from today's scheduled homeowners.<br>
@@ -14344,14 +14358,22 @@ function renderDispatchPipeline(){
     return
   }
 
-  let batches = generatedBatches
+  let batches = batchSource
   if(zoneFil) batches = batches.filter(b=>b.zoneId===zoneFil)
 
   const titleEl = document.getElementById('pipeline-title')
   const badgeEl = document.getElementById('pipeline-badge')
   const allPreview = batches.every(b=>b.status==='preview')
-  if(titleEl) titleEl.textContent = 'Route Preview — ' + (dayFil||'All Days') + (allPreview ? ' · Not sent yet' : '')
-  if(badgeEl) badgeEl.textContent = batches.length+' batch'+(batches.length!==1?'es':'')+' · '+RUNNERS.filter(r=>r.status==='AVAILABLE').length+' runners available'
+
+  if(isLiveView){
+    const accepted  = batches.filter(b=>['accepted','in_progress'].includes(b.status)).length
+    const offered   = batches.filter(b=>['offered','broadcast'].includes(b.status)).length
+    if(titleEl) titleEl.textContent = `Live Routes — ${dayFil||'Today'} · ${accepted} accepted · ${offered} awaiting`
+    if(badgeEl) badgeEl.textContent = batches.length+' active route'+(batches.length!==1?'s':'')+' · click to manage'
+  } else {
+    if(titleEl) titleEl.textContent = 'Route Preview — ' + (dayFil||'All Days') + (allPreview ? ' · Not sent yet' : '')
+    if(badgeEl) badgeEl.textContent = batches.length+' batch'+(batches.length!==1?'es':'')+' · '+RUNNERS.filter(r=>r.status==='AVAILABLE').length+' runners available'
+  }
 
   // Check for merge opportunities — same runner assigned to multiple batches
   const runnerBatches = {}
@@ -14390,10 +14412,12 @@ function renderDispatchPipeline(){
     const loyalTag   = b.offerBadge || ''
     const badgeTxt   = isPreview    ? '👁 Preview'
       : b.status==='accepted'  ? '✓ Accepted'
+      : b.status==='in_progress'?'🔄 In Progress'
       : b.status==='offered'   ? '⏳ Offer sent'
       : b.status==='broadcast' ? '📡 Broadcast' : '🚨 Unassigned'
     const badgeStyle = isPreview   ? 'background:rgba(165,180,252,.2);color:#a5b4fc'
       : b.status==='accepted'  ? 'background:#22c55e22;color:#22c55e'
+      : b.status==='in_progress'?'background:rgba(6,214,160,.15);color:var(--cyan)'
       : b.status==='offered'   ? 'background:rgba(245,158,11,.15);color:#f59e0b'
       : b.status==='broadcast' ? 'background:rgba(59,130,246,.15);color:#3b82f6' : 'background:rgba(239,68,68,.15);color:#ef4444'
     const offerChainStyle = b.offerType==='loyalty' ? 'background:rgba(6,214,160,.1);color:var(--cyan)'
@@ -14595,9 +14619,8 @@ function updateLaunchButton(){
   }
 }
 
-function initDispatchPage(){
+async function initDispatchPage(){
   try { renderZoneList() } catch(e){ console.warn('renderZoneList:', e) }
-  try { renderDispatchPipeline() } catch(e){ console.warn('renderDispatchPipeline:', e) }
   try { renderZoneLearnedList() } catch(e){ console.warn('renderZoneLearnedList:', e) }
 
   // Populate zone selectors
@@ -14605,17 +14628,107 @@ function initDispatchPage(){
   zoneSelects.forEach(id=>{
     const sel = document.getElementById(id)
     if(!sel) return
-    // Keep first option, remove rest
     while(sel.options.length > 1) sel.remove(1)
     ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
       const o = document.createElement('option'); o.value=z.id; o.textContent=z.name; sel.appendChild(o)
     })
   })
 
-  // Init dispatch day pills with dates and 3-day window
+  // Init day pills
   initDispatchDayPills()
-
   updateDispatchStats()
+
+  // Auto-load live jobs for the currently selected day into the pipeline
+  await loadLiveJobsIntoPipeline()
+}
+
+// Load active (non-complete) jobs from Supabase for the selected day
+// and render them in the pipeline so admin can see live status at a glance
+async function loadLiveJobsIntoPipeline(){
+  const day = document.getElementById('dispatch-day-val')?.value || ''
+  if(!day) return
+
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  const today = new Date(); today.setHours(0,0,0,0)
+  const targetIdx = dayNames.findIndex(d => normDay(d) === normDay(day))
+  if(targetIdx < 0) return
+  const diff = (targetIdx - today.getDay() + 7) % 7
+  const scheduledDate = new Date(today); scheduledDate.setDate(today.getDate() + diff)
+  const scheduledDateStr = scheduledDate.toISOString().slice(0,10)
+
+  try {
+    const { data: liveJobs } = await _supa.from('jobs')
+      .select('*')
+      .eq('scheduled_date', scheduledDateStr)
+      .not('status', 'in', '("complete","cancelled","declined")')
+      .order('created_at', { ascending: true })
+
+    if(!liveJobs?.length){
+      // No live jobs — show the empty preview prompt
+      if(!generatedBatches.length) renderDispatchPipeline()
+      return
+    }
+
+    // Group jobs by batch_id into pipeline batches
+    const batchMap = {}
+    liveJobs.forEach(j => {
+      const key = j.batch_id || j.id
+      if(!batchMap[key]) {
+        const runner = RUNNERS.find(r=>r.id===j.runner_id||r.name===j.runner_name)
+        const zone   = ADMIN_ZONES.find(z=>z.id===j.zone_id)
+        batchMap[key] = {
+          id:        key,
+          day:       day,
+          zoneId:    j.zone_id,
+          zoneName:  zone?.name || 'Zone',
+          runner:    runner || (j.runner_name ? {id:j.runner_id, name:j.runner_name, initials:j.runner_name.split(' ').map(w=>w[0]).join('').toUpperCase()} : null),
+          status:    j.status,
+          offerType: j.offer_type || 'loyalty',
+          offerBadge:j.offer_type==='broadcast' ? '📡 Broadcast' : '🔒 Assigned runner (25 min)',
+          earnTotal: '0.00',
+          hasSplit:  false,
+          stops:     [],
+          _fromDB:   true,  // flag: this came from DB, don't allow editing
+        }
+      }
+      // Add stop from this job
+      const hw = HOMEOWNERS.find(h=>h.email===j.homeowner_email)
+      batchMap[key].stops.push({
+        name:         hw?.name || j.homeowner_email?.split('@')[0] || '--',
+        email:        j.homeowner_email,
+        address:      hw?.address || '--',
+        zip:          hw?.zip || '',
+        service:      hw?.service || 'RECYCLING',
+        bins:         hw?.bins || 1,
+        gate:         hw?.gate || '--',
+        gateCode:     hw?.gateCode || '',
+        pets:         hw?.pets || '--',
+        svcNotes:     hw?.svcNotes || '',
+        assignedRunner: hw?.assignedRunner,
+        jobId:        j.id,
+        jobStatus:    j.status,
+      })
+      // Update batch earn total
+      batchMap[key].earnTotal = (batchMap[key].stops.length * 3.25 * 2).toFixed(2)
+      // Use worst status (offered < accepted < in_progress)
+      const statusRank = {offered:1, broadcast:1, accepted:2, in_progress:3}
+      if((statusRank[j.status]||0) > (statusRank[batchMap[key].status]||0)) {
+        batchMap[key].status = j.status
+      }
+    })
+
+    // If we already have locally generated preview batches, keep them
+    // Otherwise replace pipeline with live DB batches
+    if(!generatedBatches.length) {
+      // Show live batches in pipeline without replacing generatedBatches
+      window._livePipelineBatches = Object.values(batchMap)
+    } else {
+      window._livePipelineBatches = null
+    }
+
+    renderDispatchPipeline()
+
+  } catch(e){ console.warn('[BinDash] loadLiveJobsIntoPipeline:', e) }
 }
 
 // Initialise homeowner list when page loads
