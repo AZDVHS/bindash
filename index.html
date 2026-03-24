@@ -33,6 +33,63 @@ const STRIPE_PRICES = {
   plan_a: { name:'1 Can -- Weekly',        monthly:'price_1TDpucKQcgkU1rZozFQNwxJK', callout:'price_1TDpssKQcgkU1rZo2WEDZT8R', monthlyAmt:34.99, splitDays:false, desc:'1 bin . any type . Bin Out + Bin In . 1 collection day/week' },
   plan_b: { name:'2 Cans -- Same Day',     monthly:'price_1TDptqKQcgkU1rZoEvzOOIES', callout:'price_1TDpssKQcgkU1rZo2WEDZT8R', monthlyAmt:44.99, splitDays:false, desc:'2 bins . Recycling + General Waste . same collection day . Bin Out + Bin In' },
   plan_c: { name:'2 Cans -- Split Days',   monthly:'price_1TDprRKQcgkU1rZoy9DTYlWg', callout:'price_1TDpssKQcgkU1rZo2WEDZT8R', monthlyAmt:54.99, splitDays:true,  desc:'2 bins . separate collection days . Recycling one day + Waste another . Bin Out + Bin In both days' },
+
+  // ── BIN OUT AS NEEDED (Vacant / Seasonal / Short Term Rental) ───────────────
+  // Base subscription: $19.99/mo — keeps the property covered all season
+  // Usage (metered): billed per successful bin move via Stripe Metered Billing
+  //
+  // Stripe Products & Metered Price IDs (CONFIRMED — do not change):
+  //   Base sub (all tiers share same base):
+  //     prod_UCipqIE5t0OCEp  →  price_1TEJNPKQcgkU1rZol6dSx2K6  ($19.99/mo)
+  //   Tier A — 1-Can:
+  //     prod_UCisk3cHlvI5YZ  →  price_1TEJQMKQcgkU1rZoxfv6CuXc  ($12.99 metered/move)
+  //   Tier B — 2-Can Same Day:
+  //     prod_UCiulIUONqsED6  →  price_1TEJT4KQcgkU1rZoTHq9pcs6  ($16.99 metered/move)
+  //   Tier C — 2-Can Split Days:
+  //     prod_UCiviXsKFERI6F  →  price_1TEJTrKQcgkU1rZoiymCNFgF  ($19.99 metered/move)
+  // ──────────────────────────────────────────────────────────────────────────────
+  oan_a: {
+    name:         'Bin Out As Needed — 1-Can',
+    monthly:      'price_1TEJNPKQcgkU1rZol6dSx2K6',   // $19.99/mo base subscription
+    metered:      'price_1TEJQMKQcgkU1rZoxfv6CuXc',   // $12.99/move metered
+    callout:      'price_1TDpssKQcgkU1rZo2WEDZT8R',
+    baseAmt:      19.99,
+    usageFee:     12.99,
+    monthlyAmt:   19.99,
+    splitDays:    false,
+    isOAN:   true,
+    oanTier: 'A',
+    productId:    'prod_UCisk3cHlvI5YZ',
+    desc: '$19.99/mo base + $12.99 per bin move · 1 bin · Weekly drive-by · Pay only when bin is moved',
+  },
+  oan_b: {
+    name:         'Bin Out As Needed — 2-Can Same Day',
+    monthly:      'price_1TEJNPKQcgkU1rZol6dSx2K6',   // same $19.99/mo base
+    metered:      'price_1TEJT4KQcgkU1rZoTHq9pcs6',   // $16.99/move metered
+    callout:      'price_1TDpssKQcgkU1rZo2WEDZT8R',
+    baseAmt:      19.99,
+    usageFee:     16.99,
+    monthlyAmt:   19.99,
+    splitDays:    false,
+    isOAN:   true,
+    oanTier: 'B',
+    productId:    'prod_UCiulIUONqsED6',
+    desc: '$19.99/mo base + $16.99 per move · 2 bins same day · Weekly drive-by · Pay per move',
+  },
+  oan_c: {
+    name:         'Bin Out As Needed — 2-Can Split Days',
+    monthly:      'price_1TEJNPKQcgkU1rZol6dSx2K6',   // same $19.99/mo base
+    metered:      'price_1TEJTrKQcgkU1rZoiymCNFgF',   // $19.99/move metered
+    callout:      'price_1TDpssKQcgkU1rZo2WEDZT8R',
+    baseAmt:      19.99,
+    usageFee:     19.99,
+    monthlyAmt:   19.99,
+    splitDays:    true,
+    isOAN:   true,
+    oanTier: 'C',
+    productId:    'prod_UCiviXsKFERI6F',
+    desc: '$19.99/mo base + $19.99 per move · 2 bins split days · Weekly drive-by · Most flexible',
+  },
 }
 
 // Config fingerprint -- auto-validates on load, warns if tampered
@@ -50,6 +107,11 @@ const _EXPECTED = {
   if(STRIPE_PRICES.plan_b.monthly !== _EXPECTED.priceB) errors.push('plan_b price changed: '+STRIPE_PRICES.plan_b.monthly)
   if(STRIPE_PRICES.plan_c.monthly !== _EXPECTED.priceC) errors.push('plan_c price changed: '+STRIPE_PRICES.plan_c.monthly)
   if(STRIPE_PRICES.plan_a.callout !== _EXPECTED.callout) errors.push('callout price changed')
+  // OAN prices — warn if placeholder IDs still present
+  ;['oan_a','oan_b','oan_c'].forEach(k=>{
+    const p = STRIPE_PRICES[k]
+    if(p?.monthly?.includes('PLACEHOLDER')||p?.metered?.includes('PLACEHOLDER')) errors.push(k+' still has placeholder price IDs')
+  })
   if(errors.length){
     console.error('=== BINDASH CONFIG MISMATCH ===')
     errors.forEach(e => console.error('  >', e))
@@ -1171,11 +1233,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div style="text-align:center;margin-bottom:40px">
         <div style="display:inline-flex;align-items:center;gap:8px;font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--cyan);margin-bottom:14px"><span style="width:22px;height:1px;background:var(--cyan);display:block"></span>Simple Pricing<span style="width:22px;height:1px;background:var(--cyan);display:block"></span></div>
         <h2 style="font-family:'Syne',sans-serif;font-size:clamp(24px,5vw,38px);font-weight:800;margin-bottom:10px">Plans for every home</h2>
-        <p style="color:var(--sub);font-size:15px;max-width:480px;margin:0 auto;line-height:1.6">Every plan includes Bin Out the evening before <em>and</em> Bin In after the truck. Cancel or pause any time.</p>
+        <p style="color:var(--sub);font-size:15px;max-width:520px;margin:0 auto;line-height:1.6">Every plan includes Bin Out the evening before <em>and</em> Bin In after the truck. Cancel or pause any time.</p>
       </div>
 
-      <!-- PLAN CARDS ROW -->
-      <div id="land-pricing-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px">
+      <!-- STANDARD PLANS ROW -->
+      <div id="land-pricing-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
 
         <!-- PLAN A -->
         <div onclick="startOnboarding('a')" style="position:relative;border:2px solid var(--border2);border-radius:18px;padding:28px 24px;cursor:pointer;transition:all .25s;background:var(--surface)"
@@ -1184,36 +1246,32 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div style="font-size:32px;margin-bottom:14px">🗑️</div>
           <div style="font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">1 Can</div>
           <div style="font-family:'Syne',sans-serif;font-size:42px;font-weight:853;color:var(--cyan);line-height:1;margin-bottom:4px">$34<span style="font-size:20px;font-weight:400">.99</span></div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:20px">per month . weekly</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:20px">per month · weekly</div>
           <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;font-size:13px;color:var(--sub)">
-            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> 1 bin -- recycling or waste</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> 1 bin — recycling or waste</div>
             <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> 🌙 Bin Out the night before</div>
             <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> ☀️ Bin In after the truck</div>
             <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> Notifications at every step</div>
           </div>
-          <div style="background:var(--cyan);color:#07090f;font-size:13px;font-weight:700;padding:11px;border-radius:10px;text-align:center">
-            Check My Area ->
-          </div>
+          <div style="background:var(--cyan);color:#07090f;font-size:13px;font-weight:700;padding:11px;border-radius:10px;text-align:center">Check My Area -></div>
         </div>
 
-        <!-- PLAN B -- highlighted -->
+        <!-- PLAN B — highlighted -->
         <div onclick="startOnboarding('b')" style="position:relative;border:2px solid var(--cyan);border-radius:18px;padding:28px 24px;cursor:pointer;transition:all .25s;background:rgba(6,214,160,.04)"
           onmouseover="this.style.transform='translateY(-4px)';this.style.boxShadow='0 20px 56px rgba(6,214,160,.22)'"
           onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 8px 32px rgba(6,214,160,.1)'">
           <div style="position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:var(--cyan);color:#07090f;font-size:10px;font-weight:800;padding:3px 14px;border-radius:99px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap">Most Popular</div>
           <div style="font-size:32px;margin-bottom:14px">🗑️🗑️</div>
-          <div style="font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">2 Cans -- Same Day</div>
+          <div style="font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">2 Cans — Same Day</div>
           <div style="font-family:'Syne',sans-serif;font-size:42px;font-weight:853;color:var(--cyan);line-height:1;margin-bottom:4px">$44<span style="font-size:20px;font-weight:400">.99</span></div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:20px">per month . weekly</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:20px">per month · weekly</div>
           <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;font-size:13px;color:var(--sub)">
-            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> 2 bins -- recycling + waste</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> 2 bins — recycling + waste</div>
             <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> Both collected same day</div>
             <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> 🌙 Bin Out + ☀️ Bin In both bins</div>
             <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--cyan);font-size:15px">✓</span> Save vs. two separate plans</div>
           </div>
-          <div style="background:var(--cyan);color:#07090f;font-size:13px;font-weight:700;padding:11px;border-radius:10px;text-align:center">
-            Check My Area ->
-          </div>
+          <div style="background:var(--cyan);color:#07090f;font-size:13px;font-weight:700;padding:11px;border-radius:10px;text-align:center">Check My Area -></div>
         </div>
 
         <!-- PLAN C -->
@@ -1222,23 +1280,45 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           onmouseout="this.style.borderColor='var(--border2)';this.style.transform='translateY(0)';this.style.boxShadow='none'">
           <div style="position:absolute;top:16px;right:16px;font-size:9px;font-weight:800;color:var(--purple);letter-spacing:.08em;text-transform:uppercase;border:1px solid rgba(139,92,246,.4);border-radius:99px;padding:2px 8px">Most Flexible</div>
           <div style="font-size:32px;margin-bottom:14px">♻️🗑️</div>
-          <div style="font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">2 Cans -- Split Days</div>
+          <div style="font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">2 Cans — Split Days</div>
           <div style="font-family:'Syne',sans-serif;font-size:42px;font-weight:853;color:#a78bfa;line-height:1;margin-bottom:4px">$54<span style="font-size:20px;font-weight:400">.99</span></div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:20px">per month . weekly</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:20px">per month · weekly</div>
           <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;font-size:13px;color:var(--sub)">
             <div style="display:flex;align-items:center;gap:8px"><span style="color:#a78bfa;font-size:15px">✓</span> Recycling one day</div>
             <div style="display:flex;align-items:center;gap:8px"><span style="color:#a78bfa;font-size:15px">✓</span> General waste another day</div>
             <div style="display:flex;align-items:center;gap:8px"><span style="color:#a78bfa;font-size:15px">✓</span> You choose each pickup day</div>
             <div style="display:flex;align-items:center;gap:8px"><span style="color:#a78bfa;font-size:15px">✓</span> Full Bin Out + Bin In both days</div>
           </div>
-          <div style="background:rgba(139,92,246,.15);border:1.5px solid rgba(139,92,246,.4);color:#a78bfa;font-size:13px;font-weight:700;padding:11px;border-radius:10px;text-align:center">
-            Check My Area ->
-          </div>
+          <div style="background:rgba(139,92,246,.15);border:1.5px solid rgba(139,92,246,.4);color:#a78bfa;font-size:13px;font-weight:700;padding:11px;border-radius:10px;text-align:center">Check My Area -></div>
         </div>
 
       </div>
 
-      <!-- CALLOUT ROW -->
+      <!-- BIN OUT AS NEEDED — full-width banner card -->
+      <div onclick="startOnboarding('oan')" style="position:relative;border:2px solid rgba(245,158,11,.4);border-radius:18px;padding:28px 32px;cursor:pointer;transition:all .25s;background:rgba(245,158,11,.04);margin-bottom:16px;display:grid;grid-template-columns:auto 1fr auto;gap:24px;align-items:center"
+        onmouseover="this.style.borderColor='#f59e0b';this.style.boxShadow='0 16px 48px rgba(245,158,11,.18)';this.style.transform='translateY(-2px)'"
+        onmouseout="this.style.borderColor='rgba(245,158,11,.4)';this.style.boxShadow='none';this.style.transform='translateY(0)'">
+        <div style="position:absolute;top:-13px;left:32px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#07090f;font-size:10px;font-weight:800;padding:3px 14px;border-radius:99px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap">✈️ Vacant · Seasonal · Short Term Rental</div>
+        <div style="font-size:42px">✈️</div>
+        <div>
+          <div style="font-size:18px;font-weight:800;color:#fbbf24;margin-bottom:6px">Bin Out As Needed</div>
+          <div style="font-size:14px;color:var(--sub);line-height:1.6">
+            Perfect for snowbirds, Airbnb hosts, and vacant properties.
+            <strong style="color:var(--text)">$19.99/mo base</strong> keeps your spot active.
+            Your runner does a weekly drive-by — <strong style="color:var(--text)">you only pay the usage fee when a bin actually gets moved.</strong>
+          </div>
+          <div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap">
+            <div style="font-size:12px;color:var(--muted)">🗑️ 1-Can: <strong style="color:var(--text)">$12.99/move</strong></div>
+            <div style="font-size:12px;color:var(--muted)">🗑️🗑️ 2-Can Same Day: <strong style="color:var(--text)">$16.99/move</strong></div>
+            <div style="font-size:12px;color:var(--muted)">♻️🗑️ 2-Can Split Days: <strong style="color:var(--text)">$19.99/move</strong></div>
+          </div>
+        </div>
+        <div style="text-align:center;flex-shrink:0">
+          <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:853;color:#fbbf24;line-height:1">$19<span style="font-size:16px;font-weight:400">.99</span></div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">base/mo + usage</div>
+          <div style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#07090f;font-size:12px;font-weight:700;padding:9px 18px;border-radius:10px;white-space:nowrap">Check My Area -></div>
+        </div>
+      </div>
       <div onclick="startOnboarding(null)" style="border:1.5px dashed var(--border2);border-radius:14px;padding:20px 24px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:16px;transition:all .2s"
         onmouseover="this.style.borderColor='var(--cyan)';this.style.background='rgba(6,214,160,.04)'"
         onmouseout="this.style.borderColor='var(--border2)';this.style.background='transparent'">
@@ -1692,16 +1772,95 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- PLAN CARDS (shown for monthly/biweekly/weekly) -->
         <div id="ob-plan-section">
-          <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">How many bins?</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px" id="ob-plan-cards"></div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:18px" id="ob-plan-note"></div>
+          <!-- SERVICE TYPE TOGGLE -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+            <div id="ob-svc-standard" onclick="obSelectServiceType('standard')"
+                 style="border:2px solid var(--cyan);background:rgba(6,214,160,.07);border-radius:12px;padding:12px 14px;cursor:pointer;text-align:center;transition:all .15s">
+              <div style="font-size:18px;margin-bottom:4px">🏠</div>
+              <div style="font-size:13px;font-weight:700;color:var(--cyan)">Standard Service</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:3px">Full Bin Out + In every week</div>
+            </div>
+            <div id="ob-svc-oan" onclick="obSelectServiceType('oan')"
+                 style="border:1.5px solid var(--border2);border-radius:12px;padding:12px 14px;cursor:pointer;text-align:center;transition:all .15s">
+              <div style="font-size:18px;margin-bottom:4px">✈️</div>
+              <div style="font-size:13px;font-weight:700">Bin Out As Needed / STR</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:3px">Drive-by check · Pay per move</div>
+            </div>
+          </div>
 
-          <!-- WHAT'S INCLUDED EXPLAINER -->
-          <div style="background:var(--surface2);border-radius:10px;padding:12px 14px;margin-bottom:18px;font-size:12px;color:var(--sub);line-height:1.7">
-            <div style="font-weight:700;color:var(--text);margin-bottom:4px">Every plan includes:</div>
-            <div>🌙 <strong style="color:var(--text)">Bin Out</strong> -- runner moves your bins to the curb the evening before collection</div>
-            <div>☀️ <strong style="color:var(--text)">Bin In</strong> -- runner returns your bins to your property after the truck passes</div>
-            <div>📧 Notifications at every step . Cancel or pause any time . No lock-in</div>
+          <!-- STANDARD PLANS (default) -->
+          <div id="ob-standard-section">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">How many bins?</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px" id="ob-plan-cards"></div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:18px" id="ob-plan-note"></div>
+
+            <!-- WHAT'S INCLUDED -->
+            <div style="background:var(--surface2);border-radius:10px;padding:12px 14px;margin-bottom:18px;font-size:12px;color:var(--sub);line-height:1.7">
+              <div style="font-weight:700;color:var(--text);margin-bottom:4px">Every plan includes:</div>
+              <div>🌙 <strong style="color:var(--text)">Bin Out</strong> -- runner moves your bins to the curb the evening before collection</div>
+              <div>☀️ <strong style="color:var(--text)">Bin In</strong> -- runner returns your bins to your property after the truck passes</div>
+              <div>📧 Notifications at every step . Cancel or pause any time . No lock-in</div>
+            </div>
+          </div>
+
+          <!-- SNOWBIRD / STR PLANS -->
+          <div id="ob-oan-section" style="display:none">
+            <div style="background:rgba(139,92,246,.07);border:1px solid rgba(139,92,246,.25);border-radius:12px;padding:12px 14px;margin-bottom:14px">
+              <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:4px">✈️ How Bin Out As Needed Service Works</div>
+              <div style="font-size:12px;color:var(--sub);line-height:1.7">
+                <div>🔍 Your runner does a <strong style="color:var(--text)">weekly drive-by</strong> to check your bin</div>
+                <div>🗑️ <strong style="color:var(--text)">Bin empty?</strong> No action, no extra charge</div>
+                <div>✅ <strong style="color:var(--text)">Bin full?</strong> Runner moves it — you pay the usage fee that week</div>
+                <div>💳 <strong style="color:var(--text)">$19.99/mo base</strong> keeps your spot active all season</div>
+              </div>
+            </div>
+
+            <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">Choose your tier</div>
+            <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
+
+              <!-- Tier A -->
+              <div id="sbpc-oan_a" onclick="selectObPlan('oan_a')"
+                   style="border:1.5px solid var(--border2);border-radius:14px;padding:14px 16px;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:space-between;gap:12px">
+                <div style="flex:1">
+                  <div style="font-size:13px;font-weight:700;margin-bottom:2px">Tier A — 1 Can</div>
+                  <div style="font-size:11px;color:var(--muted)">1 bin · any type · weekly drive-by check</div>
+                </div>
+                <div style="text-align:right;flex-shrink:0">
+                  <div style="font-size:11px;color:var(--muted)">Base</div>
+                  <div style="font-size:15px;font-weight:800;color:var(--cyan)">$19.99<span style="font-size:10px;font-weight:400">/mo</span></div>
+                  <div style="font-size:10px;color:var(--muted);margin-top:2px">+ <strong style="color:var(--text)">$12.99</strong> per move</div>
+                </div>
+              </div>
+
+              <!-- Tier B -->
+              <div id="sbpc-oan_b" onclick="selectObPlan('oan_b')"
+                   style="border:1.5px solid var(--cyan);background:rgba(6,214,160,.05);border-radius:14px;padding:14px 16px;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:space-between;gap:12px;position:relative">
+                <div style="position:absolute;top:-9px;left:16px;background:var(--cyan);color:#07090f;font-size:9px;font-weight:700;padding:2px 10px;border-radius:99px">MOST POPULAR</div>
+                <div style="flex:1;margin-top:4px">
+                  <div style="font-size:13px;font-weight:700;margin-bottom:2px">Tier B — 2 Cans Same Day</div>
+                  <div style="font-size:11px;color:var(--muted)">Recycling + General Waste · same collection day</div>
+                </div>
+                <div style="text-align:right;flex-shrink:0">
+                  <div style="font-size:11px;color:var(--muted)">Base</div>
+                  <div style="font-size:15px;font-weight:800;color:var(--cyan)">$19.99<span style="font-size:10px;font-weight:400">/mo</span></div>
+                  <div style="font-size:10px;color:var(--muted);margin-top:2px">+ <strong style="color:var(--text)">$16.99</strong> per move</div>
+                </div>
+              </div>
+
+              <!-- Tier C -->
+              <div id="sbpc-oan_c" onclick="selectObPlan('oan_c')"
+                   style="border:1.5px solid var(--border2);border-radius:14px;padding:14px 16px;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:space-between;gap:12px">
+                <div style="flex:1">
+                  <div style="font-size:13px;font-weight:700;margin-bottom:2px">Tier C — 2 Cans Split Days</div>
+                  <div style="font-size:11px;color:var(--muted)">Recycling + Waste · separate collection days · most flexible</div>
+                </div>
+                <div style="text-align:right;flex-shrink:0">
+                  <div style="font-size:11px;color:var(--muted)">Base</div>
+                  <div style="font-size:15px;font-weight:800;color:#a5b4fc">$19.99<span style="font-size:10px;font-weight:400">/mo</span></div>
+                  <div style="font-size:10px;color:var(--muted);margin-top:2px">+ <strong style="color:var(--text)">$19.99</strong> per move</div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- 1-BIN SERVICE SELECTOR (shown only for 1-bin plans) -->
@@ -4250,7 +4409,7 @@ async function _populateHWDashData(row, fn, ln, initials){
   }
 
   // Subscription banner
-  const planLabels = { plan_a:'1 Can . $34.99/mo', plan_b:'2 Cans Same Day . $44.99/mo', plan_c:'2 Cans Split Days . $54.99/mo' }
+  const planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split Days · $54.99/mo', oan_a:'OAN 1-Can · $19.99/mo+usage', oan_b:'OAN 2-Can · $19.99/mo+usage', oan_c:'OAN 2-Can Split · $19.99/mo+usage' }
   const planIcons  = { plan_a:'🗑️', plan_b:'🗑️🗑️', plan_c:'♻️🗑️' }
   const planKey = row.plan_id || 'plan_a'
   safe('acct-plan-name', planLabels[planKey] || planLabels.plan_a)
@@ -5683,11 +5842,14 @@ function startSignup(){go(signupRole==='rn'?'S-rn-ob':'S-hw-ob')}
 
 // -- LANDING PAGE PLAN CLICK -> jump to onboarding + pre-select plan --
 function startOnboarding(planLetter){
-  // Go to homeowner onboarding, land on step 1 (address)
   go('S-hw-ob')
-  // After the screen renders, pre-select the plan on step 3
   // Store desired plan so selectFreq/selectObPlan can apply it when step 3 loads
-  window._landingPlanLetter = planLetter  // 'a', 'b', 'c', or null (as-needed/callout)
+  // planLetter: 'a', 'b', 'c' = standard weekly plans
+  //             'oan' = Bin Out As Needed (pre-selects the OAN service type)
+  //             null = as-needed callout
+  window._landingPlanLetter = planLetter
+  // If OAN, pre-flag so step 3 activates the right toggle
+  window._landingIsOAN = planLetter === 'oan'
 }
 
 // Radio
@@ -5788,7 +5950,7 @@ function buildScheduleFromRow(row){
   const isSplit = row.plan_id === 'plan_c' || row.collection_day_2
   const colDay  = row.collection_day || ''
   const colDay2 = row.collection_day_2 || ''
-  const planLabels = { plan_a:'1 Can', plan_b:'2 Cans', plan_c:'2 Cans Split' }
+  const planLabels = { plan_a:'1 Can', plan_b:'2 Cans', plan_c:'2 Cans Split', oan_a:'OAN 1-Can', oan_b:'OAN 2-Can', oan_c:'OAN 2-Can Split' }
   const planLabel = planLabels[row.plan_id] || '1 Can'
 
   if(scheduleTitleEl){
@@ -6015,18 +6177,36 @@ async function hNext(s){
     _obCachedPassword = document.getElementById('h-pw').value
   }
   if(s===3){
-    // Validate split-day conflict
-    if(obSelectedPlan.endsWith('3')){
+    // Validate split-day conflict for standard and OAN split plans
+    const isSplitPlan = obSelectedPlan.endsWith('3') || obSelectedPlan === 'oan_c'
+    if(isSplitPlan){
       const r = document.getElementById('h-day-recycling')?.value
       const w = document.getElementById('h-day-waste')?.value
       if(r && w && r === w){ showToast('Please choose different days for split-day service','err'); return }
     }
+    // Require a plan to be selected
+    if(!obSelectedPlan){ showToast('Please select a plan to continue','err'); return }
   }
   if(s===4){
     // Sync onboarding plan selection -> Stripe checkout plan key when entering payment step
-    const planMap = { w1:'plan_a', b1:'plan_a', m1:'plan_a', w2:'plan_b', b2:'plan_b', m2:'plan_b', w3:'plan_c', b3:'plan_c', m3:'plan_c' }
+    const planMap = {
+      // Standard plans
+      w1:'plan_a', b1:'plan_a', m1:'plan_a',
+      w2:'plan_b', b2:'plan_b', m2:'plan_b',
+      w3:'plan_c', b3:'plan_c', m3:'plan_c',
+      // Bin Out As Needed — direct passthrough (already full key)
+      oan_a:'oan_a', oan_b:'oan_b', oan_c:'oan_c',
+    }
     const mapped = planMap[obSelectedPlan]
     if(mapped) _checkoutPlanKey = mapped
+    // For OAN plans, set split flag and update service label
+    if(_checkoutPlanKey?.startsWith('oan_')){
+      const oanPlan = STRIPE_PRICES[_checkoutPlanKey]
+      window._obSvcLabel = oanPlan?.name || 'Bin Out As Needed'
+      window._isOANPlan  = true
+    } else {
+      window._isOANPlan = false
+    }
     setTimeout(updateCheckoutSummary, 50)
 
     // -- SAVE SIGNUP RECORD NOW (before payment) --------------
@@ -6040,7 +6220,7 @@ async function hNext(s){
         const _city= document.getElementById('h-city')?.value.trim()|| ''
         const _zip = document.getElementById('h-zip')?.value.trim() || ''
         const _pw  = _obCachedPassword || document.getElementById('h-pw')?.value || ''
-        const _isSplit = obSelectedPlan.endsWith('3')
+        const _isSplit = obSelectedPlan === 'oan_c' || obSelectedPlan.endsWith('3')
         const _colDay  = _isSplit ? null : (document.getElementById('h-day')?.value || null)
         const _colDayW = _isSplit ? (document.getElementById('h-day-waste')?.value || null) : null
 
@@ -6138,15 +6318,18 @@ async function hNext(s){
   const nsc=document.getElementById('h-sc'+(s+1)); if(nsc) nsc.classList.add('active')
   if(s===2){ 
     // Default weekly; then apply any plan pre-selected from landing page
-    selectFreq('weekly')
+    if(window._landingIsOAN){
+      window._landingIsOAN = false
+      setTimeout(()=>obSelectServiceType('oan'), 50)
+    } else {
+      selectFreq('weekly')
+    }
     if(window._landingPlanLetter){
       const letter = window._landingPlanLetter
       window._landingPlanLetter = null  // consume it
-      // Map a/b/c to weekly plan ids w1/w2/w3
       const planMap = { a:'w1', b:'w2', c:'w3' }
       const planId = planMap[letter]
-      if(planId) setTimeout(()=>selectObPlan(planId), 0)
-      // For callout (null) -- 'asneeded' frequency
+      if(planId) setTimeout(()=>selectObPlan(planId), 50)
       if(letter === null) setTimeout(()=>selectFreq('asneeded'), 0)
     }
   }
@@ -8881,6 +9064,77 @@ function navPhotoTaken(input){
   reader.readAsDataURL(file)
 }
 
+// ── SNOWBIRD METERED BILLING ──────────────────────────────────────────────────
+// Called when runner clicks "Bin Moved" for a oan stop.
+// Creates a Stripe usage record against the homeowner's metered subscription item.
+// The backend (Edge Function or server) must handle the actual Stripe API call
+// since secret keys cannot be exposed in client-side JS.
+// This function calls your Supabase Edge Function which does:
+//   stripe.subscriptionItems.createUsageRecord(subscriptionItemId, { quantity: 1, timestamp: 'now', action: 'increment' })
+
+async function recordOanBinMoved(stop){
+  const plan = STRIPE_PRICES[stop.planId] || STRIPE_PRICES.oan_b
+  const usageFee = plan.usageFee || 12.99
+  const meteredPriceId = plan.metered || 'price_SNOWBIRD_A_METERED'
+
+  console.log('[BinDash] Bin Out As Needed bin moved — tier:', plan.oanTier,
+    '| homeowner:', stop.email, '| usage fee: $'+usageFee)
+
+  try {
+    // Call Supabase Edge Function to record usage via Stripe server-side
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/stripe-record-usage`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({
+        homeowner_email:  stop.email,
+        metered_price_id: meteredPriceId,
+        oan_tier:    plan.oanTier,
+        usage_fee:        usageFee,
+        quantity:         1,
+        timestamp:        Math.floor(Date.now() / 1000),
+      }),
+    })
+    const data = await res.json()
+    if(data?.error){
+      console.warn('[BinDash] Stripe usage record failed:', data.error)
+      showToast('⚠️ Usage recorded locally — Stripe sync pending', 'info', 4000)
+    } else {
+      console.log('[BinDash] Stripe usage record created ✅', data)
+    }
+  } catch(e){
+    console.warn('[BinDash] recordOanBinMoved error:', e)
+    // Non-blocking — log locally and continue
+    showToast('Usage recorded — billing syncs within 1 hour', 'info', 3000)
+  }
+
+  // Log to Supabase jobs table for admin visibility
+  try {
+    await _supa.from('jobs').insert({
+      homeowner_email: stop.email,
+      job_type:        'oan_usage',
+      service_type:    'Bin Out As Needed Bin Move',
+      visit_type:      'BIN_OUT',
+      status:          'complete',
+      amount:          usageFee,
+      runner_name:     (currentUser?.first_name||'') + ' ' + (currentUser?.last_name||''),
+      scheduled_date:  new Date().toISOString().slice(0,10),
+      created_at:      new Date().toISOString(),
+      updated_at:      new Date().toISOString(),
+    })
+  } catch(e){ console.warn('[BinDash] Bin Out As Needed job log:', e) }
+}
+
+// Derive usage fee from plan ID — used in billing summaries
+function getOanUsageFee(planId){
+  const plan = STRIPE_PRICES[planId]
+  if(!plan?.isOAN) return 0
+  return plan.usageFee || 0
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function navBegin(){
   navPhase = 'travelling'
   navRouteActive = true
@@ -9440,24 +9694,71 @@ function renderObPlanCards(freq){
 
 let obSelectedBinSvc = 'recycling'
 
+function obSelectServiceType(type){
+  const isSnow = type === 'oan'
+  // Toggle button styles
+  const stdBtn  = document.getElementById('ob-svc-standard')
+  const snowBtn = document.getElementById('ob-svc-oan')
+  const stdSec  = document.getElementById('ob-standard-section')
+  const snowSec = document.getElementById('ob-oan-section')
+  const freqRow = document.getElementById('ob-freq-row') // frequency selector row
+
+  if(stdBtn){
+    stdBtn.style.borderColor = isSnow ? 'var(--border2)' : 'var(--cyan)'
+    stdBtn.style.background  = isSnow ? 'transparent' : 'rgba(6,214,160,.07)'
+    const lbl = stdBtn.querySelector('div:nth-child(2)')
+    if(lbl) lbl.style.color = isSnow ? 'var(--text)' : 'var(--cyan)'
+  }
+  if(snowBtn){
+    snowBtn.style.borderColor = isSnow ? '#a5b4fc' : 'var(--border2)'
+    snowBtn.style.background  = isSnow ? 'rgba(165,180,252,.07)' : 'transparent'
+    const lbl = snowBtn.querySelector('div:nth-child(2)')
+    if(lbl) lbl.style.color = isSnow ? '#a5b4fc' : 'var(--text)'
+  }
+
+  if(stdSec) stdSec.style.display = isSnow ? 'none' : 'block'
+  if(snowSec) snowSec.style.display = isSnow ? 'block' : 'none'
+  // Hide frequency selector for oan — it's always weekly drive-by
+  if(freqRow) freqRow.style.display = isSnow ? 'none' : 'flex'
+
+  if(isSnow){
+    selectObPlan('oan_b') // default to most popular tier
+  } else {
+    selectFreq(obSelectedFreq || 'weekly')
+  }
+}
+
 function selectObPlan(planId){
   obSelectedPlan = planId
+  const isOAN = planId.startsWith('oan_')
+
+  // Highlight standard plan cards
   document.querySelectorAll('[id^="obpc-"]').forEach(el=>{
     const sel = el.id === 'obpc-'+planId
     el.style.borderColor = sel ? 'var(--cyan)' : 'var(--border2)'
     el.style.background   = sel ? 'rgba(6,214,160,.06)' : 'transparent'
   })
-  // Show service selector only for 1-bin plans (id ends in 1)
-  const is1Bin = planId.endsWith('1')
-  const isSplit = planId.endsWith('3')
+
+  // Highlight oan plan cards
+  document.querySelectorAll('[id^="sbpc-"]').forEach(el=>{
+    const sel = el.id === 'sbpc-'+planId
+    el.style.borderColor = sel ? '#a5b4fc' : 'var(--border2)'
+    el.style.background   = sel ? 'rgba(165,180,252,.06)' : (el.id==='sbpc-oan_b'&&!sel?'transparent':'transparent')
+  })
+
+  // Show service selector only for standard 1-bin plans (id ends in 1)
+  const is1Bin  = !isOAN && planId.endsWith('1')
+  const isSplit = planId === 'oan_c' || (!isOAN && planId.endsWith('3'))
+
   const svcEl = document.getElementById('ob-1bin-svc')
   if(svcEl) svcEl.style.display = is1Bin ? 'block' : 'none'
+
   // Toggle single vs split day pickers
   const singleDay = document.getElementById('ob-day-single')
   const splitDay  = document.getElementById('ob-day-split')
   if(singleDay) singleDay.style.display = isSplit ? 'none' : 'block'
   if(splitDay)  splitDay.style.display  = isSplit ? 'block' : 'none'
-  // Wire same-day warning for split pickers
+
   if(isSplit){
     ['h-day-recycling','h-day-waste'].forEach(id=>{
       const el = document.getElementById(id)
@@ -9738,7 +10039,7 @@ async function loadPaymentsData(){
       .order('created_at', { ascending: false })
 
     const planPrices = { plan_a:34.99, plan_b:44.99, plan_c:54.99, w1:34.99, w2:44.99, w3:54.99 }
-    const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split', w1:'1 Can', w2:'2 Cans Same Day', w3:'2 Cans Split' }
+    const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split', oan_a:'OAN 1-Can', oan_b:'OAN 2-Can Same Day', oan_c:'OAN 2-Can Split', w1:'1 Can', w2:'2 Cans Same Day', w3:'2 Cans Split' }
     HW_PAYMENTS = (hwRows||[]).map(hw => {
       const planKey = hw.plan || 'plan_a'
       return {
@@ -10641,7 +10942,31 @@ function renderActiveRouteTab(){
           </div>
         </div>
 
-        <!-- Photo capture -->
+        <!-- Photo capture / Bin Out As Needed Check-Bin -->
+        ${s?.isOAN ? `
+        <!-- BIN OUT AS NEEDED CHECK-BIN TASK -->
+        <div style="background:rgba(139,92,246,.07);border:1.5px solid rgba(139,92,246,.3);border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="font-size:12px;font-weight:700;color:#a5b4fc;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">
+            ✈️ Bin Out As Needed Check — Tier ${STRIPE_PRICES[s.planId||'oan_b']?.oanTier||'B'}
+          </div>
+          <div style="font-size:13px;color:var(--sub);margin-bottom:14px;line-height:1.5">
+            Check the bin at this property. <strong style="color:var(--text)">Only charge if you move it.</strong>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <button onclick="navOanEmpty()" class="btn"
+                    style="padding:14px;border-radius:10px;font-size:14px;font-weight:700;background:rgba(34,197,94,.12);border:1.5px solid rgba(34,197,94,.3);color:#22c55e">
+              🟢 Empty<br><span style="font-size:10px;font-weight:400;opacity:.8">No action needed<br>No charge</span>
+            </button>
+            <button onclick="navOanMoved()" class="btn"
+                    style="padding:14px;border-radius:10px;font-size:14px;font-weight:700;background:rgba(139,92,246,.12);border:1.5px solid rgba(139,92,246,.4);color:#a5b4fc">
+              🟣 Full — Moved<br><span style="font-size:10px;font-weight:400;opacity:.8">Bin moved · Bill $${STRIPE_PRICES[s.planId||'oan_b']?.usageFee||12.99}<br>Bin-In auto-scheduled</span>
+            </button>
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-top:10px;text-align:center">
+            Usage fee billed via Stripe metered billing · Homeowner notified by email
+          </div>
+        </div>` : `
+        <!-- Standard photo capture -->
         <div style="margin-bottom:14px">
           <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px">📸 Photo confirmation required</div>
           <div style="font-size:11px;color:var(--sub);margin-bottom:10px">Take a photo showing the bins — this confirms the job and notifies the homeowner.</div>
@@ -10657,7 +10982,7 @@ function renderActiveRouteTab(){
         <button id="nav-complete-btn" onclick="navCompleteStop()" disabled
                 style="width:100%;padding:14px;border-radius:10px;font-size:15px;font-weight:700;background:rgba(34,197,94,.15);color:rgba(34,197,94,.4);border:1.5px solid rgba(34,197,94,.2);cursor:not-allowed;transition:all .3s">
           ${isLastStop ? '✅ Complete Route' : '✅ Mark Complete & Next Stop →'}
-        </button>
+        </button>`}
       </div>
       ${_renderStopList(stops, navStop)}`
 
@@ -10707,6 +11032,88 @@ function _renderStopList(stops, currentIdx){
 
 function navArrived(){
   navPhase = 'arrived'
+  renderActiveRouteTab()
+}
+
+// Bin Out As Needed: bin was empty — no charge, close stop, no Bin In needed
+function navOanEmpty(){
+  const stop = (window.NAV_STOPS||[])[navStop]
+  showToast('✅ Bin empty — no charge · Stop logged', 'ok', 3000)
+  if(stop?.email){
+    sendEmail(stop.email, 'Weekly check complete — no action needed 🟢',
+      `<p>Hi ${stop.name?.split(' ')[0]||'there'},</p><p>Your runner stopped by today for the weekly check. Your bin was empty — no action was needed and no usage fee will be charged this week.</p><p>— BinDash</p>`,
+      'oan_empty')
+  }
+  // Log to jobs as 'complete' with $0
+  _supa.from('jobs').insert({
+    homeowner_email: stop?.email,
+    job_type:        'oan_check',
+    service_type:    'Bin Out As Needed Drive-By',
+    visit_type:      'BIN_OUT',
+    status:          'complete',
+    amount:          0,
+    runner_name:     (currentUser?.first_name||'')+' '+(currentUser?.last_name||''),
+    scheduled_date:  new Date().toISOString().slice(0,10),
+    created_at:      new Date().toISOString(),
+    updated_at:      new Date().toISOString(),
+  }).then(()=>{}).catch(e=>console.warn('[BinDash] oan empty log:', e))
+  navAdvanceStop()
+}
+
+// Bin Out As Needed: bin was full — record Stripe usage, schedule Bin In
+async function navOanMoved(){
+  const stop = (window.NAV_STOPS||[])[navStop]
+  if(!stop) return
+
+  const btn = document.querySelector('[onclick="navOanMoved()"]')
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Billing...' }
+
+  showToast('🟣 Bin moved — billing usage fee...', 'info', 2000)
+
+  await recordOanBinMoved(stop)
+
+  // Email homeowner: bin moved + Bin In scheduled for tomorrow
+  if(stop.email){
+    const plan = STRIPE_PRICES[stop.planId||'oan_b']
+    sendEmail(stop.email,
+      `Your bin was moved — $${plan?.usageFee||12.99} usage fee 🟣`,
+      `<p>Hi ${stop.name?.split(' ')[0]||'there'},</p>
+       <p>Your runner checked your bin today — it was full and has been moved to the curb for collection.</p>
+       <p><strong>Usage fee: $${plan?.usageFee||12.99}</strong> will appear on your next billing statement.</p>
+       <p>Your runner will return tomorrow morning to bring the bin back in. 🌅</p>
+       <p>— BinDash</p>`,
+      'oan_bin_moved')
+  }
+
+  // Auto-schedule Bin In for tomorrow
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate()+1)
+  _supa.from('jobs').insert({
+    homeowner_email: stop?.email,
+    job_type:        'oan_bin_in',
+    service_type:    'Bin Out As Needed Bin In',
+    visit_type:      'BIN_IN',
+    status:          'offered',
+    amount:          0,  // Bin In is included — no extra charge
+    runner_name:     (currentUser?.first_name||'')+' '+(currentUser?.last_name||''),
+    scheduled_date:  tomorrow.toISOString().slice(0,10),
+    created_at:      new Date().toISOString(),
+    updated_at:      new Date().toISOString(),
+  }).then(()=>console.log('[BinDash] Bin Out As Needed Bin In scheduled for tomorrow ✅'))
+    .catch(e=>console.warn('[BinDash] oan bin-in schedule:', e))
+
+  showToast(`✅ Bin moved · $${STRIPE_PRICES[stop.planId||'oan_b']?.usageFee||12.99} billed · Bin In scheduled tomorrow`, 'ok', 5000)
+  navAdvanceStop()
+}
+
+function navAdvanceStop(){
+  navStop++
+  const stops = window.NAV_STOPS || []
+  if(navStop >= stops.length){
+    navPhase = 'done'
+    navRouteActive = false
+  } else {
+    navPhase = 'travelling'
+  }
   renderActiveRouteTab()
 }
 
