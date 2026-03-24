@@ -4192,19 +4192,67 @@ async function populateHWDashboard(){
   try {
     let data = null, loadErr = null
     try {
+      // Use ilike for case-insensitive match, maybeSingle to avoid crash on 0 rows
       const res = await _supa
         .from('homeowner_signups')
         .select('*')
-        .eq('email', currentUser.email)
-        .single()
+        .ilike('email', currentUser.email)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
       data    = res?.data
       loadErr = res?.error?.message || null
     } catch(e){ loadErr = String(e?.message||e) }
 
     if(loadErr || !data){
       console.warn('[BinDash] HW profile load:', loadErr)
+      // Try homeowners table directly as fallback
+      try {
+        const { data: hwRow } = await _supa
+          .from('homeowners')
+          .select('*')
+          .ilike('email', currentUser.email)
+          .maybeSingle()
+        if(hwRow){
+          data = {
+            ...hwRow,
+            status:           'approved',
+            plan_id:          hwRow.plan_id,
+            collection_day:   hwRow.collection_day,
+            collection_day_2: hwRow.collection_day_2,
+            zone_id:          hwRow.zone_id,
+            assigned_runner:  hwRow.assigned_runner,
+          }
+          console.log('[BinDash] HW profile loaded from homeowners table ✅')
+        }
+      } catch(e2){ console.warn('[BinDash] homeowners fallback:', e2) }
+    }
+
+    if(!data){
       go('S-hw-dash')
       return
+    }
+
+    // If we have signup row, also fetch homeowners table to get zone/runner (more up to date)
+    if(data.status === 'approved' || data.status === 'active'){
+      try {
+        const { data: hwRow } = await _supa
+          .from('homeowners')
+          .select('zone_id, assigned_runner, collection_day, collection_day_2, plan_id, status')
+          .ilike('email', currentUser.email)
+          .maybeSingle()
+        if(hwRow){
+          // homeowners table is more authoritative for operational fields
+          data = {
+            ...data,
+            zone_id:          hwRow.zone_id          || data.zone_id,
+            assigned_runner:  hwRow.assigned_runner  || data.assigned_runner,
+            collection_day:   hwRow.collection_day   || data.collection_day,
+            collection_day_2: hwRow.collection_day_2 || data.collection_day_2,
+            plan_id:          hwRow.plan_id          || data.plan_id,
+          }
+        }
+      } catch(e){ /* non-blocking */ }
     }
 
     const row = data
@@ -4220,7 +4268,7 @@ async function populateHWDashboard(){
 
     const status = row.status
 
-    if(status === 'approved'){
+    if(status === 'approved' || status === 'active'){
       go('S-hw-dash')
       _populateHWDashData(row, fn, ln, initials)
       loadHWCollections(row.email)
@@ -4399,16 +4447,16 @@ async function _populateHWDashData(row, fn, ln, initials){
   }
   safe('hw-collections-count', row.collections_done || 0)
 
-  // Upcoming = next 4 weeks of Bin Out visits (each collection day = 1 collection)
-  const upcomingWeeks = 4
-  safe('hw-upcoming-count', colDayIdx >= 0 ? upcomingWeeks : 0)
-
   // Next collection dates computed from collection_day
   const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   const shortDays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
   const shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const colDay = row.collection_day || ''
   const colDayIdx = dayNames.findIndex(d => d.toLowerCase() === colDay.toLowerCase())
+
+  // Upcoming — now colDayIdx is defined
+  const upcomingWeeks = 4
+  safe('hw-upcoming-count', colDayIdx >= 0 ? upcomingWeeks : 0)
   if(colDayIdx >= 0){
     const today = new Date()
     let daysUntil = (colDayIdx - today.getDay() + 7) % 7
