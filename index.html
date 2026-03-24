@@ -7500,9 +7500,14 @@ function renderRunnerCard(r){
         ${rJobs.slice(0,5).map(j=>{
           const sc={offered:'#fbbf24',accepted:'#6366f1',in_progress:'#06d6a0',complete:'#22c55e',declined:'#ef4444'}
           const dt=j.scheduled_date?new Date(j.scheduled_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'--'
+          // Resolve homeowner name from HOMEOWNERS array, fall back to first part of email
+          const hw = HOMEOWNERS.find(h=>h.email===j.homeowner_email)
+          const hwLabel = hw?.name || (j.homeowner_email?.split('@')[0]||'--')
+          const visitIcon = j.visit_type==='BIN_IN'?'☀️':j.visit_type==='BIN_OUT'?'🌙':'📦'
           return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
             <span style="background:${sc[j.status]||'#64748b'}22;color:${sc[j.status]||'#64748b'};border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;flex-shrink:0">${j.status}</span>
-            <span style="flex:1;color:var(--text)">${j.homeowner_email||'--'}</span>
+            <span style="font-size:13px;flex-shrink:0">${visitIcon}</span>
+            <span style="flex:1;color:var(--text);font-weight:600">${hwLabel}</span>
             <span style="color:var(--muted);font-size:10px">${dt}</span>
             <span style="color:var(--green);font-weight:600">$${parseFloat(j.amount||3.25).toFixed(2)}</span>
           </div>`
