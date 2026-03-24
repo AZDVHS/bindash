@@ -358,8 +358,22 @@ function handleStripeReturn(){
   if(p.get('checkout')==='success'){
     window.history.replaceState({},'',' ')
     obClear()  // signup complete -- clear saved progress
+    window._checkoutJustCompleted = true  // prevent initApp from re-routing away
     go('S-hw-pending')
     showToast('Payment successful! Account being set up ✅','ok')
+    // Update signup status to pending_review so admin sees it
+    ;(async()=>{
+      try {
+        const { data:{ session } } = await _supa.auth.getSession()
+        if(session?.user?.email){
+          await _supa.from('homeowner_signups').update({
+            status: 'pending_review',
+            updated_at: new Date().toISOString(),
+          }).ilike('email', session.user.email)
+          console.log('[BinDash] Signup status → pending_review after checkout ✅')
+        }
+      } catch(e){ console.warn('[BinDash] Post-checkout status update:', e) }
+    })()
   } else if(p.get('checkout')==='cancel'){
     window.history.replaceState({},'',' ')
     showToast('Payment cancelled -- try again anytime','info')
@@ -2595,12 +2609,9 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             </div>
           </div>
 
-          <div class="callout-card a2" onclick="showCallout()" style="margin-bottom:18px">
-            <div style="font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Need a one-time pickup?</div>
-            <div class="callout-price">$12.99</div>
-            <div class="callout-title">One-Time Callout</div>
-            <div class="callout-sub">Bin Out or Bin In -- recycling or general waste. One visit, flat rate, no subscription.</div>
-            <button class="btn btn-cyan btn-lg" style="pointer-events:none">📦 Book a Callout -- $12.99</button>
+          <div id="hw-callout-banner" style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div style="font-size:12px;color:var(--sub)">📦 Need a one-off pickup outside your schedule?</div>
+            <button class="btn btn-outline btn-sm" style="font-size:11px;white-space:nowrap" onclick="showCallout()">Book Callout — $12.99</button>
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
@@ -2618,7 +2629,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <span style="color:var(--muted)">.</span>
             <span style="color:var(--sub)">Your day: <strong style="color:var(--text)" id="hw-collection-day">--</strong></span>
             <span style="color:var(--muted)">.</span>
-            <span style="color:var(--sub)" id="hw-assigned-runner">Runner: <strong style="color:var(--cyan)">TBD -- pending activation</strong></span>
+            <span style="color:var(--sub)" id="hw-assigned-runner">Priority Runner: <strong style="color:var(--cyan)">TBD — pending activation</strong></span>
           </div>
 
           <!-- NEXT COLLECTION -- shows both visits -->
@@ -4383,8 +4394,8 @@ async function _populateHWDashData(row, fn, ln, initials){
   if(runnerEl){
     const runner = RUNNERS.find(r=>r.id===row.assigned_runner)
     runnerEl.innerHTML = runner
-      ? 'Runner: <strong style="color:var(--cyan)">' + runner.name + '</strong>'
-      : 'Runner: <strong style="color:var(--muted)">TBD -- pending assignment</strong>'
+      ? 'Priority Runner: <strong style="color:var(--cyan)">' + runner.name + '</strong>'
+      : 'Priority Runner: <strong style="color:var(--muted)">TBD — pending assignment</strong>'
   }
   safe('hw-collections-count', row.collections_done || 0)
 
@@ -5637,6 +5648,15 @@ async function initApp(){
     let role   = user?.user_metadata?.role || ''
     const fn   = user?.user_metadata?.first_name || ''
     const ln   = user?.user_metadata?.last_name  || ''
+
+    // If returning from Stripe checkout, always treat as homeowner — don't re-route
+    if(window._checkoutJustCompleted){
+      window._checkoutJustCompleted = false
+      setCurrentUser(user)
+      populateHWDashboard()
+      await loadZonesFromSupabase()
+      return
+    }
 
     // If role missing from metadata, check DB tables — same logic as doLogin
     if(!role || role === 'hw'){
