@@ -5867,37 +5867,198 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
   try {
     const ref      = binOutJobs[0]
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
-    const inBatchId = (ref.batch_id || ref.id).replace('0321','0322').replace('BIN_OUT','BIN_IN') + '-IN'
-    const expiresAt = new Date(Date.now() + 25 * 60 * 1000).toISOString() // 25 min loyalty window
+    const tomorrowStr = tomorrow.toISOString().slice(0,10)
+    const inBatchId = (ref.batch_id || ref.id) + '-IN'
+    const loyaltyExpiry = new Date(Date.now() + 25 * 60 * 1000).toISOString()
 
-    const inJobs = binOutJobs.map(j => ({
-      batch_id:          inBatchId,
-      homeowner_email:   j.homeowner_email,
-      runner_id:         j.runner_id,
-      runner_name:       j.runner_name,
-      visit_type:        'BIN_IN',
-      job_type:          'subscription',
-      service_type:      j.service_type,
-      status:            'offered',
-      offer_type:        'loyalty',
-      offer_expires_at:  expiresAt,
-      scheduled_date:    tomorrow.toISOString().slice(0,10),
-      amount:            3.25,
-      zone_id:           j.zone_id,
-      created_at:        new Date().toISOString(),
-      updated_at:        new Date().toISOString(),
-    }))
+    const stopNames = binOutJobs.slice(0,3).map(j=>{
+      const hw = (window.NAV_STOPS||[]).find(s=>s.email===j.homeowner_email)
+      return hw?.name || j.homeowner_email?.split('@')[0] || 'Stop'
+    }).join(', ')
+    const moreStops = binOutJobs.length > 3 ? ` +${binOutJobs.length - 3} more` : ''
+    const earn = (binOutJobs.length * 3.25).toFixed(2)
 
-    const { error } = await _supa.from('jobs').insert(inJobs)
-    if(error) console.warn('[BinDash] Bin In auto-create failed:', error.message)
-    else {
-      showToast('☀️ Bin In route auto-created — check your offers!', 'info', 4000)
-      // Reload routes so offer banner appears
-      setTimeout(() => loadRunnerRoutes(runnerRow), 1500)
-    }
+    // Show runner the Bin In offer prompt
+    document.getElementById('modal-box').innerHTML = `
+    <div class="mh" style="background:rgba(245,158,11,.07)">
+      <div>
+        <div style="font-size:15px;font-weight:700;color:#fbbf24">☀️ Bin In Ready to Schedule</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">Bins are at the curb — residents are waiting</div>
+      </div>
+    </div>
+    <div class="mb">
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${binOutJobs.length} Bin In stop${binOutJobs.length!==1?'s':''} available</div>
+        <div style="font-size:12px;color:var(--sub);margin-bottom:8px">${stopNames}${moreStops}</div>
+        <div style="display:flex;gap:10px">
+          <div style="background:rgba(34,197,94,.1);border-radius:8px;padding:8px 14px;text-align:center;flex:1">
+            <div style="font-size:20px;font-weight:800;color:#22c55e">$${earn}</div>
+            <div style="font-size:10px;color:var(--muted)">you earn</div>
+          </div>
+          <div style="background:rgba(245,158,11,.1);border-radius:8px;padding:8px 14px;text-align:center;flex:1">
+            <div style="font-size:20px;font-weight:800;color:#fbbf24">25 min</div>
+            <div style="font-size:10px;color:var(--muted)">to decide</div>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--sub);line-height:1.6;margin-bottom:4px">
+        ☀️ Bin In happens <strong style="color:var(--text)">after the collection truck passes</strong> — typically afternoon. Accept now to lock in this route, or it goes to other runners in your zone.
+      </div>
+      <div id="bin-in-countdown" style="font-size:11px;color:#fbbf24;font-weight:700;margin-top:6px">⏳ 25:00 remaining</div>
+    </div>
+    <div class="mf">
+      <button class="btn btn-ghost btn-sm" onclick="_declineBinIn('${inBatchId}')">✕ Decline — pass to zone</button>
+      <button class="btn btn-cyan" onclick="_acceptBinIn('${inBatchId}')">☀️ Accept Bin In — $${earn}</button>
+    </div>`
+    openM()
+
+    // Countdown timer in modal
+    const expiry = Date.now() + 25*60*1000
+    const countdownInterval = setInterval(()=>{
+      const remaining = Math.max(0, expiry - Date.now())
+      const mins = Math.floor(remaining/60000)
+      const secs = Math.floor((remaining%60000)/1000)
+      const el = document.getElementById('bin-in-countdown')
+      if(el) el.textContent = `⏳ ${mins}:${String(secs).padStart(2,'0')} remaining`
+      if(remaining <= 0){
+        clearInterval(countdownInterval)
+        closeM()
+        // Timer expired — cascade to zone runners
+        _offerBinInToZone(inBatchId, binOutJobs, runnerRow, tomorrowStr, loyaltyExpiry)
+      }
+    }, 1000)
+    window._binInCountdownInterval = countdownInterval
+
+    // Store batch data for accept/decline handlers
+    window._pendingBinInBatch = { inBatchId, binOutJobs, runnerRow, tomorrowStr, loyaltyExpiry, countdownInterval }
+
   } catch(e){
     console.warn('[BinDash] _autoCreateBinInBatch:', e)
   }
+}
+
+async function _acceptBinIn(inBatchId){
+  clearInterval(window._binInCountdownInterval)
+  closeM()
+  const p = window._pendingBinInBatch
+  if(!p) return
+
+  const { binOutJobs, runnerRow, tomorrowStr } = p
+  const expiresAt = new Date(Date.now() + 8*60*60*1000).toISOString() // 8hr window — whole day
+
+  const inJobs = binOutJobs.map(j => ({
+    batch_id:          inBatchId,
+    homeowner_email:   j.homeowner_email,
+    runner_id:         runnerRow?.id    || j.runner_id,
+    runner_name:       runnerRow ? ((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).trim() : j.runner_name,
+    visit_type:        'BIN_IN',
+    job_type:          'subscription',
+    service_type:      j.service_type,
+    status:            'accepted',   // directly accepted — no offer window needed
+    offer_type:        'loyalty',
+    offer_expires_at:  expiresAt,
+    scheduled_date:    tomorrowStr,
+    amount:            3.25,
+    zone_id:           j.zone_id,
+    created_at:        new Date().toISOString(),
+    updated_at:        new Date().toISOString(),
+  }))
+
+  const { error } = await _supa.from('jobs').insert(inJobs)
+  if(error){
+    showToast('Failed to save Bin In: '+error.message, 'err')
+  } else {
+    showToast(`☀️ Bin In accepted — ${inJobs.length} stop${inJobs.length!==1?'s':''} locked in for tomorrow ✅`, 'ok', 5000)
+    // Email homeowners
+    binOutJobs.forEach(j=>{
+      const hw = (window.NAV_STOPS||[]).find(s=>s.email===j.homeowner_email)
+      const name = hw?.name?.split(' ')[0] || 'there'
+      if(j.homeowner_email) sendEmail(j.homeowner_email,
+        'Your Bin In is confirmed for tomorrow ☀️',
+        `<p>Hi ${name},</p><p>Your runner has confirmed your Bin In for tomorrow. Your bins will be returned to your property after the collection truck passes.</p><p>— BinDash</p>`,
+        'bin_in_confirmed')
+    })
+    await loadRunnerRoutes(runnerRow)
+    // Refresh admin dispatch pipeline
+    window._livePipelineBatches = null
+    loadLiveJobsIntoPipeline?.()
+  }
+  window._pendingBinInBatch = null
+}
+
+async function _declineBinIn(inBatchId){
+  clearInterval(window._binInCountdownInterval)
+  closeM()
+  const p = window._pendingBinInBatch
+  if(!p) return
+  showToast('Bin In passed to zone runners — they\'ll be notified now', 'info', 4000)
+  await _offerBinInToZone(inBatchId, p.binOutJobs, p.runnerRow, p.tomorrowStr, p.loyaltyExpiry)
+  window._pendingBinInBatch = null
+}
+
+async function _offerBinInToZone(inBatchId, binOutJobs, originalRunner, tomorrowStr, expiresAt){
+  // Find zone runners (excluding original runner who declined/timed out)
+  const zoneId = binOutJobs[0]?.zone_id
+  const zoneRunners = RUNNERS.filter(r=>
+    r.status!=='INACTIVE' && r.status!=='OFF_DUTY' &&
+    r.id !== (originalRunner?.id) &&
+    (r.zoneId===zoneId || r.coverageZones?.includes(zoneId)) &&
+    (r.visitType==='BOTH'||r.visitType==='BIN_IN')
+  )
+
+  const zoneExpiresAt = new Date(Date.now() + 45*60*1000).toISOString() // 45min zone window
+
+  if(zoneRunners.length){
+    // Offer to first zone runner
+    const zoneRunner = zoneRunners[0]
+    const inJobs = binOutJobs.map(j => ({
+      batch_id:         inBatchId,
+      homeowner_email:  j.homeowner_email,
+      runner_id:        zoneRunner.id,
+      runner_name:      zoneRunner.name,
+      visit_type:       'BIN_IN',
+      job_type:         'subscription',
+      service_type:     j.service_type,
+      status:           'offered',
+      offer_type:       'zone',
+      offer_expires_at: zoneExpiresAt,
+      scheduled_date:   tomorrowStr,
+      amount:           3.25,
+      zone_id:          j.zone_id,
+      created_at:       new Date().toISOString(),
+      updated_at:       new Date().toISOString(),
+    }))
+    await _supa.from('jobs').insert(inJobs)
+    if(zoneRunner.email) sendEmail(zoneRunner.email,
+      `☀️ Bin In route available — ${binOutJobs.length} stop${binOutJobs.length!==1?'s':''} · $${(binOutJobs.length*3.25).toFixed(2)}`,
+      `<p>Hi ${zoneRunner.name?.split(' ')[0]||'Runner'},</p><p>A Bin In route is available in your zone for tomorrow. You have <strong>45 minutes</strong> to accept before it goes to all runners.</p>`,
+      'bin_in_zone_offer')
+    showToast(`☀️ Bin In offered to ${zoneRunner.name} — 45 min window`, 'info', 4000)
+  } else {
+    // No zone runners — broadcast immediately
+    const inJobs = binOutJobs.map(j => ({
+      batch_id:         inBatchId,
+      homeowner_email:  j.homeowner_email,
+      runner_id:        null,
+      runner_name:      null,
+      visit_type:       'BIN_IN',
+      job_type:         'subscription',
+      service_type:     j.service_type,
+      status:           'broadcast',
+      offer_type:       'broadcast',
+      offer_expires_at: new Date(Date.now() + 2*60*60*1000).toISOString(),
+      scheduled_date:   tomorrowStr,
+      amount:           3.25,
+      zone_id:          j.zone_id,
+      created_at:       new Date().toISOString(),
+      updated_at:       new Date().toISOString(),
+    }))
+    await _supa.from('jobs').insert(inJobs)
+    showToast('📡 Bin In broadcast to all available runners', 'info', 4000)
+  }
+  // Refresh dispatch pipeline on admin side
+  window._livePipelineBatches = null
+  loadLiveJobsIntoPipeline?.()
 }
 
 function showCurrentOfferDetail(){
@@ -14260,8 +14421,8 @@ async function launchDispatchRoutes(){
       const targetIdx  = dayNames.findIndex(d => normDay(d)===targetNorm)
       const scheduledDate = (() => {
         if(targetIdx < 0) return now.toISOString().slice(0,10)
-        const d = new Date()
-        const diff = (targetIdx - d.getDay() + 7) % 7 || 7
+        const d = new Date(); d.setHours(0,0,0,0)
+        const diff = (targetIdx - d.getDay() + 7) % 7  // 0 = today, not pushed to next week
         d.setDate(d.getDate() + diff)
         return d.toISOString().slice(0,10)
       })()
@@ -14660,10 +14821,23 @@ async function loadLiveJobsIntoPipeline(){
     const { data: liveJobs } = await _supa.from('jobs')
       .select('*')
       .eq('scheduled_date', scheduledDateStr)
-      .not('status', 'in', '("complete","cancelled","declined")')
+      .not('status', 'in', '("complete","cancelled")')
+      .order('visit_type', { ascending: true })  // BIN_IN before BIN_OUT alphabetically, swap below
       .order('created_at', { ascending: true })
 
-    if(!liveJobs?.length){
+    // Also load tomorrow's BIN_IN jobs (created after tonight's BIN_OUT completes)
+    const tomorrow = new Date(scheduledDate); tomorrow.setDate(scheduledDate.getDate() + 1)
+    const tomorrowStr = tomorrow.toISOString().slice(0,10)
+    const { data: binInJobs } = await _supa.from('jobs')
+      .select('*')
+      .eq('scheduled_date', tomorrowStr)
+      .eq('visit_type', 'BIN_IN')
+      .not('status', 'in', '("complete","cancelled")')
+      .order('created_at', { ascending: true })
+
+    const allJobs = [...(liveJobs||[]), ...(binInJobs||[])]
+
+    if(!allJobs.length){
       // No live jobs — show the empty preview prompt
       if(!generatedBatches.length) renderDispatchPipeline()
       return
@@ -14671,16 +14845,18 @@ async function loadLiveJobsIntoPipeline(){
 
     // Group jobs by batch_id into pipeline batches
     const batchMap = {}
-    liveJobs.forEach(j => {
+    allJobs.forEach(j => {
       const key = j.batch_id || j.id
       if(!batchMap[key]) {
         const runner = RUNNERS.find(r=>r.id===j.runner_id||r.name===j.runner_name)
         const zone   = ADMIN_ZONES.find(z=>z.id===j.zone_id)
+        const visitLabel = j.visit_type==='BIN_IN' ? '☀️ BIN IN' : '🌙 BIN OUT'
         batchMap[key] = {
           id:        key,
           day:       day,
           zoneId:    j.zone_id,
-          zoneName:  zone?.name || 'Zone',
+          zoneName:  (zone?.name || 'Zone') + ' · ' + visitLabel,
+          visitType: j.visit_type,
           runner:    runner || (j.runner_name ? {id:j.runner_id, name:j.runner_name, initials:j.runner_name.split(' ').map(w=>w[0]).join('').toUpperCase()} : null),
           status:    j.status,
           offerType: j.offer_type || 'loyalty',
@@ -14688,10 +14864,10 @@ async function loadLiveJobsIntoPipeline(){
           earnTotal: '0.00',
           hasSplit:  false,
           stops:     [],
-          _fromDB:   true,  // flag: this came from DB, don't allow editing
+          _fromDB:   true,
+          binInUnlock: 'afternoon',
         }
       }
-      // Add stop from this job
       const hw = HOMEOWNERS.find(h=>h.email===j.homeowner_email)
       batchMap[key].stops.push({
         name:         hw?.name || j.homeowner_email?.split('@')[0] || '--',
@@ -14708,9 +14884,7 @@ async function loadLiveJobsIntoPipeline(){
         jobId:        j.id,
         jobStatus:    j.status,
       })
-      // Update batch earn total
-      batchMap[key].earnTotal = (batchMap[key].stops.length * 3.25 * 2).toFixed(2)
-      // Use worst status (offered < accepted < in_progress)
+      batchMap[key].earnTotal = (batchMap[key].stops.length * 3.25).toFixed(2)
       const statusRank = {offered:1, broadcast:1, accepted:2, in_progress:3}
       if((statusRank[j.status]||0) > (statusRank[batchMap[key].status]||0)) {
         batchMap[key].status = j.status
