@@ -13,6 +13,10 @@
 //  To update: change values AND update CONFIG_HASH below
 // ================================================================
 const SUPABASE_URL      = 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
+
+// Global onboarding state — declared here so they're NEVER undefined regardless of navigation path
+var obSelectedFreq = 'weekly'
+var obSelectedPlan = 'w2'
 const SUPABASE_ANON_KEY = 'sb_publishable_PzQNU1g9t7nH_c8GrK37sQ_2OocnlNQ'
 let _supa
 try {
@@ -204,7 +208,9 @@ async function launchStripeCheckout(){
   const addr = document.getElementById('h-addr')?.value.trim() || ''
   const city = document.getElementById('h-city')?.value.trim() || ''
   const zip  = document.getElementById('h-zip')?.value.trim()  || ''
-  const isSplit   = obSelectedPlan.endsWith('3')
+  const _plan    = obSelectedPlan || 'w2'
+  const _freq    = obSelectedFreq || 'weekly'
+  const isSplit   = _plan === 'oan_c' || _plan.endsWith('3')
   const colDay    = isSplit ? null : (document.getElementById('h-day')?.value || null)
   const colDayW   = isSplit ? (document.getElementById('h-day-waste')?.value    || null) : null
   const binLoc    = document.getElementById('h-bin-location')?.value || null
@@ -247,7 +253,7 @@ async function launchStripeCheckout(){
       city:             city||null,
       zip_code:         zip||null,
       plan_id:          _checkoutPlanKey,
-      frequency:        obSelectedFreq||'weekly',
+      frequency:        _freq,
       service_type:     window._obSvcLabel||'Recycling',
       collection_day:   colDay,
       collection_day_2: colDayW,
@@ -6279,7 +6285,7 @@ async function hNext(s){
     const fn=document.getElementById('h-fn')?.value||''
     const ln=document.getElementById('h-ln')?.value||''
     const freqLabel = {asneeded:'As Needed',monthly:'Monthly',biweekly:'Bi-weekly',weekly:'Weekly'}[obSelectedFreq]||obSelectedFreq
-    const isSplit = obSelectedPlan.endsWith('3')
+    const isSplit = obSelectedPlan === 'oan_c' || obSelectedPlan.endsWith('3')
     const dayVal = isSplit
       ? '♻️ ' + (document.getElementById('h-day-recycling')?.value||'--') + ' . 🗑️ ' + (document.getElementById('h-day-waste')?.value||'--')
       : (document.getElementById('h-day')?.value||'--')
@@ -6289,7 +6295,7 @@ async function hNext(s){
     const gateCode = document.getElementById('h-gate-code')?.value || ''
     const pets = document.getElementById('h-pet-info')?.value || '--'
     const notes = document.getElementById('h-svc-notes')?.value || ''
-    const planLabel = (OB_PLANS[obSelectedFreq]||[]).find(p=>p.id===obSelectedPlan)?.label || obSelectedPlan
+    const planLabel = obSelectedPlan?.startsWith('oan_') ? (STRIPE_PRICES[obSelectedPlan]?.name || 'Bin Out As Needed') : ((OB_PLANS[obSelectedFreq]||[]).find(p=>p.id===obSelectedPlan)?.label || obSelectedPlan)
     const photoCount = (_binPhotos||[]).filter(Boolean).length
     document.getElementById('h-review').innerHTML=`
       <div class="card-ttl">Your BinDash Summary</div>
@@ -6475,7 +6481,7 @@ async function hSubmit(){
   const curbNotes   = document.getElementById('h-curb-notes')?.value   || ''
   const svcNotes    = document.getElementById('h-svc-notes')?.value    || ''
   // Service info
-  const isSplit = obSelectedPlan.endsWith('3')
+  const isSplit = obSelectedPlan === 'oan_c' || obSelectedPlan.endsWith('3')
   const colDay  = isSplit ? null : (document.getElementById('h-day')?.value || null)
   const colDayR = isSplit ? (document.getElementById('h-day-recycling')?.value || null) : null
   const colDayW = isSplit ? (document.getElementById('h-day-waste')?.value    || null) : null
@@ -6508,8 +6514,8 @@ async function hSubmit(){
       city:              city,
       zip_code:          zip,
       service_type:      window._obSvcLabel || 'Recycling',
-      frequency:         obSelectedFreq,
-      plan_id:           obSelectedPlan,
+      frequency:         obSelectedFreq || 'weekly',
+      plan_id:           obSelectedPlan || 'w2',
       collection_day:    colDay,
       collection_day_2:  colDayW,
       bin_location:      binLocation || null,
@@ -9840,7 +9846,8 @@ function obSelectServiceType(type){
   if(freqRow) freqRow.style.display = isSnow ? 'none' : 'flex'
 
   if(isSnow){
-    selectObPlan('oan_b') // default to most popular tier
+    obSelectedFreq = 'weekly'  // OAN is always weekly drive-by
+    selectObPlan('oan_b')      // default to most popular tier
   } else {
     selectFreq(obSelectedFreq || 'weekly')
   }
