@@ -3014,6 +3014,9 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <div>
                   <div style="font-weight:700;font-size:14px;color:#a5b4fc">Set up your payouts to get paid</div>
                   <div style="font-size:12px;color:var(--muted);margin-top:2px">Connect your bank account via Stripe — takes 2 minutes. Your bank info is handled securely by Stripe, not BinDash.</div>
+                  <div style="font-size:11px;color:var(--sub);margin-top:6px;line-height:1.6">
+                    💡 <strong style="color:var(--text)">When Stripe asks for "Professional Details"</strong> — enter your full legal name as it appears on your ID, your home address, and the last 4 of your SSN. Select <strong>"Individual"</strong> (not business) unless you have a registered business entity. This is required for IRS 1099 reporting — you'll receive a 1099-NEC from BinDash each January for earnings over $600.
+                  </div>
                 </div>
               </div>
               <button class="btn btn-sm" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;flex-shrink:0" onclick="launchStripeConnect()">Set Up Payouts -></button>
@@ -3132,7 +3135,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <!-- TAB BAR -->
           <div style="display:flex;gap:0;margin-bottom:16px;background:var(--surface2);border-radius:10px;padding:4px">
             <button id="rtab-upcoming" onclick="switchRouteTab('upcoming')" style="flex:1;background:var(--surface);border:none;border-radius:7px;padding:9px 6px;font-size:12px;font-weight:700;color:var(--text);cursor:pointer;transition:all .2s">
-              📋 Upcoming <span id="rtab-upcoming-count" style="background:rgba(99,102,241,.2);color:#a5b4fc;border-radius:99px;font-size:9px;padding:1px 6px;margin-left:3px">2</span>
+              📋 Upcoming <span id="rtab-upcoming-count" style="background:rgba(99,102,241,.2);color:#a5b4fc;border-radius:99px;font-size:9px;padding:1px 6px;margin-left:3px">0</span>
             </button>
             <button id="rtab-active" onclick="switchRouteTab('active')" style="flex:1;background:transparent;border:none;border-radius:7px;padding:9px 6px;font-size:12px;font-weight:700;color:var(--muted);cursor:pointer;transition:all .2s">
               🧭 Active <span id="rtab-active-count" style="background:rgba(6,214,160,.2);color:var(--cyan);border-radius:99px;font-size:9px;padding:1px 6px;margin-left:3px;display:none">!</span>
@@ -3831,6 +3834,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                     <div class="ob-day-pill" data-day="Friday"    onclick="pickDispatchDay(this)">Fri</div>
                   </div>
                   <div id="dispatch-date-label" style="font-size:11px;color:var(--cyan);margin-top:5px;text-align:center;min-height:16px"></div>
+                  <div id="dispatch-day-status" style="background:var(--surface2);border-radius:10px;padding:10px;margin-top:10px;min-height:32px"></div>
                   <input type="hidden" id="dispatch-day-val" value="">
                 </div>
 
@@ -4265,7 +4269,8 @@ async function populateHWDashboard(){
     // Store stripe IDs on window for pause/resume
     window._hwStripeSubId      = row.stripe_subscription_id || null
     window._hwStripeCustomerId = row.stripe_customer_id     || null
-    window._hwSubPeriodEnd     = null // will be fetched from Stripe if needed
+    window._hwSubPeriodEnd     = null
+    window._hwProfileRow       = row  // store full row for preference editing
 
     const status = row.status
 
@@ -4667,9 +4672,23 @@ async function populateRNDashboard(){
     if(nameEl) nameEl.textContent = (fn + ' ' + ln).trim() || currentUser.email
     if(avEl)   avEl.textContent   = initials
 
-    // Stripe Connect banner
+    // Stripe Connect banner — hide if connect ID exists OR if connect=return (just completed setup)
     const stripeBanner = document.getElementById('rn-stripe-setup-banner')
-    if(stripeBanner) stripeBanner.style.display = merged.stripe_connect_id ? 'none' : 'block'
+    const hasConnect = merged.stripe_connect_id || merged.stripe_account_id || window._stripeConnectJustDone
+    if(stripeBanner) stripeBanner.style.display = hasConnect ? 'none' : 'block'
+
+    // If returning from Stripe Connect, mark setup done in DB
+    if(window._showConnectReturnToast){
+      window._stripeConnectJustDone = true
+      if(stripeBanner) stripeBanner.style.display = 'none'
+      // Update runners table to record that connect setup was completed
+      try {
+        await _supa.from('runners').update({
+          stripe_connect_id: merged.stripe_connect_id || 'setup_complete',
+          updated_at: new Date().toISOString()
+        }).ilike('email', currentUser?.email||'')
+      } catch(e){ console.warn('[BinDash] Stripe connect save:', e) }
+    }
 
     // Store for later use
     window._rnRow = merged
@@ -4861,7 +4880,7 @@ function _renderRNHomeDashZones(runnerRow){
     const hwPct      = Math.min(100, Math.round(hwCount / Math.max(needed, 1) * 100))
     const rnPct      = Math.min(100, Math.round(rnCount / Math.max(capacity, 1) * 100))
     const dayLabels  = (z.collection||[]).map(d => typeof d==='object' ? d.day||d : d).join(', ') || '--'
-    const wlCount    = WAITLIST_SIGNUPS.filter(s => z.zips?.includes(s.zip) || z.zip===s.zip?.slice(0,3)).length
+    const wlCount    = WAITLIST_SIGNUPS.filter(s => z.zips?.includes(s.zip) || z.zips?.includes(s.zip) || z.zip===s.zip).length
 
     const statusBadge = isLive
       ? `<span style="background:rgba(34,197,94,.15);color:#22c55e;border-radius:99px;font-size:9px;font-weight:700;padding:2px 8px">🟢 Live</span>`
@@ -4949,7 +4968,7 @@ async function loadRNInterestList(runnerRow){
   try {
     // Determine the runner's ZIP(s) to search — use their home ZIP + any zone ZIPs
     const runnerZip   = runnerRow?.zip_code || ''
-    const prefix      = runnerZip.slice(0,3)
+    const prefix      = runnerZip
 
     // Find zones this runner covers
     const myZoneIds = [runnerRow?.zone_id].filter(Boolean)
@@ -4971,7 +4990,7 @@ async function loadRNInterestList(runnerRow){
       // Filter by ZIP prefix (homeowner's ZIP starts with same 3 digits)
       rows = (data||[]).filter(r => {
         const rz = r.zip_code||''
-        return allZips.includes(rz) || rz.slice(0,3)===prefix
+        return allZips.includes(rz) || rz.slice(0,4)===runnerZip.slice(0,4)
       })
     } catch(e){ console.warn('[BinDash] interest list:', e) }
 
@@ -5066,35 +5085,80 @@ function filterAdminJobs(){
   const filtered = _adminJobsCache.filter(j=>{
     if(status && j.status!==status) return false
     if(type   && j.visit_type!==type) return false
-    if(q && !JSON.stringify(j).toLowerCase().includes(q)) return false
+    if(q){
+      // Search by name, email, address, runner
+      const hw = HOMEOWNERS.find(h=>h.email===j.homeowner_email)
+      const searchStr = [j.homeowner_email, hw?.name, hw?.address, j.runner_name, j.batch_id].join(' ').toLowerCase()
+      if(!searchStr.includes(q)) return false
+    }
     return true
   })
   if(countEl) countEl.textContent = filtered.length+' job'+(filtered.length!==1?'s':'')
   if(!filtered.length){ if(tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">No jobs match filter</td></tr>'; return }
 
-  const sc = { offered:'#f59e0b', accepted:'#6366f1', in_progress:'#06d6a0', complete:'#22c55e', declined:'#ef4444', unassigned:'#64748b', late:'#ef4444' }
-  const si = { offered:'📬', accepted:'✅', in_progress:'🔄', complete:'✓', declined:'✕', unassigned:'⚠️', late:'🚨' }
+  const sc = { offered:'#f59e0b', accepted:'#6366f1', in_progress:'#06d6a0', complete:'#22c55e', declined:'#ef4444', broadcast:'#3b82f6', unassigned:'#64748b', late:'#ef4444' }
+  const si = { offered:'📬', accepted:'✅', in_progress:'🔄', complete:'✓', declined:'✕', broadcast:'📡', unassigned:'⚠️', late:'🚨' }
   const now = new Date()
 
   tbody.innerHTML = filtered.map(j=>{
-    const late = ['accepted','in_progress'].includes(j.status) && j.scheduled_date && now > new Date(j.scheduled_date+'T23:59:00')
-    const col  = sc[j.status]||'#64748b', icon = si[j.status]||'·'
+    const hw = HOMEOWNERS.find(h=>h.email===j.homeowner_email)
+    const hwName    = hw?.name || (j.homeowner_email?.split('@')[0] || '--')
+    const hwAddr    = hw?.address ? hw.address + (hw.zip ? ', '+hw.zip : '') : (j.homeowner_email || '--')
+    const late      = ['accepted','in_progress'].includes(j.status) && j.scheduled_date && now > new Date(j.scheduled_date+'T23:59:00')
+    const offerExpired = j.status==='offered' && j.offer_expires_at && new Date(j.offer_expires_at) < now
+    const offerExpiresIn = j.status==='offered' && j.offer_expires_at && new Date(j.offer_expires_at) > now
+      ? Math.round((new Date(j.offer_expires_at)-now)/60000) : null
+    const col  = offerExpired ? '#ef4444' : (sc[j.status]||'#64748b')
+    const icon = si[j.status]||'·'
     const dt   = j.scheduled_date ? new Date(j.scheduled_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '--'
-    return `<tr style="${late?'background:rgba(239,68,68,.04)':''}">
-      <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)">${(j.batch_id||j.id||'').slice(0,18)}</td>
-      <td style="font-size:12px">${j.homeowner_email||'--'}</td>
+    const runnerDisplay = j.runner_name
+      ? `<span onclick="event.stopPropagation();_adminNavToRunner('${j.runner_name}')" style="color:var(--cyan);cursor:pointer;font-weight:600">${j.runner_name}</span>`
+      : `<span style="color:var(--muted)">Unassigned</span>`
+
+    return `<tr style="${late?'background:rgba(239,68,68,.06)':offerExpired?'background:rgba(239,68,68,.03)':''};cursor:pointer" onclick="_adminNavToHW('${j.homeowner_email}')">
+      <td style="padding:10px 8px">
+        <div style="font-size:13px;font-weight:700;color:${offerExpired?'#ef4444':'var(--text)'}">${hwName}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:1px">📍 ${hwAddr}</div>
+      </td>
       <td><span class="${j.visit_type==='BIN_OUT'?'vt-out':'vt-in'}">${j.visit_type==='BIN_OUT'?'🌙 Out':'☀️ In'}</span></td>
-      <td style="font-size:12px">${dt}${late?' <span style="color:#ef4444;font-size:10px;font-weight:700">LATE</span>':''}</td>
-      <td style="font-size:12px">${j.runner_name||'<span style="color:var(--muted)">Unassigned</span>'}</td>
-      <td><span style="background:${col}22;color:${col};font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">${icon} ${j.status||'--'}</span></td>
+      <td style="font-size:12px">
+        ${dt}
+        ${late?'<div style="color:#ef4444;font-size:10px;font-weight:700">OVERDUE</div>':''}
+      </td>
+      <td style="font-size:12px">${runnerDisplay}</td>
+      <td>
+        <span style="background:${col}22;color:${col};font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap">${icon} ${j.status||'--'}</span>
+        ${offerExpired?'<div style="color:#ef4444;font-size:10px;font-weight:800;margin-top:2px">⚠️ ALL TIMERS EXPIRED</div>':''}
+        ${offerExpiresIn!==null?`<div style="color:#fbbf24;font-size:10px;margin-top:2px">⏳ ${offerExpiresIn}m left</div>`:''}
+      </td>
       <td style="font-size:12px;color:var(--green);font-weight:600">$${parseFloat(j.amount||3.25).toFixed(2)}</td>
-      <td style="display:flex;gap:4px;align-items:center">
-        ${['accepted','in_progress'].includes(j.status)?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fbbf24" onclick="adminMarkJobLate('${j.id}')">⚠️ Flag</button>`:''}
-        ${j.status==='complete'?'<span style="color:#22c55e;font-size:11px">✓</span>':''}
-        <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#ef4444;padding:3px 6px" onclick="confirmDeleteJob('${j.id}','${(j.homeowner_email||'').replace(/'/g,'')}')" title="Delete job">🗑</button>
+      <td style="white-space:nowrap">
+        ${['accepted','in_progress'].includes(j.status)?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fbbf24" onclick="event.stopPropagation();adminMarkJobLate('${j.id}')">⚠️ Flag</button>`:''}
+        <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#ef4444;padding:3px 6px" onclick="event.stopPropagation();confirmDeleteJob('${j.id}','${(j.homeowner_email||'').replace(/'/g,'')}')" title="Delete">🗑</button>
       </td>
     </tr>`
   }).join('')
+}
+
+function _adminNavToHW(email){
+  if(!email) return
+  adNav(null, 'ad-homeowners')
+  setTimeout(()=>{
+    const search = document.getElementById('hw-search')
+    if(search){ search.value = email; filterHomeowners() }
+    // Expand their card
+    const hw = HOMEOWNERS.find(h=>h.email===email)
+    if(hw) setTimeout(()=>toggleHWExpand(hw.id), 300)
+  }, 100)
+}
+
+function _adminNavToRunner(runnerName){
+  if(!runnerName) return
+  adNav(null, 'ad-runners')
+  setTimeout(()=>{
+    const search = document.getElementById('runner-search')
+    if(search){ search.value = runnerName; filterRunners(runnerName) }
+  }, 100)
 }
 
 async function adminMarkJobLate(jobId){
@@ -5443,7 +5507,13 @@ async function loadRunnerRoutes(runnerRow){
 
     // Update badge counts on route tabs
     const upcomingBadge = document.getElementById('rtab-upcoming-count')
-    if(upcomingBadge) upcomingBadge.textContent = activeJobs.length
+    const now = new Date()
+    const upcomingJobs = activeJobs.filter(j => {
+      if(!j.scheduled_date) return false
+      const sched = new Date(j.scheduled_date + 'T23:59:00')
+      return sched >= now && ['offered','accepted'].includes(j.status)
+    })
+    if(upcomingBadge) upcomingBadge.textContent = upcomingJobs.length
 
     // Update projected pay
     const todayJobs = activeJobs.filter(j => j.scheduled_date && new Date(j.scheduled_date).toDateString()===new Date().toDateString())
@@ -5485,12 +5555,29 @@ async function acceptOffer(){
   if(btn){ btn.disabled=true; btn.textContent='Accepting...' }
 
   try {
-    // Update by batch_id only (runner_id may be null for existing jobs)
+    // First check if another runner already accepted (only valid block)
+    const { data: currentJobs } = await _supa.from('jobs')
+      .select('status, runner_id')
+      .eq('batch_id', offerId)
+      .limit(1)
+
+    const currentStatus = currentJobs?.[0]?.status
+    const takenByOther  = ['accepted','in_progress','complete'].includes(currentStatus) &&
+                          currentJobs[0]?.runner_id && currentJobs[0].runner_id !== runnerRow.id
+
+    if(takenByOther){
+      showToast('This route was already accepted by another runner', 'err', 4000)
+      document.getElementById('offer-banner').style.display = 'none'
+      if(btn){ btn.disabled=false; btn.textContent='✓ Accept' }
+      return
+    }
+
+    // Accept regardless of expiry — expired just means it was broadcast, not locked
     const { error } = await _supa.from('jobs')
       .update({ 
-        status:         'accepted', 
+        status:          'accepted', 
         runner_accepted: true, 
-        runner_id:       runnerRow.id,  // backfill runner_id on accept
+        runner_id:       runnerRow.id,
         runner_name:     ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim(),
         updated_at:      new Date().toISOString() 
       })
@@ -5500,11 +5587,9 @@ async function acceptOffer(){
 
     clearInterval(window._offerCountdownTimer)
     document.getElementById('offer-banner').style.display = 'none'
-    showToast('Route accepted ✅ -- check My Routes to start when ready', 'ok', 5000)
+    showToast('Route accepted ✅ — check My Routes to start when ready', 'ok', 5000)
 
     await loadRunnerRoutes(runnerRow)
-
-    // Also switch to routes tab so runner sees it immediately
     rnNav(document.querySelector('#S-rn-dash .nav-i:nth-child(2)'), 'rn-routes')
 
   } catch(e){
@@ -6861,7 +6946,7 @@ async function loadRNZones(){
 
     // D: ZIP match (fallback only)
     const zonesByZip = runnerZip
-      ? ADMIN_ZONES.filter(z => z.zips?.includes(runnerZip) || z.zip===runnerZip.slice(0,3)).map(z=>z.id)
+      ? ADMIN_ZONES.filter(z => z.zips?.includes(runnerZip) || z.zip===runnerZip || z.zips?.includes(runnerZip)).map(z=>z.id)
       : []
 
     const primaryIds = [...new Set([...coverageFromRow, ...zonesByAssignment, ...zonesByRequest])]
@@ -6933,8 +7018,8 @@ async function loadRNZones(){
       const needed  = z.threshold||3
       const hwPct   = Math.min(100,Math.round(hwCount/Math.max(needed,1)*100))
       const capPct  = Math.min(100,Math.round(rnCount/Math.max(z.capacity||4,1)*100))
-      const zoneHOs = myHomeowners.filter(h => z.zips?.includes(h.zip_code)||h.zip_code?.slice(0,3)===z.zip)
-      const zoneWL  = waitlistedHOs.filter(h => z.zips?.includes(h.zip_code)||h.zip_code?.slice(0,3)===z.zip)
+      const zoneHOs = myHomeowners.filter(h => z.zips?.includes(h.zip_code)||h.zip_code===z.zip || z.zips?.includes(h.zip_code))
+      const zoneWL  = waitlistedHOs.filter(h => z.zips?.includes(h.zip_code)||h.zip_code===z.zip || z.zips?.includes(h.zip_code))
       const hasPendingRemoval = zoneRequests.some(r=>r.zone_id===z.id&&r.type==='removal'&&r.status==='pending')
 
       return `<div style="border:1.5px solid ${st.border};border-radius:14px;overflow:hidden;margin-bottom:14px">
@@ -7554,7 +7639,7 @@ function approveR(id, name, zoneSelectId){
   if(zoneVal === '_new'){
     const zipText = c.querySelector('.dl')?.textContent || ''
     const zipMatch = zipText.match(/\d{5}/)
-    const zip = zipMatch ? zipMatch[0].slice(0,3) : '853'
+    const zip = zipMatch ? zipMatch[0] : '853'
     const newZone = {
       id: crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+Math.random().toString(36).slice(2,8), name:'Zone '+zip+'xx', city:'', zip,
       status:'live', pilot:false, overridden:true,
@@ -8656,22 +8741,102 @@ async function saveEditProperty(){
   }
 }
 function showEditPreferences(){
-  const curDay   = document.getElementById('pref-day')?.textContent   || 'Monday'
-  const curNotes = document.getElementById('pref-notes')?.textContent || ''
+  // Read current values from populated elements
+  const curDay     = document.getElementById('pref-day')?.textContent?.trim()     || 'Monday'
+  const curSvc     = document.getElementById('pref-service')?.textContent?.trim() || 'Recycling'
+  const curPlan    = document.getElementById('acct-plan-name')?.textContent?.trim()|| ''
+  const curNotes   = document.getElementById('pref-notes')?.textContent?.trim()   || ''
+  const curBinout  = document.getElementById('pref-binout-night')?.textContent?.trim() || ''
+  const row        = window._hwProfileRow || {}
+
+  // Detect split-day service
+  const isSplitCurrent = curSvc.toLowerCase().includes('split') || row.collection_day_2
+  const curDay2   = row.collection_day_2 || ''
+
+  // Plan pricing for change notification
+  const planPrices = {
+    plan_a: { label:'1 Can — Weekly', price: 34.99 },
+    plan_b: { label:'2 Cans Same Day — Weekly', price: 44.99 },
+    plan_c: { label:'2 Cans Split Days — Weekly', price: 54.99 },
+    oan_a:  { label:'Bin Out As Needed — 1 Can', price: 19.99, oan: true },
+    oan_b:  { label:'Bin Out As Needed — 2 Cans Same Day', price: 19.99, oan: true },
+    oan_c:  { label:'Bin Out As Needed — 2 Cans Split', price: 19.99, oan: true },
+  }
+  const currentPlanKey = row.plan_id || 'plan_a'
+  const currentPlanPrice = planPrices[currentPlanKey]?.price || 34.99
 
   document.getElementById('modal-box').innerHTML=`
   <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit Service Preferences</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
-  <div class="mb">
-    <div class="info-box" style="margin-bottom:14px">Day changes apply from your next billing cycle. Contact support to change plan or frequency.</div>
-    <div class="field"><label>Preferred Collection Day</label>
-      <select id="epr-day">
-        ${['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d=>`<option ${d===curDay?'selected':''}>${d}</option>`).join('')}
-      </select>
+  <div class="mb" style="max-height:70vh;overflow-y:auto">
+
+    <!-- SERVICE TYPE -->
+    <div class="sec-h" style="margin-top:0">Which bins does your runner handle?</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+      <div id="ep-svc-recycling" onclick="epSelectSvc('recycling')" style="border:1.5px solid ${!curSvc.includes('Waste')&&!curSvc.includes('Split')?'var(--cyan)':'var(--border2)'};background:${!curSvc.includes('Waste')&&!curSvc.includes('Split')?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+        <div style="font-size:20px">♻️</div><div style="font-size:12px;font-weight:700;margin-top:4px">Recycling only</div>
+      </div>
+      <div id="ep-svc-waste" onclick="epSelectSvc('waste')" style="border:1.5px solid ${curSvc.includes('General')?'var(--cyan)':'var(--border2)'};background:${curSvc.includes('General')&&!curSvc.includes('Split')?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+        <div style="font-size:20px">🗑️</div><div style="font-size:12px;font-weight:700;margin-top:4px">General Waste only</div>
+      </div>
+      <div id="ep-svc-both" onclick="epSelectSvc('both')" style="border:1.5px solid ${curSvc.includes('Both')||curSvc.includes('both')?'var(--cyan)':'var(--border2)'};background:${curSvc.includes('Both')?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+        <div style="font-size:20px">♻️🗑️</div><div style="font-size:12px;font-weight:700;margin-top:4px">Both — same day</div>
+      </div>
+      <div id="ep-svc-split" onclick="epSelectSvc('split')" style="border:1.5px solid ${isSplitCurrent?'var(--cyan)':'var(--border2)'};background:${isSplitCurrent?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+        <div style="font-size:20px">📅</div><div style="font-size:12px;font-weight:700;margin-top:4px">Both — split days</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">Different days for each bin</div>
+      </div>
     </div>
-    <div class="field"><label>Special Instructions for Runner</label>
-      <textarea id="epr-notes" placeholder="e.g. Use side gate, dog is friendly">${curNotes==='--'?'':curNotes}</textarea>
+    <input type="hidden" id="ep-svc-val" value="${isSplitCurrent?'split':curSvc.includes('General')&&!curSvc.includes('Both')?'waste':curSvc.includes('Both')?'both':'recycling'}">
+
+    <!-- PLAN CHANGE NOTICE -->
+    <div id="ep-plan-notice" style="display:none;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#fbbf24"></div>
+
+    <!-- COLLECTION DAY(S) -->
+    <div class="sec-h">Collection schedule</div>
+
+    <!-- Single day (shown when not split) -->
+    <div id="ep-day-single" style="${isSplitCurrent?'display:none':''}">
+      <div class="field"><label>Collection day</label>
+        <select id="ep-day">
+          ${['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d=>`<option ${d===curDay?'selected':''}>${d}</option>`).join('')}
+        </select>
+      </div>
     </div>
-    <div id="epr-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:4px"></div>
+
+    <!-- Split days (shown when split service selected) -->
+    <div id="ep-day-split" style="${isSplitCurrent?'':'display:none'}">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field"><label>♻️ Recycling day</label>
+          <select id="ep-day-recycling">
+            ${['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d=>`<option ${d===(isSplitCurrent?curDay:'')?'selected':''}>${d}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>🗑️ Waste day</label>
+          <select id="ep-day-waste">
+            ${['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d=>`<option ${d===curDay2?'selected':''}>${d}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="ep-split-warn" style="display:none;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:7px;padding:8px 12px;font-size:12px;color:#fbbf24;margin-top:4px">⚠️ Both days can't be the same — please choose different days.</div>
+    </div>
+
+    <!-- SPECIAL INSTRUCTIONS -->
+    <div class="sec-h">Special instructions for runner</div>
+    <div class="field">
+      <textarea id="ep-svc-notes" placeholder="e.g. Side gate is usually unlocked, bins are behind the lemon tree">${curNotes==='--'?'':curNotes}</textarea>
+    </div>
+
+    <!-- PLAN CHANGE (only show if service type changes warrant it) -->
+    <div id="ep-plan-section" style="display:none">
+      <div class="sec-h">Your plan</div>
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--sub);margin-bottom:8px">
+        Current: <strong style="color:var(--text)">${curPlan || planPrices[currentPlanKey]?.label || '--'}</strong>
+        — $${currentPlanPrice.toFixed(2)}/mo
+      </div>
+      <div style="font-size:12px;color:var(--muted)">Service type changes that affect your bin count will be reflected in your next billing cycle. Contact support for plan downgrades.</div>
+    </div>
+
+    <div id="epr-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:8px"></div>
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
@@ -8680,23 +8845,119 @@ function showEditPreferences(){
   openM()
 }
 
+function epSelectSvc(svc){
+  document.getElementById('ep-svc-val').value = svc
+  // Highlight selected card
+  ;['recycling','waste','both','split'].forEach(s=>{
+    const el = document.getElementById('ep-svc-'+s)
+    if(!el) return
+    const on = s === svc
+    el.style.borderColor = on ? 'var(--cyan)' : 'var(--border2)'
+    el.style.background  = on ? 'rgba(6,214,160,.07)' : 'transparent'
+  })
+  // Show/hide split day pickers
+  const isSplit = svc === 'split'
+  document.getElementById('ep-day-single').style.display = isSplit ? 'none' : ''
+  document.getElementById('ep-day-split').style.display  = isSplit ? '' : 'none'
+
+  // Plan change notice
+  const notice = document.getElementById('ep-plan-notice')
+  const planSec = document.getElementById('ep-plan-section')
+  const row = window._hwProfileRow || {}
+  const currentKey = row.plan_id || 'plan_a'
+  const planPrices = { plan_a:34.99, plan_b:44.99, plan_c:54.99, oan_a:19.99, oan_b:19.99, oan_c:19.99 }
+  const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split Days' }
+
+  if(svc==='recycling'||svc==='waste'){
+    // Switching to 1-bin
+    if(currentKey==='plan_b'||currentKey==='plan_c'){
+      notice.style.display='block'
+      notice.innerHTML='⚠️ Switching to 1 bin would change your plan from <strong>'+planLabels[currentKey]+'</strong> ($'+planPrices[currentKey].toFixed(2)+'/mo) to <strong>1 Can</strong> ($34.99/mo). Rate change applies next billing cycle.'
+      planSec.style.display='block'
+    } else { notice.style.display='none'; planSec.style.display='none' }
+  } else if(svc==='both'){
+    if(currentKey==='plan_a'||currentKey==='plan_c'){
+      notice.style.display='block'
+      notice.innerHTML='ℹ️ Both bins same day changes your plan to <strong>2 Cans Same Day</strong> ($44.99/mo). Rate change applies next billing cycle.'
+      planSec.style.display='block'
+    } else { notice.style.display='none'; planSec.style.display='none' }
+  } else if(svc==='split'){
+    if(currentKey!=='plan_c'){
+      notice.style.display='block'
+      notice.innerHTML='ℹ️ Split days changes your plan to <strong>2 Cans Split Days</strong> ($54.99/mo). Rate change applies next billing cycle.'
+      planSec.style.display='block'
+    } else { notice.style.display='none'; planSec.style.display='none' }
+  } else { notice.style.display='none'; planSec.style.display='none' }
+}
+
 async function saveEditPreferences(){
   const btn = document.getElementById('epr-btn')
   const errEl = document.getElementById('epr-error')
   if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+
+  const svc     = document.getElementById('ep-svc-val')?.value || 'recycling'
+  const isSplit = svc === 'split'
+  const notes   = document.getElementById('ep-svc-notes')?.value.trim() || null
+
+  // Validate split days
+  if(isSplit){
+    const r = document.getElementById('ep-day-recycling')?.value
+    const w = document.getElementById('ep-day-waste')?.value
+    const warn = document.getElementById('ep-split-warn')
+    if(r && w && r===w){
+      if(warn) warn.style.display='block'
+      if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
+      return
+    }
+    if(warn) warn.style.display='none'
+  }
+
+  const newDay  = isSplit ? document.getElementById('ep-day-recycling')?.value : document.getElementById('ep-day')?.value
+  const newDay2 = isSplit ? document.getElementById('ep-day-waste')?.value : null
+
+  const svcLabels = { recycling:'Recycling', waste:'General Waste', both:'Recycling + General Waste', split:'Split days — different days' }
+  const svcLabel = svcLabels[svc] || 'Recycling'
+
+  // Determine new plan key based on service change
+  const row = window._hwProfileRow || {}
+  const currentKey = row.plan_id || 'plan_a'
+  let newPlanKey = currentKey
+  if(svc==='recycling'||svc==='waste')       newPlanKey = 'plan_a'
+  else if(svc==='both')                       newPlanKey = 'plan_b'
+  else if(svc==='split')                      newPlanKey = 'plan_c'
+
   try {
-    const newDay   = document.getElementById('epr-day')?.value   || ''
-    const newNotes = document.getElementById('epr-notes')?.value.trim() || null
+    // Update homeowner_signups
     const { error } = await _supa.from('homeowner_signups')
-      .update({ collection_day: newDay, service_notes: newNotes, updated_at: new Date().toISOString() })
-      .eq('email', currentUser.email)
+      .update({
+        service_type:     svcLabel,
+        collection_day:   newDay   || null,
+        collection_day_2: newDay2  || null,
+        service_notes:    notes,
+        plan_id:          newPlanKey,
+        updated_at:       new Date().toISOString()
+      })
+      .ilike('email', currentUser.email)
     if(error) throw new Error(error.message)
+
+    // Also update homeowners table
+    await _supa.from('homeowners').update({
+      service_type:     svcLabel,
+      collection_day:   newDay   || null,
+      collection_day_2: newDay2  || null,
+      plan_id:          newPlanKey,
+      updated_at:       new Date().toISOString()
+    }).ilike('email', currentUser.email)
+
     const safe = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v||'--' }
-    safe('pref-day', newDay)
-    safe('pref-notes', newNotes)
+    safe('pref-service', svcLabel)
+    safe('pref-day',     newDay)
+    safe('pref-notes',   notes)
+
     closeM()
-    showToast('Preferences saved ✅','ok')
-    setTimeout(populateHWDashboard, 300)
+    showToast('Service preferences saved ✅' + (newPlanKey!==currentKey?' — plan change queued for next billing cycle':''), 'ok', 5000)
+    // Reload to reflect all changes
+    setTimeout(populateHWDashboard, 400)
   } catch(e){
     if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
     if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
@@ -11919,31 +12180,51 @@ const DENSITY_THRESHOLD = 10
 // Returns the best matching zone for a given ZIP, or null
 function findZoneForZip(zip){
   if(!zip || zip.length < 3) return null
-  const prefix = zip.slice(0,3)
-  // 1. Exact ZIP match
-  let zone = ADMIN_ZONES.find(z=>
+  const fullZip = zip.trim()
+  const prefix3 = fullZip.slice(0,3)
+  const prefix4 = fullZip.slice(0,4)
+
+  // 1. Exact full-ZIP match in zips array (most precise)
+  let zone = ADMIN_ZONES.find(z =>
     z.status !== 'inactive' &&
-    (z.zips?.includes(zip) || z.zip === zip)
+    z.zips?.some(zz => zz === fullZip)
   )
-  // 2. Prefix match
-  if(!zone) zone = ADMIN_ZONES.find(z=>
+
+  // 2. Exact full-ZIP match on zip field
+  if(!zone) zone = ADMIN_ZONES.find(z =>
     z.status !== 'inactive' &&
-    (z.zip === prefix || z.zip?.slice(0,3) === prefix || z.zips?.some(zz=>zz.slice(0,3)===prefix))
+    z.zip === fullZip
   )
-  // 3. Zone is valid only if at least one AVAILABLE runner covers it
-  //    (otherwise homeowner goes to waitlist even if zone exists)
+
+  // 3. First-4-digit prefix (e.g. 8530 matches 85301-85309) — only if zip is 5 digits
+  if(!zone && fullZip.length === 5) zone = ADMIN_ZONES.find(z =>
+    z.status !== 'inactive' &&
+    (z.zip?.startsWith(prefix4) || z.zips?.some(zz => zz.startsWith(prefix4)))
+  )
+
+  // 4. Runner zip exact match — runner in area implies live zone coverage
   if(zone){
-    // Only block on runner check if we have runners loaded
-    // If RUNNERS is empty (not loaded yet) allow the zone to be found
     if(RUNNERS.length > 0){
-      const hasRunner = RUNNERS.some(r=>
+      const hasRunner = RUNNERS.some(r =>
         r.status !== 'INACTIVE' && r.status !== 'OFF_DUTY' &&
-        (r.coverageZones?.includes(zone.id) || r.zoneId===zone.id ||
-         r.zip===zip || r.zip?.slice(0,3)===prefix)
+        (r.coverageZones?.includes(zone.id) || r.zoneId === zone.id ||
+         r.zip === fullZip || r.zip?.slice(0,4) === prefix4)
       )
       if(!hasRunner && zone.status !== 'live') zone = null
     }
   }
+
+  // 5. Last resort — 3-digit prefix (broad match, only if no better match found)
+  // This is intentionally kept as a fallback but logs a warning
+  if(!zone){
+    zone = ADMIN_ZONES.find(z =>
+      z.status !== 'inactive' &&
+      (z.zip === prefix3 || z.zip?.startsWith(prefix3) ||
+       z.zips?.some(zz => zz === prefix3 || zz.startsWith(prefix3)))
+    )
+    if(zone) console.log('[BinDash] findZoneForZip: prefix3 match for', fullZip, '→', zone.name, '(imprecise)')
+  }
+
   return zone || null
 }
 
@@ -12116,10 +12397,10 @@ async function _autoCreateWaitlistZoneForRunner(fn, ln, em, zip){
 }
 
 function suggestZoneName(zip){
-  const prefix = zip?.slice(0,3)||''
+  const prefix = zip || ''
   const cityMap = {'853':'Glendale/Surprise','850':'Phoenix','852':'Scottsdale','851':'Tempe/Chandler'}
   const city = cityMap[prefix]||'Area '+zip
-  const existing = ADMIN_ZONES.filter(z=>z.zip===prefix&&z.status!=='inactive').length
+  const existing = ADMIN_ZONES.filter(z=>z.zips?.includes(zip) || z.zip===zip&&z.status!=='inactive').length
   const suffix = existing===0?'':existing===1?' East':existing===2?' West':' '+(existing+1)
   return city+suffix
 }
@@ -12313,7 +12594,7 @@ async function confirmCreateZoneFromWaitlist(zip){
   const cap=parseInt(document.getElementById('wl-cap')?.value)||8
   const days=['Mon','Tue','Wed','Thu','Fri'].filter(d=>document.getElementById('wlz-day-'+d)?.checked)
   const newZone = {id: crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),name,city:zip+' area',
-    zip:zip.slice(0,3), zips:[zip],
+    zip:zip, zips:[zip],
     status:'pilot',pilot:true,overridden:true,runners:0,capacity:cap,homeowners:0,
     threshold:cap,collection:days,assignedRunner:null,stopOrder:[],notes:'Created from waitlist ZIP '+zip}
   ADMIN_ZONES.push(newZone)
@@ -12393,10 +12674,10 @@ function createZoneAndApproveHW(appId){
   const name=document.getElementById('new-zone-name')?.value?.trim()||suggestZoneName(app.zip)
   const cap=parseInt(document.getElementById('nz-cap')?.value)||8
   const days=['Mon','Tue','Wed','Thu','Fri'].filter(d=>document.getElementById('nz-day-'+d)?.checked)
-  const prefix=app.zip.slice(0,3)
+  const prefix=app.zip
   const newZoneId='z-new-'+Date.now()
   const newZone={id:newZoneId,name,city:app.city||app.zip+' area',
-    zip:prefix, zips:[app.zip],
+    zip:app.zip, zips:[app.zip],
     status:'pilot',pilot:true,overridden:true,runners:0,capacity:cap,
     homeowners:0,threshold:cap,collection:days,assignedRunner:null,stopOrder:[],
     notes:'Auto-created on approval . ZIP '+app.zip}
@@ -12659,7 +12940,7 @@ async function approveZoneReqThenAssignRunner(appId, reqId, zip){
     const newZoneId = crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()
     const newZone = {
       id: newZoneId, name: zoneName,
-      zip: zip.slice(0,3), zips: [zip],
+      zip: zip, zips: [zip],
       status:'waitlist', pilot:false,
       runners:0, capacity:10, homeowners:0, threshold:3,
       collection:[], notes:'Created from runner zone request — ZIP '+zip
@@ -13160,8 +13441,8 @@ async function _confirmDeleteRN(appId, name){
 }
 
 function getZoneSuggestion(zip){
-  const prefix = zip.slice(0,3)
-  const match = ADMIN_ZONES.find(z=>z.zip===prefix)
+  const prefix = zip
+  const match = ADMIN_ZONES.find(z=>z.zips?.includes(zip) || z.zip===zip)
   return match ? `suggested: ${match.name}` : 'no existing zone -- will create new'
 }
 
@@ -13495,6 +13776,7 @@ function pickDispatchDay(el){
   const diff = (targetIdx - today.getDay() + 7) % 7
   const scheduledDate = new Date(today); scheduledDate.setDate(today.getDate() + diff)
   const dateStr = scheduledDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+  const scheduledDateStr = scheduledDate.toISOString().slice(0,10)
 
   // Block if more than 3 days out
   if(diff > 3){
@@ -13515,6 +13797,59 @@ function pickDispatchDay(el){
   if(dateLabel) dateLabel.textContent = dateStr + (diff===0?' (today)':diff===1?' (tomorrow)':'')
 
   updateDispatchStats()
+
+  // Load live job status for this day and show in dispatch sidebar
+  _showDispatchDayStatus(day, scheduledDateStr, dateStr)
+}
+
+async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
+  const statusEl = document.getElementById('dispatch-day-status')
+  if(!statusEl) return
+  statusEl.innerHTML = '<div style="font-size:11px;color:var(--muted)">Checking routes...</div>'
+  try {
+    const { data: jobs } = await _supa.from('jobs')
+      .select('id, status, homeowner_email, runner_name, visit_type, offer_expires_at')
+      .eq('scheduled_date', scheduledDateStr)
+      .in('status', ['offered','accepted','in_progress','complete','declined','broadcast'])
+    if(!jobs?.length){
+      statusEl.innerHTML = `<div style="font-size:11px;color:var(--muted)">No routes dispatched for ${dateStr} yet</div>`
+      return
+    }
+    const offered   = jobs.filter(j=>j.status==='offered').length
+    const accepted  = jobs.filter(j=>j.status==='accepted').length
+    const inProg    = jobs.filter(j=>j.status==='in_progress').length
+    const complete  = jobs.filter(j=>j.status==='complete').length
+    const broadcast = jobs.filter(j=>j.status==='broadcast').length
+    const total     = jobs.length
+    const now = new Date()
+    const expired   = jobs.filter(j=>j.status==='offered'&&j.offer_expires_at&&new Date(j.offer_expires_at)<now).length
+
+    statusEl.innerHTML = `
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">📋 ${dateStr} Route Status</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+      ${accepted||inProg ? `<div style="background:rgba(34,197,94,.1);border-radius:7px;padding:7px 10px;text-align:center">
+        <div style="font-size:16px;font-weight:800;color:#22c55e">${accepted+inProg}</div>
+        <div style="font-size:9px;color:var(--muted)">Accepted</div>
+      </div>` : ''}
+      ${offered ? `<div style="background:rgba(245,158,11,.1);border-radius:7px;padding:7px 10px;text-align:center">
+        <div style="font-size:16px;font-weight:800;color:#fbbf24">${offered}</div>
+        <div style="font-size:9px;color:var(--muted)">Awaiting</div>
+      </div>` : ''}
+      ${complete ? `<div style="background:rgba(99,102,241,.1);border-radius:7px;padding:7px 10px;text-align:center">
+        <div style="font-size:16px;font-weight:800;color:#a5b4fc">${complete}</div>
+        <div style="font-size:9px;color:var(--muted)">Done</div>
+      </div>` : ''}
+      ${broadcast ? `<div style="background:rgba(59,130,246,.1);border-radius:7px;padding:7px 10px;text-align:center">
+        <div style="font-size:16px;font-weight:800;color:#3b82f6">${broadcast}</div>
+        <div style="font-size:9px;color:var(--muted)">Broadcast</div>
+      </div>` : ''}
+    </div>
+    <div style="font-size:11px;color:var(--sub)">${accepted+inProg} of ${total} stops accepted</div>
+    ${expired ? `<div style="font-size:11px;color:#ef4444;font-weight:700;margin-top:4px">⚠️ ${expired} offer${expired!==1?'s':''} expired — no runner accepted yet</div>` : ''}
+    <div style="height:6px;background:var(--surface3);border-radius:99px;margin-top:8px;overflow:hidden">
+      <div style="height:100%;width:${total?Math.round((accepted+inProg+complete)*100/total):0}%;background:linear-gradient(90deg,#22c55e,#06d6a0);border-radius:99px;transition:width .4s"></div>
+    </div>`
+  } catch(e){ statusEl.innerHTML = '' }
 }
 
 function initDispatchDayPills(){
@@ -13706,7 +14041,7 @@ async function _adGenerateBatchesAsync(){
     const zoneRunners = RUNNERS.filter(r=>{
       if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
       if(r.id===hw.assignedRunner) return false
-      return r.zoneId===hwZone || r.coverageZones?.includes(hwZone) || r.zip===hwZip || r.zip?.slice(0,3)===hwZip?.slice(0,3)
+      return r.zoneId===hwZone || r.coverageZones?.includes(hwZone) || r.zip===hwZip || r.zip?.slice(0,4)===hwZip?.slice(0,4)
     })
     if(zoneRunners.length){
       return { runner: zoneRunners.find(r=>r.status==='AVAILABLE')||zoneRunners[0], offerType: 'zone', windowMins: 45 }
@@ -14479,62 +14814,105 @@ function showZoneDetail(zoneId){
   const coverRunners = getZoneCoverageRunners(zoneId)
   const derivedDays = getZoneDerivedDays(zoneId)
 
+  const activeHWs  = hws.filter(h=>h.status==='active')
+  const waitlisted = WAITLIST_SIGNUPS.filter(s=>z.zips?.includes(s.zip)||s.zip===z.zip).length
+  const planRates  = { plan_a:34.99, plan_b:44.99, plan_c:54.99, oan_a:19.99, oan_b:19.99, oan_c:19.99 }
+  const zoneMRR    = activeHWs.reduce((t,h)=>t+(planRates[h.plan]||34.99),0)
+  const recentJobs = (_adminJobsCache||[]).filter(j=>activeHWs.some(h=>h.email===j.homeowner_email))
+  const completedJobs = recentJobs.filter(j=>j.status==='complete').length
+  const activeJobs = recentJobs.filter(j=>['offered','accepted','in_progress'].includes(j.status)).length
+  const zipList    = (z.zips||[z.zip]).filter(Boolean).join(', ') || z.zip || '--'
+
   document.getElementById('modal-box').innerHTML=`
   <div class="mh">
     <div>
-      <div style="font-size:15px;font-weight:700">📋 ${z.name} -- Route Order</div>
-      <div style="font-size:11px;color:var(--sub);margin-top:2px">${hws.length} homeowners . drag to set stop sequence</div>
+      <div style="font-size:15px;font-weight:700">📍 ${z.name}</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:2px">
+        <span style="background:${z.status==='live'?'#22c55e22':z.status==='pilot'?'rgba(99,102,241,.15)':'rgba(245,158,11,.15)'};color:${z.status==='live'?'#22c55e':z.status==='pilot'?'#a5b4fc':'#fbbf24'};padding:1px 8px;border-radius:99px;font-size:10px;font-weight:700">${z.status==='live'?'● Live':z.status==='pilot'?'⚡ Pilot':'⏳ Waitlist'}</span>
+        ZIPs: ${zipList}
+      </div>
     </div>
     <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
   </div>
-  <div class="mb">
+  <div class="mb" style="max-height:75vh;overflow-y:auto">
 
-    <!-- Zone summary strip -->
-    <div style="display:flex;gap:14px;background:var(--surface2);border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:12px;flex-wrap:wrap">
-      <span>📅 <strong>${derivedDays.join(', ') || '--'}</strong> (from homeowner schedules)</span>
-      <span>🏠 <strong>${hws.length}</strong> active homeowners</span>
-      <span>🚐 Covered by: <strong>${coverRunners.map(r=>r.name.split(' ')[0]).join(', ') || 'Unassigned'}</strong></span>
-      <button onclick="showZoneCoverageEdit('${zoneId}');closeM()" style="background:none;border:none;color:var(--cyan);font-size:11px;cursor:pointer;padding:0">Edit runners -></button>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:var(--cyan)">${activeHWs.length}</div>
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Active HOs</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:#a5b4fc">${coverRunners.length}</div>
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Runners</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:var(--green)">$${zoneMRR.toFixed(0)}</div>
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Zone MRR</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;text-align:center">
+        <div style="font-size:22px;font-weight:800;color:#fbbf24">${waitlisted}</div>
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:3px">Waitlisted</div>
+      </div>
     </div>
 
-    <div style="font-size:12px;color:var(--sub);margin-bottom:10px;line-height:1.5">
-      This is the <strong style="color:var(--text)">default stop sequence</strong> for this zone. Runners follow this order unless dispatch generates an optimised route. Set it based on the most efficient walking path through the zone -- typically starting from the runner's nearest entry point.
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div style="background:var(--surface2);border-radius:10px;padding:12px">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Schedule</div>
+        ${derivedDays.length ? derivedDays.map(d=>`<div style="font-size:12px;margin-bottom:3px">📅 ${d}</div>`).join('') : '<div style="font-size:12px;color:var(--muted)">No scheduled days</div>'}
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:12px">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Routes</div>
+        <div style="font-size:13px;font-weight:700;color:#22c55e">${completedJobs} completed</div>
+        ${activeJobs ? `<div style="font-size:12px;color:#fbbf24;margin-top:2px">${activeJobs} in flight</div>` : ''}
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Cap: ${z.capacity||0} stops</div>
+      </div>
     </div>
 
-    <!-- Draggable stop list -->
-    <div id="zone-stop-list" style="display:flex;flex-direction:column;gap:6px">
-      ${hws.length ? hws.map((hw,i)=>{
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Runners (${coverRunners.length})</div>
+    ${coverRunners.length ? coverRunners.map(r=>`
+      <div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:8px;padding:9px 12px;margin-bottom:6px">
+        <div style="width:28px;height:28px;border-radius:50%;background:${r.color||'var(--cyan)'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#07090f;flex-shrink:0">${r.initials}</div>
+        <div style="flex:1"><div style="font-size:13px;font-weight:700">${r.name}</div>
+          <div style="font-size:11px;color:var(--muted)">${r.visitType==='BOTH'?'🌙☀️ Both':r.visitType==='BIN_OUT'?'🌙 Out':'☀️ In'}</div>
+        </div>
+        <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;background:${r.status==='AVAILABLE'?'#22c55e22':'rgba(245,158,11,.15)'};color:${r.status==='AVAILABLE'?'#22c55e':'#fbbf24'}">${r.status}</span>
+      </div>`).join('') : `<div style="font-size:12px;color:var(--muted);padding:8px 0">No runners assigned — <button onclick="showZoneCoverageEdit('${zoneId}');closeM()" style="background:none;border:none;color:var(--cyan);cursor:pointer;font-size:12px">Assign now</button></div>`}
+
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">Homeowners (${activeHWs.length}) — drag to reorder</div>
+    <div id="zone-stop-list" style="display:flex;flex-direction:column;gap:5px">
+      ${activeHWs.length ? activeHWs.map((hw,i)=>{
         const runner = RUNNERS.find(r=>r.id===hw.assignedRunner)
-        const days = hw.service==='SPLIT' ? `♻️ ${hw.dayRecycling} / 🗑️ ${hw.dayWaste}` : hw.day
+        const days = hw.service==='SPLIT' ? `♻️ ${hw.dayRecycling} / 🗑️ ${hw.dayWaste}` : (hw.day||'--')
+        const planLabel = {plan_a:'1 Can',plan_b:'2 Cans',plan_c:'Split',oan_a:'OAN-A',oan_b:'OAN-B',oan_c:'OAN-C'}[hw.plan]||hw.plan||'--'
         return `<div class="zone-stop-card" data-hwid="${hw.id}" draggable="true"
-          style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;cursor:grab;transition:opacity .2s;user-select:none"
+          style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;cursor:grab;user-select:none"
           ondragstart="zoneDragStart(event,this)" ondragover="zoneDragOver(event,this)" ondragleave="zoneDragLeave(this)" ondrop="zoneDrop(event,this)">
-          <div style="width:24px;height:24px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">${i+1}</div>
+          <div style="width:22px;height:22px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">${i+1}</div>
           <div style="flex:1;min-width:0">
             <div style="font-weight:600;font-size:13px">${hw.name}</div>
-            <div style="font-size:11px;color:var(--muted)">${hw.address} . ${days}</div>
+            <div style="font-size:11px;color:var(--muted)">📍 ${hw.address||'--'} · ${days}</div>
           </div>
-          <div style="font-size:11px;color:var(--muted);text-align:right;flex-shrink:0">
-            ${runner ? `<div style="color:var(--sub)">${runner.name.split(' ')[0]}</div>` : '<div style="color:#ef4444">Unassigned</div>'}
-            <div>${hw.gate && hw.gate!=='--' ? '🔑' : ''} ${hw.pets && hw.pets!=='None' ? '🐾' : ''}</div>
-          </div>
-          <div style="cursor:grab;color:var(--muted);font-size:16px;padding:0 2px">⠿</div>
+          <div style="font-size:10px;background:rgba(6,214,160,.1);color:var(--cyan);padding:1px 6px;border-radius:4px;flex-shrink:0">${planLabel}</div>
+          <div style="font-size:11px;color:${runner?'var(--sub)':'#ef4444'};flex-shrink:0">${runner?runner.name.split(' ')[0]:'Unassigned'}</div>
+          <div style="color:var(--muted);font-size:16px;padding:0 2px;cursor:grab">⠿</div>
         </div>`
-      }).join('') : '<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No active homeowners in this zone yet.</div>'}
+      }).join('') : '<div style="font-size:12px;color:var(--muted);padding:8px">No active homeowners</div>'}
     </div>
-
-    ${hws.length > 1 ? `<div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:center">⠿ Drag rows to reorder . changes save when you click Save Order</div>` : ''}
+    ${z.notes ? `<div style="margin-top:12px;font-size:12px;color:var(--muted);font-style:italic;background:var(--surface2);border-radius:8px;padding:8px 12px">📝 ${z.notes}</div>` : ''}
   </div>
-  <div class="mf">
-    <button class="btn btn-ghost btn-sm" onclick="closeM()">Close</button>
-    ${hws.length > 1 ? `<button class="btn btn-outline btn-sm" onclick="autoOrderStops('${zoneId}')">🔀 Auto-order by address</button>` : ''}
+  <div class="mf" style="flex-wrap:wrap;gap:6px">
+    ${z.status==='waitlist' ? `<button class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3)" onclick="activateZone('${z.id}');closeM()">⚡ Activate</button>` : ''}
+    ${z.pilot ? `<button class="btn btn-sm" style="background:#22c55e22;color:#22c55e;border:1px solid rgba(34,197,94,.3)" onclick="promoteToLive('${z.id}');closeM()">↑ Go Live</button>` : ''}
+    <button class="btn btn-outline btn-sm" onclick="closeM();showZoneCoverageEdit('${z.id}')">+ Runner</button>
+    <button class="btn btn-outline btn-sm" onclick="closeM();showEditZone('${z.id}')">✏️ Edit</button>
+    ${activeHWs.length > 1 ? `<button class="btn btn-outline btn-sm" onclick="autoOrderStops('${zoneId}')">🔀 Auto-order</button>` : ''}
     <button class="btn btn-cyan" onclick="saveStopOrder('${zoneId}')">💾 Save Order</button>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Close</button>
   </div>`
   openM()
-
-  // Wire drag events after render
   addZoneDragListeners()
 }
+
 
 // -- DRAG-TO-REORDER STOP LIST ---------------------
 
@@ -14777,7 +15155,7 @@ function saveEditZone(zId){
   const zipRaw = document.getElementById('ez-zip')?.value.trim() || ''
   if(zipRaw){
     z.zips = zipRaw.split(',').map(x=>x.trim()).filter(Boolean)
-    z.zip  = z.zips[0]?.slice(0,3) || z.zip
+    z.zip  = z.zips[0] || z.zip
   }
   z.capacity = parseInt(document.getElementById('ez-cap')?.value) || z.capacity
   const statusRaw = document.getElementById('ez-status')?.value || z.status
@@ -14843,7 +15221,7 @@ function showCreateZone(){
 // -- NOTIFY ALL WAITLISTED HWs FOR A ZIP when zone is created --
 
 async function notifyZipFromWaitlist(zip, zoneId){
-  const zone = ADMIN_ZONES.find(z=>z.id===zoneId) || ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip.slice(0,3))
+  const zone = ADMIN_ZONES.find(z=>z.id===zoneId) || ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip)
   if(!zone){ showToast('Zone not found','err'); return }
   showToast('Notifying homeowners in ZIP '+zip+'...','info')
   const count = await notifyWaitlistForZip(zip, zone)
@@ -14891,7 +15269,7 @@ function saveCreateZone(){
   const city   = document.getElementById('cz-city')?.value.trim() || ''
   if(!name || !zipRaw){ showToast('Zone name and ZIP code(s) are required','err'); return }
   const zips = zipRaw.split(',').map(z=>z.trim()).filter(z=>z.length>=3)
-  const zip  = zips[0].slice(0,3)
+  const zip  = zips[0]
   const statusRaw = document.getElementById('cz-status')?.value || 'pilot'
   const isPilot   = statusRaw === 'pilot'
   const newZone = {
@@ -15030,7 +15408,7 @@ async function confirmSplitZone(zId){
   z.area = currentArea
   const zoneB = {
     id: crypto.randomUUID ? crypto.randomUUID() : 'z-split-'+Date.now(), name:nameB,
-    city: z.city, zip: zipsB[0].slice(0,3), zips: zipsB,
+    city: z.city, zip: zipsB[0], zips: zipsB,
     area: nextArea,
     status: z.status, pilot: z.pilot, overridden: z.overridden,
     runners:0, capacity:z.capacity, homeowners:0, threshold:z.threshold,
@@ -15504,11 +15882,11 @@ function checkRunnerZipCoverage(zip){
     return
   }
   // Use raw zone lookup without runner check (runner is enrolling)
-  const prefix = zip.slice(0,3)
+  const prefix = zip
   const zone = ADMIN_ZONES.find(z=>
     z.status!=='inactive' &&
     (z.zips?.includes(zip) || z.zip===zip || z.zip===prefix ||
-     z.zips?.some(zz=>zz.slice(0,3)===prefix))
+     z.zips?.some(zz=>zz===prefix || zz.startsWith(prefix.slice(0,4))))
   )
   if(zone){
     el.style.cssText='display:block;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:8px;padding:8px 12px;font-size:12px;margin-top:6px'
@@ -15552,7 +15930,7 @@ function lookupRunnerZones(zip){
   picker.style.display = 'block'
   if(wlZip) wlZip.textContent = zip
 
-  const prefix = zip.slice(0,3)
+  const prefix = zip
   const zones  = ZONE_DATA[prefix] || null
 
   if(!zones || zones.length === 0){
@@ -15743,7 +16121,7 @@ async function submitRunnerZoneRequest(){
 function checkZoneAvailability(){
   const zip = document.getElementById('ri-postcode')?.value?.trim()
   if(!zip){ showToast('Enter a ZIP or postcode first','err'); return }
-  const prefix = zip.slice(0,3)
+  const prefix = zip
   const zones = ZONE_DATA[prefix]
   const result = document.getElementById('ri-zone-result')
   if(!result) return
@@ -16248,11 +16626,11 @@ async function renderZoneWaitlist(){
     el.innerHTML = Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
       const existingZone = ADMIN_ZONES.find(z=>
         z.zips?.includes(zip) ||
-        z.zips?.some(zz=>zz.slice(0,3)===zip.slice(0,3)) ||
+        z.zips?.some(zz=>zz===zip) ||
         z.zip===zip ||
-        z.zip===zip.slice(0,3)
+        z.zip===zip || z.zips?.includes(zip)
       )
-      const runnerInterest = RUNNERS.filter(r=>r.zip===zip||r.zip?.slice(0,3)===zip.slice(0,3)).length
+      const runnerInterest = RUNNERS.filter(r=>r.zip===zip||r.zip?.slice(0,4)===zip?.slice(0,4)).length
       const waitingList = group.filter(r=>r.status==='waitlisted')
       const notifiedList = group.filter(r=>r.status==='zone_assigned')
       const statusLabel = existingZone
@@ -16334,7 +16712,7 @@ function _renderZoneHealthOverview(){
     const rnCount  = (z.runners||0)
     const hwPct    = Math.min(100, Math.round(hwCount/Math.max(needed,1)*100))
     const rnPct    = Math.min(100, Math.round(rnCount/Math.max(z.capacity||4,1)*100))
-    const wlCount  = WAITLIST_SIGNUPS.filter(s => z.zips?.includes(s.zip)||z.zip===s.zip?.slice(0,3)).length
+    const wlCount  = WAITLIST_SIGNUPS.filter(s => z.zips?.includes(s.zip)||z.zips?.includes(s.zip) || z.zip===s.zip).length
     return { z, needed, hwCount, rnCount, hwPct, rnPct, wlCount }
   }).sort((a,b) => (b.hwPct+b.rnPct)-(a.hwPct+a.rnPct))
 
@@ -16436,7 +16814,7 @@ function _renderZoneGrid(){
       const needed  = z.threshold || 3
       const hwPct   = Math.min(100, Math.round((z.homeowners||0)/Math.max(needed,1)*100))
       const rnPct   = Math.min(100, Math.round((z.runners||0)/Math.max(z.capacity||4,1)*100))
-      const wlCount = WAITLIST_SIGNUPS.filter(s => z.zips?.includes(s.zip)||z.zip===s.zip?.slice(0,3)).length
+      const wlCount = WAITLIST_SIGNUPS.filter(s => z.zips?.includes(s.zip)||z.zips?.includes(s.zip) || z.zip===s.zip).length
       const dayLabels = (z.collection||[]).map(d=>typeof d==='object'?d.day||d:d).join(', ')||'--'
       const assignedRunners = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id))
       const refCount = assignedRunners.reduce((t,r)=>(t+(r.totalReferrals||0)),0)
@@ -16565,7 +16943,7 @@ async function renderRunnerZoneRequests(){
       newZoneReqs.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
       html += Object.entries(byZip).map(([zip,group])=>{
         const suggested  = group[0]?.zone_name || ('ZIP '+zip+' Area')
-        const hwInterest = WAITLIST_SIGNUPS.filter(s=>s.zip===zip||s.zip?.slice(0,3)===zip.slice(0,3)).length
+        const hwInterest = WAITLIST_SIGNUPS.filter(s=>s.zip===zip||s.zip===zip).length
         const inputId    = 'nzr-name-'+zip.replace(/\D/g,'')
         const notesText  = group[0]?.notes ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;font-style:italic">💬 Runner notes: "${group[0].notes}"</div>` : ''
         const hwBar      = hwInterest ? `
@@ -16617,8 +16995,8 @@ async function renderRunnerZoneRequests(){
       const byZip = {}
       zoneExpReqs.forEach(row=>{ const z=row.zip_code||'Unknown'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(row) })
       html += Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
-        const existingZone = ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip.slice(0,3))
-        const hwInterest   = WAITLIST_SIGNUPS.filter(s=>s.zip===zip||s.zip?.slice(0,3)===zip.slice(0,3)).length
+        const existingZone = ADMIN_ZONES.find(z=>z.zips?.includes(zip)||z.zip===zip || z.zips?.includes(zip))
+        const hwInterest   = WAITLIST_SIGNUPS.filter(s=>s.zip===zip||s.zip===zip).length
         const zoneName     = existingZone?.name || group[0]?.zone_name || ('ZIP '+zip+' Area')
         return `<div class="card" style="margin-bottom:10px;border-left:3px solid var(--cyan)">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
