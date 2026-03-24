@@ -11298,17 +11298,20 @@ function showHWDetail(hwId){
   const hw = HOMEOWNERS.find(x=>x.id===hwId); if(!hw) return
   const availRunners = RUNNERS.filter(r=>r.status!=='INACTIVE')
   const isSplit = hw.service === 'SPLIT'
-  const isMultiBin = hw.service === 'SPLIT' || hw.service === 'BOTH'
-  const days = ['Mon','Tue','Wed','Thu','Fri']
+  const fullDays = ['Monday','Tuesday','Wednesday','Thursday','Friday']
 
-  const daySelect = (id, val, label) => `
+  const daySelect = (id, val, label) => {
+    // Normalize val to full day name for comparison
+    const normVal = normDay(val||'')
+    return `
     <div class="field">
       <label>${label}</label>
       <select id="${id}">
         <option value="">-- Not set --</option>
-        ${days.map(d=>`<option value="${d}" ${(val||''===d||val===d)?'selected':''}>${d}</option>`).join('')}
+        ${fullDays.map(d=>`<option value="${d}" ${normDay(d)===normVal?'selected':''}>${d}</option>`).join('')}
       </select>
     </div>`
+  }
 
   // Service type selector
   const svcOpts = [
@@ -11393,16 +11396,18 @@ function hwDetailToggleSplit(hwId){
   const svc = document.getElementById('hwd-service')?.value || ''
   const block = document.getElementById('hwd-days-block')
   if(!block) return
-  const days = ['Mon','Tue','Wed','Thu','Fri']
-  const daySelect = (id, val, label) =>
-    `<div class="field"><label>${label}</label><select id="${id}">
+  const fullDays = ['Monday','Tuesday','Wednesday','Thursday','Friday']
+  const daySelect = (id, val, label) => {
+    const normVal = normDay(val||'')
+    return `<div class="field"><label>${label}</label><select id="${id}">
       <option value="">-- Not set --</option>
-      ${days.map(d=>`<option value="${d}" ${val===d?'selected':''}>${d}</option>`).join('')}
+      ${fullDays.map(d=>`<option value="${d}" ${normDay(d)===normVal?'selected':''}>${d}</option>`).join('')}
     </select></div>`
+  }
 
   if(svc === 'SPLIT'){
     block.innerHTML = `<div class="g2">
-      ${daySelect('hwd-day-recycling', hw.dayRecycling||'', '♻️ Recycling Day')}
+      ${daySelect('hwd-day-recycling', hw.dayRecycling||hw.day||'', '♻️ Recycling Day')}
       ${daySelect('hwd-day-waste', hw.dayWaste||'', '🗑 Waste Day')}
     </div>`
   } else {
@@ -11502,17 +11507,25 @@ async function saveHWDetail(hwId){
     updated_at:       new Date().toISOString(),
   }
 
+  const errEl = document.getElementById('hwd-save-error')
+
   try {
     const [r1, r2] = await Promise.all([
-      _supa.from('homeowners').update(updHomeowners).eq('email', originalEmail),
-      _supa.from('homeowner_signups').update(updSignups).eq('email', originalEmail),
+      _supa.from('homeowners').update(updHomeowners).ilike('email', originalEmail),
+      _supa.from('homeowner_signups').update(updSignups).ilike('email', originalEmail),
     ])
+    const ok1 = !r1?.error, ok2 = !r2?.error
     if(r1?.error) console.warn('[BinDash] homeowners update error:', r1.error.message)
     if(r2?.error) console.warn('[BinDash] signups update error:', r2.error.message)
-    const ok1 = !r1?.error, ok2 = !r2?.error
     console.log('[BinDash] HW save — homeowners:', ok1?'✅':'❌', '| signups:', ok2?'✅':'❌', '| day:', newDay, '| runner:', newRunner, '| email match:', originalEmail)
+    if(!ok1 && !ok2){
+      showToast('Save failed — check console for details', 'err')
+    }
     await loadHomeownersFromSupabase()
-  } catch(e){ console.warn('[BinDash] saveHWDetail exception:', String(e?.message||e)) }
+  } catch(e){
+    console.warn('[BinDash] saveHWDetail exception:', String(e?.message||e))
+    showToast('Save error: ' + String(e?.message||e).slice(0,60), 'err')
+  }
 
   updateDispatchStats()
   syncZoneData()
