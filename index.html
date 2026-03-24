@@ -2549,7 +2549,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       </div>
     </div>
     <div class="main">
-      <div class="topbar"><div class="pg-title" id="hw-pg-title">Dashboard</div><div style="display:flex;align-items:center;gap:10px"><button class="btn btn-ghost btn-sm" style="position:relative;padding:6px 10px" onclick="showNotifPanel('hw')"><span style="font-size:16px">🔔</span><span id="hw-notif-badge" style="position:absolute;top:2px;right:2px;width:8px;height:8px;background:#ef4444;border-radius:50%;display:block"></span></button><button class="btn btn-red btn-sm" onclick="showSosHW()">🚨 Emergency Pickup</button></div></div>
+      <div class="topbar"><div class="pg-title" id="hw-pg-title">Dashboard</div><div style="display:flex;align-items:center;gap:8px"><button class="btn btn-ghost btn-sm" style="position:relative;padding:6px 10px" onclick="showNotifPanel('hw')"><span style="font-size:16px">🔔</span><span id="hw-notif-badge" style="position:absolute;top:2px;right:2px;width:8px;height:8px;background:#ef4444;border-radius:50%;display:block"></span></button><button class="btn btn-red btn-sm" onclick="showSosHW()">🚨 Emergency Pickup</button><button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--muted);padding:5px 10px" onclick="bindashLogout()" title="Log out">⎋ Log Out</button></div></div>
       <div class="body">
 
         <!-- HW HOME -->
@@ -2983,7 +2983,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       </div>
     </div>
     <div class="main">
-      <div class="topbar"><div class="pg-title" id="rn-pg-title">Dashboard</div><div style="display:flex;align-items:center;gap:10px"><div id="rn-priority-badge" style="display:none;align-items:center;gap:5px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.3);border-radius:99px;padding:4px 10px;font-size:11px;font-weight:700;color:#fbbf24">⚡ Priority</div><button class="btn btn-ghost btn-sm" style="position:relative;padding:6px 10px" onclick="showNotifPanel('rn')"><span style="font-size:16px">🔔</span><span id="rn-notif-badge" style="position:absolute;top:2px;right:2px;width:8px;height:8px;background:#ef4444;border-radius:50%;display:block"></span></button><span class="badge" style="background:#22c55e22;color:#22c55e;font-size:12px;padding:6px 14px">● Available</span></div></div>
+      <div class="topbar"><div class="pg-title" id="rn-pg-title">Dashboard</div><div style="display:flex;align-items:center;gap:8px"><div id="rn-priority-badge" style="display:none;align-items:center;gap:5px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.3);border-radius:99px;padding:4px 10px;font-size:11px;font-weight:700;color:#fbbf24">⚡ Priority</div><button class="btn btn-ghost btn-sm" style="position:relative;padding:6px 10px" onclick="showNotifPanel('rn')"><span style="font-size:16px">🔔</span><span id="rn-notif-badge" style="position:absolute;top:2px;right:2px;width:8px;height:8px;background:#ef4444;border-radius:50%;display:block"></span></button><span class="badge" style="background:#22c55e22;color:#22c55e;font-size:12px;padding:6px 14px">● Available</span><button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--muted);padding:5px 10px" onclick="bindashLogout()" title="Log out">⎋ Log Out</button></div></div>
       <div class="body">
 
         <!-- RN HOME -->
@@ -4914,13 +4914,10 @@ async function loadRNInterestList(runnerRow){
       badgeEl.style.display = rows.length ? 'inline' : 'none'
     }
 
-    if(!rows.length){
-      listEl.innerHTML = `<div style="text-align:center;padding:18px 8px;color:var(--muted);font-size:12px">
-        <div style="font-size:22px;margin-bottom:6px">🎉</div>
-        No waitlisted homeowners in your area right now — check back after sharing your referral link!
-      </div>`
-      return
-    }
+    // Hide entire card if no interest list data
+    if(cardEl) cardEl.style.display = rows.length ? 'block' : 'none'
+
+    if(!rows.length) return
 
     const ownCode = runnerRow?.own_ref_code || null
     listEl.innerHTML = rows.slice(0,8).map((r,i) => {
@@ -7330,58 +7327,118 @@ function renderRunnerCard(r){
     ? `<span class="badge" style="background:rgba(139,92,246,.12);color:#c4b5fd;font-size:9px">🎯 via ${r.referredBy.split(' ')[0]}</span>`
     : ''
 
+  // Route stats from jobs cache
+  const rJobs = (_adminJobsCache||[]).filter(j=>
+    j.runner_name === r.name || (r.email && j.runner_id === r.id)
+  )
+  const completed = rJobs.filter(j=>j.status==='complete').length
+  const active    = rJobs.filter(j=>['offered','accepted','in_progress'].includes(j.status)).length
+  const declined  = rJobs.filter(j=>j.status==='declined').length
+  const earnings  = rJobs.filter(j=>j.status==='complete').reduce((s,j)=>s+(parseFloat(j.amount)||3.25),0)
+  const zoneNames = (r.coverageZones?.length ? r.coverageZones : (r.zoneId?[r.zoneId]:[])).map(zid=>{
+    const z=ADMIN_ZONES.find(x=>x.id===zid); return z?.name||''
+  }).filter(Boolean)
+
   return `<div class="cc" id="rcard-${r.id}" style="${inactive?'opacity:.55':''}">
-    <div class="cc-head">
+    <!-- Header — always visible -->
+    <div class="cc-head" onclick="toggleRunnerExpand('${r.id}')" style="cursor:pointer">
       <div style="display:flex;align-items:center;gap:10px">
         <div class="cc-av" style="background:${r.color}">${r.initials}</div>
         <div>
           <div class="cc-nm">${r.name} ${refBadge}</div>
-          <div class="cc-id">${r.email}${r.zip ? ' . ZIP '+r.zip : ''}</div>
+          <div class="cc-id">${r.email}${r.zip ? ' · ZIP '+r.zip : ''}</div>
+          <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
+            <span style="font-size:10px;color:var(--muted)">✓ ${completed} done</span>
+            ${active ? `<span style="font-size:10px;color:#fbbf24">⏳ ${active} active</span>` : ''}
+            ${declined ? `<span style="font-size:10px;color:#ef4444">✕ ${declined} declined</span>` : ''}
+            <span style="font-size:10px;color:var(--green)">$${earnings.toFixed(2)} earned</span>
+          </div>
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <span class="badge" style="background:${bg};color:${col}">${lbl}</span>
-        <button class="btn btn-outline btn-sm" onclick="showRnEdit('${r.id}')">✏️ Edit</button>
-        <button class="btn btn-ghost btn-sm" style="color:#ef4444;padding:4px 7px" onclick="confirmRemoveRunner('${r.id}','${r.name}')">✕</button>
+        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();showRnEdit('${r.id}')">✏️ Edit</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444;padding:4px 7px" onclick="event.stopPropagation();confirmRemoveRunner('${r.id}','${r.name}')">✕</button>
+        <span style="font-size:16px;color:var(--muted)" id="rcard-chevron-${r.id}">›</span>
       </div>
     </div>
-    <div class="cc-grid">
-      <div class="dl"><div class="dl-l">Area</div><div>${r.area||r.zip||'--'}</div></div>
-      <div class="dl"><div class="dl-l">Coverage Zones</div><div style="display:flex;flex-direction:column;gap:3px">
-        ${(r.coverageZones?.length ? r.coverageZones : (r.zoneId ? [r.zoneId] : [])).map(zid=>{
-          const z=ADMIN_ZONES.find(x=>x.id===zid)
-          return z ? `<span style="font-size:12px">${z.name}</span>` : ''
-        }).join('') || '<span style="color:#f59e0b;font-size:11px">⚠️ No zones assigned</span>'}
-      </div></div>
-      <div class="dl"><div class="dl-l">Visit Type</div><div>${VISIT_LABEL[r.visitType]}</div></div>
-      <div class="dl"><div class="dl-l">Vehicle</div><div>${r.vehicle}</div></div>
-      <div class="dl"><div class="dl-l">Total Visits</div><div>${r.visits}</div></div>
-      <div class="dl"><div class="dl-l">Rating</div><div>${r.rating}★</div></div>
-      <div class="dl"><div class="dl-l">Loyalty Tier</div>
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="color:${tierCol};font-weight:700;font-size:12px">${tierIcon} ${tier.charAt(0).toUpperCase()+tier.slice(1)}</span>
-          <span style="color:var(--muted);font-size:11px">$${rate.toFixed(2)}/stop</span>
-          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px" onclick="showEditLoyalty('${r.id}')">Edit</button>
+
+    <!-- Expandable stats section -->
+    <div id="rcard-detail-${r.id}" style="display:none;border-top:1px solid var(--border);padding:14px">
+
+      <!-- Quick stats row -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;text-align:center">
+        <div style="background:var(--surface2);border-radius:8px;padding:10px">
+          <div style="font-size:18px;font-weight:800;color:#22c55e">${completed}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Completed</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:10px">
+          <div style="font-size:18px;font-weight:800;color:#fbbf24">${active}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Active</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:10px">
+          <div style="font-size:18px;font-weight:800;color:var(--cyan)">${r.rating||0}★</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Rating</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:10px">
+          <div style="font-size:18px;font-weight:800;color:var(--green)">$${earnings.toFixed(0)}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Earned</div>
         </div>
       </div>
-      <div class="dl"><div class="dl-l">Referrals</div>
-        <div style="display:flex;flex-direction:column;gap:3px">
+
+      <div class="cc-grid">
+        <div class="dl"><div class="dl-l">Zones</div><div style="display:flex;flex-direction:column;gap:3px">
+          ${zoneNames.length ? zoneNames.map(n=>`<span style="font-size:12px">${n}</span>`).join('') : '<span style="color:#f59e0b;font-size:11px">⚠️ No zones</span>'}
+        </div></div>
+        <div class="dl"><div class="dl-l">Visit Type</div><div>${VISIT_LABEL[r.visitType]}</div></div>
+        <div class="dl"><div class="dl-l">Vehicle</div><div>${r.vehicle}</div></div>
+        <div class="dl"><div class="dl-l">Loyalty</div>
           <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-weight:600">${r.totalReferrals||0}</span>
-            ${r.referredBy ? `<span style="font-size:11px;color:var(--muted)">via ${r.referredBy}</span>` : ''}
+            <span style="color:${tierCol};font-weight:700;font-size:12px">${tierIcon} ${tier.charAt(0).toUpperCase()+tier.slice(1)}</span>
+            <span style="color:var(--muted);font-size:11px">$${rate.toFixed(2)}/stop</span>
+            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px" onclick="showEditLoyalty('${r.id}')">Edit</button>
           </div>
-          ${r.ownRefCode ? `<div style="display:flex;align-items:center;gap:6px;margin-top:2px">
-            <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--cyan);background:rgba(6,214,160,.08);border:1px solid rgba(6,214,160,.15);border-radius:5px;padding:2px 7px;letter-spacing:.06em">${r.ownRefCode}</span>
-            <button onclick="navigator.clipboard.writeText('${r.ownRefCode}');showToast('Ref code copied','ok')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0">📋</button>
-          </div>` : ''}
         </div>
+        <div class="dl"><div class="dl-l">Ref Code</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            ${r.ownRefCode ? `<span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--cyan);background:rgba(6,214,160,.08);border:1px solid rgba(6,214,160,.15);border-radius:5px;padding:2px 7px">${r.ownRefCode}</span>
+              <button onclick="navigator.clipboard.writeText('${r.ownRefCode}');showToast('Copied','ok')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px">📋</button>` : '<span style="color:var(--muted);font-size:11px">Not assigned</span>'}
+          </div>
+        </div>
+        <div class="dl"><div class="dl-l">Referrals</div><div>${r.totalReferrals||0} HOs referred</div></div>
+        <div class="dl"><div class="dl-l">Status</div><div>${inactive
+          ? `<button class="btn btn-outline btn-sm" style="font-size:10px" onclick="reactivateRunner('${r.id}')">Reactivate</button>`
+          : `<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#f59e0b" onclick="deactivateRunner('${r.id}')">Deactivate</button>`
+        }</div></div>
       </div>
-      <div class="dl"><div class="dl-l">Status</div><div>${inactive
-        ? `<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" onclick="reactivateRunner('${r.id}')">Reactivate</button>`
-        : `<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px;color:#f59e0b" onclick="deactivateRunner('${r.id}')">Deactivate</button>`
-      }</div></div>
+
+      <!-- Recent jobs for this runner -->
+      ${rJobs.length ? `
+      <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Recent Activity</div>
+        ${rJobs.slice(0,5).map(j=>{
+          const sc={offered:'#fbbf24',accepted:'#6366f1',in_progress:'#06d6a0',complete:'#22c55e',declined:'#ef4444'}
+          const dt=j.scheduled_date?new Date(j.scheduled_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'--'
+          return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
+            <span style="background:${sc[j.status]||'#64748b'}22;color:${sc[j.status]||'#64748b'};border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;flex-shrink:0">${j.status}</span>
+            <span style="flex:1;color:var(--text)">${j.homeowner_email||'--'}</span>
+            <span style="color:var(--muted);font-size:10px">${dt}</span>
+            <span style="color:var(--green);font-weight:600">$${parseFloat(j.amount||3.25).toFixed(2)}</span>
+          </div>`
+        }).join('')}
+        ${rJobs.length > 5 ? `<div style="font-size:11px;color:var(--muted);text-align:center;padding-top:6px">+${rJobs.length-5} more jobs</div>` : ''}
+      </div>` : ''}
     </div>
   </div>`
+}
+
+function toggleRunnerExpand(rId){
+  const detail  = document.getElementById('rcard-detail-'+rId)
+  const chevron = document.getElementById('rcard-chevron-'+rId)
+  if(!detail) return
+  const open = detail.style.display === 'block'
+  detail.style.display = open ? 'none' : 'block'
+  if(chevron) chevron.textContent = open ? '›' : '⌄'
 }
 
 function renderRunnerList(){
@@ -8084,8 +8141,69 @@ async function confirmSosHW(){
   }
 }
 function showAdminSos(){
-  document.getElementById('modal-box').innerHTML=`<div class="mh" style="background:rgba(239,68,68,.06)"><div style="font-size:15px;font-weight:700;color:#fca5a5">🚨 Admin Emergency Dispatch</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb"><div class="field"><label>Homeowner</label><select><option value="">-- Select homeowner --</option></select></div><div class="field"><label>Service Type</label><div class="radio-row"><div class="r-opt on" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">♻️ Recycling</div><div class="r-opt" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')">🗑️ General Waste</div></div></div><div class="field"><label>Visit Type Needed</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="r-opt on" style="text-align:center;padding:10px" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')"><div style="font-size:18px">🌙</div><div style="font-size:11px;font-weight:700;margin-top:3px">Bin Out</div></div><div class="r-opt" style="text-align:center;padding:10px" onclick="this.closest('.field').querySelectorAll('.r-opt').forEach(x=>x.classList.remove('on'));this.classList.add('on')"><div style="font-size:18px">☀️</div><div style="font-size:11px;font-weight:700;margin-top:3px">Bin In</div></div></div></div><div class="field"><label>Notes</label><textarea placeholder="Reason for emergency dispatch..."></textarea></div></div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-red" onclick="closeM();showToast('🚨 Emergency dispatched to nearest available runner!','err')">🚨 Confirm Dispatch</button></div>`
+  const hwOptions = HOMEOWNERS.filter(h=>h.status==='active')
+    .map(h=>`<option value="${h.id}" data-email="${h.email}" data-addr="${h.address||''}">${h.name} — ${h.address||h.zip||'--'} (${h.day||'--'})</option>`)
+    .join('')
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh" style="background:rgba(239,68,68,.06)">
+    <div style="font-size:15px;font-weight:700;color:#fca5a5">🚨 Admin Emergency Dispatch</div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div class="field"><label>Homeowner</label>
+      <select id="sos-hw-select">
+        <option value="">— Select homeowner —</option>
+        ${hwOptions || '<option disabled>No active homeowners loaded</option>'}
+      </select>
+    </div>
+    <div class="field"><label>Service Type</label>
+      <div class="radio-row">
+        <div class="r-opt on" onclick="rOpt(this)">♻️ Recycling</div>
+        <div class="r-opt" onclick="rOpt(this)">🗑️ General Waste</div>
+        <div class="r-opt" onclick="rOpt(this)">♻️🗑️ Both</div>
+      </div>
+    </div>
+    <div class="field"><label>Visit Type Needed</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="r-opt on" style="text-align:center;padding:10px" onclick="rOpt(this)"><div style="font-size:18px">🌙</div><div style="font-size:11px;font-weight:700;margin-top:3px">Bin Out</div></div>
+        <div class="r-opt" style="text-align:center;padding:10px" onclick="rOpt(this)"><div style="font-size:18px">☀️</div><div style="font-size:11px;font-weight:700;margin-top:3px">Bin In</div></div>
+      </div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="sos-notes" placeholder="Reason for emergency dispatch..."></textarea></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-red" onclick="confirmAdminSos()">🚨 Dispatch Now</button>
+  </div>`
   openM()
+}
+
+async function confirmAdminSos(){
+  const hwId   = document.getElementById('sos-hw-select')?.value
+  const notes  = document.getElementById('sos-notes')?.value || ''
+  const svcEl  = document.querySelector('#modal-box .field:nth-child(2) .r-opt.on')
+  const vtEl   = document.querySelector('#modal-box .field:nth-child(3) .r-opt.on')
+  if(!hwId){ showToast('Please select a homeowner','err'); return }
+  const hw = HOMEOWNERS.find(x=>x.id===hwId)
+  closeM()
+  showToast(`🚨 Emergency dispatched to all available runners for ${hw?.name||'homeowner'}!`,'err', 5000)
+  // Write emergency job
+  try {
+    await _supa.from('jobs').insert({
+      homeowner_email:  hw?.email || '',
+      visit_type:       vtEl?.textContent?.includes('In') ? 'BIN_IN' : 'BIN_OUT',
+      job_type:         'sos',
+      service_type:     svcEl?.textContent?.replace(/[^\w\s+]/g,'').trim() || 'Recycling',
+      status:           'offered',
+      offer_type:       'broadcast',
+      amount:           12.99,
+      zone_id:          hw?.zoneId || null,
+      scheduled_date:   new Date().toISOString().slice(0,10),
+      service_notes:    notes || 'EMERGENCY DISPATCH',
+      created_at:       new Date().toISOString(),
+      updated_at:       new Date().toISOString(),
+    })
+  } catch(e){ console.warn('[BinDash] SOS job insert:', e) }
 }
 
 function showScheduleModal(){
@@ -9926,42 +10044,107 @@ function renderHomeownerCard(hw){
   const zone = getHWZoneName(hw)
   const statusColors = { active:['#22c55e22','#22c55e','● Active'], paused:['rgba(245,158,11,.15)','#f59e0b','⏸ Paused'], inactive:['rgba(100,100,100,.15)','#666','○ Inactive'] }
   const [sbg,scol,slbl] = statusColors[hw.status] || statusColors.active
+
+  // Route stats
+  const hwJobs = (_adminJobsCache||[]).filter(j=>j.homeowner_email===hw.email)
+  const completed = hwJobs.filter(j=>j.status==='complete').length
+  const activeJob = hwJobs.find(j=>['offered','accepted','in_progress'].includes(j.status))
+  const totalPaid = hwJobs.filter(j=>j.status==='complete').reduce((s,j)=>s+(parseFloat(j.amount)||3.25),0)
+
+  const planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split · $54.99/mo',
+    oan_a:'OAN 1-Can · $19.99+usage', oan_b:'OAN 2-Can · $19.99+usage', oan_c:'OAN Split · $19.99+usage' }
+
   return `<div class="cc" id="hwcard-${hw.id}">
-    <div class="cc-head">
+    <!-- Header — always visible, click to expand -->
+    <div class="cc-head" onclick="toggleHWExpand('${hw.id}')" style="cursor:pointer">
       <div style="display:flex;align-items:center;gap:10px">
         <div class="cc-av" style="background:${hw.color}">${hw.initials}</div>
         <div>
           <div class="cc-nm">${hw.name}</div>
-          <div class="cc-id">${hw.id} . ${hw.email}</div>
+          <div class="cc-id">${hw.email}</div>
+          <div style="display:flex;gap:8px;margin-top:3px;flex-wrap:wrap">
+            <span style="font-size:10px;color:var(--muted)">${zone}</span>
+            ${activeJob ? `<span style="font-size:10px;color:#fbbf24">⏳ Route active</span>` : ''}
+            <span style="font-size:10px;color:var(--muted)">${getHWServiceLabel(hw)}</span>
+          </div>
         </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;align-items:center">
         <span class="badge" style="background:${sbg};color:${scol}">${slbl}</span>
-        <button class="btn btn-outline btn-sm" onclick="showHWPaymentDetail('${hw.id}')">💳 Payments</button>
-        <button class="btn btn-outline btn-sm" onclick="showHWDetail('${hw.id}')">✏️ Edit</button>
-        <button class="btn btn-ghost btn-sm" style="color:#ef4444;padding:4px 7px" onclick="confirmRemoveHW('${hw.id}','${hw.name}')">✕</button>
+        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();showHWPaymentDetail('${hw.id}')">💳</button>
+        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();showHWDetail('${hw.id}')">✏️ Edit</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444;padding:4px 7px" onclick="event.stopPropagation();confirmRemoveHW('${hw.id}','${hw.name}')">✕</button>
+        <span style="font-size:16px;color:var(--muted)" id="hwcard-chevron-${hw.id}">›</span>
       </div>
     </div>
-    <div class="cc-grid">
-      <div class="dl"><div class="dl-l">Address</div><div>${hw.address}, ${hw.city} ${hw.state}</div></div>
-      <div class="dl"><div class="dl-l">Zone</div><div style="display:flex;align-items:center;gap:6px">
-        ${zone}
-        ${!hw.zoneId ? '<span style="background:rgba(239,68,68,.15);color:#ef4444;font-size:10px;padding:1px 6px;border-radius:5px">⚠️ Unzoned</span>' : ''}
-        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="showReassignZone('${hw.id}')">↔</button>
-      </div></div>
-      <div class="dl"><div class="dl-l">Service</div><div>${getHWServiceLabel(hw)}</div></div>
-      <div class="dl"><div class="dl-l">Collection</div><div>
-        ${hw.service==='SPLIT'
-          ? `${hw.freq||'weekly'} <span style="margin-left:4px">♻️ <strong>${hw.dayRecycling||'--'}</strong> · 🗑️ <strong>${hw.dayWaste||'--'}</strong></span>`
-          : `${hw.freq||'weekly'} · <strong>${hw.day||'--'}</strong>`}
-      </div></div>
-      <div class="dl"><div class="dl-l">Runner</div><div style="display:flex;align-items:center;gap:6px">
-        ${runner ? runner.name : '<span style="color:#ef4444">Unassigned</span>'}
-        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="showReassignRunner('${hw.id}')">↔</button>
-      </div></div>
-      <div class="dl"><div class="dl-l">Bins</div><div>${hw.bins} . ${hw.storage}</div></div>
+
+    <!-- Expandable detail section -->
+    <div id="hwcard-detail-${hw.id}" style="display:none;border-top:1px solid var(--border);padding:14px">
+
+      <!-- Stats row -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;text-align:center">
+        <div style="background:var(--surface2);border-radius:8px;padding:10px">
+          <div style="font-size:18px;font-weight:800;color:#22c55e">${completed}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Routes Done</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:10px">
+          <div style="font-size:18px;font-weight:800;color:var(--cyan)">${runner?.name?.split(' ')[0]||'None'}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Runner</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:10px">
+          <div style="font-size:18px;font-weight:800;color:var(--green)">$${(parseFloat(hw.plan==='plan_b'?44.99:hw.plan==='plan_c'?54.99:hw.plan?.startsWith('oan')?19.99:34.99)).toFixed(0)}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">MRR</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:10px">
+          <div style="font-size:18px;font-weight:800;color:#a5b4fc">$${totalPaid.toFixed(0)}</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Runner Paid</div>
+        </div>
+      </div>
+
+      <!-- Full details grid -->
+      <div class="cc-grid">
+        <div class="dl"><div class="dl-l">Address</div><div>${hw.address}, ${hw.city||''} ${hw.zip||''}</div></div>
+        <div class="dl"><div class="dl-l">Zone</div><div style="display:flex;align-items:center;gap:6px">
+          ${zone}
+          ${!hw.zoneId ? '<span style="background:rgba(239,68,68,.15);color:#ef4444;font-size:10px;padding:1px 6px;border-radius:5px">⚠️ Unzoned</span>' : ''}
+          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="showReassignZone('${hw.id}')">↔</button>
+        </div></div>
+        <div class="dl"><div class="dl-l">Plan</div><div>${planLabels[hw.plan]||hw.plan||'--'}</div></div>
+        <div class="dl"><div class="dl-l">Collection</div><div>
+          ${hw.service==='SPLIT'
+            ? `${hw.freq||'weekly'} ♻️ <strong>${hw.dayRecycling||'--'}</strong> · 🗑️ <strong>${hw.dayWaste||'--'}</strong>`
+            : `${hw.freq||'weekly'} · <strong>${hw.day||'--'}</strong>`}
+        </div></div>
+        <div class="dl"><div class="dl-l">Service</div><div>${getHWServiceLabel(hw)}</div></div>
+        <div class="dl"><div class="dl-l">Runner</div><div style="display:flex;align-items:center;gap:6px">
+          ${runner ? runner.name : '<span style="color:#ef4444">Unassigned</span>'}
+          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="showReassignRunner('${hw.id}')">↔</button>
+        </div></div>
+        ${hw.gate && hw.gate!=='--' ? `<div class="dl"><div class="dl-l">Gate</div><div>🔑 ${hw.gate}${hw.gateCode?' · '+hw.gateCode:''}</div></div>` : ''}
+        ${hw.pets && hw.pets!=='None' && hw.pets!=='--' ? `<div class="dl"><div class="dl-l">Pets</div><div>🐾 ${hw.pets}</div></div>` : ''}
+        ${hw.storage && hw.storage!=='--' ? `<div class="dl"><div class="dl-l">Bin Storage</div><div>📦 ${hw.storage}</div></div>` : ''}
+        ${hw.svcNotes ? `<div class="dl" style="grid-column:1/-1"><div class="dl-l">Notes</div><div style="font-size:12px;color:var(--sub)">📝 ${hw.svcNotes}</div></div>` : ''}
+        <div class="dl"><div class="dl-l">Phone</div><div>${hw.phone||'--'}</div></div>
+        <div class="dl"><div class="dl-l">Bins</div><div>${hw.bins||1} bin${(hw.bins||1)>1?'s':''} · ${hw.storage||'--'}</div></div>
+      </div>
+
+      <!-- Active route status -->
+      ${activeJob ? `<div style="margin-top:10px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;font-size:12px">
+        ⏳ <strong>Active route</strong> — ${activeJob.status} · ${activeJob.runner_name||'runner'} · ${activeJob.scheduled_date?new Date(activeJob.scheduled_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'today'}
+      </div>` : ''}
     </div>
   </div>`
+}
+
+function toggleHWExpand(hwId){
+  const detail  = document.getElementById('hwcard-detail-'+hwId)
+  const chevron = document.getElementById('hwcard-chevron-'+hwId)
+  if(!detail) return
+  const open = detail.style.display === 'block'
+  detail.style.display = open ? 'none' : 'block'
+  if(chevron) chevron.textContent = open ? '›' : '⌄'
+  // Load admin jobs if not yet loaded for stats
+  if(!open && !_adminJobsCache?.length) loadAdminJobs()
 }
 
 function renderHomeownerList(){
@@ -11709,28 +11892,71 @@ async function routeAfterSignup(appData){
   const matchedZone = window._hwMatchedZone || null
   const hasLiveCoverage = window._hwZipHasCoverage === true
 
+  // Always check for duplicate signup first
+  try {
+    const { data: existing } = await _supa.from('homeowner_signups')
+      .select('id, status').ilike('email', appData.email).limit(1)
+    if(existing?.length > 1){
+      // More than the row we just inserted — consolidate
+      console.log('[BinDash] Duplicate signup detected — keeping newest')
+    }
+    // Dedup waitlist by ZIP: if another row with same ZIP + status=waitlisted exists, don't create another
+    const { data: dupWL } = await _supa.from('homeowner_signups')
+      .select('id').eq('zip_code', appData.zip).eq('status','waitlisted')
+      .neq('email', appData.email).limit(1)
+    if(dupWL?.length) console.log('[BinDash] ZIP already on waitlist — no zone creation needed')
+  } catch(e){ console.warn('[BinDash] Dedup check:', e) }
+
   if(!hasLiveCoverage){
-    // -- Waitlisted --
+    // ── WAITLIST FLOW ────────────────────────────────────────────────────────
+    // If zone exists as 'waitlist' status → immediately waitlisted, no approval needed
+    // If no zone → create zone request for admin, go to waitlist screen
+    const isKnownWaitlistZone = matchedZone && matchedZone.status === 'waitlist'
+
     const wlEntry = {...appData, status:'waitlist', zoneId: matchedZone?.id || null}
     WAITLIST_SIGNUPS.push(wlEntry)
     updateWaitlistBadge()
     const zipDisplay = document.getElementById('waitlist-zip-display')
     if(zipDisplay) zipDisplay.textContent = 'ZIP '+(appData.zip||'your area')
+
     try {
       await _supa.from('homeowner_signups').update({
-        status:  'waitlisted',
-        zone_id: matchedZone?.id || null,
+        status:   'waitlisted',
+        zone_id:  matchedZone?.id || null,
         updated_at: new Date().toISOString(),
       }).eq('email', appData.email)
     } catch(err){ console.warn('[BinDash] Waitlist update failed:', err) }
+
+    if(isKnownWaitlistZone){
+      // Zone exists — update zone homeowner count
+      matchedZone.homeowners = (matchedZone.homeowners||0) + 1
+      try { await _supa.from('zones').update({ homeowners: matchedZone.homeowners, updated_at: new Date().toISOString() }).eq('id', matchedZone.id) } catch(e){}
+      console.log('[BinDash] Auto-waitlisted to existing zone:', matchedZone.name)
+    } else if(!matchedZone){
+      // New ZIP — create a zone request so admin knows about it
+      try {
+        await _supa.from('runner_zone_requests').insert({
+          runner_name:  'Homeowner Signup',
+          runner_email: appData.email,
+          zip_code:     appData.zip,
+          zone_name:    'ZIP '+appData.zip,
+          status:       'pending',
+          type:         'new_zone',
+          notes:        `Auto-created from homeowner signup: ${appData.name} (${appData.email})`,
+          created_at:   new Date().toISOString(),
+        })
+        // Update admin badges
+        loadZoneWaitlistBadge()
+        loadRunnerZoneRequestsBadge()
+      } catch(e){ console.warn('[BinDash] Zone request create:', e) }
+    }
+
     go('S-hw-waitlist')
   } else {
-    // -- Pending review --
+    // ── LIVE ZONE FLOW ───────────────────────────────────────────────────────
     const pendingEntry = {...appData, status:'pending', zoneId: matchedZone?.id || null}
     PENDING_HOMEOWNERS.push(pendingEntry)
     updateOverviewCounts()
-    const badge = document.getElementById('hw-pcount')
-    if(badge) badge.textContent = PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length
     try {
       await _supa.from('homeowner_signups').update({
         status:  'pending_review',
@@ -13176,7 +13402,10 @@ function updateDispatchStats(){
   if(zf) zf.value = zoneId
 }
 
-function adGenerateBatches(){
+function adGenerateBatches(){ _adGenerateBatchesAsync() }
+function _adForceGenerateBatches(){ 
+  // Bypasses duplicate check — called when admin confirms override
+  _adGenerateBatchesAsync._force = true
   _adGenerateBatchesAsync()
 }
 
@@ -13185,6 +13414,44 @@ async function _adGenerateBatchesAsync(){
   const zoneId = document.getElementById('dispatch-zone-select')?.value || ''
 
   if(!day){ showToast('Please select a collection day first','err'); return }
+
+  // ── DOUBLE-BOOKING GUARD ─────────────────────────────────────────────────
+  // Check if there are already offered/accepted jobs for this day to prevent duplicates
+  try {
+    const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+    const targetIdx = dayNames.findIndex(d => normDay(d) === normDay(day))
+    if(targetIdx >= 0){
+      const d = new Date(); const diff = (targetIdx - d.getDay() + 7) % 7 || 7
+      const scheduledDate = new Date(d.getFullYear(), d.getMonth(), d.getDate() + diff).toISOString().slice(0,10)
+      const { data: existing } = await _supa.from('jobs')
+        .select('id, status', { count: 'exact' })
+        .eq('scheduled_date', scheduledDate)
+        .in('status', ['offered', 'accepted', 'in_progress'])
+        .limit(1)
+      if(existing?.length > 0){
+        document.getElementById('modal-box').innerHTML = `
+        <div class="mh" style="background:rgba(245,158,11,.07)">
+          <div style="font-size:15px;font-weight:700;color:#fbbf24">⚠️ Active Routes Exist</div>
+          <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+        </div>
+        <div class="mb">
+          <div style="font-size:14px;color:var(--text);margin-bottom:8px">
+            Routes for <strong>${day}</strong> have already been launched and are currently offered or accepted by runners.
+          </div>
+          <div style="font-size:13px;color:var(--sub);line-height:1.6">
+            Re-generating will create duplicate jobs. Only continue if you need to add missed homeowners or if all previous routes were cancelled.
+          </div>
+        </div>
+        <div class="mf">
+          <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel — keep existing routes</button>
+          <button class="btn btn-outline btn-sm" style="color:#fbbf24;border-color:rgba(245,158,11,.4)" onclick="closeM();_adForceGenerateBatches()">⚠️ Generate anyway</button>
+        </div>`
+        openM()
+        return
+      }
+    }
+  } catch(e){ console.warn('[BinDash] Double-booking check:', e) }
+  // ─────────────────────────────────────────────────────────────────────────
 
   const target = normDay(day)
 
@@ -13398,6 +13665,9 @@ async function launchDispatchRoutes(){
 
   renderDispatchPipeline()
   if(btn){ btn.disabled=false; btn.style.display='none' }
+  // Clear generated batches so re-clicking Preview doesn't duplicate
+  generatedBatches = []
+  showToast('Routes launched and locked ✅ — regenerate only if needed', 'ok', 4000)
 }
 
 function renderRunnerAvailabilityAlerts(unzoned){
