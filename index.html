@@ -3830,6 +3830,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                     <div class="ob-day-pill" data-day="Thursday"  onclick="pickDispatchDay(this)">Thu</div>
                     <div class="ob-day-pill" data-day="Friday"    onclick="pickDispatchDay(this)">Fri</div>
                   </div>
+                  <div id="dispatch-date-label" style="font-size:11px;color:var(--cyan);margin-top:5px;text-align:center;min-height:16px"></div>
                   <input type="hidden" id="dispatch-day-val" value="">
                 </div>
 
@@ -13483,6 +13484,19 @@ function normDay(d){
 }
 
 function pickDispatchDay(el){
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  const today = new Date(); today.setHours(0,0,0,0)
+  const targetIdx = dayNames.findIndex(d => d === el.dataset.day)
+  const diff = (targetIdx - today.getDay() + 7) % 7
+  const scheduledDate = new Date(today); scheduledDate.setDate(today.getDate() + diff)
+  const dateStr = scheduledDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+
+  // Block if more than 3 days out
+  if(diff > 3){
+    showToast(`${el.dataset.day} (${dateStr}) is ${diff} days away — max 3 days ahead`, 'err', 4000)
+    return
+  }
+
   document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>p.classList.remove('on'))
   el.classList.add('on')
   const day = el.dataset.day
@@ -13490,6 +13504,44 @@ function pickDispatchDay(el){
   if(inp) inp.value = day
   const pf = document.getElementById('dispatch-day-filter')
   if(pf) pf.value = day
+
+  // Show selected date
+  const dateLabel = document.getElementById('dispatch-date-label')
+  if(dateLabel) dateLabel.textContent = dateStr + (diff===0?' (today)':diff===1?' (tomorrow)':'')
+
+  updateDispatchStats()
+}
+
+function initDispatchDayPills(){
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  const today = new Date(); today.setHours(0,0,0,0)
+  const pills = document.querySelectorAll('#dispatch-day-pills .ob-day-pill')
+  pills.forEach(p => {
+    const targetIdx = dayNames.findIndex(d => d === p.dataset.day)
+    const diff = (targetIdx - today.getDay() + 7) % 7
+    const scheduledDate = new Date(today); scheduledDate.setDate(today.getDate() + diff)
+    const dateStr = scheduledDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+
+    if(diff > 3){
+      // Grayed out — too far ahead
+      p.style.opacity = '0.35'
+      p.style.cursor = 'not-allowed'
+      p.title = `${p.dataset.day} (${dateStr}) — more than 3 days out`
+    } else {
+      p.style.opacity = ''
+      p.style.cursor = ''
+      // Show date below day name
+      p.innerHTML = p.dataset.day.slice(0,3) + '<br><span style="font-size:9px;opacity:.7">' + dateStr + '</span>'
+      if(diff === 0) p.innerHTML += '<br><span style="font-size:8px;color:var(--cyan)">today</span>'
+      if(p.dataset.day === dayNames[today.getDay()]){
+        p.classList.add('on')
+        const inp = document.getElementById('dispatch-day-val')
+        if(inp) inp.value = p.dataset.day
+        const pf = document.getElementById('dispatch-day-filter')
+        if(pf) pf.value = p.dataset.day
+      }
+    }
+  })
   updateDispatchStats()
 }
 
@@ -13535,7 +13587,7 @@ function updateDispatchStats(){
 function adGenerateBatches(){ _adGenerateBatchesAsync() }
 function _adForceGenerateBatches(){ 
   // Bypasses duplicate check — called when admin confirms override
-  _adGenerateBatchesAsync._force = true
+  window._adForceGenerate = true
   _adGenerateBatchesAsync()
 }
 
@@ -13545,42 +13597,66 @@ async function _adGenerateBatchesAsync(){
 
   if(!day){ showToast('Please select a collection day first','err'); return }
 
-  // ── DOUBLE-BOOKING GUARD ─────────────────────────────────────────────────
-  // Check if there are already offered/accepted jobs for this day to prevent duplicates
-  try {
-    const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
-    const targetIdx = dayNames.findIndex(d => normDay(d) === normDay(day))
-    if(targetIdx >= 0){
-      const d = new Date(); const diff = (targetIdx - d.getDay() + 7) % 7 || 7
-      const scheduledDate = new Date(d.getFullYear(), d.getMonth(), d.getDate() + diff).toISOString().slice(0,10)
-      const { data: existing } = await _supa.from('jobs')
-        .select('id, status', { count: 'exact' })
-        .eq('scheduled_date', scheduledDate)
-        .in('status', ['offered', 'accepted', 'in_progress'])
-        .limit(1)
-      if(existing?.length > 0){
-        document.getElementById('modal-box').innerHTML = `
-        <div class="mh" style="background:rgba(245,158,11,.07)">
-          <div style="font-size:15px;font-weight:700;color:#fbbf24">⚠️ Active Routes Exist</div>
-          <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
-        </div>
-        <div class="mb">
-          <div style="font-size:14px;color:var(--text);margin-bottom:8px">
-            Routes for <strong>${day}</strong> have already been launched and are currently offered or accepted by runners.
+  // ── DOUBLE-BOOKING GUARD + 3-DAY WINDOW ─────────────────────────────────
+  // Skip if admin explicitly overrode
+  if(window._adForceGenerate){
+    window._adForceGenerate = false
+    console.log('[BinDash] Double-booking guard bypassed — generating anyway')
+  } else {
+    try {
+      const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+      const targetIdx = dayNames.findIndex(d => normDay(d) === normDay(day))
+      if(targetIdx >= 0){
+        const today = new Date()
+        today.setHours(0,0,0,0)
+        // Calculate days until next occurrence (0 = today, 1 = tomorrow, etc.)
+        let diff = (targetIdx - today.getDay() + 7) % 7
+        // 0 means today — that's valid. Keep it as 0, not push to next week.
+        // The scheduled date is exactly that many days from today
+        const scheduledDate = new Date(today)
+        scheduledDate.setDate(today.getDate() + diff)
+        const scheduledDateStr = scheduledDate.toISOString().slice(0,10)
+        const displayDay = dayNames[targetIdx]
+
+        // 3-day window limit — don't allow scheduling more than 3 days out
+        if(diff > 3){
+          showToast(`${displayDay} is ${diff} days away — routes can only be created up to 3 days in advance`, 'err', 5000)
+          const btn = document.getElementById('dispatch-generate-btn')
+          if(btn){ btn.disabled=false; btn.textContent='🔍 Preview Routes' }
+          return
+        }
+
+        // Check for existing active jobs on that exact date
+        const { data: existing } = await _supa.from('jobs')
+          .select('id, status')
+          .eq('scheduled_date', scheduledDateStr)
+          .in('status', ['offered', 'accepted', 'in_progress'])
+          .limit(1)
+
+        if(existing?.length > 0){
+          document.getElementById('modal-box').innerHTML = `
+          <div class="mh" style="background:rgba(245,158,11,.07)">
+            <div style="font-size:15px;font-weight:700;color:#fbbf24">⚠️ Active Routes Exist</div>
+            <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
           </div>
-          <div style="font-size:13px;color:var(--sub);line-height:1.6">
-            Re-generating will create duplicate jobs. Only continue if you need to add missed homeowners or if all previous routes were cancelled.
+          <div class="mb">
+            <div style="font-size:14px;color:var(--text);margin-bottom:8px">
+              Routes for <strong>${displayDay} ${scheduledDateStr}</strong> have already been launched and are currently offered or accepted by runners.
+            </div>
+            <div style="font-size:13px;color:var(--sub);line-height:1.6">
+              Re-generating will create duplicate jobs. Only continue if you need to add missed homeowners or if all previous routes were cancelled.
+            </div>
           </div>
-        </div>
-        <div class="mf">
-          <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel — keep existing routes</button>
-          <button class="btn btn-outline btn-sm" style="color:#fbbf24;border-color:rgba(245,158,11,.4)" onclick="closeM();_adForceGenerateBatches()">⚠️ Generate anyway</button>
-        </div>`
-        openM()
-        return
+          <div class="mf">
+            <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel — keep existing routes</button>
+            <button class="btn btn-outline btn-sm" style="color:#fbbf24;border-color:rgba(245,158,11,.4)" onclick="closeM();_adForceGenerateBatches()">⚠️ Generate anyway</button>
+          </div>`
+          openM()
+          return
+        }
       }
-    }
-  } catch(e){ console.warn('[BinDash] Double-booking check:', e) }
+    } catch(e){ console.warn('[BinDash] Double-booking check:', e) }
+  }
   // ─────────────────────────────────────────────────────────────────────────
 
   const target = normDay(day)
@@ -14108,18 +14184,8 @@ function initDispatchPage(){
     })
   })
 
-  // Auto-select today's day
-  const todayFull = FULL_DAYS[new Date().getDay()]
-  const pills = document.querySelectorAll('#dispatch-day-pills .ob-day-pill')
-  pills.forEach(p=>{
-    if(p.dataset.day === todayFull){
-      p.classList.add('on')
-      const inp = document.getElementById('dispatch-day-val')
-      if(inp) inp.value = todayFull
-      const pf = document.getElementById('dispatch-day-filter')
-      if(pf) pf.value = todayFull
-    }
-  })
+  // Init dispatch day pills with dates and 3-day window
+  initDispatchDayPills()
 
   updateDispatchStats()
 }
