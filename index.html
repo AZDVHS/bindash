@@ -2901,10 +2901,40 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
             </div>
 
+            <!-- OAN PLAN -->
+            <div style="margin-bottom:16px">
+              <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">Pay-Per-Use Option</div>
+              <div class="plan-card" id="plan-oan" onclick="selectAccountPlan('oan')" style="border:2px solid rgba(245,158,11,.35);background:rgba(245,158,11,.04);border-radius:14px;padding:20px;cursor:pointer;transition:all .2s;position:relative;max-width:820px">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:#fbbf24;text-transform:uppercase;margin-bottom:6px">Bin Out As Needed</div>
+                <div style="font-size:24px;margin-bottom:8px">📅</div>
+                <div style="font-size:15px;font-weight:700;margin-bottom:4px">Pay only when your bin is full</div>
+                <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;color:#fbbf24;margin-bottom:6px">$19.99<span style="font-size:13px;font-weight:400;color:var(--sub)">/mo + usage</span></div>
+                <div style="font-size:12px;color:var(--sub);line-height:1.8;margin-bottom:10px">
+                  <div>✓ $19.99/mo base — keeps your property covered</div>
+                  <div>✓ Runner checks your bin on collection day</div>
+                  <div>✓ <strong style="color:#fbbf24">Only charged when bin is moved</strong></div>
+                  <div>✓ 1 Can: +$12.99/move &nbsp;·&nbsp; 2 Cans Same Day: +$16.99/move &nbsp;·&nbsp; 2 Cans Split: +$19.99/move</div>
+                  <div>✓ Great for seasonal, vacation, or low-waste households</div>
+                </div>
+                <div id="plan-oan-tiers" style="display:none;margin-top:10px;padding-top:12px;border-top:1px solid rgba(245,158,11,.2)">
+                  <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Select tier</div>
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    ${['a','b','c'].map((t,i)=>{
+                      const labels = ['1 Can — $12.99/move','2 Cans Same Day — $16.99/move','2 Cans Split Days — $19.99/move']
+                      return `<label onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+                        <input type="radio" name="oan-tier" value="oan_${t}" ${i===0?'checked':''} onclick="event.stopPropagation()">
+                        ${labels[i]}
+                      </label>`
+                    }).join('')}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- SAVE PLAN BUTTON -->
-            <div style="display:flex;align-items:center;gap:12px">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
               <button class="btn btn-cyan" onclick="savePlan()">Save Subscription Changes</button>
-              <span id="plan-save-note" style="font-size:12px;color:var(--muted)">Changes apply from your next billing date</span>
+              <span id="plan-save-note" style="font-size:12px;color:var(--muted)">⚠️ Changes apply from your next billing date — current plan stays active until then</span>
             </div>
           </div>
 
@@ -3141,7 +3171,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               🧭 Active <span id="rtab-active-count" style="background:rgba(6,214,160,.2);color:var(--cyan);border-radius:99px;font-size:9px;padding:1px 6px;margin-left:3px;display:none">!</span>
             </button>
             <button id="rtab-completed" onclick="switchRouteTab('completed')" style="flex:1;background:transparent;border:none;border-radius:7px;padding:9px 6px;font-size:12px;font-weight:700;color:var(--muted);cursor:pointer;transition:all .2s">
-              ✅ Completed <span id="rtab-completed-count" style="background:rgba(34,197,94,.2);color:#22c55e;border-radius:99px;font-size:9px;padding:1px 6px;margin-left:3px">0</span>
+              ✅ Completed <span id="rtab-completed-count" style="display:none"></span>
             </button>
           </div>
 
@@ -4447,37 +4477,40 @@ async function _populateHWDashData(row, fn, ln, initials){
   safe('hw-collection-day', row.collection_day || '--')
   const runnerEl = document.getElementById('hw-assigned-runner')
   if(runnerEl){
-    const runner = RUNNERS.find(r=>r.id===row.assigned_runner)
+    const runner = RUNNERS.find(r=>r.id===row.assigned_runner) ||
+      // fall back to referral runner if no assigned runner
+      RUNNERS.find(r=>r.name?.toLowerCase()===row.referred_by?.toLowerCase() ||
+                      r.email?.toLowerCase()===row.referred_by_email?.toLowerCase())
     runnerEl.innerHTML = runner
       ? 'Priority Runner: <strong style="color:var(--cyan)">' + runner.name + '</strong>'
       : 'Priority Runner: <strong style="color:var(--muted)">TBD — pending assignment</strong>'
   }
   safe('hw-collections-count', row.collections_done || 0)
 
-  // Next collection dates computed from collection_day
+  // Next collection dates — always the NEXT future occurrence, never today
   const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   const shortDays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
   const shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const colDay = row.collection_day || ''
   const colDayIdx = dayNames.findIndex(d => d.toLowerCase() === colDay.toLowerCase())
 
-  // Upcoming — now colDayIdx is defined
   const upcomingWeeks = 4
   safe('hw-upcoming-count', colDayIdx >= 0 ? upcomingWeeks : 0)
   if(colDayIdx >= 0){
-    const today = new Date()
+    const today = new Date(); today.setHours(0,0,0,0)
+    // Always find the NEXT future collection day (minimum 1 day away)
     let daysUntil = (colDayIdx - today.getDay() + 7) % 7
-    if(daysUntil === 0) daysUntil = 7 // next week if today is collection day
+    if(daysUntil === 0) daysUntil = 7  // if today is collection day, show next week
     const collectionDate = new Date(today); collectionDate.setDate(today.getDate() + daysUntil)
     const binOutDate = new Date(collectionDate); binOutDate.setDate(collectionDate.getDate() - 1)
     const fmtDate = d => shortDays[d.getDay()] + ' ' + shortMonths[d.getMonth()] + ' ' + d.getDate()
     const prevDay = dayNames[(colDayIdx + 6) % 7]
-    safe('hw-next-col-title', 'Next Collection -- ' + fmtDate(collectionDate))
-    safe('hw-binout-date',    fmtDate(binOutDate) + ' . Evening')
-    safe('hw-binin-date',     fmtDate(collectionDate) + ' . Daytime')
+    safe('hw-next-col-title', 'Next Collection — ' + fmtDate(collectionDate))
+    safe('hw-binout-date',    fmtDate(binOutDate) + ' · Evening')
+    safe('hw-binin-date',     fmtDate(collectionDate) + ' · Daytime')
     const nextColStrip = document.getElementById('hw-next-collection-strip')
     if(nextColStrip) nextColStrip.innerHTML =
-      'Next collection: <strong style="color:var(--cyan)">' + fmtDate(collectionDate) + '</strong> -- Bin Out ' + prevDay + ' evening'
+      'Next collection: <strong style="color:var(--cyan)">' + fmtDate(collectionDate) + '</strong> — Bin Out ' + prevDay + ' evening'
   }
 
   // Subscription banner
@@ -5131,6 +5164,7 @@ function filterAdminJobs(){
       <td style="font-size:12px;color:var(--green);font-weight:600">$${parseFloat(j.amount||3.25).toFixed(2)}</td>
       <td style="white-space:nowrap">
         ${['accepted','in_progress'].includes(j.status)?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fbbf24" onclick="event.stopPropagation();adminMarkJobLate('${j.id}')">⚠️ Flag</button>`:''}
+        ${j.status==='late'?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#06d6a0" onclick="event.stopPropagation();adminUnflagJob('${j.id}')">↩ Unflag</button>`:''}
         <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#ef4444;padding:3px 6px" onclick="event.stopPropagation();confirmDeleteJob('${j.id}','${(j.homeowner_email||'').replace(/'/g,'')}')" title="Delete">🗑</button>
       </td>
     </tr>`
@@ -5308,6 +5342,15 @@ async function adminMarkJobLate(jobId){
   try {
     await _supa.from('jobs').update({ status:'late', updated_at:new Date().toISOString() }).eq('id', jobId)
     showToast('Job flagged as late', 'info')
+    await loadAdminJobs()
+  } catch(e){ showToast('Error: '+e.message,'err') }
+}
+
+async function adminUnflagJob(jobId){
+  try {
+    // Restore to accepted status (most likely prior state for a flagged job)
+    await _supa.from('jobs').update({ status:'accepted', updated_at:new Date().toISOString() }).eq('id', jobId)
+    showToast('Flag removed — job restored to accepted ✅', 'ok')
     await loadAdminJobs()
   } catch(e){ showToast('Error: '+e.message,'err') }
 }
@@ -5600,11 +5643,12 @@ async function loadRunnerRoutes(runnerRow){
           <div>
             <div style="display:flex;align-items:center;gap:8px">
               <span class="${batch.type==='BIN_OUT'?'vt-out':'vt-in'}">${batch.type==='BIN_OUT'?'🌙 BIN OUT':'☀️ BIN IN'}</span>
-              <span style="font-weight:700;font-size:13px">${String(batch.id).slice(0,12).toUpperCase()}</span>
+              <span style="font-weight:700;font-size:13px">${batch.stops.length} stop${batch.stops.length!==1?'s':''} · ${batch.type==='BIN_OUT'?'Bin Out Route':'Bin In Route'}</span>
               ${statusBadge}
             </div>
             <div style="font-size:11px;color:var(--muted);margin-top:3px">
-              ${batch.date ? new Date(batch.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : '--'}
+              ${batch.date ? new Date(batch.date + 'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}) : '--'}
+              ${batch.type==='BIN_IN' ? ' · After truck collection' : ' · Evening'}
             </div>
           </div>
           <div style="text-align:right">
@@ -5866,8 +5910,10 @@ async function completeBatch(batchId){
 async function _autoCreateBinInBatch(binOutJobs, runnerRow){
   try {
     const ref      = binOutJobs[0]
-    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
-    const tomorrowStr = tomorrow.toISOString().slice(0,10)
+    // BIN IN is always the day AFTER the BIN OUT date
+    const binOutDate = ref.scheduled_date ? new Date(ref.scheduled_date + 'T12:00:00') : new Date()
+    const binInDate  = new Date(binOutDate); binInDate.setDate(binOutDate.getDate() + 1)
+    const tomorrowStr = binInDate.toISOString().slice(0,10)
     const inBatchId = (ref.batch_id || ref.id) + '-IN'
     const loyaltyExpiry = new Date(Date.now() + 25 * 60 * 1000).toISOString()
 
@@ -8667,7 +8713,6 @@ async function confirmAdminSos(){
       amount:           12.99,
       zone_id:          hw?.zoneId || null,
       scheduled_date:   new Date().toISOString().slice(0,10),
-      service_notes:    notes || 'EMERGENCY DISPATCH',
       created_at:       new Date().toISOString(),
       updated_at:       new Date().toISOString(),
     })
@@ -8873,17 +8918,20 @@ function selectAccountPlan(p) {
     c.style.border = '2px solid var(--border2)'
     c.style.background = 'transparent'
   })
-  const colors = {a:'var(--cyan)', b:'var(--blue)', c:'var(--purple)'}
-  const bgs = {a:'rgba(6,214,160,.06)', b:'rgba(59,130,246,.06)', c:'rgba(139,92,246,.06)'}
+  const colors = {a:'var(--cyan)', b:'var(--blue)', c:'var(--purple)', oan:'#f59e0b'}
+  const bgs    = {a:'rgba(6,214,160,.06)', b:'rgba(59,130,246,.06)', c:'rgba(139,92,246,.06)', oan:'rgba(245,158,11,.06)'}
   const el = document.getElementById('plan-'+p)
-  el.style.border = '2px solid ' + colors[p]
-  el.style.background = bgs[p]
+  if(el){ el.style.border = '2px solid ' + (colors[p]||colors.a); el.style.background = bgs[p]||bgs.a }
   // Show/hide sub-panels
-  document.getElementById('plan-b-extras').style.display = p==='b' ? 'block' : 'none'
-  document.getElementById('plan-c-days').style.display = p==='c' ? 'block' : 'none'
-  // Update save note
-  const labels = {a:'1 Can -- $34.99/mo', b:'2 Cans Same Day -- $44.99/mo', c:'2 Cans Split Days -- $54.99/mo'}
-  document.getElementById('plan-save-note').textContent = 'Selected: ' + labels[p] + ' . changes apply next billing date'
+  const bExtras = document.getElementById('plan-b-extras')
+  const cDays   = document.getElementById('plan-c-days')
+  const oanTiers= document.getElementById('plan-oan-tiers')
+  if(bExtras)  bExtras.style.display  = p==='b'   ? 'block' : 'none'
+  if(cDays)    cDays.style.display    = p==='c'   ? 'block' : 'none'
+  if(oanTiers) oanTiers.style.display = p==='oan' ? 'block' : 'none'
+  const labels = {a:'1 Can — $34.99/mo', b:'2 Cans Same Day — $44.99/mo', c:'2 Cans Split Days — $54.99/mo', oan:'Bin Out As Needed — $19.99/mo + usage'}
+  const noteEl = document.getElementById('plan-save-note')
+  if(noteEl) noteEl.textContent = 'Selected: ' + (labels[p]||'') + ' · changes apply next billing date'
 }
 function adjCans(d) {
   extraCans = Math.max(0, Math.min(4, extraCans + d))
@@ -8893,18 +8941,34 @@ function adjCans(d) {
 }
 async function savePlan(){
   const subId = window._hwStripeSubId
-  const labels   = {a:'1 Can -- $34.99/mo', b:'2 Cans Same Day -- $'+(44.99+(window.extraCans||0)*8).toFixed(2)+'/mo', c:'2 Cans Split Days -- $54.99/mo'}
+  const labels   = {a:'1 Can — $34.99/mo', b:'2 Cans Same Day — $'+(44.99+(window.extraCans||0)*8).toFixed(2)+'/mo', c:'2 Cans Split Days — $54.99/mo', oan:'Bin Out As Needed — $19.99/mo + usage'}
   const priceIds = { a:'price_1TDpucKQcgkU1rZozFQNwxJK', b:'price_1TDptqKQcgkU1rZoEvzOOIES', c:'price_1TDprRKQcgkU1rZoy9DTYlWg' }
   const planKeys = { a:'plan_a', b:'plan_b', c:'plan_c' }
 
+  // OAN plan — redirect to onboarding flow
+  if(activePlan === 'oan'){
+    const selectedTier = document.querySelector('input[name="oan-tier"]:checked')?.value || 'oan_a'
+    document.getElementById('modal-box').innerHTML=`
+    <div class="mh"><div style="font-size:15px;font-weight:700">📅 Switch to Bin Out As Needed</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+    <div class="mb">
+      <div class="info-box" style="margin-bottom:12px">You're switching to <strong>Bin Out As Needed (${selectedTier.replace('oan_','Tier ').toUpperCase()})</strong>.<br>Your current plan stays active until your next billing date. After that, you'll be charged $19.99/mo base + per-move fees only when your bin is moved.</div>
+      <div style="font-size:12px;color:var(--muted)">Our support team will process this change and confirm via email within 24 hours.</div>
+    </div>
+    <div class="mf">
+      <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+      <button class="btn btn-cyan btn-sm" onclick="requestOANSwitch('${selectedTier}');closeM()">Request OAN Switch</button>
+    </div>`
+    openM(); return
+  }
+
   if(!subId){
-    showToast('No active subscription found -- contact support','err'); return
+    showToast('No active subscription found — contact support','err'); return
   }
 
   document.getElementById('modal-box').innerHTML=`
   <div class="mh"><div style="font-size:15px;font-weight:700">📋 Confirm Plan Change</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
   <div class="mb">
-    <div class="info-box">Changing to <strong>${labels[activePlan]}</strong>.<br>The new rate takes effect at your next billing date -- no proration, no surprise charges.</div>
+    <div class="info-box">Changing to <strong>${labels[activePlan]}</strong>.<br>⚠️ The new rate takes effect at your next billing date — no proration, no surprise charges.</div>
     <div id="plan-change-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:8px"></div>
   </div>
   <div class="mf">
@@ -8912,6 +8976,16 @@ async function savePlan(){
     <button class="btn btn-cyan btn-sm" id="plan-change-btn" onclick="confirmPlanChange('${activePlan}','${priceIds[activePlan]}','${planKeys[activePlan]}')">Confirm Change</button>
   </div>`
   openM()
+}
+
+async function requestOANSwitch(oanTier){
+  try {
+    await _supa.from('homeowner_signups').update({
+      service_notes: 'PLAN_CHANGE_REQUEST: ' + oanTier + ' requested on ' + new Date().toLocaleDateString(),
+      updated_at: new Date().toISOString()
+    }).ilike('email', currentUser?.email||'')
+    showToast('OAN switch requested ✅ — we\'ll confirm via email within 24 hours', 'ok', 6000)
+  } catch(e){ showToast('Request sent — our team will follow up', 'ok') }
 }
 
 async function confirmPlanChange(planLetter, priceId, planKey){
@@ -9120,6 +9194,11 @@ function showEditPreferences(){
     </div>
 
     <div id="epr-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:8px"></div>
+
+    <!-- BILLING DISCLAIMER -->
+    <div style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.6;margin-top:8px">
+      ⚠️ <strong>Collection day changes</strong> take effect from your next scheduled visit. <strong>Service type changes</strong> that affect your plan rate will be applied at your next billing cycle — your current rate stays in effect until then.
+    </div>
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
@@ -9143,34 +9222,27 @@ function epSelectSvc(svc){
   document.getElementById('ep-day-single').style.display = isSplit ? 'none' : ''
   document.getElementById('ep-day-split').style.display  = isSplit ? '' : 'none'
 
-  // Plan change notice
-  const notice = document.getElementById('ep-plan-notice')
+  // Plan change notice — only show if the selection actually requires a different plan
+  const notice  = document.getElementById('ep-plan-notice')
   const planSec = document.getElementById('ep-plan-section')
   const row = window._hwProfileRow || {}
   const currentKey = row.plan_id || 'plan_a'
-  const planPrices = { plan_a:34.99, plan_b:44.99, plan_c:54.99, oan_a:19.99, oan_b:19.99, oan_c:19.99 }
+  const isOAN = currentKey.startsWith('oan')
+  const planPrices = { plan_a:34.99, plan_b:44.99, plan_c:54.99 }
   const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split Days' }
 
-  if(svc==='recycling'||svc==='waste'){
-    // Switching to 1-bin
-    if(currentKey==='plan_b'||currentKey==='plan_c'){
-      notice.style.display='block'
-      notice.innerHTML='⚠️ Switching to 1 bin would change your plan from <strong>'+planLabels[currentKey]+'</strong> ($'+planPrices[currentKey].toFixed(2)+'/mo) to <strong>1 Can</strong> ($34.99/mo). Rate change applies next billing cycle.'
-      planSec.style.display='block'
-    } else { notice.style.display='none'; planSec.style.display='none' }
-  } else if(svc==='both'){
-    if(currentKey==='plan_a'||currentKey==='plan_c'){
-      notice.style.display='block'
-      notice.innerHTML='ℹ️ Both bins same day changes your plan to <strong>2 Cans Same Day</strong> ($44.99/mo). Rate change applies next billing cycle.'
-      planSec.style.display='block'
-    } else { notice.style.display='none'; planSec.style.display='none' }
-  } else if(svc==='split'){
-    if(currentKey!=='plan_c'){
-      notice.style.display='block'
-      notice.innerHTML='ℹ️ Split days changes your plan to <strong>2 Cans Split Days</strong> ($54.99/mo). Rate change applies next billing cycle.'
-      planSec.style.display='block'
-    } else { notice.style.display='none'; planSec.style.display='none' }
-  } else { notice.style.display='none'; planSec.style.display='none' }
+  // Map selected service to required plan key
+  const requiredPlan = svc==='split' ? 'plan_c' : (svc==='both') ? 'plan_b' : 'plan_a'
+  const planChanges  = !isOAN && requiredPlan !== currentKey
+
+  if(planChanges && notice){
+    notice.style.display = 'block'
+    notice.innerHTML = `ℹ️ Switching to <strong>${svc==='split'?'2 Cans Split Days ($54.99/mo)':svc==='both'?'2 Cans Same Day ($44.99/mo)':'1 Can ($34.99/mo)'}</strong> from <strong>${planLabels[currentKey]||currentKey} ($${(planPrices[currentKey]||34.99).toFixed(2)}/mo)</strong>. Rate change applies at next billing cycle.`
+    if(planSec) planSec.style.display = 'block'
+  } else {
+    if(notice) notice.style.display = 'none'
+    if(planSec) planSec.style.display = 'none'
+  }
 }
 
 async function saveEditPreferences(){
@@ -16076,6 +16148,8 @@ async function loadHomeownersFromSupabase(){
         dayWaste:       isSplit ? (day2 || null) : null,
         plan:           row.plan_id||'plan_a',
         assignedRunner: row.assigned_runner||null,
+        referredBy:     row.referred_by||row.referred_by_runner||null,
+        referredByEmail:row.referred_by_email||null,
         status:         'active',
         bins:           isSplit || service==='BOTH' ? 2 : 1,
         storage:        row.bin_location  || '--',
