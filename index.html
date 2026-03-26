@@ -2574,102 +2574,124 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- HW HOME -->
         <div class="pg on" id="hw-home">
-
-          <!-- PAYMENT PENDING BANNER -->
-          <div id="hw-payment-banner" style="display:none;background:linear-gradient(135deg,rgba(245,158,11,.1),rgba(251,191,36,.05));border:1.5px solid rgba(245,158,11,.4);border-radius:14px;padding:16px;margin-bottom:18px">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
-              <div style="display:flex;align-items:center;gap:12px">
-                <span style="font-size:28px">💳</span>
-                <div>
-                  <div style="font-weight:700;font-size:14px;color:#fbbf24">Payment required to activate service</div>
-                  <div style="font-size:12px;color:var(--muted);margin-top:2px">Your account is saved but scheduling is locked until payment is complete.</div>
-                </div>
+          <!-- Payment pending banner -->
+          <div id="hw-payment-banner" style="display:none;background:rgba(245,158,11,.07);border:1.5px solid rgba(245,158,11,.3);border-radius:12px;padding:14px 16px;margin-bottom:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:10px"><span style="font-size:22px">💳</span>
+                <div><div style="font-weight:700;font-size:14px;color:#fbbf24">Payment required to activate service</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">Account saved — scheduling locked until payment complete.</div></div>
               </div>
-              <button class="btn btn-sm" style="background:#f59e0b;color:#07090f;border:none;font-weight:700;flex-shrink:0" onclick="hwCompletePayment()">
-                Complete Payment ->
-              </button>
+              <button class="btn btn-sm" style="background:#f59e0b;color:#07090f;border:none;font-weight:700;flex-shrink:0" onclick="hwCompletePayment()">Complete Payment →</button>
             </div>
           </div>
 
-          <div style="margin-bottom:18px"><div style="font-size:21px;font-weight:700" id="hw-greeting">Welcome to BinDash 👋</div><div style="color:var(--sub);font-size:14px;margin-top:3px" id="hw-next-collection-strip">Next collection: <strong style="color:var(--cyan)">--</strong></div></div>
+          <!-- Greeting -->
+          <div style="margin-bottom:16px">
+            <div style="font-size:20px;font-weight:700" id="hw-greeting">Welcome to BinDash 👋</div>
+            <div style="font-size:13px;color:var(--sub);margin-top:3px" id="hw-next-collection-strip">Next collection: <strong style="color:var(--cyan)">--</strong></div>
+          </div>
 
-          <!-- TRUCK CONFIRMATION PROMPT -- shown on collection day -->
-          <div id="hw-truck-confirm-card" style="background:rgba(245,158,11,.07);border:1.5px solid rgba(245,158,11,.3);border-radius:14px;padding:16px;margin-bottom:18px">
-            <div style="display:flex;align-items:flex-start;gap:12px">
-              <span style="font-size:24px;flex-shrink:0">🚛</span>
-              <div style="flex:1">
-                <div style="font-weight:700;font-size:14px;color:#fbbf24;margin-bottom:4px">Have your bins been emptied today?</div>
-                <div style="font-size:12px;color:var(--sub);margin-bottom:12px">It's Thursday -- your collection day. Let us know when the waste truck has passed so we can dispatch your Bin In runner at the right time. Takes one tap.</div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap">
-                  <button class="btn btn-sm" style="background:#22c55e;color:#fff;border:none;font-size:13px;padding:8px 18px" onclick="confirmTruckPassed()">✓ Yes -- bins are empty</button>
-                  <button class="btn btn-ghost btn-sm" style="font-size:12px" onclick="snoozeTruckConfirm()">Not yet -- remind me later</button>
-                  <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--muted)" onclick="dismissTruckConfirm()">Dismiss</button>
-                </div>
-              </div>
+          <!-- Truck confirm prompt -->
+          <div id="hw-truck-confirm-card" style="background:rgba(245,158,11,.07);border:1.5px solid rgba(245,158,11,.3);border-radius:12px;padding:14px;margin-bottom:14px">
+            <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:4px">Have your bins been emptied today? 🚛</div>
+            <div style="font-size:12px;color:var(--sub);margin-bottom:10px">Let us know when the truck has passed so we dispatch your Bin In runner at the right time.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-sm" style="background:#22c55e;color:#fff;border:none" onclick="confirmTruckPassed()">✓ Yes — bins are empty</button>
+              <button class="btn btn-ghost btn-sm" onclick="snoozeTruckConfirm()">Not yet</button>
+              <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="dismissTruckConfirm()">Dismiss</button>
             </div>
           </div>
 
-          <div id="hw-callout-banner" style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:12px">
-            <div style="font-size:12px;color:var(--sub)">📦 Need a one-off pickup outside your schedule?</div>
-            <button class="btn btn-outline btn-sm" style="font-size:11px;white-space:nowrap" onclick="showCallout()">Book Callout — $12.99</button>
-          </div>
-
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
+          <!-- Stats -->
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
             <div class="sc2"><div class="sn" style="color:var(--cyan)" id="hw-collections-count">0</div><div class="sl2">Collections Done</div></div>
             <div class="sc2"><div class="sn" style="color:var(--blue)" id="hw-upcoming-count">0</div><div class="sl2">Upcoming</div></div>
             <div class="sc2"><div class="sn" style="color:var(--amber)" id="hw-rating">--</div><div class="sl2">Service Rating</div></div>
           </div>
 
-          <!-- ZONE INFO STRIP -->
-          <div style="background:var(--surface2);border-radius:9px;padding:9px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px;font-size:12px;flex-wrap:wrap">
-            <span style="color:var(--muted)">📍 Your zone:</span>
-            <span style="font-weight:600;color:var(--text)" id="hw-zone-name">your area</span>
-            <span style="color:var(--muted)">.</span>
-            <span style="color:var(--sub)" id="hw-confirm-zip">--</span>
-            <span style="color:var(--muted)">.</span>
-            <span style="color:var(--sub)">Your day: <strong style="color:var(--text)" id="hw-collection-day">--</strong></span>
-            <span style="color:var(--muted)">.</span>
-            <span style="color:var(--sub)" id="hw-assigned-runner">Priority Runner: <strong style="color:var(--cyan)">TBD — pending activation</strong></span>
+          <!-- Callout strip -->
+          <div id="hw-callout-banner" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <div style="font-size:12px;color:var(--sub)">📦 Need a one-off pickup?</div>
+            <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="showCallout()">Book Callout — $12.99</button>
           </div>
 
-          <!-- NEXT COLLECTION -- shows both visits -->
-          <div class="card" style="margin-bottom:14px">
-            <div class="card-ttl" id="hw-next-col-title">Next Collection</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-              <div style="border:1.5px solid rgba(99,102,241,.3);background:rgba(99,102,241,.06);border-radius:10px;padding:14px">
-                <div class="vt-out" style="margin-bottom:8px">🌙 BIN OUT</div>
-                <div style="font-size:13px;font-weight:600;margin-bottom:3px" id="hw-binout-date">-- . Evening</div>
-                <div style="font-size:12px;color:var(--sub);margin-bottom:6px">Runner moves bins to curb</div>
-                <div style="font-size:11px;color:var(--muted)">Runner: TBD</div>
-                <span class="badge" style="background:#3b82f622;color:#3b82f6;margin-top:8px">Scheduled</span>
+          <!-- Next collection expandable card -->
+          <div class="hw-card" id="hw-next-card" style="border:1px solid var(--border);border-left:4px solid var(--indigo);border-radius:10px;overflow:hidden;margin-bottom:8px;background:var(--surface)">
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer" onclick="hwToggle('hw-next-card')">
+              <div style="flex:1">
+                <div style="font-size:13px;font-weight:700" id="hw-next-col-title">Next Collection</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px" id="hw-next-col-sub">Loading schedule...</div>
               </div>
-              <div style="border:1.5px solid rgba(6,214,160,.3);background:rgba(6,214,160,.05);border-radius:10px;padding:14px">
-                <div class="vt-in" style="margin-bottom:8px">☀️ BIN IN</div>
-                <div style="font-size:13px;font-weight:600;margin-bottom:3px" id="hw-binin-date">-- . Daytime</div>
-                <div style="font-size:12px;color:var(--sub);margin-bottom:6px">Runner returns bins to property</div>
-                <div style="font-size:11px;color:var(--muted)">Runner: TBD</div>
-                <span class="badge" style="background:#3b82f622;color:#3b82f6;margin-top:8px">Scheduled</span>
+              <span class="badge" style="background:rgba(59,130,246,.15);color:#3b82f6">Scheduled</span>
+              <span id="hw-chev-next" style="font-size:11px;color:var(--muted);transition:transform .2s">▼</span>
+            </div>
+            <div id="hw-next-body" style="display:none;border-top:1px solid var(--border);padding:12px 14px;background:var(--surface2)">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+                <div style="border:1px solid rgba(99,102,241,.3);background:rgba(99,102,241,.06);border-radius:8px;padding:12px">
+                  <div class="vt-out" style="margin-bottom:6px">🌙 BIN OUT</div>
+                  <div style="font-size:13px;font-weight:600" id="hw-binout-date">-- · Evening</div>
+                  <div style="font-size:11px;color:var(--sub);margin-top:3px">Runner moves bins to curb</div>
+                </div>
+                <div style="border:1px solid rgba(6,214,160,.3);background:rgba(6,214,160,.05);border-radius:8px;padding:12px">
+                  <div class="vt-in" style="margin-bottom:6px">☀️ BIN IN</div>
+                  <div style="font-size:13px;font-weight:600" id="hw-binin-date">-- · Daytime</div>
+                  <div style="font-size:11px;color:var(--sub);margin-top:3px">Bins returned after truck</div>
+                </div>
+              </div>
+              <div style="font-size:11px;color:var(--muted)">Zone: <span id="hw-zone-name">--</span> · Day: <span id="hw-collection-day">--</span> · <span id="hw-assigned-runner">Priority Runner: TBD</span></div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px">ZIP: <span id="hw-confirm-zip">--</span></div>
+            </div>
+          </div>
+
+          <!-- My service card -->
+          <div class="hw-card" id="hw-svc-card" style="border:1px solid var(--border);border-left:4px solid var(--cyan);border-radius:10px;overflow:hidden;margin-bottom:8px;background:var(--surface)">
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer" onclick="hwToggle('hw-svc-card')">
+              <div style="flex:1">
+                <div style="font-size:13px;font-weight:700">My service</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px" id="hw-svc-summary">Loading plan...</div>
+              </div>
+              <span id="hw-chev-svc" style="font-size:11px;color:var(--muted);transition:transform .2s">▼</span>
+            </div>
+            <div id="hw-svc-body" style="display:none;border-top:1px solid var(--border);padding:12px 14px;background:var(--surface2)">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+                <div>
+                  <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Service</div>
+                  <div style="font-size:12px;color:var(--sub);display:flex;flex-direction:column;gap:4px">
+                    <div>Plan: <strong style="color:var(--text)" id="acct-plan-name">--</strong></div>
+                    <div>Day: <strong style="color:var(--text)" id="pref-day">--</strong></div>
+                    <div>Service: <strong style="color:var(--text)" id="pref-service">--</strong></div>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Property</div>
+                  <div style="font-size:12px;color:var(--sub);display:flex;flex-direction:column;gap:4px">
+                    <div>Storage: <strong style="color:var(--text)" id="pref-binout-night">--</strong></div>
+                    <div>Gate: <strong style="color:var(--text)" id="prop-gate">--</strong></div>
+                    <div>Pets: <strong style="color:var(--text)" id="prop-pets">--</strong></div>
+                  </div>
+                </div>
+              </div>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:10px" id="pref-notes"></div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="btn btn-outline btn-sm" onclick="showEditPreferences()">✏️ Edit preferences</button>
+                <button class="btn btn-outline btn-sm" onclick="showEditProperty()">🏠 Edit property</button>
+                <button class="btn btn-red btn-sm" onclick="showSosHW()">🚨 Emergency pickup</button>
               </div>
             </div>
           </div>
 
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-            <div class="card">
-              <div class="card-ttl">What We Collect</div>
-              <div style="display:flex;flex-direction:column;gap:8px">
-                <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--surface2);border-radius:8px"><span style="font-size:18px">♻️</span><div><div style="font-size:13px;font-weight:600">Recycling</div><div style="font-size:11px;color:var(--muted)">Plastics, paper, glass, metals</div></div></div>
-                <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--surface2);border-radius:8px"><span style="font-size:18px">🗑️</span><div><div style="font-size:13px;font-weight:600">General Waste</div><div style="font-size:11px;color:var(--muted)">Household rubbish</div></div></div>
-                <div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border-radius:8px;opacity:.5;border:1px dashed var(--border2)"><span style="font-size:18px">🌿</span><div><div style="font-size:13px;font-weight:600;color:var(--muted)">Garden &amp; Bulk</div><div style="font-size:11px;color:var(--muted)">Coming soon -- more services on the way</div></div></div>
+          <!-- Recent collections card -->
+          <div class="hw-card" id="hw-recent-card" style="border:1px solid var(--border);border-left:4px solid #22c55e;border-radius:10px;overflow:hidden;background:var(--surface)">
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer" onclick="hwToggle('hw-recent-card')">
+              <div style="flex:1">
+                <div style="font-size:13px;font-weight:700">Recent collections</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px" id="hw-recent-summary">Loading history...</div>
               </div>
+              <span id="hw-chev-recent" style="font-size:11px;color:var(--muted);transition:transform .2s">▼</span>
             </div>
-            <div class="card">
-              <div class="card-ttl">Recent Collections</div>
-              <table><thead><tr><th>Date</th><th>Visit</th><th>Status</th></tr></thead><tbody>
-                <tr><td>Mar 12</td><td><span class="vt-in">☀️ Bin In</span></td><td><span class="badge" style="background:#22c55e22;color:#22c55e">✓ Done</span></td></tr>
-                <tr><td>Mar 11</td><td><span class="vt-out">🌙 Bin Out</span></td><td><span class="badge" style="background:#22c55e22;color:#22c55e">✓ Done</span></td></tr>
-                <tr><td>Mar 5</td><td><span class="vt-in">☀️ Bin In</span></td><td><span class="badge" style="background:#22c55e22;color:#22c55e">✓ Done</span></td></tr>
-                <tr><td>Mar 4</td><td><span class="vt-out">🌙 Bin Out</span></td><td><span class="badge" style="background:#22c55e22;color:#22c55e">✓ Done</span></td></tr>
-              </tbody></table>
+            <div id="hw-recent-body" style="display:none;border-top:1px solid var(--border);padding:12px 14px;background:var(--surface2)">
+              <div id="hw-recent-list"><div style="font-size:12px;color:var(--muted);padding:8px 0">Loading...</div></div>
+              <button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="hwNav(null,'hw-collections')">View all collections →</button>
             </div>
           </div>
         </div>
@@ -3036,128 +3058,158 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <!-- RN HOME -->
         <div class="pg on" id="rn-home">
 
-          <!-- STRIPE CONNECT SETUP BANNER -->
-          <div id="rn-stripe-setup-banner" style="display:none;background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(139,92,246,.06));border:1.5px solid rgba(99,102,241,.35);border-radius:14px;padding:16px;margin-bottom:18px">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
-              <div style="display:flex;align-items:center;gap:12px">
-                <span style="font-size:28px">💳</span>
+          <!-- Stripe setup banner -->
+          <div id="rn-stripe-setup-banner" style="display:none;background:rgba(99,102,241,.08);border:1.5px solid rgba(99,102,241,.3);border-radius:12px;padding:14px 16px;margin-bottom:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:10px;flex:1">
+                <span style="font-size:22px">💳</span>
                 <div>
                   <div style="font-weight:700;font-size:14px;color:#a5b4fc">Set up your payouts to get paid</div>
-                  <div style="font-size:12px;color:var(--muted);margin-top:2px">Connect your bank account via Stripe — takes 2 minutes. Your bank info is handled securely by Stripe, not BinDash.</div>
-                  <div style="font-size:11px;color:var(--sub);margin-top:6px;line-height:1.6">
-                    💡 <strong style="color:var(--text)">When Stripe asks for "Professional Details"</strong> — enter your full legal name as it appears on your ID, your home address, and the last 4 of your SSN. Select <strong>"Individual"</strong> (not business) unless you have a registered business entity. This is required for IRS 1099 reporting — you'll receive a 1099-NEC from BinDash each January for earnings over $600.
-                  </div>
+                  <div style="font-size:12px;color:var(--muted);margin-top:2px">Connect your bank via Stripe — takes 2 minutes. Enter legal name, home address, last 4 SSN. Select Individual.</div>
                 </div>
               </div>
-              <button class="btn btn-sm" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;flex-shrink:0" onclick="launchStripeConnect()">Set Up Payouts -></button>
+              <button class="btn btn-sm" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;flex-shrink:0" onclick="launchStripeConnect()">Set Up Payouts →</button>
             </div>
           </div>
 
-          <!-- INCOMING OFFER BANNER -- populated by loadRunnerRoutes() -->
-          <div id="offer-banner" style="display:none;background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(251,191,36,.06));border:1.5px solid rgba(245,158,11,.4);border-radius:14px;padding:16px;margin-bottom:18px"></div>
+          <!-- Incoming offer banner -->
+          <div id="offer-banner" style="display:none;background:rgba(245,158,11,.08);border:1.5px solid rgba(245,158,11,.35);border-radius:12px;padding:14px 16px;margin-bottom:14px"></div>
 
-          <!-- GREETING + SUBTITLE -->
-          <div style="margin-bottom:16px">
-            <div style="font-size:21px;font-weight:700">Runner Dashboard 👋</div>
-            <div style="color:var(--sub);font-size:14px;margin-top:3px" id="rn-home-subtitle">Loading your dashboard...</div>
+          <!-- Greeting -->
+          <div style="margin-bottom:14px">
+            <div style="font-size:20px;font-weight:700">Runner Dashboard 👋</div>
+            <div style="font-size:13px;color:var(--sub);margin-top:3px" id="rn-home-subtitle">Loading your dashboard...</div>
           </div>
 
-          <!-- STAT PILLS ROW — 6 stats -->
-          <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:16px">
+          <!-- Stats row -->
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
             <div class="sc2"><div class="sn" style="color:var(--cyan)" id="rn-stat-visits">0</div><div class="sl2">Total Visits</div></div>
             <div class="sc2"><div class="sn" style="color:var(--green)" id="rn-stat-month">$0</div><div class="sl2">This Month</div></div>
             <div class="sc2"><div class="sn" style="color:var(--amber)" id="rn-stat-rating">--</div><div class="sl2">Rating</div></div>
-            <div class="sc2"><div class="sn" style="color:var(--indigo)" id="rn-stat-type">--</div><div class="sl2">Visit Type</div></div>
             <div class="sc2"><div class="sn" style="color:#f97316" id="rn-stat-bins">0</div><div class="sl2">Bins Moved</div></div>
-            <div class="sc2"><div class="sn" style="color:#c4b5fd" id="rn-stat-streak">0</div><div class="sl2">Day Streak</div></div>
           </div>
 
-          <!-- MAIN 2-COL LAYOUT -->
-          <div style="display:grid;grid-template-columns:3fr 2fr;gap:14px">
+          <!-- Active route / batch area -->
+          <div id="rn-home-batch-area" style="margin-bottom:10px">
+            <div style="text-align:center;padding:32px 20px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--muted)">
+              <div style="font-size:32px;margin-bottom:8px">📬</div>
+              <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px">No active routes</div>
+              <div style="font-size:12px" id="rn-batch-empty-sub">Route offers appear here before each collection day.</div>
+            </div>
+          </div>
 
-            <!-- LEFT: batch area + zone status + interest list -->
+          <!-- Zone status -->
+          <div id="rn-home-zones" style="margin-bottom:10px"></div>
+
+          <div style="display:grid;grid-template-columns:3fr 2fr;gap:10px">
             <div>
-              <!-- Batch offers / active route -->
-              <div id="rn-home-batch-area">
-                <div style="text-align:center;padding:36px 20px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--muted)">
-                  <div style="font-size:36px;margin-bottom:10px">📬</div>
-                  <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No upcoming routes</div>
-                  <div style="font-size:13px" id="rn-batch-empty-sub">Batch offers appear here before each collection day once homeowners are on your route.</div>
+              <!-- Referral + QR card -->
+              <div class="rn-card" id="rn-ref-card-home" style="border:1px solid rgba(6,214,160,.2);border-left:4px solid var(--cyan);border-radius:10px;overflow:hidden;background:var(--surface);margin-bottom:10px">
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer" onclick="rnToggle('rn-ref-card-home')">
+                  <div style="flex:1">
+                    <div style="font-size:13px;font-weight:700">Referrals & QR code</div>
+                    <div style="font-size:11px;color:var(--muted);margin-top:2px">Share your code · Earn $10/signup</div>
+                  </div>
+                  <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:rgba(6,214,160,.12);color:var(--cyan)" id="rn-growth-label">0 referred</span>
+                  <span id="rn-chev-ref" style="font-size:11px;color:var(--muted);transition:transform .2s">▼</span>
+                </div>
+                <div id="rn-ref-card-home-body" style="display:none;border-top:1px solid var(--border);padding:12px 14px;background:var(--surface2)">
+                  <div style="display:grid;grid-template-columns:1fr auto;gap:14px;align-items:start">
+                    <div>
+                      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Your referral code</div>
+                      <div style="font-size:18px;font-weight:700;font-family:'DM Mono',monospace;color:var(--cyan);background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:8px;padding:8px 12px;margin-bottom:10px;letter-spacing:.1em" id="rn-acct-ref-code-display-home">--</div>
+                      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Each homeowner who signs up with your code earns you <strong style="color:var(--cyan)">$10</strong> + boosts your dispatch priority.</div>
+                      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Signup link</div>
+                      <div style="font-size:11px;color:var(--sub);background:var(--surface3);border-radius:6px;padding:6px 10px;font-family:'DM Mono',monospace;word-break:break-all;margin-bottom:8px" id="rn-signup-link-display">--</div>
+                      <div style="display:flex;gap:6px;flex-wrap:wrap">
+                        <button class="btn btn-cyan btn-sm" onclick="showReferralLink()">🔗 Share link</button>
+                        <button class="btn btn-outline btn-sm" onclick="copyReferralLink()">📋 Copy</button>
+                      </div>
+                    </div>
+                    <!-- QR Code -->
+                    <div style="text-align:center">
+                      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">QR Code</div>
+                      <div id="rn-qr-code" style="background:#fff;border-radius:8px;padding:8px;display:inline-block;border:1px solid var(--border2)">
+                        <canvas id="rn-qr-canvas" width="100" height="100"></canvas>
+                      </div>
+                      <div style="font-size:10px;color:var(--muted);margin-top:5px">Show to homeowners<br>to sign up with your code</div>
+                      <button class="btn btn-ghost btn-sm" style="margin-top:6px;font-size:10px" onclick="downloadQR()">⬇ Download QR</button>
+                    </div>
+                  </div>
+                  <div style="margin-top:12px">
+                    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
+                      <span style="color:var(--sub)">HOs referred</span>
+                      <span style="font-weight:700;color:var(--cyan)" id="rn-growth-label-detail">0 referred</span>
+                    </div>
+                    <div style="background:var(--surface3);border-radius:99px;height:5px;overflow:hidden">
+                      <div style="height:100%;background:var(--cyan);border-radius:99px;transition:width .5s" id="rn-growth-bar"></div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <!-- ZONE STATUS CARDS -- populated by _renderRNHomeDashZones() -->
-              <div id="rn-home-zones" style="margin-top:14px"></div>
-
-              <!-- HOMEOWNER INTEREST LIST -->
-              <div class="card" style="margin-top:14px;border-color:rgba(251,191,36,.25)" id="rn-interest-card">
+              <!-- Homeowner interest list -->
+              <div class="card" id="rn-interest-card" style="border-color:rgba(251,191,36,.25)">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
                   <div class="card-ttl" style="margin:0;color:#fbbf24">🏠 Homeowners Near You</div>
                   <span id="rn-interest-badge" style="display:none;background:rgba(251,191,36,.2);color:#fbbf24;border-radius:99px;font-size:9px;padding:2px 8px;font-weight:700">0</span>
                 </div>
-                <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">
-                  Signed up in your ZIP but no runner assigned yet. Share your code to earn $10/signup.
-                </div>
-                <div id="rn-interest-list">
-                  <div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">Loading...</div>
-                </div>
+                <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Signed up in your ZIP but no runner assigned. Share your code to earn $10/signup.</div>
+                <div id="rn-interest-list"><div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">Loading...</div></div>
               </div>
             </div>
 
-            <!-- RIGHT: pay + quick links + growth -->
             <div>
-              <!-- TODAY'S PAY -->
-              <div class="earn-card" style="margin-bottom:12px">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-                  <div class="card-ttl" style="margin-bottom:0">Today's Projected Pay</div>
+              <!-- Pay card -->
+              <div class="rn-card" id="rn-pay-card-home" style="border:1px solid var(--border);border-left:4px solid var(--green);border-radius:10px;overflow:hidden;background:var(--surface);margin-bottom:10px">
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer" onclick="rnToggle('rn-pay-card-home')">
+                  <div style="flex:1">
+                    <div style="font-size:13px;font-weight:700">Pay this week</div>
+                    <div style="font-size:11px;color:var(--muted);margin-top:2px" id="rn-projected-sub">No routes today</div>
+                  </div>
+                  <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:853;color:var(--cyan)" id="rn-projected-pay">$0.00</div>
+                  <span id="rn-chev-pay" style="font-size:11px;color:var(--muted);transition:transform .2s">▼</span>
                 </div>
-                <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:853;color:var(--cyan)" id="rn-projected-pay">$0.00</div>
-                <div style="font-size:12px;color:var(--sub);margin-top:2px;margin-bottom:8px" id="rn-projected-sub">No routes today</div>
-                <div style="font-size:11px;color:var(--muted);line-height:1.5;background:rgba(245,158,11,.06);border-radius:6px;padding:8px 10px">
-                  Bin In pay unlocks after truck confirms. Pay held <strong style="color:var(--text)">24-48 hrs</strong> pending completion review.
+                <div id="rn-pay-card-home-body" style="display:none;border-top:1px solid var(--border);padding:12px 14px;background:var(--surface2)">
+                  <div style="font-size:11px;color:var(--muted);background:rgba(245,158,11,.06);border-radius:6px;padding:8px 10px;line-height:1.5">
+                    Bin In pay unlocks after truck confirms. Pay held <strong style="color:var(--text)">24–48 hrs</strong> pending completion review.
+                  </div>
+                  <div style="display:flex;gap:6px;margin-top:10px">
+                    <button class="btn btn-outline btn-sm" onclick="rnNav(null,'rn-earnings')">Full earnings →</button>
+                    <button class="btn btn-outline btn-sm" onclick="openStripePortalRunner()">💳 Bank & Tax</button>
+                  </div>
                 </div>
               </div>
 
-              <!-- QUICK LINKS -->
-              <div class="card" style="margin-bottom:12px">
-                <div class="card-ttl">Quick Links</div>
-                <div style="display:flex;flex-direction:column;gap:7px">
-                  <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-earnings')">💵 Full Earnings</button>
+              <!-- Quick links -->
+              <div class="card" style="margin-bottom:10px">
+                <div class="card-ttl">Quick links</div>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-routes')">📋 My Routes</button>
+                  <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-earnings')">💵 Earnings</button>
                   <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-zones')">📍 My Zones</button>
-                  <button class="btn btn-outline btn-full btn-sm" onclick="openStripePortalRunner()">💳 Bank &amp; Tax (Stripe)</button>
-                  <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-account')">✏️ Update My Info</button>
+                  <button class="btn btn-outline btn-full btn-sm" onclick="rnNav(null,'rn-account')">✏️ My Account</button>
                 </div>
               </div>
 
-              <!-- ROUTE GROWTH + REFERRALS -->
-              <div class="card" style="border-color:rgba(6,214,160,.2)">
-                <div class="card-ttl">Route Growth &amp; Referrals</div>
-                <div style="margin-bottom:10px">
-                  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-                    <span style="color:var(--sub)">HO referrals</span>
-                    <span style="font-weight:700;color:var(--cyan)" id="rn-growth-label">0 referred</span>
+              <!-- Stats extra -->
+              <div class="card" style="padding:10px 14px">
+                <div class="card-ttl" style="margin-bottom:8px">Performance</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                  <div style="text-align:center;background:var(--surface2);border-radius:8px;padding:10px">
+                    <div style="font-size:18px;font-weight:700;color:var(--indigo)" id="rn-stat-type">--</div>
+                    <div style="font-size:10px;color:var(--muted);margin-top:2px">Visit type</div>
                   </div>
-                  <div style="background:var(--surface2);border-radius:99px;height:5px;overflow:hidden">
-                    <div style="width:0%;height:100%;background:var(--cyan);border-radius:99px;transition:width .5s" id="rn-growth-bar"></div>
-                  </div>
-                  <div style="font-size:10px;color:var(--muted);margin-top:3px" id="rn-growth-sub">Share your code to grow your route and earn bonuses</div>
-                </div>
-                <div style="background:rgba(6,214,160,.06);border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12px">
-                  <div style="display:flex;justify-content:space-between;margin-bottom:3px">
-                    <span style="color:var(--sub)">Current rate</span>
-                    <span style="font-weight:700;color:var(--cyan)" id="rn-rate-display">$3.25/stop</span>
-                  </div>
-                  <div style="display:flex;justify-content:space-between">
-                    <span style="color:var(--sub)">Referral bonuses earned</span>
-                    <span style="font-weight:700;color:var(--green)" id="rn-bonus-earned">$0.00</span>
+                  <div style="text-align:center;background:var(--surface2);border-radius:8px;padding:10px">
+                    <div style="font-size:18px;font-weight:700;color:#c4b5fd" id="rn-stat-streak">--</div>
+                    <div style="font-size:10px;color:var(--muted);margin-top:2px">Day streak</div>
                   </div>
                 </div>
-                <button class="btn btn-cyan btn-full btn-sm" onclick="showReferralLink()">🔗 Share My Referral Link</button>
               </div>
             </div>
-
           </div>
         </div>
+
 
         <!-- RN ROUTES -->
         <div class="pg" id="rn-routes">
@@ -4552,6 +4604,28 @@ async function _populateHWDashData(row, fn, ln, initials){
   safe('pref-plan',       planLabels[planKey] || '--')
   safe('pref-notes',      row.service_notes  || '--')
 
+  // Populate new card summary lines
+  safe('hw-next-col-sub', colDayIdx>=0 ? (prevDayName+' evening Bin Out · '+colDay+' daytime Bin In') : 'No schedule set')
+  safe('hw-svc-summary',  (planLabels[planKey]||'--') + ' · ' + (row.collection_day||'--') + 's')
+
+  // Populate recent collections list in expandable card
+  const recentEl = document.getElementById('hw-recent-list')
+  if(recentEl){
+    // We'll populate from jobs cache if available, or show placeholder
+    const hwJobs = (_adminJobsCache||[]).filter(j=>j.homeowner_email===currentUser?.email&&j.status==='complete')
+      .sort((a,b)=>new Date(b.scheduled_date)-new Date(a.scheduled_date)).slice(0,5)
+    if(hwJobs.length){
+      recentEl.innerHTML = hwJobs.map(j=>{
+        const dt = j.scheduled_date ? new Date(j.scheduled_date+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '--'
+        const vt = j.visit_type==='BIN_OUT' ? '🌙 Bin Out' : '☀️ Bin In'
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span>${dt} · ${vt}</span><span style="background:#22c55e22;color:#22c55e;padding:1px 8px;border-radius:99px;font-size:10px;font-weight:700">✓ Done</span></div>`
+      }).join('')
+    } else {
+      recentEl.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">No completed collections yet</div>'
+    }
+    safe('hw-recent-summary', hwJobs.length ? hwJobs.length+' completed · last '+new Date(hwJobs[0]?.scheduled_date+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : 'No completed collections yet')
+  }
+
   // Build upcoming schedule from DB row
   buildScheduleFromRow(row)
 }
@@ -4848,11 +4922,25 @@ async function populateRNDashboard(){
     const growthLabel = document.getElementById('rn-growth-label')
     const growthBar   = document.getElementById('rn-growth-bar')
     const growthSub   = document.getElementById('rn-growth-sub')
-    if(growthLabel) growthLabel.innerHTML = `${hwRefCount} homeowner${hwRefCount!==1?'s':''} referred <span style="color:var(--muted);font-weight:400">· $${bonusEarned.toFixed(0)} bonus earned</span>`
-    if(growthBar)   growthBar.style.width = Math.min(100, hwRefCount * 20)+'%'  // 5 referrals = 100%
+    if(growthLabel) growthLabel.innerHTML = `${hwRefCount} referred`
+    if(growthBar)   growthBar.style.width = Math.min(100, hwRefCount * 20)+'%'
     if(growthSub)   growthSub.textContent = hwRefCount > 0
-      ? `Each homeowner referral = $10 bonus + priority dispatch`
-      : 'Share your code with neighbours — earn $10 per homeowner signup'
+      ? `Each referral = $10 bonus + priority dispatch`
+      : 'Share your code to grow your route and earn bonuses'
+
+    // Sync new home page card IDs
+    const growthLabelDetail = document.getElementById('rn-growth-label-detail')
+    if(growthLabelDetail) growthLabelDetail.textContent = hwRefCount+' HO'+(hwRefCount!==1?'s':'')+' referred · $'+bonusEarned.toFixed(0)+' earned'
+    const growthBarHome = document.getElementById('rn-growth-bar')
+    if(growthBarHome) growthBarHome.style.width = Math.min(100, hwRefCount * 20)+'%'
+
+    // Sync referral code to home card
+    if(ownCode){
+      const homeRefCode = document.getElementById('rn-acct-ref-code-display-home')
+      if(homeRefCode) homeRefCode.textContent = ownCode
+      const signupLink = document.getElementById('rn-signup-link-display')
+      if(signupLink) signupLink.textContent = window.location.origin+'/?ref='+encodeURIComponent(ownCode)
+    }
 
     // Priority dispatch badge — show on dashboard if active
     const priBadge = document.getElementById('rn-priority-badge')
@@ -7274,6 +7362,22 @@ async function rSubmit(){
 
 // Nav
 function hwNav(el,pg){document.querySelectorAll('#S-hw-dash .nav-i').forEach(n=>n.classList.remove('on'));if(el)el.classList.add('on');document.querySelectorAll('#S-hw-dash .pg').forEach(p=>p.classList.remove('on'));document.getElementById(pg).classList.add('on');const t={'hw-home':'Dashboard','hw-collections':'My Collections','hw-property':'My Property','hw-schedule':'Schedule','hw-account':'Account & Plan'};document.getElementById('hw-pg-title').textContent=t[pg]}
+function hwToggle(cardId){
+  const body   = document.getElementById(cardId.replace('hw-','hw-')+''.replace(/-card$/,'') + '-body') ||
+                 document.getElementById(cardId.split('-card')[0]+'-body')||
+                 document.getElementById(cardId+''.replace('-card','') +'-body')
+  // Generic toggle: find body and chevron by naming convention
+  const bodyEl   = cardId.includes('-card')
+    ? document.getElementById(cardId.replace('-card','-body'))
+    : null
+  const chevEl   = cardId.includes('-card')
+    ? document.getElementById('hw-chev-'+cardId.replace('hw-','').replace('-card',''))
+    : null
+  if(!bodyEl) return
+  const open = bodyEl.style.display === 'block'
+  bodyEl.style.display = open ? 'none' : 'block'
+  if(chevEl) chevEl.style.transform = open ? '' : 'rotate(180deg)'
+}
 function rnNav(el,pg){
   if(el) document.querySelectorAll('#S-rn-dash .nav-i').forEach(n=>n.classList.remove('on'))
   if(el) el.classList.add('on')
@@ -7284,6 +7388,65 @@ function rnNav(el,pg){
   if(pg==='rn-routes')   initRoutesTabs()
   if(pg==='rn-earnings') loadRNEarnings()
   if(pg==='rn-zones')    loadRNZones()
+}
+
+function rnToggle(cardId){
+  const bodyEl  = document.getElementById(cardId+'-body')
+  const chevKey = cardId.replace('rn-','').replace('-card-home','').replace('-card','')
+  const chevEl  = document.getElementById('rn-chev-'+chevKey)
+  if(!bodyEl) return
+  const open = bodyEl.style.display==='block'
+  bodyEl.style.display = open?'none':'block'
+  if(chevEl) chevEl.style.transform = open?'':'rotate(180deg)'
+  // Generate QR when ref card opens
+  if(!open && cardId.includes('ref')) generateRunnerQR()
+}
+
+async function generateRunnerQR(){
+  const canvas = document.getElementById('rn-qr-canvas')
+  if(!canvas) return
+  const refCode = document.getElementById('rn-acct-ref-code-display-home')?.textContent?.trim()
+  if(!refCode || refCode==='--') return
+
+  const signupUrl = `${window.location.origin}/?ref=${encodeURIComponent(refCode)}`
+  document.getElementById('rn-signup-link-display').textContent = signupUrl
+
+  // Build QR using a simple URL-based API (no library needed, works without CDN)
+  // Encode the URL into a QR matrix manually via qr-server API image
+  const img = new Image()
+  img.crossOrigin = 'anonymous'
+  img.onload = () => {
+    const ctx = canvas.getContext('2d')
+    ctx.clearRect(0,0,100,100)
+    ctx.drawImage(img,0,0,100,100)
+  }
+  img.onerror = () => {
+    // Fallback: draw a simple placeholder
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(0,0,100,100)
+    ctx.fillStyle = '#000'
+    ctx.font = '8px monospace'
+    ctx.fillText('Scan to sign up', 5, 50)
+    ctx.fillText(refCode, 5, 65)
+  }
+  // Use goqr.me API — no auth, free, CORS-enabled
+  img.src = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(signupUrl)}&margin=4`
+}
+
+function downloadQR(){
+  const canvas = document.getElementById('rn-qr-canvas')
+  if(!canvas) return
+  const link = document.createElement('a')
+  link.download = 'bindash-referral-qr.png'
+  link.href = canvas.toDataURL('image/png')
+  link.click()
+}
+
+function copyReferralLink(){
+  const link = document.getElementById('rn-signup-link-display')?.textContent?.trim()
+  if(!link || link==='--') { showToast('No referral link yet — log in to load it','err'); return }
+  navigator.clipboard?.writeText(link).then(()=>showToast('Link copied ✅','ok')).catch(()=>showToast('Copy failed — select manually','err'))
 }
 
 async function loadRNZones(){
