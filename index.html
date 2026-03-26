@@ -8264,7 +8264,14 @@ function ruleGetPriorityRunner(zoneId){
   if(!z) return null
   const zips = (z.zips?.length?z.zips:[z.zip]).filter(Boolean)
   const candidates = RUNNERS.filter(r=>r.zoneId===zoneId||r.coverageZones?.includes(zoneId)||zips.includes(r.zip))
-  return candidates.find(r=>r.isPriority||r.id===z.priorityRunnerId) || candidates[0] || null
+  if(!candidates.length) return null
+  // Priority = explicitly flagged, OR matched to zone's assigned_runner field (by id, name, or email)
+  const zoneAssigned = z.assignedRunner || z.priorityRunnerId
+  const byFlag   = candidates.find(r=>r.isPriority)
+  const byZoneAssign = zoneAssigned
+    ? candidates.find(r=>r.id===zoneAssigned||r.name===zoneAssigned||r.email===zoneAssigned)
+    : null
+  return byFlag || byZoneAssign || candidates[0] || null
 }
 
 function ruleGetSecondaryRunners(zoneId){
@@ -11321,7 +11328,7 @@ function getHWDayLabel(hw){
 }
 
 function renderHomeownerCard(hw){
-  const runner   = RUNNERS.find(r=>r.id===hw.assignedRunner)
+  const runner   = RUNNERS.find(r=>r.id===hw.assignedRunner||r.name===hw.assignedRunner||r.email===hw.assignedRunner)
   const zone     = getHWZoneName(hw)
   const statusColors = { active:['#22c55e','● Active'], paused:['#f59e0b','⏸ Paused'], inactive:['#64748b','○ Inactive'] }
   const [scol,slbl] = statusColors[hw.status] || statusColors.active
@@ -12278,7 +12285,7 @@ function showReassignRunner(hwId){
   document.getElementById('modal-box').innerHTML=`
   <div class="mh"><div style="font-size:15px;font-weight:700">↔ Reassign Runner -- ${hw.name}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
   <div class="mb">
-    <div style="font-size:13px;color:var(--sub);margin-bottom:12px">Current runner: <strong style="color:var(--text)">${RUNNERS.find(r=>r.id===hw.assignedRunner)?.name||'Unassigned'}</strong></div>
+    <div style="font-size:13px;color:var(--sub);margin-bottom:12px">Current runner: <strong style="color:var(--text)">${RUNNERS.find(r=>r.id===hw.assignedRunner||r.name===hw.assignedRunner||r.email===hw.assignedRunner)?.name||'Unassigned'}</strong></div>
     <div style="display:flex;flex-direction:column;gap:7px">
       ${available.map(r=>`
         <div style="display:flex;align-items:center;justify-content:space-between;background:${hw.assignedRunner===r.id?'rgba(6,214,160,.08)':'var(--surface2)'};border:1px solid ${hw.assignedRunner===r.id?'rgba(6,214,160,.3)':'var(--border)'};border-radius:8px;padding:9px 12px;font-size:13px">
@@ -14826,12 +14833,18 @@ async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
       statusEl.innerHTML = `<div style="font-size:11px;color:var(--muted)">No routes dispatched for ${dateStr} yet</div>`
       return
     }
-    const offered   = jobs.filter(j=>j.status==='offered').length
-    const accepted  = jobs.filter(j=>j.status==='accepted').length
-    const inProg    = jobs.filter(j=>j.status==='in_progress').length
-    const complete  = jobs.filter(j=>j.status==='complete').length
-    const broadcast = jobs.filter(j=>j.status==='broadcast').length
-    const total     = jobs.length
+    // Count by unique homeowner (not raw job count — each HO has BIN_OUT + BIN_IN = 2 jobs)
+    const uniqueHWs = [...new Set(jobs.map(j=>j.homeowner_email))]
+    const totalHWs   = uniqueHWs.length
+    // Route status = per homeowner, use their highest-progress job
+    const hwStatus = {}
+    jobs.forEach(j=>{ if(!hwStatus[j.homeowner_email] || ['complete','in_progress','accepted'].includes(j.status)) hwStatus[j.homeowner_email]=j.status })
+    const accepted  = Object.values(hwStatus).filter(s=>s==='accepted').length
+    const inProg    = Object.values(hwStatus).filter(s=>s==='in_progress').length
+    const complete  = Object.values(hwStatus).filter(s=>s==='complete').length
+    const broadcast = Object.values(hwStatus).filter(s=>s==='broadcast').length
+    const offered   = Object.values(hwStatus).filter(s=>s==='offered').length
+    const total     = totalHWs
     const now = new Date()
     const expired   = jobs.filter(j=>j.status==='offered'&&j.offer_expires_at&&new Date(j.offer_expires_at)<now).length
     const active    = jobs.filter(j=>j.status==='offered'&&(!j.offer_expires_at||new Date(j.offer_expires_at)>now)).length
@@ -15042,7 +15055,7 @@ async function _adGenerateBatchesAsync(){
       if(primary) return { runner: primary, offerType: 'loyalty', windowMins: 25 }
 
       // Assigned runner exists but wrong visit type — still note them
-      const anyPrimary = RUNNERS.find(r=>r.id===hw.assignedRunner||r.email===hw.assignedRunner)
+      const anyPrimary = RUNNERS.find(r=>r.id===hw.assignedRunner||r.name===hw.assignedRunner||r.email===hw.assignedRunner)
       if(anyPrimary && anyPrimary.status!=='INACTIVE') {
         // Use them anyway — admin assigned them
         return { runner: anyPrimary, offerType: 'loyalty', windowMins: 25 }
@@ -16106,7 +16119,7 @@ function showZoneDetail(zoneId){
     <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">Homeowners (${activeHWs.length}) — drag to reorder</div>
     <div id="zone-stop-list" style="display:flex;flex-direction:column;gap:5px">
       ${activeHWs.length ? activeHWs.map((hw,i)=>{
-        const runner = RUNNERS.find(r=>r.id===hw.assignedRunner)
+        const runner = RUNNERS.find(r=>r.id===hw.assignedRunner||r.name===hw.assignedRunner||r.email===hw.assignedRunner)
         const days = hw.service==='SPLIT' ? `♻️ ${hw.dayRecycling} / 🗑️ ${hw.dayWaste}` : (hw.day||'--')
         const planLabel = {plan_a:'1 Can',plan_b:'2 Cans',plan_c:'Split',oan_a:'OAN-A',oan_b:'OAN-B',oan_c:'OAN-C'}[hw.plan]||hw.plan||'--'
         return `<div class="zone-stop-card" data-hwid="${hw.id}" draggable="true"
