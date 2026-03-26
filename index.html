@@ -3783,11 +3783,13 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
             <!-- Day pills -->
             <div style="display:flex;gap:4px" id="dispatch-day-pills">
-              <div class="ob-day-pill" data-day="Monday"    onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px" title="Collection: Monday · Bin Out: Sunday evening">Mon<br><span style="font-size:8px;opacity:.6">Sun out</span></div>
+              <div class="ob-day-pill" data-day="Sunday"    onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Sun</div>
+              <div class="ob-day-pill" data-day="Monday"    onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Mon</div>
               <div class="ob-day-pill" data-day="Tuesday"   onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Tue</div>
               <div class="ob-day-pill" data-day="Wednesday" onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Wed</div>
               <div class="ob-day-pill" data-day="Thursday"  onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Thu</div>
               <div class="ob-day-pill" data-day="Friday"    onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Fri</div>
+              <div class="ob-day-pill" data-day="Saturday"  onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Sat</div>
             </div>
             <div id="dispatch-date-label" style="font-size:11px;color:var(--cyan);min-width:80px"></div>
 
@@ -3810,8 +3812,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               </select>
               <select id="dispatch-day-filter" style="font-size:11px;padding:3px 8px" onchange="onDispatchDayFilterChange(this)">
                 <option value="">All Days</option>
-                <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
-                <option>Thursday</option><option>Friday</option>
+                <option>Sunday</option><option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+                <option>Thursday</option><option>Friday</option><option>Saturday</option>
               </select>
               <button onclick="loadLiveJobsIntoPipeline()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--muted);cursor:pointer">⟳ Refresh</button>
               <button class="btn btn-cyan btn-sm" onclick="adGenerateBatches()">🔍 Preview Routes</button>
@@ -14879,84 +14881,34 @@ function normDay(d){
 }
 
 // Returns the Bin Out scheduled_date string for a given collection day name.
-// Monday collection → Sunday evening Bin Out (date - 1).
-// All other days → same date as collection day (Bin Out evening before collection morning).
-// NOTE: "scheduled_date" for a job always represents the Bin Out night,
-//       and Bin In is auto-created for the following day.
-function binOutDateStr(collectionDayName){
-  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
-  const today = new Date(); today.setHours(0,0,0,0)
-  const colIdx = dayNames.findIndex(d => normDay(d) === normDay(collectionDayName))
-  if(colIdx < 0) return today.toISOString().slice(0,10)
-  // Next occurrence of collection day (0 = today)
-  const diff = (colIdx - today.getDay() + 7) % 7
-  const colDate = new Date(today); colDate.setDate(today.getDate() + diff)
-  // Bin Out is always the evening BEFORE collection morning
-  const binOutDate = new Date(colDate); binOutDate.setDate(colDate.getDate() - 1)
-  return binOutDate.toISOString().slice(0,10)
-}
-
-function binOutLabelForDay(collectionDayName){
-  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
-  const today = new Date(); today.setHours(0,0,0,0)
-  const colIdx = dayNames.findIndex(d => normDay(d) === normDay(collectionDayName))
-  if(colIdx < 0) return ''
-  const diff = (colIdx - today.getDay() + 7) % 7
-  const colDate = new Date(today); colDate.setDate(today.getDate() + diff)
-  const binOutDate = new Date(colDate); binOutDate.setDate(colDate.getDate() - 1)
-  const binOutDay = dayNames[binOutDate.getDay()]
-  const binOutStr = binOutDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})
-  return `${binOutDay} ${binOutStr} evening → ${collectionDayName} collection`
-}
-
 function pickDispatchDay(el){
   const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   const today = new Date(); today.setHours(0,0,0,0)
-  const collectionDay = el.dataset.day
-  const targetIdx = dayNames.findIndex(d => d === collectionDay)
+  const day = el.dataset.day
+  const targetIdx = dayNames.findIndex(d => d === day)
   const diff = (targetIdx - today.getDay() + 7) % 7
-  const colDate = new Date(today); colDate.setDate(today.getDate() + diff)
-  const colDateStr = colDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+  const scheduledDate = new Date(today); scheduledDate.setDate(today.getDate() + diff)
+  const dateStr = scheduledDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+  const scheduledDateStr = scheduledDate.toISOString().slice(0,10)
 
-  // Bin Out is the evening BEFORE collection day
-  const binOutDateString = binOutDateStr(collectionDay)
-  const binOutDate = new Date(binOutDateString + 'T12:00:00')
-  const binOutDay  = dayNames[binOutDate.getDay()]
-  const binOutStr  = binOutDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})
-
-  // Block if collection day is more than 4 days out (gives room for Sunday Bin Out)
-  if(diff > 4){
-    showToast(`${collectionDay} (${colDateStr}) is ${diff} days away — max 4 days ahead`, 'err', 4000)
+  if(diff > 5){
+    showToast(`${day} (${dateStr}) is ${diff} days away — max 5 days ahead`, 'err', 4000)
     return
   }
 
   document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>p.classList.remove('on'))
   el.classList.add('on')
   const inp = document.getElementById('dispatch-day-val')
-  if(inp) inp.value = collectionDay
+  if(inp) inp.value = day
   const pf = document.getElementById('dispatch-day-filter')
-  if(pf) pf.value = collectionDay
+  if(pf) pf.value = day
 
-  // Show Bin Out date in label
   const dateLabel = document.getElementById('dispatch-date-label')
-  if(dateLabel){
-    const isToday  = diff === 0
-    const isTomorrow = diff === 1
-    const suffix = isToday?' (today)':isTomorrow?' (tomorrow)':''
-    // For Monday, highlight that Bin Out is Sunday
-    if(binOutDay !== collectionDay){
-      dateLabel.innerHTML = `<span style="color:var(--cyan)">${binOutDay} ${binOutStr} Bin Out</span> <span style="color:var(--muted)">→ ${collectionDay}${suffix} collection</span>`
-    } else {
-      dateLabel.textContent = colDateStr + suffix
-    }
-  }
+  if(dateLabel) dateLabel.textContent = dateStr + (diff===0?' (today)':diff===1?' (tomorrow)':'')
 
   updateDispatchStats()
+  _showDispatchDayStatus(day, scheduledDateStr, dateStr)
 
-  // Show day status using the Bin Out date (Sunday for Monday collection)
-  _showDispatchDayStatus(collectionDay, binOutDateString, binOutStr)
-
-  // If no preview batches exist, reload live jobs for this day into pipeline
   if(!generatedBatches.length){
     window._livePipelineBatches = null
     renderDispatchPipeline()
@@ -14967,12 +14919,10 @@ function pickDispatchDay(el){
 function onDispatchDayFilterChange(sel){
   const day = sel.value
   if(!day){
-    // "All Days" selected — clear pill selection so all days load
     document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>p.classList.remove('on'))
     const inp = document.getElementById('dispatch-day-val')
     if(inp) inp.value = ''
   } else {
-    // Specific day selected — sync to pill if it exists
     const inp = document.getElementById('dispatch-day-val')
     if(inp) inp.value = day
     document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>{
@@ -14980,7 +14930,6 @@ function onDispatchDayFilterChange(sel){
       else p.classList.remove('on')
     })
   }
-  // Always reload from DB with new filter
   window._livePipelineBatches = null
   loadLiveJobsIntoPipeline()
 }
@@ -15048,37 +14997,26 @@ function initDispatchDayPills(){
   const today = new Date(); today.setHours(0,0,0,0)
   const pills = document.querySelectorAll('#dispatch-day-pills .ob-day-pill')
   pills.forEach(p => {
-    const collectionDay = p.dataset.day
-    const targetIdx = dayNames.findIndex(d => d === collectionDay)
+    const day = p.dataset.day
+    const targetIdx = dayNames.findIndex(d => d === day)
     const diff = (targetIdx - today.getDay() + 7) % 7
-    const colDate = new Date(today); colDate.setDate(today.getDate() + diff)
-    const colDateStr = colDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+    const date = new Date(today); date.setDate(today.getDate() + diff)
+    const dateStr = date.toLocaleDateString('en-US',{month:'short',day:'numeric'})
 
-    // Bin Out is always evening before collection
-    const binOutDate = new Date(colDate); binOutDate.setDate(colDate.getDate() - 1)
-    const binOutDay  = dayNames[binOutDate.getDay()]
-    const binOutStr  = binOutDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})
-
-    if(diff > 4){
+    if(diff > 5){
       p.style.opacity = '0.35'
       p.style.cursor = 'not-allowed'
-      p.title = `${collectionDay} (${colDateStr}) — more than 4 days out`
+      p.title = `${day} (${dateStr}) — more than 5 days out`
     } else {
       p.style.opacity = ''
       p.style.cursor = ''
-      // For Monday: show "Mon" with "Sun out" sub-label
-      const shortName = collectionDay.slice(0,3)
-      const binOutNote = binOutDay !== collectionDay
-        ? `<br><span style="font-size:8px;opacity:.6">${binOutDay.slice(0,3)} out</span>`
-        : ''
-      p.innerHTML = shortName + '<br><span style="font-size:9px;opacity:.7">' + colDateStr + '</span>' + binOutNote
+      p.innerHTML = day.slice(0,3) + '<br><span style="font-size:9px;opacity:.7">' + dateStr + '</span>'
       if(diff === 0) p.innerHTML += '<br><span style="font-size:8px;color:var(--cyan)">today</span>'
-      p.title = `Collection: ${collectionDay} ${colDateStr} · Bin Out: ${binOutDay} ${binOutStr} evening`
-
-      if(collectionDay === dayNames[today.getDay()]){
+      p.title = day + ' · ' + dateStr
+      if(day === dayNames[today.getDay()]){
         p.classList.add('on')
         const inp = document.getElementById('dispatch-day-val')
-        if(inp) inp.value = collectionDay
+        if(inp) inp.value = day
       }
     }
   })
@@ -15150,12 +15088,13 @@ async function _adGenerateBatchesAsync(){
         const today = new Date()
         today.setHours(0,0,0,0)
         let diff = (targetIdx - today.getDay() + 7) % 7
-        const scheduledDateStr = binOutDateStr(day)  // Sunday if Monday collection
+        const scheduledDate = new Date(today)
+        scheduledDate.setDate(today.getDate() + diff)
+        const scheduledDateStr = scheduledDate.toISOString().slice(0,10)
         const displayDay = dayNames[targetIdx]
 
-        // 4-day window limit (Monday needs Sunday Bin Out = 6 days if today is Monday, but diff=0 for today)
-        if(diff > 4){
-          showToast(`${displayDay} is ${diff} days away — routes can only be created up to 4 days in advance`, 'err', 5000)
+        if(diff > 5){
+          showToast(`${displayDay} is ${diff} days away — routes can only be created up to 5 days in advance`, 'err', 5000)
           const btn = document.getElementById('dispatch-generate-btn')
           if(btn){ btn.disabled=false; btn.textContent='🔍 Preview Routes' }
           return
@@ -15351,9 +15290,15 @@ async function launchDispatchRoutes(){
 
     generatedBatches.forEach(batch => {
       const expiresAt = new Date(now.getTime() + (batch.windowMins||45) * 60 * 1000).toISOString()
-      // Bin Out scheduled_date = evening BEFORE collection day
-      // Monday collection → Sunday Bin Out date
-      const scheduledDate = binOutDateStr(batch.day)
+      const targetNorm = normDay(batch.day)
+      const targetIdx  = dayNames.findIndex(d => normDay(d)===targetNorm)
+      const scheduledDate = (() => {
+        if(targetIdx < 0) return now.toISOString().slice(0,10)
+        const d = new Date(); d.setHours(0,0,0,0)
+        const diff = (targetIdx - d.getDay() + 7) % 7
+        d.setDate(d.getDate() + diff)
+        return d.toISOString().slice(0,10)
+      })()
 
       batch.stops.forEach(hw => {
         let serviceType = 'Recycling'
@@ -15763,20 +15708,17 @@ async function loadLiveJobsIntoPipeline(){
 
   let dateRange = []
   if(effectiveDay){
-    // For BIN_OUT, scheduled_date is always the evening BEFORE collection day.
-    // Monday collection → Sunday Bin Out. Use binOutDateStr() for consistency.
-    const binOutDate = binOutDateStr(effectiveDay)
-    dateRange.push(binOutDate)
-    // Also include the collection day itself for BIN_IN jobs (created after Bin Out completes)
-    const colDate = new Date(binOutDate + 'T12:00:00')
-    colDate.setDate(colDate.getDate() + 1)
-    dateRange.push(colDate.toISOString().slice(0,10))
-    // And the day after collection for any late BIN_IN jobs
-    const afterCol = new Date(colDate); afterCol.setDate(colDate.getDate() + 1)
-    dateRange.push(afterCol.toISOString().slice(0,10))
+    const targetIdx = dayNames.findIndex(d => normDay(d) === normDay(effectiveDay))
+    if(targetIdx < 0){ renderDispatchPipeline(); return }
+    const diff = (targetIdx - today.getDay() + 7) % 7
+    const d = new Date(today); d.setDate(today.getDate() + diff)
+    dateRange.push(d.toISOString().slice(0,10))
+    // Include next day for BIN_IN jobs
+    const tom = new Date(d); tom.setDate(d.getDate() + 1)
+    dateRange.push(tom.toISOString().slice(0,10))
   } else {
-    // All days — load next 8 days to catch Sunday Bin Out for Monday collection
-    for(let i = -1; i <= 7; i++){
+    // All days — next 7 days
+    for(let i = 0; i <= 7; i++){
       const d = new Date(today); d.setDate(today.getDate() + i)
       dateRange.push(d.toISOString().slice(0,10))
     }
