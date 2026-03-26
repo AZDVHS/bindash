@@ -3771,176 +3771,90 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <!-- AD DISPATCH -->
         <div class="pg" id="ad-dispatch">
 
-          <!-- DISPATCH CONTROLS ROW -->
-          <div style="display:grid;grid-template-columns:280px 1fr;gap:14px;margin-bottom:14px">
-            <div>
-              <!-- GENERATE CONTROLS CARD -->
-              <div class="card" style="margin-bottom:10px">
-                <div class="card-ttl" style="margin-bottom:14px">🗺️ Generate Routes</div>
+          <!-- TOP STATUS BAR -->
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
 
-                <!-- ZONE SELECTOR -->
-                <div class="field" style="margin-bottom:10px">
-                  <label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Zone</label>
-                  <select id="dispatch-zone-select" style="font-size:13px" onchange="updateDispatchStats()">
-                    <option value="">All Zones</option>
-                  </select>
-                </div>
-
-                <!-- DAY SELECTOR -->
-                <div class="field" style="margin-bottom:14px">
-                  <label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Collection Day</label>
-                  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px" id="dispatch-day-pills">
-                    <div class="ob-day-pill" data-day="Monday"    onclick="pickDispatchDay(this)">Mon</div>
-                    <div class="ob-day-pill" data-day="Tuesday"   onclick="pickDispatchDay(this)">Tue</div>
-                    <div class="ob-day-pill" data-day="Wednesday" onclick="pickDispatchDay(this)">Wed</div>
-                    <div class="ob-day-pill" data-day="Thursday"  onclick="pickDispatchDay(this)">Thu</div>
-                    <div class="ob-day-pill" data-day="Friday"    onclick="pickDispatchDay(this)">Fri</div>
-                  </div>
-                  <div id="dispatch-date-label" style="font-size:11px;color:var(--cyan);margin-top:5px;text-align:center;min-height:16px"></div>
-                  <div id="dispatch-day-status" style="background:var(--surface2);border-radius:10px;padding:10px;margin-top:10px;min-height:32px"></div>
-                  <input type="hidden" id="dispatch-day-val" value="">
-                </div>
-
-                <!-- LIVE STATS -->
-                <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:14px">
-                  <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Scheduled for selection</div>
-                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                    <div style="text-align:center">
-                      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;color:var(--cyan)" id="disp-hw-count">--</div>
-                      <div style="font-size:10px;color:var(--muted)">Homeowners</div>
-                    </div>
-                    <div style="text-align:center">
-                      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;color:var(--green)" id="disp-runner-count">--</div>
-                      <div style="font-size:10px;color:var(--muted)">Available Runners</div>
-                    </div>
-                  </div>
-                  <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--sub)" id="disp-stats-detail">Select a day to see schedule</div>
-                </div>
-
-                <!-- GENERATE BUTTONS -->
-                <button class="btn btn-cyan btn-full btn-sm" onclick="adGenerateBatches()" style="margin-bottom:7px">🔍 Preview Routes</button>
-                <button id="dispatch-launch-btn" class="btn btn-full btn-sm" onclick="launchDispatchRoutes()" style="display:none;margin-bottom:7px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-weight:700;border:none;padding:10px">🚀 Launch Routes to Runners</button>
-                <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.15);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--sub);margin-bottom:7px;line-height:1.5">
-                  ☀️ <strong style="color:var(--text)">Bin In auto-routes</strong> when runner marks Bin Out complete — no action needed. Offered to same runner with 25 min loyalty window.
-                </div>
-                <div style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--sub);margin-bottom:7px;line-height:1.5">
-                  📅 <strong style="color:var(--text)">Future:</strong> Bin Out batches will auto-generate 24hrs before each collection day based on zone schedule.
-                </div>
-
-                <!-- BATCH SIZE -->
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-                  <div class="field" style="margin:0">
-                    <label style="font-size:10px">Min stops/batch</label>
-                    <input type="number" id="min-stops" value="3" min="1" max="20" style="font-size:12px;padding:5px 8px">
-                  </div>
-                  <div class="field" style="margin:0">
-                    <label style="font-size:10px">Max stops/batch</label>
-                    <input type="number" id="max-stops" value="10" min="1" max="30" style="font-size:12px;padding:5px 8px">
-                  </div>
-                </div>
-              </div>
-
-              <!-- LOYALTY & OFFER CHAIN CARD -->
-              <div class="card" style="margin-bottom:10px">
-                <div class="card-ttl" style="margin-bottom:10px">🔒 Offer Chain</div>
-                <div style="display:flex;flex-direction:column;gap:0">
-
-                  <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
-                    <div style="width:26px;height:26px;border-radius:50%;background:rgba(6,214,160,.15);color:var(--cyan);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">1</div>
-                    <div>
-                      <div style="font-size:12px;font-weight:700;color:var(--cyan)">Primary Runner -- 25 min</div>
-                      <div style="font-size:11px;color:var(--muted);line-height:1.5">Assigned runner gets first refusal. Loyalty offer -- they have 25 minutes to accept before it escalates.</div>
-                    </div>
-                  </div>
-
-                  <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
-                    <div style="width:26px;height:26px;border-radius:50%;background:rgba(59,130,246,.15);color:var(--blue);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">2</div>
-                    <div>
-                      <div style="font-size:12px;font-weight:700;color:var(--blue)">Zone Runners -- 45 min</div>
-                      <div style="font-size:11px;color:var(--muted);line-height:1.5">Other available runners in the same ZIP zone. 45 minutes to accept.</div>
-                    </div>
-                  </div>
-
-                  <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
-                    <div style="width:26px;height:26px;border-radius:50%;background:rgba(245,158,11,.15);color:var(--amber);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">3</div>
-                    <div>
-                      <div style="font-size:12px;font-weight:700;color:var(--amber)">All Runners + Bonus -- 30 min</div>
-                      <div style="font-size:11px;color:var(--muted);line-height:1.5">Broadcast to all available runners system-wide with an urgency bonus incentive. 30 minutes to accept.</div>
-                    </div>
-                  </div>
-
-                  <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0">
-                    <div style="width:26px;height:26px;border-radius:50%;background:rgba(239,68,68,.15);color:#ef4444;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">🚨</div>
-                    <div>
-                      <div style="font-size:12px;font-weight:700;color:#ef4444">SOS Override</div>
-                      <div style="font-size:11px;color:var(--muted);line-height:1.5">Emergency dispatch -- goes to all runners immediately regardless of zone, with urgent rate.</div>
-                    </div>
-                  </div>
-
-                </div>
-              </div>
-
-              <!-- COLLECTION TIMING CARD -->
-              <div class="card">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-                  <div class="card-ttl" style="margin:0">Collection Timing</div>
-                  <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px" onclick="showAddZone()">+ Add Zone</button>
-                </div>
-                <div style="font-size:11px;color:var(--sub);line-height:1.5;margin-bottom:10px">
-                  Expected time when the waste truck passes each zone. Used to unlock Bin In routes at the right time.
-                </div>
-                <div id="zone-list" style="display:flex;flex-direction:column;gap:6px"></div>
-                <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-                  <div style="font-size:10px;color:var(--muted);margin-bottom:5px">Extra wait after estimated window before unlocking</div>
-                  <div style="display:flex;align-items:center;gap:8px">
-                    <input type="number" id="unlock-delay" value="30" min="0" max="120" style="width:60px;font-size:12px;padding:4px 8px" onchange="saveUnlockDelay(this.value)">
-                    <span style="font-size:12px;color:var(--sub)">minutes</span>
-                  </div>
-                </div>
-              </div>
+            <!-- Auto-dispatch status pill -->
+            <div id="dispatch-auto-status" style="display:flex;align-items:center;gap:8px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);cursor:pointer" onclick="adNav(null,'ad-rules')" title="Click to open Dispatch Rules">
+              <div id="dispatch-auto-dot" style="width:8px;height:8px;border-radius:50%;background:#64748b;flex-shrink:0"></div>
+              <span id="dispatch-auto-label" style="font-size:12px;font-weight:700;color:var(--muted)">Manual dispatch</span>
+              <span style="font-size:10px;color:var(--muted)">· edit rules →</span>
             </div>
 
-            <!-- OFFER PIPELINE -->
-            <div>
-              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
-                <div style="font-size:13px;font-weight:700" id="pipeline-title">Offer Pipeline</div>
-                <span class="badge" style="background:rgba(245,158,11,.15);color:#f59e0b" id="pipeline-badge">--</span>
-                <button onclick="loadLiveJobsIntoPipeline()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer" title="Refresh live status">⟳ Refresh</button>
-                <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
-                  <select id="dispatch-zone-filter" style="font-size:11px;padding:3px 8px" onchange="loadLiveJobsIntoPipeline()">
-                    <option value="">All Zones</option>
-                  </select>
-                  <select id="dispatch-day-filter" style="font-size:11px;padding:3px 8px" onchange="onDispatchDayFilterChange(this)">
-                    <option value="">All Days</option>
-                    <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
-                    <option>Thursday</option><option>Friday</option>
-                  </select>
-                </div>
-                <div style="display:flex;gap:6px;flex-wrap:wrap">
-                  <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:8px;height:8px;background:#22c55e;border-radius:50%;display:inline-block"></span>Accepted</span>
-                  <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:8px;height:8px;background:#f59e0b;border-radius:50%;display:inline-block"></span>Awaiting</span>
-                  <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:8px;height:8px;background:#3b82f6;border-radius:50%;display:inline-block"></span>Broadcast</span>
-                  <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:8px;height:8px;background:#ef4444;border-radius:50%;display:inline-block"></span>Unassigned</span>
-                </div>
-              </div>
+            <!-- Day pills -->
+            <div style="display:flex;gap:4px" id="dispatch-day-pills">
+              <div class="ob-day-pill" data-day="Monday"    onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Mon</div>
+              <div class="ob-day-pill" data-day="Tuesday"   onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Tue</div>
+              <div class="ob-day-pill" data-day="Wednesday" onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Wed</div>
+              <div class="ob-day-pill" data-day="Thursday"  onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Thu</div>
+              <div class="ob-day-pill" data-day="Friday"    onclick="pickDispatchDay(this)" style="font-size:11px;padding:5px 10px">Fri</div>
+            </div>
+            <div id="dispatch-date-label" style="font-size:11px;color:var(--cyan);min-width:80px"></div>
 
-              <!-- RUNNER AVAILABILITY ALERTS -->
-              <div id="runner-availability-alerts" style="margin-bottom:10px"></div>
+            <!-- Zone filter -->
+            <select id="dispatch-zone-select" style="font-size:12px;padding:4px 8px" onchange="updateDispatchStats()">
+              <option value="">All Zones</option>
+            </select>
 
-              <!-- COMMITMENT MODEL NOTE -->
-              <div style="background:rgba(6,214,160,.05);border:1px solid rgba(6,214,160,.2);border-radius:9px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--sub);line-height:1.7">
-                <span style="color:var(--cyan);font-weight:700">Paired offer model active.</span>
-                Runners who do <em>both visits</em> receive Bin Out + Bin In as a single offer at T-24h -- one accept covers both. Fallback: paired runner declines day-of -> Bin In-only runners -> broadcast with urgency bonus.
-              </div>
+            <!-- Stats pills -->
+            <div style="display:flex;gap:8px;align-items:center;margin-left:4px">
+              <span style="font-size:12px;color:var(--muted)"><strong style="color:var(--cyan)" id="disp-hw-count">--</strong> HOs</span>
+              <span style="font-size:12px;color:var(--muted)"><strong style="color:var(--green)" id="disp-runner-count">--</strong> runners</span>
+              <span style="font-size:11px;color:var(--muted)" id="disp-stats-detail"></span>
+            </div>
 
-              <div id="dispatch-pipeline" style="display:flex;flex-direction:column;gap:10px">
-                <div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px">
-                  <div style="font-size:32px;margin-bottom:10px">🗺️</div>
-                  Click <strong style="color:var(--text)">Generate Bin Out Batches</strong> to build routes from today's scheduled homeowners.
-                </div>
+            <div style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <!-- Zone filter for pipeline -->
+              <select id="dispatch-zone-filter" style="font-size:11px;padding:3px 8px" onchange="onDispatchDayFilterChange(document.getElementById('dispatch-day-filter'))">
+                <option value="">All Zones</option>
+              </select>
+              <select id="dispatch-day-filter" style="font-size:11px;padding:3px 8px" onchange="onDispatchDayFilterChange(this)">
+                <option value="">All Days</option>
+                <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+                <option>Thursday</option><option>Friday</option>
+              </select>
+              <button onclick="loadLiveJobsIntoPipeline()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--muted);cursor:pointer">⟳ Refresh</button>
+              <button class="btn btn-cyan btn-sm" onclick="adGenerateBatches()">🔍 Preview Routes</button>
+              <button id="dispatch-launch-btn" class="btn btn-sm" onclick="launchDispatchRoutes()" style="display:none;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-weight:700;border:none;padding:6px 14px">🚀 Launch Routes</button>
+            </div>
+          </div>
+
+          <!-- DAY STATUS STRIP -->
+          <div id="dispatch-day-status" style="margin-bottom:10px"></div>
+
+          <!-- RUNNER AVAILABILITY ALERTS -->
+          <div id="runner-availability-alerts" style="margin-bottom:8px"></div>
+
+          <!-- PIPELINE LEGEND + COMMITMENT NOTE -->
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;flex-wrap:wrap">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:8px;height:8px;background:#22c55e;border-radius:50%;display:inline-block"></span>Accepted</span>
+              <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:8px;height:8px;background:#f59e0b;border-radius:50%;display:inline-block"></span>Awaiting</span>
+              <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:8px;height:8px;background:#3b82f6;border-radius:50%;display:inline-block"></span>Broadcast</span>
+              <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:8px;height:8px;background:#ef4444;border-radius:50%;display:inline-block"></span>Unassigned</span>
+            </div>
+            <span id="pipeline-badge" style="font-size:11px;color:var(--muted)"></span>
+            <span style="font-size:11px;font-weight:700;color:var(--text)" id="pipeline-title"></span>
+          </div>
+
+          <!-- MAIN PIPELINE -->
+          <div id="dispatch-pipeline" style="display:flex;flex-direction:column;gap:8px">
+            <div style="text-align:center;padding:60px 20px;color:var(--muted);font-size:13px">
+              <div style="font-size:36px;margin-bottom:12px">🗺️</div>
+              <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px">No active routes today</div>
+              <div style="margin-bottom:18px">Select a collection day and click <strong style="color:var(--text)">Preview Routes</strong> to generate — or routes will appear here automatically once dispatched.</div>
+              <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                <button class="btn btn-cyan btn-sm" onclick="adGenerateBatches()">🔍 Preview Routes for Today</button>
+                <button class="btn btn-outline btn-sm" onclick="adNav(null,'ad-rules')">⚙️ Dispatch Rules</button>
               </div>
             </div>
           </div>
+
+          <!-- HIDDEN: batch size inputs still needed by generate logic -->
+          <input type="hidden" id="dispatch-day-val" value="">
+          <input type="hidden" id="min-stops" value="3">
+          <input type="hidden" id="max-stops" value="10">
+
         </div>
 
         <!-- AD ZONES -->
@@ -8138,9 +8052,8 @@ let DISPATCH_RULES = {
 
 async function loadDispatchRules(){
   try {
-    const { data } = await _supa.from('admins')
-      .select('dispatch_rules').eq('email', currentUser?.email).maybeSingle()
-    if(data?.dispatch_rules) DISPATCH_RULES = { ...DISPATCH_RULES, ...data.dispatch_rules }
+    const saved = localStorage.getItem('bindash_dispatch_rules')
+    if(saved) DISPATCH_RULES = { ...DISPATCH_RULES, ...JSON.parse(saved) }
   } catch(e){ console.warn('[Rules] load:', e.message) }
 }
 
@@ -8208,14 +8121,21 @@ async function saveDispatchRules(){
   if(thumb) thumb.style.transform  = DISPATCH_RULES.autoDispatch ? 'translateX(16px)' : ''
   if(lbl)   { lbl.textContent = DISPATCH_RULES.autoDispatch ? 'Live' : 'Off'; lbl.style.color = DISPATCH_RULES.autoDispatch ? '#22c55e' : 'var(--muted)' }
 
-  // Persist to Supabase on the admin record
+  // Persist to localStorage
   try {
-    await _supa.from('admins').update({ dispatch_rules: DISPATCH_RULES }).eq('email', currentUser?.email)
+    localStorage.setItem('bindash_dispatch_rules', JSON.stringify(DISPATCH_RULES))
     showToast('Rules saved ✅', 'ok')
-  } catch(e){
-    // Fallback: store in localStorage for now
-    try { localStorage.setItem('bindash_dispatch_rules', JSON.stringify(DISPATCH_RULES)) } catch{}
-    showToast('Saved locally (DB unavailable)', 'info')
+  } catch(e){ showToast('Could not save rules: '+e.message, 'err') }
+
+  // Refresh dispatch page status pill if it's visible
+  const dot   = document.getElementById('dispatch-auto-dot')
+  const label = document.getElementById('dispatch-auto-label')
+  if(dot && label){
+    if(DISPATCH_RULES.autoDispatch){
+      dot.style.background='#22c55e'; label.textContent='Auto-dispatch on'; label.style.color='#22c55e'
+    } else {
+      dot.style.background='#64748b'; label.textContent='Manual dispatch'; label.style.color='var(--muted)'
+    }
   }
 }
 
@@ -8419,17 +8339,13 @@ async function setZonePriorityRunner(zoneId, runnerId){
   const z = ADMIN_ZONES.find(x=>x.id===zoneId)
   const r = RUNNERS.find(x=>x.id===runnerId)
   if(!z||!r) return
-  // Clear existing priority flags for this zone
+  // Clear existing priority flags for this zone in memory
   RUNNERS.filter(x=>x.zoneId===zoneId||x.coverageZones?.includes(zoneId)).forEach(x=>{ x.isPriority=false })
   r.isPriority = true
   z.priorityRunnerId = runnerId
-  try {
-    await _supa.from('runners').update({ is_priority:false }).or('zone_id.eq.'+zoneId+',coverage_zones.cs.{"'+zoneId+'"}')
-    await _supa.from('runners').update({ is_priority:true  }).eq('id', runnerId)
-    await _supa.from('zones').update({ priority_runner_id: runnerId }).eq('id', zoneId)
-  } catch(e){ console.warn('[Rules] setZonePriority:', e.message) }
   showToast(r.name+' set as priority runner for '+z.name+' ✅','ok')
   renderRulesZoneList()
+  renderAdminZones()
 }
 
 function showAdminSetPriority(zoneId){
@@ -15626,6 +15542,17 @@ async function initDispatchPage(){
       const o = document.createElement('option'); o.value=z.id; o.textContent=z.name; sel.appendChild(o)
     })
   })
+
+  // Update auto-dispatch status pill to reflect current rules
+  const dot   = document.getElementById('dispatch-auto-dot')
+  const label = document.getElementById('dispatch-auto-label')
+  if(DISPATCH_RULES?.autoDispatch){
+    if(dot)   { dot.style.background='#22c55e' }
+    if(label) { label.textContent='Auto-dispatch on'; label.style.color='#22c55e' }
+  } else {
+    if(dot)   { dot.style.background='#64748b' }
+    if(label) { label.textContent='Manual dispatch'; label.style.color='var(--muted)' }
+  }
 
   // Init day pills — but don't override the "All Days" dropdown default
   initDispatchDayPills()
