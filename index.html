@@ -5615,7 +5615,7 @@ async function loadRunnerRoutes(runnerRow){
     const rid        = runnerRow.id
     const runnerName = ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim()
 
-    // Fetch jobs for this runner (by id or name fallback)
+    // Fetch active jobs for this runner
     const { data: jobs, error } = await _supa
       .from('jobs')
       .select('*')
@@ -5625,21 +5625,61 @@ async function loadRunnerRoutes(runnerRow){
 
     if(error) throw error
 
-    // Fetch homeowner details for each unique email
-    const emails = [...new Set((jobs||[]).map(j=>j.homeowner_email).filter(Boolean))]
+    // Also fetch completed jobs (last 30 days) for stat display
+    const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate()-30)
+    const { data: completedJobs } = await _supa
+      .from('jobs')
+      .select('id, amount, visit_type, scheduled_date, homeowner_email, status')
+      .or(`runner_id.eq.${rid},runner_name.eq."${runnerName}"`)
+      .eq('status', 'complete')
+      .gte('scheduled_date', thirtyDaysAgo.toISOString().slice(0,10))
+      .order('scheduled_date', { ascending: false })
+      .limit(100)
+
+    // Store completed for stats
+    window._rnCompletedJobs = completedJobs || []
+
+    // Update runner stat pills with fresh completed data
+    const safe = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v }
+    const allDone   = (completedJobs||[]).length
+    const monthEarn = (completedJobs||[]).reduce((s,j)=>s+(parseFloat(j.amount)||3.25),0)
+    if(allDone > 0){
+      safe('rn-stat-visits', allDone)
+      safe('rn-stat-month',  '$'+monthEarn.toFixed(2))
+      safe('rn-stat-bins',   allDone)
+    }
+
+    // Fetch homeowner details for ALL unique emails (active + recent completed)
+    const allEmails = [...new Set([...(jobs||[]), ...(completedJobs||[])].map(j=>j.homeowner_email).filter(Boolean))]
     let hwMap = {}
-    if(emails.length){
+    if(allEmails.length){
       const { data: hwRows } = await _supa
         .from('homeowner_signups')
         .select('email, first_name, last_name, street_address, zip_code, bin_location, gate_type, gate_code, pet_info, service_notes')
-        .in('email', emails)
-      ;(hwRows||[]).forEach(h => hwMap[h.email] = h)
+        .in('email', allEmails)
+      ;(hwRows||[]).forEach(h => {
+        hwMap[h.email] = h
+        // Also index by name for fallback lookup
+        const name = ((h.first_name||'')+' '+(h.last_name||'')).trim()
+        if(name) hwMap[name] = h
+      })
     }
 
-    // Attach homeowner data to each job
+    // Helper: resolve homeowner name from email or cache
+    window._rnHwMap = hwMap
+    const hwName = (email) => {
+      const h = hwMap[email]
+      if(h) return ((h.first_name||'')+' '+(h.last_name||'')).trim() || email
+      // Fall back to in-memory HOMEOWNERS array
+      const localHW = (window.HOMEOWNERS||[]).find(x=>x.email===email)
+      return localHW?.name || email?.split('@')[0] || '--'
+    }
+
+    // Attach homeowner data and resolved display name to each job
     const enriched = (jobs||[]).map(j => ({
       ...j,
-      hw: hwMap[j.homeowner_email] || null
+      hw: hwMap[j.homeowner_email] || null,
+      hwDisplayName: hwName(j.homeowner_email)
     }))
 
     // Store enriched jobs for startBatch stop list
@@ -5694,7 +5734,7 @@ async function loadRunnerRoutes(runnerRow){
         <div style="display:flex;align-items:center;gap:8px;padding:4px 0;${i>0?'border-top:1px solid rgba(255,255,255,.05)':''}">
           <div style="width:18px;height:18px;border-radius:50%;background:rgba(99,102,241,.3);color:#a5b4fc;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
           <div style="flex:1">
-            <span style="font-weight:600">${(j.hw?.first_name||'')+' '+(j.hw?.last_name||'')}</span>
+            <span style="font-weight:600">${j.hwDisplayName}</span>
             <span style="color:var(--muted);margin-left:6px">${j.hw?.street_address||'--'}</span>
           </div>
           ${j.hw?.gate_code?`<span style="color:#fbbf24;font-size:10px">🔑 ${j.hw?.gate_code}</span>`:''}
@@ -5765,7 +5805,7 @@ async function loadRunnerRoutes(runnerRow){
           <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:${i<batch.stops.length-1?'1px solid rgba(30,40,64,.5)':'none'}">
             <div style="width:22px;height:22px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
             <div style="flex:1">
-              <div style="font-size:13px;font-weight:600">${(s.hw?.first_name||'')+' '+(s.hw?.last_name||'')}</div>
+              <div style="font-size:13px;font-weight:600">${s.hwDisplayName}</div>
               <div style="font-size:11px;color:var(--muted)">📍 ${s.hw?.street_address||'--'}</div>
               ${s.hw?.gate_code?`<div style="font-size:11px;color:#fbbf24;margin-top:2px">🔑 Gate: ${s.hw?.gate_code}</div>`:''}
               ${s.hw?.pet_info&&s.hw?.pet_info!=='None'?`<div style="font-size:11px;color:#fbbf24;margin-top:2px">🐾 ${s.hw?.pet_info}</div>`:''}
@@ -5999,13 +6039,32 @@ async function completeBatch(batchId){
       })
     }
 
+    // Increment total_stops and total_visits on the runner record in DB
+    if(runnerRow?.id && jobCount > 0){
+      try {
+        const { data: rnData } = await _supa.from('runners').select('total_stops,total_visits').eq('id',runnerRow.id).maybeSingle()
+        const curStops = (rnData?.total_stops||0) + jobCount
+        const curVisits = (rnData?.total_visits||0) + jobCount
+        await _supa.from('runners').update({ total_stops:curStops, total_visits:curVisits, updated_at:new Date().toISOString() }).eq('id',runnerRow.id)
+        // Update in-memory row so stats display immediately
+        if(window._rnRow){ window._rnRow.total_stops = curStops; window._rnRow.total_visits = curVisits }
+        if(window._currentRunnerRow){ window._currentRunnerRow.total_stops = curStops }
+      } catch(e){ console.warn('[BinDash] total_stops increment:', e.message) }
+    }
+
     // AUTO-CREATE BIN IN batch if this was BIN OUT
     if(visitType === 'BIN_OUT' && jobs?.length){
       await _autoCreateBinInBatch(jobs, runnerRow)
     }
 
     showToast(`Route complete ✅ — $${totalEarned} queued for Friday payout`, 'ok', 5000)
+    // Refresh routes AND earnings stats together so dashboard reflects completion immediately
     await loadRunnerRoutes(runnerRow)
+    await loadRNEarnings()
+    // Re-populate dashboard stat pills (visits, earnings, rating, bins moved)
+    if(runnerRow) await populateRNDashboard(runnerRow)
+    // Refresh admin dispatch pipeline if admin has it open (background, non-blocking)
+    try { if(window._livePipelineBatches) loadLiveJobsIntoPipeline() } catch(e){}
   } catch(e){
     showToast('Error: '+String(e?.message||e), 'err')
   }
@@ -6278,6 +6337,9 @@ async function initApp(){
       loadHomeownersFromSupabase()
       loadRunnersFromSupabase()
       loadDispatchRules()
+      // Restore priority runner assignments from localStorage after a short delay
+      // (gives runners time to load from Supabase first)
+      setTimeout(restoreZonePriorityFromStorage, 1500)
     } else if(role === 'rn'){
       setCurrentUser(user)
       go('S-rn-dash')
@@ -8346,13 +8408,51 @@ async function setZonePriorityRunner(zoneId, runnerId){
   const z = ADMIN_ZONES.find(x=>x.id===zoneId)
   const r = RUNNERS.find(x=>x.id===runnerId)
   if(!z||!r) return
-  // Clear existing priority flags for this zone in memory
+
+  // Update in-memory state
   RUNNERS.filter(x=>x.zoneId===zoneId||x.coverageZones?.includes(zoneId)).forEach(x=>{ x.isPriority=false })
-  r.isPriority = true
+  r.isPriority       = true
   z.priorityRunnerId = runnerId
-  showToast(r.name+' set as priority runner for '+z.name+' ✅','ok')
+  z.assignedRunner   = runnerId
+
+  // Persist to Supabase zones table (assigned_runner column only — no priority_runner_id column needed)
+  let savedToDb = false
+  try {
+    const { error } = await _supa.from('zones').update({
+      assigned_runner: runnerId,
+      updated_at:      new Date().toISOString()
+    }).eq('id', zoneId)
+    if(!error) savedToDb = true
+    else console.warn('[Rules] zones update:', error.message)
+  } catch(e){ console.warn('[Rules] setZonePriority DB:', e.message) }
+
+  // Always also persist to localStorage as reliable fallback
+  try {
+    const saved = JSON.parse(localStorage.getItem('bindash_zone_priority')||'{}')
+    saved[zoneId] = runnerId
+    localStorage.setItem('bindash_zone_priority', JSON.stringify(saved))
+  } catch(e){}
+
+  showToast(r.name+' set as priority runner for '+z.name+(savedToDb?' ✅':' ✅ (saved locally)'),'ok')
   renderRulesZoneList()
   renderAdminZones()
+}
+
+// Restore zone priority assignments from localStorage on load (fallback when DB unavailable)
+function restoreZonePriorityFromStorage(){
+  try {
+    const saved = JSON.parse(localStorage.getItem('bindash_zone_priority')||'{}')
+    Object.entries(saved).forEach(([zoneId, runnerId])=>{
+      const z = ADMIN_ZONES.find(x=>x.id===zoneId)
+      const r = RUNNERS.find(x=>x.id===runnerId)
+      if(z && r){
+        RUNNERS.filter(x=>x.zoneId===zoneId||x.coverageZones?.includes(zoneId)).forEach(x=>{ x.isPriority=false })
+        r.isPriority       = true
+        z.priorityRunnerId = runnerId
+        z.assignedRunner   = runnerId
+      }
+    })
+  } catch(e){}
 }
 
 function showAdminSetPriority(zoneId){
@@ -12779,7 +12879,6 @@ async function navCompleteStop(){
 }
 
 async function navFinishRoute(){
-  const runnerRow = window._rnRow
   navRouteActive = false
   navPhase = 'idle'
 
@@ -12789,6 +12888,19 @@ async function navFinishRoute(){
   // Switch to completed tab
   switchRouteTab('completed')
   showToast('Route submitted ✅ Pay queued for Friday', 'ok', 5000)
+
+  // Reload runner's active jobs so dashboard reflects completion
+  try {
+    if(typeof loadRunnerRoutes === 'function') await loadRunnerRoutes()
+  } catch(e){ console.warn('[BinDash] navFinishRoute runner reload:', e.message) }
+
+  // Refresh admin dispatch pipeline so completed route shows immediately
+  try {
+    if(typeof loadLiveJobsIntoPipeline === 'function'){
+      window._livePipelineBatches = null
+      await loadLiveJobsIntoPipeline()
+    }
+  } catch(e){ console.warn('[BinDash] navFinishRoute pipeline refresh:', e.message) }
 }
 
 // Keep startBatch pointing into the active tab flow
@@ -13098,9 +13210,17 @@ async function renderCompletedRoutes(){
         <div style="display:flex;flex-direction:column;gap:5px">
           ${batch.stops.map((s,i)=>{
             const hw = hwMap[s.homeowner_email] || {}
+            // Use hwDisplayName helper: resolved full name, fall back to in-memory HOMEOWNERS, then email prefix
+            const displayName = ((hw.first_name||'')+' '+(hw.last_name||'')).trim()
+              || (window.HOMEOWNERS||[]).find(x=>x.email===s.homeowner_email)?.name
+              || s.homeowner_email?.split('@')[0]
+              || '--'
+            const addr = hw.street_address
+              || (window.HOMEOWNERS||[]).find(x=>x.email===s.homeowner_email)?.address
+              || '--'
             return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:5px 0;border-top:${i>0?'1px solid var(--border)':'none'}">
               <span style="color:#22c55e;font-size:14px">✓</span>
-              <span style="flex:1">${(hw.first_name||'')+' '+(hw.last_name||s.homeowner_email||'--')} · ${hw.street_address||'--'}</span>
+              <span style="flex:1">${displayName} · ${addr}</span>
               <span style="color:var(--green);font-weight:600">$${parseFloat(s.amount||3.25).toFixed(2)}</span>
             </div>`
           }).join('')}
@@ -17067,6 +17187,15 @@ async function loadRunnersFromSupabase(){
     if(useAppFallback){
       appData.forEach((row,i) => RUNNERS.push(toRunner(row, i, true)))
     }
+
+    // Cross-reference zone assigned_runner to set isPriority on the right runner
+    ADMIN_ZONES.forEach(z => {
+      const assigned = z.assignedRunner || z.priorityRunnerId
+      if(!assigned) return
+      const r = RUNNERS.find(x=>x.id===assigned||x.name===assigned||x.email===assigned)
+      if(r) r.isPriority = true
+    })
+
     console.log('[BinDash] Runners loaded:', RUNNERS.length, '-- source:', useAppFallback ? 'applications fallback' : 'runners table')
     updateOverviewCounts()
     renderRunnerList()
@@ -17731,7 +17860,7 @@ function showOfferDetail(){
         return `<div style="display:flex;align-items:flex-start;gap:10px;background:var(--surface2);border-radius:8px;padding:9px 12px">
           <div style="width:22px;height:22px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
           <div style="flex:1">
-            <div style="font-size:13px;font-weight:600">${(hw.first_name||'') + ' ' + (hw.last_name||j.homeowner_email||'--')}</div>
+            <div style="font-size:13px;font-weight:600">${j.hwDisplayName || (hw.first_name||'') + ' ' + (hw.last_name||j.homeowner_email||'--')}</div>
             <div style="font-size:11px;color:var(--muted)">${hw.street_address||'--'} · ${j.service_type||'Recycling'}</div>
             ${hw.gate_code?`<div style="font-size:10px;color:#fbbf24;margin-top:2px">🔑 ${hw.gate_code}</div>`:''}
           </div>
