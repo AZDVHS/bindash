@@ -3804,14 +3804,15 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <!-- AD JOBS -->
         <div class="pg" id="ad-jobs">
           <div class="toolbar">
-            <input placeholder="Search jobs..." id="jobs-search" oninput="filterAdminJobs()" style="width:150px">
+            <input placeholder="Search routes..." id="jobs-search" oninput="filterAdminJobs()" style="width:150px">
             <select id="jobs-status-filter" onchange="filterAdminJobs()" style="width:auto">
               <option value="">All Status</option>
               <option value="offered">Offered</option>
               <option value="accepted">Accepted</option>
               <option value="in_progress">In Progress</option>
               <option value="complete">Complete</option>
-              <option value="declined">Declined</option>
+              <option value="late">Late / Flagged</option>
+              <option value="broadcast">Broadcast</option>
             </select>
             <select id="jobs-type-filter" onchange="filterAdminJobs()" style="width:auto">
               <option value="">All Types</option>
@@ -3819,20 +3820,13 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               <option value="BIN_IN">☀️ Bin In</option>
               <option value="sos">🚨 SOS</option>
             </select>
-            <span class="tc" id="jobs-count">0 jobs</span>
+            <span class="tc" id="jobs-count">0 routes</span>
             <button class="btn btn-ghost btn-sm" onclick="loadAdminJobs()">↺ Refresh</button>
           </div>
-          <!-- Late warning banner -->
+          <!-- Overdue banner — compact summary only -->
           <div id="jobs-late-banner" style="display:none;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:13px;color:#fca5a5"></div>
-          <div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
-            <table><thead><tr>
-              <th>Batch</th><th>Homeowner</th><th>Visit</th><th>Date</th>
-              <th>Runner</th><th>Status</th><th>Pay</th><th></th>
-            </tr></thead>
-            <tbody id="jobs-tbody">
-              <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">Loading jobs...</td></tr>
-            </tbody></table>
-          </div>
+          <!-- Batch route cards -->
+          <div id="jobs-batch-list" style="display:flex;flex-direction:column;gap:10px"></div>
         </div>
 
         <!-- AD DISPATCH -->
@@ -5075,100 +5069,175 @@ async function loadRNInterestList(runnerRow){
 let _adminJobsCache = []
 
 async function loadAdminJobs(){
-  const tbody  = document.getElementById('jobs-tbody')
+  const list   = document.getElementById('jobs-batch-list')
   const banner = document.getElementById('jobs-late-banner')
-  if(tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">Loading...</td></tr>'
-
+  if(list) list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">Loading routes...</div>'
   try {
     const { data: jobs, error } = await _supa
-      .from('jobs').select('*').order('created_at', { ascending: false }).limit(200)
+      .from('jobs').select('*').order('scheduled_date', { ascending: false }).limit(300)
     if(error) throw error
     _adminJobsCache = jobs || []
-
-    // Check for late jobs
-    const now  = new Date()
-    const late = _adminJobsCache.filter(j => {
-      if(!['accepted','in_progress'].includes(j.status)) return false
-      if(!j.scheduled_date) return false
-      const sched = new Date(j.scheduled_date); sched.setHours(23,59,0,0)
-      return now > sched
-    })
-    if(banner){
-      if(late.length){
-        banner.style.display = 'block'
-        banner.innerHTML = `🚨 <strong>${late.length} overdue job${late.length!==1?'s':''}</strong> — accepted but not completed past scheduled date. &nbsp;${late.map(j=>`<span style="background:rgba(239,68,68,.15);padding:2px 8px;border-radius:4px;font-size:11px;margin-left:4px">${j.batch_id||j.id} · ${j.runner_name||'Unassigned'}</span>`).join('')}`
-      } else { banner.style.display = 'none' }
-    }
     filterAdminJobs()
-  } catch(e){
-    if(tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#fca5a5;padding:24px">Error: ${e.message}</td></tr>`
+  } catch(e) {
+    if(list) list.innerHTML = `<div style="text-align:center;padding:40px;color:#fca5a5">Error: ${e.message}</div>`
   }
 }
 
 function filterAdminJobs(){
-  const q       = (document.getElementById('jobs-search')?.value||'').toLowerCase()
-  const status  = document.getElementById('jobs-status-filter')?.value||''
-  const type    = document.getElementById('jobs-type-filter')?.value||''
-  const tbody   = document.getElementById('jobs-tbody')
-  const countEl = document.getElementById('jobs-count')
+  const q      = (document.getElementById('jobs-search')?.value||'').toLowerCase()
+  const status = document.getElementById('jobs-status-filter')?.value||''
+  const type   = document.getElementById('jobs-type-filter')?.value||''
+  const list   = document.getElementById('jobs-batch-list')
+  const countEl= document.getElementById('jobs-count')
+  const banner = document.getElementById('jobs-late-banner')
+  const now    = new Date()
 
-  const filtered = _adminJobsCache.filter(j=>{
-    if(status && j.status!==status) return false
-    if(type   && j.visit_type!==type) return false
+  // Group all jobs into batches
+  const batchMap = {}
+  ;(_adminJobsCache||[]).forEach(j => {
+    const key = j.batch_id || j.id
+    if(!batchMap[key]) {
+      const zone = ADMIN_ZONES.find(z=>z.id===j.zone_id)
+      batchMap[key] = {
+        id: key, batchId: j.batch_id||j.id,
+        date: j.scheduled_date, visitType: j.visit_type,
+        runnerName: j.runner_name, runnerId: j.runner_id,
+        zoneName: zone?.name||'--', zoneId: j.zone_id, jobs: []
+      }
+    }
+    batchMap[key].jobs.push(j)
+  })
+
+  // Compute route-level status
+  Object.values(batchMap).forEach(b => {
+    const statuses = b.jobs.map(j=>j.status)
+    const allComplete  = statuses.every(s=>s==='complete')
+    const anyLate      = statuses.some(s=>s==='late')
+    const anyInProg    = statuses.some(s=>s==='in_progress')
+    const anyAccepted  = statuses.some(s=>s==='accepted')
+    const anyOffered   = statuses.some(s=>['offered','broadcast'].includes(s))
+    const allExpired   = b.jobs.every(j=>j.status==='offered'&&j.offer_expires_at&&new Date(j.offer_expires_at)<now)
+    b.routeStatus = allComplete?'complete':anyLate?'late':anyInProg?'in_progress':anyAccepted?'accepted':allExpired?'expired':anyOffered?'offered':'unassigned'
+    b.completedCount = statuses.filter(s=>s==='complete').length
+    b.totalCount = b.jobs.length
+    b.earnTotal  = (b.totalCount*3.25).toFixed(2)
+    b.isOverdue  = ['accepted','in_progress','late'].includes(b.routeStatus)&&b.date&&now>new Date(b.date+'T23:59:00')
+  })
+
+  // Filter
+  const allBatches = Object.values(batchMap).filter(b => {
+    if(status){
+      if(status==='late' && !['late','expired'].includes(b.routeStatus)) return false
+      if(status!=='late' && b.routeStatus!==status) return false
+    }
+    if(type && b.visitType!==type) return false
     if(q){
-      // Search by name, email, address, runner
-      const hw = HOMEOWNERS.find(h=>h.email===j.homeowner_email)
-      const searchStr = [j.homeowner_email, hw?.name, hw?.address, j.runner_name, j.batch_id].join(' ').toLowerCase()
-      if(!searchStr.includes(q)) return false
+      const str = [b.batchId,b.runnerName,b.zoneName,
+        ...b.jobs.map(j=>{const h=HOMEOWNERS.find(x=>x.email===j.homeowner_email);return h?.name||j.homeowner_email||''})
+      ].join(' ').toLowerCase()
+      if(!str.includes(q)) return false
     }
     return true
   })
-  if(countEl) countEl.textContent = filtered.length+' job'+(filtered.length!==1?'s':'')
-  if(!filtered.length){ if(tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">No jobs match filter</td></tr>'; return }
+  allBatches.sort((a,b)=>{if(a.isOverdue&&!b.isOverdue)return -1;if(!a.isOverdue&&b.isOverdue)return 1;return(b.date||'')>(a.date||'')?1:-1})
 
-  const sc = { offered:'#f59e0b', accepted:'#6366f1', in_progress:'#06d6a0', complete:'#22c55e', declined:'#ef4444', broadcast:'#3b82f6', unassigned:'#64748b', late:'#ef4444' }
-  const si = { offered:'📬', accepted:'✅', in_progress:'🔄', complete:'✓', declined:'✕', broadcast:'📡', unassigned:'⚠️', late:'🚨' }
-  const now = new Date()
+  if(countEl) countEl.textContent = allBatches.length+' route'+(allBatches.length!==1?'s':'')
 
-  tbody.innerHTML = filtered.map(j=>{
-    const hw = HOMEOWNERS.find(h=>h.email===j.homeowner_email)
-    const hwName    = hw?.name || (j.homeowner_email?.split('@')[0] || '--')
-    const hwAddr    = hw?.address ? hw.address + (hw.zip ? ', '+hw.zip : '') : (j.homeowner_email || '--')
-    const late      = ['accepted','in_progress'].includes(j.status) && j.scheduled_date && now > new Date(j.scheduled_date+'T23:59:00')
-    const offerExpired = j.status==='offered' && j.offer_expires_at && new Date(j.offer_expires_at) < now
-    const offerExpiresIn = j.status==='offered' && j.offer_expires_at && new Date(j.offer_expires_at) > now
-      ? Math.round((new Date(j.offer_expires_at)-now)/60000) : null
-    const col  = offerExpired ? '#ef4444' : (sc[j.status]||'#64748b')
-    const icon = si[j.status]||'·'
-    const dt   = j.scheduled_date ? new Date(j.scheduled_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '--'
-    const runnerDisplay = j.runner_name
-      ? `<span onclick="event.stopPropagation();_adminNavToRunner('${j.runner_name}')" style="color:var(--cyan);cursor:pointer;font-weight:600">${j.runner_name}</span>`
-      : `<span style="color:var(--muted)">Unassigned</span>`
+  // Overdue banner — compact count only
+  const overdueCount = Object.values(batchMap).filter(b=>b.isOverdue).length
+  if(banner){
+    if(overdueCount){
+      banner.style.display='block'
+      banner.innerHTML=`🚨 <strong>${overdueCount} overdue route${overdueCount!==1?'s':''}</strong> — accepted but not completed past scheduled date. <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fca5a5;margin-left:8px" onclick="document.getElementById('jobs-status-filter').value='late';filterAdminJobs()">View overdue →</button>`
+    } else banner.style.display='none'
+  }
 
-    return `<tr style="${late?'background:rgba(239,68,68,.06)':offerExpired?'background:rgba(239,68,68,.03)':''};cursor:pointer" onclick="_adminNavToHW('${j.homeowner_email}')">
-      <td style="padding:10px 8px">
-        <div style="font-size:13px;font-weight:700;color:${offerExpired?'#ef4444':'var(--text)'}">${hwName}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:1px">📍 ${hwAddr}</div>
-      </td>
-      <td><span class="${j.visit_type==='BIN_OUT'?'vt-out':'vt-in'}">${j.visit_type==='BIN_OUT'?'🌙 Out':'☀️ In'}</span></td>
-      <td style="font-size:12px">
-        ${dt}
-        ${late?'<div style="color:#ef4444;font-size:10px;font-weight:700">OVERDUE</div>':''}
-      </td>
-      <td style="font-size:12px">${runnerDisplay}</td>
-      <td>
-        <span style="background:${col}22;color:${col};font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap">${icon} ${j.status||'--'}</span>
-        ${offerExpired?`<div onclick="event.stopPropagation();showExpiredJobActions(this)" data-jobid="${j.id}" data-email="${(j.homeowner_email||'').replace(/"/g,'&quot;')}" data-runner="${(j.runner_name||'').replace(/"/g,'&quot;')}" data-batch="${j.batch_id||j.id}" style="color:#ef4444;font-size:10px;font-weight:800;margin-top:2px;cursor:pointer;text-decoration:underline;text-underline-offset:2px">⚠️ ALL TIMERS EXPIRED — Fix →</div>`:''}
-        ${offerExpiresIn!==null?`<div style="color:#fbbf24;font-size:10px;margin-top:2px">⏳ ${offerExpiresIn}m left</div>`:''}
-      </td>
-      <td style="font-size:12px;color:var(--green);font-weight:600">$${parseFloat(j.amount||3.25).toFixed(2)}</td>
-      <td style="white-space:nowrap">
-        ${['accepted','in_progress'].includes(j.status)?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fbbf24" onclick="event.stopPropagation();adminMarkJobLate('${j.id}')">⚠️ Flag</button>`:''}
-        ${j.status==='late'?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#06d6a0" onclick="event.stopPropagation();adminUnflagJob('${j.id}')">↩ Unflag</button>`:''}
-        <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#ef4444;padding:3px 6px" onclick="event.stopPropagation();confirmDeleteJob('${j.id}','${(j.homeowner_email||'').replace(/'/g,'')}')" title="Delete">🗑</button>
-      </td>
-    </tr>`
+  if(!allBatches.length){
+    if(list) list.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">No routes match filter</div>'
+    return
+  }
+
+  const sc={complete:'#22c55e',accepted:'#6366f1',in_progress:'#06d6a0',offered:'#f59e0b',broadcast:'#3b82f6',late:'#ef4444',expired:'#ef4444',unassigned:'#64748b'}
+  const si={complete:'✓',accepted:'✅',in_progress:'🔄',offered:'📬',broadcast:'📡',late:'🚨',expired:'⚠️',unassigned:'⚠️'}
+  const sl={complete:'Complete',accepted:'Accepted',in_progress:'In Progress',offered:'Offer Sent',broadcast:'Broadcast',late:'Flagged Late',expired:'All Timers Expired',unassigned:'Unassigned'}
+
+  if(list) list.innerHTML = allBatches.map(b=>{
+    const col=sc[b.routeStatus]||'#64748b', icon=si[b.routeStatus]||'·', lbl=sl[b.routeStatus]||b.routeStatus
+    const isBinIn=b.visitType==='BIN_IN'
+    const dt=b.date?new Date(b.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}):'--'
+    const pct=b.totalCount?Math.round(b.completedCount*100/b.totalCount):0
+    const runner=RUNNERS.find(r=>r.id===b.runnerId||r.name===b.runnerName)
+    const ri=(b.runnerName||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)
+    const rgba=col==='#22c55e'?'34,197,94':col==='#ef4444'?'239,68,68':col==='#06d6a0'?'6,214,160':col==='#6366f1'?'99,102,241':col==='#f59e0b'?'245,158,11':'59,130,246'
+
+    const stopRows=b.jobs.map((j,idx)=>{
+      const hw=HOMEOWNERS.find(h=>h.email===j.homeowner_email)
+      const hwName=hw?.name||j.homeowner_email?.split('@')[0]||'--'
+      const hwAddr=hw?.address?(hw.address+(hw.zip?', '+hw.zip:'')):'--'
+      const jCol=sc[j.status]||'#64748b', jIcon=si[j.status]||'·'
+      const exp=j.status==='offered'&&j.offer_expires_at&&new Date(j.offer_expires_at)<now
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;${idx<b.jobs.length-1?'border-bottom:1px solid var(--border)':''}">
+        <div style="width:20px;height:20px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${idx+1}</div>
+        <div style="flex:1;min-width:0;cursor:pointer" onclick="_adminNavToHW('${j.homeowner_email}')">
+          <div style="font-size:13px;font-weight:700;color:var(--cyan)">${hwName}</div>
+          <div style="font-size:11px;color:var(--muted)">📍 ${hwAddr}</div>
+        </div>
+        <span style="background:${jCol}22;color:${jCol};font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px;white-space:nowrap">${jIcon} ${j.status}</span>
+        ${exp?`<div onclick="event.stopPropagation();showExpiredJobActions(this)" data-jobid="${j.id}" data-email="${j.homeowner_email||''}" data-runner="${j.runner_name||''}" data-batch="${j.batch_id||j.id}" style="color:#ef4444;font-size:10px;font-weight:800;cursor:pointer;text-decoration:underline;white-space:nowrap">⚠️ Fix →</div>`:''}
+        ${j.status==='accepted'||j.status==='in_progress'?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fbbf24;padding:2px 6px" onclick="adminMarkJobLate('${j.id}')">⚠️</button>`:''}
+        ${j.status==='late'?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#06d6a0;padding:2px 6px" onclick="adminUnflagJob('${j.id}')">↩</button>`:''}
+        <span style="font-size:12px;color:var(--green);font-weight:600;flex-shrink:0">$${parseFloat(j.amount||3.25).toFixed(2)}</span>
+        <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#ef4444;padding:2px 5px" onclick="confirmDeleteJob('${j.id}','${(j.homeowner_email||'').replace(/'/g,'')}')">🗑</button>
+      </div>`
+    }).join('')
+
+    return `<div style="border:1px solid rgba(${rgba},.25);border-left:4px solid ${col};border-radius:10px;overflow:hidden;background:var(--surface)">
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer" onclick="toggleJobBatch('${b.id}')">
+        <span class="${isBinIn?'vt-in':'vt-out'}" style="font-size:11px;flex-shrink:0">${isBinIn?'☀️ BIN IN':'🌙 BIN OUT'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:13px;font-weight:700">${b.zoneName}</span>
+            <span style="font-size:10px;color:var(--muted);font-family:monospace">${b.batchId.slice(0,20)}</span>
+            ${b.isOverdue?'<span style="background:rgba(239,68,68,.15);color:#ef4444;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px">OVERDUE</span>':''}
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">📅 ${dt} &nbsp;·&nbsp; ${b.completedCount}/${b.totalCount} stops complete</div>
+        </div>
+        ${b.runnerName?`<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          <div style="width:26px;height:26px;border-radius:50%;background:${runner?.color||'var(--cyan)'};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#07090f">${ri}</div>
+          <span style="font-size:12px;font-weight:600;color:var(--cyan);cursor:pointer" onclick="event.stopPropagation();_adminNavToRunner('${b.runnerName}')">${b.runnerName}</span>
+        </div>`:'<span style="font-size:12px;color:var(--muted);flex-shrink:0">Unassigned</span>'}
+        <span style="background:${col}22;color:${col};font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;flex-shrink:0;white-space:nowrap">${icon} ${lbl}</span>
+        <div style="text-align:right;flex-shrink:0;min-width:56px">
+          <div style="font-size:14px;font-weight:700;color:var(--green)">$${b.earnTotal}</div>
+          <div style="height:4px;background:var(--surface3);border-radius:99px;margin-top:4px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:${col};border-radius:99px"></div>
+          </div>
+        </div>
+        <span id="jb-chevron-${b.id}" style="color:var(--muted);font-size:12px;transition:transform .2s;flex-shrink:0">▼</span>
+      </div>
+      <div id="jb-detail-${b.id}" style="display:none;border-top:1px solid var(--border)">
+        <div style="padding:8px 16px;background:var(--surface2)">${stopRows}</div>
+        <div style="display:flex;gap:8px;align-items:center;padding:10px 16px;background:var(--surface2);border-top:1px solid var(--border);flex-wrap:wrap">
+          <span style="font-size:10px;color:var(--muted);font-family:monospace">${b.batchId}</span>
+          ${b.routeStatus==='expired'||b.routeStatus==='unassigned'?`<button class="btn btn-outline btn-sm" style="font-size:11px" onclick="showExpiredJobActions(this)" data-jobid="${b.jobs[0]?.id||''}" data-email="${b.jobs[0]?.homeowner_email||''}" data-runner="${b.runnerName||''}" data-batch="${b.batchId}">📡 Re-broadcast Route</button>`:''}
+          ${['accepted','in_progress','offered'].includes(b.routeStatus)?`<button class="btn btn-ghost btn-sm" style="font-size:11px;color:#fbbf24" onclick="flagBatchLate('${b.batchId}')">⚠️ Flag All Late</button>`:''}
+        </div>
+      </div>
+    </div>`
   }).join('')
+}
+
+function toggleJobBatch(id){
+  const d=document.getElementById('jb-detail-'+id), c=document.getElementById('jb-chevron-'+id)
+  if(!d)return; const open=d.style.display==='block'
+  d.style.display=open?'none':'block'; if(c)c.style.transform=open?'':'rotate(180deg)'
+}
+
+async function flagBatchLate(batchId){
+  try{
+    await _supa.from('jobs').update({status:'late',updated_at:new Date().toISOString()}).eq('batch_id',batchId)
+    showToast('Batch flagged as late','info'); await loadAdminJobs()
+  }catch(e){showToast('Error: '+e.message,'err')}
 }
 
 function _adminNavToHW(email){
