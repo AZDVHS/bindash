@@ -3673,7 +3673,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <span class="tc" id="runner-count">2 active runners</span>
             <button class="btn btn-cyan btn-sm" onclick="showAddRunner()">+ Add Runner</button>
           </div>
-          <div id="runner-card-list" style="display:grid;grid-template-columns:1fr 1fr;gap:12px"></div>
+          <div id="runner-card-list" style="display:flex;flex-direction:column;gap:8px"></div>
         </div>
 
         <!-- AD PAYMENTS -->
@@ -7944,122 +7944,136 @@ const VISIT_LABEL = {
 
 function renderRunnerCard(r){
   const [bg,col,lbl] = STATUS_BADGE[r.status] || STATUS_BADGE.AVAILABLE
-  const inactive = r.status === 'INACTIVE'
-  const tierColors = { standard:'var(--muted)', builder:'#6ee7b7', growth:'#a5b4fc', elite:'#fbbf24' }
-  const tierIcons  = { standard:'', builder:'🌱', growth:'📈', elite:'⭐' }
-  const tier     = r.loyaltyTier || 'standard'
-  const tierCol  = tierColors[tier] || 'var(--muted)'
-  const tierIcon = tierIcons[tier] || ''
-  const rate     = r.loyaltyRate || 3.25
-  const refBadge = r.referredBy
-    ? `<span class="badge" style="background:rgba(139,92,246,.12);color:#c4b5fd;font-size:9px">🎯 via ${r.referredBy.split(' ')[0]}</span>`
-    : ''
-
-  // Route stats from jobs cache
-  const rJobs = (_adminJobsCache||[]).filter(j=>
-    j.runner_name === r.name || (r.email && j.runner_id === r.id)
-  )
+  const inactive  = r.status === 'INACTIVE'
+  const tierColors= { standard:'var(--muted)', builder:'#6ee7b7', growth:'#a5b4fc', elite:'#fbbf24' }
+  const tier      = r.loyaltyTier || 'standard'
+  const tierCol   = tierColors[tier] || 'var(--muted)'
+  const rate      = r.loyaltyRate || 3.25
+  const rJobs     = (_adminJobsCache||[]).filter(j=>j.runner_name===r.name||(r.email&&j.runner_id===r.id))
   const completed = rJobs.filter(j=>j.status==='complete').length
   const active    = rJobs.filter(j=>['offered','accepted','in_progress'].includes(j.status)).length
-  const declined  = rJobs.filter(j=>j.status==='declined').length
   const earnings  = rJobs.filter(j=>j.status==='complete').reduce((s,j)=>s+(parseFloat(j.amount)||3.25),0)
-  const zoneNames = (r.coverageZones?.length ? r.coverageZones : (r.zoneId?[r.zoneId]:[])).map(zid=>{
-    const z=ADMIN_ZONES.find(x=>x.id===zid); return z?.name||''
-  }).filter(Boolean)
+  const zoneNames = (r.coverageZones?.length?r.coverageZones:(r.zoneId?[r.zoneId]:[])).map(zid=>{const z=ADMIN_ZONES.find(x=>x.id===zid);return z?.name||''}).filter(Boolean)
+  const statusCol = r.status==='AVAILABLE'?'#22c55e':r.status==='ON_ROUTE'?'#06d6a0':r.status==='OFF_DUTY'?'#f59e0b':'#64748b'
+  const borderCol = inactive?'#64748b':statusCol
+  const rSafeName = r.name.replace(/'/g,'')
+  const refCodeHtml = r.ownRefCode
+    ? '<span style="font-family:\'DM Mono\',monospace;font-size:11px;color:var(--cyan)">'+r.ownRefCode+'</span>'
+      +' <button onclick="navigator.clipboard.writeText(\''+r.ownRefCode+'\');showToast(\'Copied\',\'ok\')"'
+      +' style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px">📋</button>'
+    : '<span style="color:var(--muted)">Not assigned</span>'
 
-  return `<div class="cc" id="rcard-${r.id}" style="${inactive?'opacity:.55':''}">
-    <div class="cc-head" onclick="toggleRunnerExpand('${r.id}')" style="cursor:pointer">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div class="cc-av" style="background:${r.color}">${r.initials}</div>
-        <div>
-          <div class="cc-nm">${r.name} ${refBadge}</div>
-          <div class="cc-id">${r.email}${r.zip ? ' · ZIP '+r.zip : ''}</div>
-          <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
-            <span style="font-size:10px;color:var(--muted)">✓ ${completed} done</span>
-            ${active ? `<span style="font-size:10px;color:#fbbf24">⏳ ${active} active</span>` : ''}
-            ${declined ? `<span style="font-size:10px;color:#ef4444">✕ ${declined} declined</span>` : ''}
-            <span style="font-size:10px;color:var(--green)">$${earnings.toFixed(2)} earned</span>
-            ${r.totalReferrals > 0 ? `<span style="font-size:10px;background:rgba(139,92,246,.15);color:#c4b5fd;border-radius:4px;padding:1px 6px;font-weight:600">🎯 ${r.totalReferrals} referral${r.totalReferrals!==1?'s':''}</span>` : ''}
-          </div>
+  const activityHtml = rJobs.slice(0,5).length ? (
+    '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Recent activity</div>'
+    + rJobs.slice(0,5).map(j=>{
+        const jc={offered:'#fbbf24',accepted:'#6366f1',in_progress:'#06d6a0',complete:'#22c55e',declined:'#ef4444'}
+        const dt=j.scheduled_date?new Date(j.scheduled_date+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}):'--'
+        const hw2=HOMEOWNERS.find(h=>h.email===j.homeowner_email)
+        const hwName=hw2?.name||j.homeowner_email?.split('@')[0]||'--'
+        const vi=j.visit_type==='BIN_IN'?'☀️':j.visit_type==='BIN_OUT'?'🌙':'📦'
+        return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">'
+          +'<span style="background:'+((jc[j.status]||'#64748b'))+'22;color:'+(jc[j.status]||'#64748b')+';border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;flex-shrink:0">'+j.status+'</span>'
+          +'<span style="flex-shrink:0">'+vi+'</span>'
+          +'<span style="flex:1;font-weight:600;cursor:pointer;color:var(--cyan)" onclick="_adminNavToHW(\''+j.homeowner_email+'\')">'+hwName+'</span>'
+          +'<span style="color:var(--muted);font-size:10px">'+dt+'</span>'
+          +'<span style="color:var(--green);font-weight:600">$'+parseFloat(j.amount||3.25).toFixed(2)+'</span>'
+          +'</div>'
+      }).join('')
+    + (rJobs.length>5?'<div style="font-size:11px;color:var(--muted);text-align:center;padding-top:6px">+'+(rJobs.length-5)+' more</div>':'')
+  ) : '<div style="font-size:12px;color:var(--muted)">No job history yet</div>'
+
+  return `<div style="border:1px solid rgba(255,255,255,.06);border-left:4px solid ${borderCol};border-radius:10px;overflow:hidden;background:var(--surface);${inactive?'opacity:.6':''}">
+    <!-- HEADER -->
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer" onclick="toggleRunnerExpand('${r.id}')">
+      <div style="width:34px;height:34px;border-radius:50%;background:${r.color||'var(--cyan)'};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#07090f;flex-shrink:0">${r.initials}</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+          <span style="font-size:14px;font-weight:700">${r.name}</span>
+          ${r.totalReferrals>0?'<span style="background:rgba(139,92,246,.15);color:#c4b5fd;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px">🎯 '+r.totalReferrals+' referral'+(r.totalReferrals!==1?'s':'')+'</span>':''}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.email} · ZIP ${r.zip||'--'}</div>
+        <div style="display:flex;gap:10px;margin-top:4px;font-size:11px;flex-wrap:wrap">
+          <span style="color:#22c55e">✓ ${completed} done</span>
+          ${active?'<span style="color:#fbbf24">⏳ '+active+' active</span>':''}
+          <span style="color:var(--green)">$${earnings.toFixed(2)} earned</span>
+          <span style="color:var(--muted)">${VISIT_LABEL[r.visitType]||r.visitType||'Both'}</span>
         </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <span class="badge" style="background:${bg};color:${col}">${lbl}</span>
-        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();showRnEdit('${r.id}')">✏️ Edit</button>
-        <button class="btn btn-ghost btn-sm" style="color:#ef4444;padding:4px 7px" onclick="event.stopPropagation();confirmRemoveRunner('${r.id}','${r.name}')">✕</button>
-        <span style="font-size:16px;color:var(--muted)" id="rcard-chevron-${r.id}">›</span>
+      <!-- Zone pills -->
+      <div style="display:flex;gap:4px;flex-wrap:wrap;max-width:140px">
+        ${zoneNames.slice(0,2).map(n=>'<span style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:99px;padding:1px 8px;font-size:10px;color:#a5b4fc">'+n.split(' ')[0]+'</span>').join('')}
+        ${zoneNames.length>2?'<span style="font-size:10px;color:var(--muted)">+'+(zoneNames.length-2)+'</span>':''}
+        ${!zoneNames.length?'<span style="font-size:10px;color:#f59e0b">⚠️ No zone</span>':''}
       </div>
+      <span style="background:${bg};color:${col};font-size:10px;font-weight:700;padding:2px 9px;border-radius:99px;flex-shrink:0">${lbl}</span>
+      <div style="display:flex;gap:5px;flex-shrink:0">
+        <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="event.stopPropagation();showRnEdit('${r.id}')">✏️ Edit</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444;padding:4px 7px" onclick="event.stopPropagation();confirmRemoveRunner('${r.id}','${rSafeName}')">✕</button>
+      </div>
+      <span id="rcard-chevron-${r.id}" style="font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0">▼</span>
     </div>
-    <div id="rcard-detail-${r.id}" style="display:none;border-top:1px solid var(--border);padding:14px">
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;text-align:center">
-        <div style="background:var(--surface2);border-radius:8px;padding:10px">
-          <div style="font-size:18px;font-weight:800;color:#22c55e">${completed}</div>
-          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Completed</div>
-        </div>
-        <div style="background:var(--surface2);border-radius:8px;padding:10px">
-          <div style="font-size:18px;font-weight:800;color:#fbbf24">${active}</div>
-          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Active</div>
-        </div>
-        <div style="background:var(--surface2);border-radius:8px;padding:10px">
-          <div style="font-size:18px;font-weight:800;color:var(--cyan)">${r.rating||0}★</div>
-          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Rating</div>
-        </div>
-        <div style="background:var(--surface2);border-radius:8px;padding:10px">
-          <div style="font-size:18px;font-weight:800;color:var(--green)">$${earnings.toFixed(0)}</div>
-          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Earned</div>
-        </div>
-      </div>
 
-      <div class="cc-grid">
-        <div class="dl"><div class="dl-l">Zones</div><div style="display:flex;flex-direction:column;gap:3px">
-          ${zoneNames.length ? zoneNames.map(n=>`<span style="font-size:12px">${n}</span>`).join('') : '<span style="color:#f59e0b;font-size:11px">⚠️ No zones</span>'}
-        </div></div>
-        <div class="dl"><div class="dl-l">Visit Type</div><div>${VISIT_LABEL[r.visitType]}</div></div>
-        <div class="dl"><div class="dl-l">Vehicle</div><div>${r.vehicle}</div></div>
-        <div class="dl"><div class="dl-l">Loyalty</div>
-          <div style="display:flex;align-items:center;gap:6px">
-            <span style="color:${tierCol};font-weight:700;font-size:12px">${tierIcon} ${tier.charAt(0).toUpperCase()+tier.slice(1)}</span>
-            <span style="color:var(--muted);font-size:11px">$${rate.toFixed(2)}/stop</span>
-            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px" onclick="showEditLoyalty('${r.id}')">Edit</button>
+    <!-- EXPANDED -->
+    <div id="rcard-detail-${r.id}" style="display:none;border-top:1px solid var(--border)">
+      <div style="padding:12px 14px;background:var(--surface2)">
+        <!-- Stat pills -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+          <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:18px;font-weight:700;color:#22c55e">${completed}</div>
+            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Completed</div>
+          </div>
+          <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:18px;font-weight:700;color:#fbbf24">${active}</div>
+            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Active</div>
+          </div>
+          <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:18px;font-weight:700;color:var(--cyan)">${r.rating||0}★</div>
+            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Rating</div>
+          </div>
+          <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:18px;font-weight:700;color:var(--green)">$${earnings.toFixed(0)}</div>
+            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Earned</div>
           </div>
         </div>
-        <div class="dl"><div class="dl-l">Ref Code</div>
-          <div style="display:flex;align-items:center;gap:6px">
-            ${r.ownRefCode ? `<span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--cyan);background:rgba(6,214,160,.08);border:1px solid rgba(6,214,160,.15);border-radius:5px;padding:2px 7px">${r.ownRefCode}</span>
-              <button onclick="navigator.clipboard.writeText('${r.ownRefCode}');showToast('Copied','ok')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px">📋</button>` : '<span style="color:var(--muted);font-size:11px">Not assigned</span>'}
-          </div>
-        </div>
-        <div class="dl"><div class="dl-l">Referrals</div>
+
+        <!-- Details grid -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">
           <div>
-            <div style="font-size:13px;font-weight:700;color:${r.totalReferrals>0?'#c4b5fd':'var(--muted)'}">${r.totalReferrals||0} HO${(r.totalReferrals||0)!==1?'s':''} referred</div>
-            ${r.totalReferrals>0?`<div style="font-size:10px;color:var(--muted);margin-top:2px">$${((r.totalReferrals||0)*10).toFixed(0)} in referral bonuses earned</div>`:''}
+            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Runner info</div>
+            <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Zones</span><span>${zoneNames.join(', ')||'⚠️ None'}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Visit type</span><span>${VISIT_LABEL[r.visitType]||'Both'}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Vehicle</span><span>${r.vehicle||'--'}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">ZIP</span><span>${r.zip||'--'}</span></div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Loyalty & referrals</div>
+            <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Tier</span><span style="color:${tierCol};font-weight:600">${tier.charAt(0).toUpperCase()+tier.slice(1)} · $${rate.toFixed(2)}/stop</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Ref code</span>
+                <span>${refCodeHtml}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">HOs referred</span><span style="color:#c4b5fd">${r.totalReferrals||0} · $${((r.totalReferrals||0)*10).toFixed(0)} earned</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Referred by</span><span>${r.referredBy||'--'}</span></div>
+            </div>
           </div>
         </div>
-        <div class="dl"><div class="dl-l">Status</div><div>${inactive
-          ? `<button class="btn btn-outline btn-sm" style="font-size:10px" onclick="reactivateRunner('${r.id}')">Reactivate</button>`
-          : `<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#f59e0b" onclick="deactivateRunner('${r.id}')">Deactivate</button>`
-        }</div></div>
+
+        <!-- Recent activity -->
+        ${activityHtml}
+
+        <!-- Actions -->
+        <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="showRnEdit('${r.id}')">✏️ Edit runner</button>
+          <button class="btn btn-outline btn-sm" onclick="showEditLoyalty('${r.id}')">⭐ Edit loyalty</button>
+          <button class="btn btn-outline btn-sm" onclick="showZoneCoverageEdit('${r.id}')">📍 Edit zones</button>
+          ${inactive
+            ?'<button class="btn btn-outline btn-sm" style="color:#22c55e;border-color:#22c55e" onclick="reactivateRunner(\''+r.id+'\')" >▶ Reactivate</button>'
+            :'<button class="btn btn-ghost btn-sm" style="color:#f59e0b" onclick="deactivateRunner(\''+r.id+'\')" >⏸ Deactivate</button>'}
+          <button class="btn btn-ghost btn-sm" style="color:#ef4444;margin-left:auto" onclick="confirmRemoveRunner('${r.id}','${rSafeName}')">🗑 Remove</button>
+        </div>
       </div>
-      ${rJobs.length ? `
-      <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
-        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Recent Activity</div>
-        ${rJobs.slice(0,5).map(j=>{
-          const sc={offered:'#fbbf24',accepted:'#6366f1',in_progress:'#06d6a0',complete:'#22c55e',declined:'#ef4444'}
-          const dt=j.scheduled_date?new Date(j.scheduled_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'--'
-          // Resolve homeowner name from HOMEOWNERS array, fall back to first part of email
-          const hw = HOMEOWNERS.find(h=>h.email===j.homeowner_email)
-          const hwLabel = hw?.name || (j.homeowner_email?.split('@')[0]||'--')
-          const visitIcon = j.visit_type==='BIN_IN'?'☀️':j.visit_type==='BIN_OUT'?'🌙':'📦'
-          return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">
-            <span style="background:${sc[j.status]||'#64748b'}22;color:${sc[j.status]||'#64748b'};border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;flex-shrink:0">${j.status}</span>
-            <span style="font-size:13px;flex-shrink:0">${visitIcon}</span>
-            <span style="flex:1;color:var(--text);font-weight:600">${hwLabel}</span>
-            <span style="color:var(--muted);font-size:10px">${dt}</span>
-            <span style="color:var(--green);font-weight:600">$${parseFloat(j.amount||3.25).toFixed(2)}</span>
-          </div>`
-        }).join('')}
-        ${rJobs.length > 5 ? `<div style="font-size:11px;color:var(--muted);text-align:center;padding-top:6px">+${rJobs.length-5} more jobs</div>` : ''}
-      </div>` : ''}
     </div>
   </div>`
 }
@@ -8070,7 +8084,8 @@ function toggleRunnerExpand(rId){
   if(!detail) return
   const open = detail.style.display === 'block'
   detail.style.display = open ? 'none' : 'block'
-  if(chevron) chevron.textContent = open ? '›' : '⌄'
+  if(chevron) chevron.style.transform = open ? '' : 'rotate(180deg)'
+  if(!open && !_adminJobsCache?.length) loadAdminJobs()
 }
 
 function renderRunnerList(){
@@ -8171,6 +8186,7 @@ function rejectR(id, name){
 function showRnEdit(rId){
   const r = RUNNERS.find(x=>x.id===rId)
   if(!r) return
+  const rSafeName = r.name.replace(/'/g,'')
   const activeZones = ADMIN_ZONES.filter(z=>z.status!=='inactive')
   const coverage = r.coverageZones?.length ? r.coverageZones : (r.zoneId ? [r.zoneId] : [])
 
@@ -8229,7 +8245,7 @@ function showRnEdit(rId){
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
-    <button class="btn btn-red btn-sm" onclick="confirmRemoveRunner('${r.id}','${r.name}');closeM()">🗑 Remove</button>
+    <button class="btn btn-red btn-sm" onclick="confirmRemoveRunner('${r.id}','${rSafeName}');closeM()">🗑 Remove</button>
     <button class="btn btn-cyan" onclick="saveRnEdit('${r.id}')">Save Changes</button>
   </div>`
   openM()
@@ -10859,89 +10875,91 @@ function getHWDayLabel(hw){
 }
 
 function renderHomeownerCard(hw){
-  const runner = RUNNERS.find(r=>r.id===hw.assignedRunner)
-  const zone = getHWZoneName(hw)
-  const statusColors = { active:['#22c55e22','#22c55e','● Active'], paused:['rgba(245,158,11,.15)','#f59e0b','⏸ Paused'], inactive:['rgba(100,100,100,.15)','#666','○ Inactive'] }
-  const [sbg,scol,slbl] = statusColors[hw.status] || statusColors.active
+  const runner   = RUNNERS.find(r=>r.id===hw.assignedRunner)
+  const zone     = getHWZoneName(hw)
+  const statusColors = { active:['#22c55e','● Active'], paused:['#f59e0b','⏸ Paused'], inactive:['#64748b','○ Inactive'] }
+  const [scol,slbl] = statusColors[hw.status] || statusColors.active
+  const hwJobs   = (_adminJobsCache||[]).filter(j=>j.homeowner_email===hw.email)
+  const completed= hwJobs.filter(j=>j.status==='complete').length
+  const activeJob= hwJobs.find(j=>['offered','accepted','in_progress'].includes(j.status))
+  const totalPaid= hwJobs.filter(j=>j.status==='complete').reduce((s,j)=>s+(parseFloat(j.amount)||3.25),0)
+  const planLabels={ plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans · $44.99/mo', plan_c:'Split · $54.99/mo',
+    oan_a:'OAN 1 Can · $19.99+usage', oan_b:'OAN 2 Cans · $19.99+usage', oan_c:'OAN Split · $19.99+usage' }
+  const mrr = hw.plan==='plan_b'?44.99:hw.plan==='plan_c'?54.99:hw.plan?.startsWith('oan')?19.99:34.99
+  const schedLabel = hw.service==='SPLIT'
+    ? `♻️ ${hw.dayRecycling||'--'} / 🗑️ ${hw.dayWaste||'--'}`
+    : hw.day||'--'
+  const hasAlerts = (hw.gate&&hw.gate!=='No gate'&&hw.gate!=='--') || (hw.pets&&hw.pets!=='None'&&hw.pets!=='--')
+  const hwSafeName = hw.name.replace(/'/g,'')
 
-  // Route stats
-  const hwJobs = (_adminJobsCache||[]).filter(j=>j.homeowner_email===hw.email)
-  const completed = hwJobs.filter(j=>j.status==='complete').length
-  const activeJob = hwJobs.find(j=>['offered','accepted','in_progress'].includes(j.status))
-  const totalPaid = hwJobs.filter(j=>j.status==='complete').reduce((s,j)=>s+(parseFloat(j.amount)||3.25),0)
-
-  const planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split · $54.99/mo',
-    oan_a:'Bin Out As Needed — 1 Can · $19.99/mo+usage', oan_b:'Bin Out As Needed — 2 Cans Same Day · $19.99/mo+usage', oan_c:'Bin Out As Needed — 2 Cans Split · $19.99/mo+usage' }
-
-  return `<div class="cc" id="hwcard-${hw.id}">
-    <div class="cc-head" onclick="toggleHWExpand('${hw.id}')" style="cursor:pointer">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div class="cc-av" style="background:${hw.color}">${hw.initials}</div>
-        <div>
-          <div class="cc-nm">${hw.name}</div>
-          <div class="cc-id">${hw.email}</div>
-          <div style="display:flex;gap:8px;margin-top:3px;flex-wrap:wrap">
-            <span style="font-size:10px;color:var(--muted)">${zone}</span>
-            ${activeJob ? `<span style="font-size:10px;color:#fbbf24">⏳ Route active</span>` : ''}
-            <span style="font-size:10px;color:var(--muted)">${getHWServiceLabel(hw)}</span>
+  return `<div id="hwcard-${hw.id}" style="border:1px solid rgba(255,255,255,.06);border-left:4px solid ${scol};border-radius:10px;overflow:hidden;background:var(--surface);${hw.status==='inactive'?'opacity:.6':''}">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer" onclick="toggleHWExpand('${hw.id}')">
+      <div style="width:34px;height:34px;border-radius:50%;background:${hw.color||'linear-gradient(135deg,var(--cyan),var(--blue))'};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#07090f;flex-shrink:0">${hw.initials}</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+          <span style="font-size:14px;font-weight:700">${hw.name}</span>
+          ${activeJob?'<span style="background:rgba(245,158,11,.15);color:#fbbf24;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px">⏳ Route active</span>':''}
+          ${!hw.zoneId?'<span style="background:rgba(239,68,68,.12);color:#ef4444;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px">⚠️ Unzoned</span>':''}
+          ${hasAlerts?'<span style="font-size:11px">'+(hw.gate&&hw.gate!=='No gate'&&hw.gate!=='--'?'🔑':'')+(hw.pets&&hw.pets!=='None'&&hw.pets!=='--'?' 🐾':'')+'</span>':''}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">📍 ${hw.address||'--'}${hw.zip?', '+hw.zip:''}</div>
+        <div style="display:flex;gap:10px;margin-top:3px;font-size:11px;flex-wrap:wrap">
+          <span style="color:var(--muted)">${zone}</span>
+          <span style="color:var(--muted)">${schedLabel}</span>
+          <span style="color:var(--muted)">${getHWServiceLabel(hw)}</span>
+        </div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;min-width:70px">
+        <div style="font-size:13px;font-weight:700;color:var(--cyan)">$${mrr.toFixed(0)}<span style="font-size:10px;color:var(--muted)">/mo</span></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:1px">${runner?runner.name.split(' ')[0]:'No runner'}</div>
+      </div>
+      <span style="background:${scol}22;color:${scol};font-size:10px;font-weight:700;padding:2px 9px;border-radius:99px;flex-shrink:0">${slbl}</span>
+      <div style="display:flex;gap:5px;flex-shrink:0">
+        <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="event.stopPropagation();showHWDetail('${hw.id}')">✏️ Edit</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444;padding:4px 7px" onclick="event.stopPropagation();confirmRemoveHW('${hw.id}','${hwSafeName}')" >✕</button>
+      </div>
+      <span id="hwcard-chevron-${hw.id}" style="font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0">▼</span>
+    </div>
+    <div id="hwcard-detail-${hw.id}" style="display:none;border-top:1px solid var(--border)">
+      <div style="padding:12px 14px;background:var(--surface2)">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+          <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:700;color:#22c55e">${completed}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Routes Done</div></div>
+          <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center"><div style="font-size:15px;font-weight:700;color:var(--cyan)">${runner?runner.name.split(' ')[0]:'None'}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Runner</div></div>
+          <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:700;color:var(--green)">$${mrr.toFixed(0)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">MRR</div></div>
+          <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:700;color:#a5b4fc">$${totalPaid.toFixed(0)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Runner Paid</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Service & schedule</div>
+            <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Plan</span><span>${planLabels[hw.plan]||hw.plan||'--'}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Collection</span><span>${schedLabel}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Service</span><span>${getHWServiceLabel(hw)}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Zone</span><span style="display:flex;align-items:center;gap:4px">${zone} <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="showReassignZone('${hw.id}')">↔</button></span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Runner</span><span style="display:flex;align-items:center;gap:4px">${runner?'<span style="color:var(--cyan);cursor:pointer" onclick="_adminNavToRunner(\''+runner.name+'\')" >'+runner.name+'</span>':'<span style="color:#ef4444">Unassigned</span>'} <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="showReassignRunner('${hw.id}')">↔</button></span></div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Property access</div>
+            <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Address</span><span style="text-align:right;max-width:160px">${hw.address||'--'}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Bin storage</span><span>${hw.storage||'--'}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Gate</span><span>${hw.gate||'--'}${hw.gateCode?' · '+hw.gateCode:''}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Pets</span><span>${hw.pets||'None'}</span></div>
+              ${hw.svcNotes?'<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Notes</span><span style="text-align:right;max-width:160px;font-style:italic">'+hw.svcNotes+'</span></div>':''} 
+            </div>
           </div>
         </div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <span class="badge" style="background:${sbg};color:${scol}">${slbl}</span>
-        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();showHWPaymentDetail('${hw.id}')">💳</button>
-        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();showHWDetail('${hw.id}')">✏️ Edit</button>
-        <button class="btn btn-ghost btn-sm" style="color:#ef4444;padding:4px 7px" onclick="event.stopPropagation();confirmRemoveHW('${hw.id}','${hw.name}')">✕</button>
-        <span style="font-size:16px;color:var(--muted)" id="hwcard-chevron-${hw.id}">›</span>
-      </div>
-    </div>
-    <div id="hwcard-detail-${hw.id}" style="display:none;border-top:1px solid var(--border);padding:14px">
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;text-align:center">
-        <div style="background:var(--surface2);border-radius:8px;padding:10px">
-          <div style="font-size:18px;font-weight:800;color:#22c55e">${completed}</div>
-          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Routes Done</div>
-        </div>
-        <div style="background:var(--surface2);border-radius:8px;padding:10px">
-          <div style="font-size:18px;font-weight:800;color:var(--cyan)">${runner?.name?.split(' ')[0]||'None'}</div>
-          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Runner</div>
-        </div>
-        <div style="background:var(--surface2);border-radius:8px;padding:10px">
-          <div style="font-size:18px;font-weight:800;color:var(--green)">$${(parseFloat(hw.plan==='plan_b'?44.99:hw.plan==='plan_c'?54.99:hw.plan?.startsWith('oan')?19.99:34.99)).toFixed(0)}</div>
-          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">MRR</div>
-        </div>
-        <div style="background:var(--surface2);border-radius:8px;padding:10px">
-          <div style="font-size:18px;font-weight:800;color:#a5b4fc">$${totalPaid.toFixed(0)}</div>
-          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">Runner Paid</div>
+        ${activeJob?'<div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:10px">⏳ <strong>Active route</strong> — '+(activeJob.status)+' · '+(activeJob.runner_name||'runner')+' · '+(activeJob.scheduled_date?new Date(activeJob.scheduled_date+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}):'today')+'</div>':''} 
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">📧 ${hw.email} · 📱 ${hw.phone||'--'}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="showHWDetail('${hw.id}')">✏️ Edit details</button>
+          <button class="btn btn-outline btn-sm" onclick="showHWPaymentDetail('${hw.id}')">💳 Payment</button>
+          <button class="btn btn-outline btn-sm" onclick="showReassignZone('${hw.id}')">📍 Zone</button>
+          <button class="btn btn-outline btn-sm" onclick="showReassignRunner('${hw.id}')">🚐 Runner</button>
+          <button class="btn btn-ghost btn-sm" style="color:#ef4444;margin-left:auto" onclick="confirmRemoveHW('${hw.id}','${hwSafeName}')" >🗑 Remove</button>
         </div>
       </div>
-      <div class="cc-grid">
-        <div class="dl"><div class="dl-l">Address</div><div>${hw.address}, ${hw.city||''} ${hw.zip||''}</div></div>
-        <div class="dl"><div class="dl-l">Zone</div><div style="display:flex;align-items:center;gap:6px">
-          ${zone}
-          ${!hw.zoneId ? '<span style="background:rgba(239,68,68,.15);color:#ef4444;font-size:10px;padding:1px 6px;border-radius:5px">⚠️ Unzoned</span>' : ''}
-          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="showReassignZone('${hw.id}')">↔</button>
-        </div></div>
-        <div class="dl"><div class="dl-l">Plan</div><div>${planLabels[hw.plan]||hw.plan||'--'}</div></div>
-        <div class="dl"><div class="dl-l">Collection</div><div>
-          ${hw.service==='SPLIT'
-            ? `${hw.freq||'weekly'} ♻️ <strong>${hw.dayRecycling||'--'}</strong> · 🗑️ <strong>${hw.dayWaste||'--'}</strong>`
-            : `${hw.freq||'weekly'} · <strong>${hw.day||'--'}</strong>`}
-        </div></div>
-        <div class="dl"><div class="dl-l">Service</div><div>${getHWServiceLabel(hw)}</div></div>
-        <div class="dl"><div class="dl-l">Runner</div><div style="display:flex;align-items:center;gap:6px">
-          ${runner ? runner.name : '<span style="color:#ef4444">Unassigned</span>'}
-          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="showReassignRunner('${hw.id}')">↔</button>
-        </div></div>
-        ${hw.gate && hw.gate!=='--' ? `<div class="dl"><div class="dl-l">Gate</div><div>🔑 ${hw.gate}${hw.gateCode?' · '+hw.gateCode:''}</div></div>` : ''}
-        ${hw.pets && hw.pets!=='None' && hw.pets!=='--' ? `<div class="dl"><div class="dl-l">Pets</div><div>🐾 ${hw.pets}</div></div>` : ''}
-        ${hw.storage && hw.storage!=='--' ? `<div class="dl"><div class="dl-l">Bin Storage</div><div>📦 ${hw.storage}</div></div>` : ''}
-        ${hw.svcNotes ? `<div class="dl" style="grid-column:1/-1"><div class="dl-l">Notes</div><div style="font-size:12px;color:var(--sub)">📝 ${hw.svcNotes}</div></div>` : ''}
-        <div class="dl"><div class="dl-l">Phone</div><div>${hw.phone||'--'}</div></div>
-        <div class="dl"><div class="dl-l">Bins</div><div>${hw.bins||1} bin${(hw.bins||1)>1?'s':''} · ${hw.storage||'--'}</div></div>
-      </div>
-      ${activeJob ? `<div style="margin-top:10px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;font-size:12px">
-        ⏳ <strong>Active route</strong> — ${activeJob.status} · ${activeJob.runner_name||'runner'} · ${activeJob.scheduled_date?new Date(activeJob.scheduled_date).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'today'}
-      </div>` : ''}
     </div>
   </div>`
 }
@@ -10952,8 +10970,7 @@ function toggleHWExpand(hwId){
   if(!detail) return
   const open = detail.style.display === 'block'
   detail.style.display = open ? 'none' : 'block'
-  if(chevron) chevron.textContent = open ? '›' : '⌄'
-  // Load admin jobs if not yet loaded for stats
+  if(chevron) chevron.style.transform = open ? '' : 'rotate(180deg)'
   if(!open && !_adminJobsCache?.length) loadAdminJobs()
 }
 
