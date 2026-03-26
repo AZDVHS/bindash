@@ -3909,7 +3909,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                   <select id="dispatch-zone-filter" style="font-size:11px;padding:3px 8px" onchange="loadLiveJobsIntoPipeline()">
                     <option value="">All Zones</option>
                   </select>
-                  <select id="dispatch-day-filter" style="font-size:11px;padding:3px 8px" onchange="loadLiveJobsIntoPipeline()">
+                  <select id="dispatch-day-filter" style="font-size:11px;padding:3px 8px" onchange="onDispatchDayFilterChange(this)">
                     <option value="">All Days</option>
                     <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
                     <option>Thursday</option><option>Friday</option>
@@ -14325,6 +14325,7 @@ function pickDispatchDay(el){
   const day = el.dataset.day
   const inp = document.getElementById('dispatch-day-val')
   if(inp) inp.value = day
+  // Sync the filter dropdown to match the pill click
   const pf = document.getElementById('dispatch-day-filter')
   if(pf) pf.value = day
 
@@ -14343,6 +14344,27 @@ function pickDispatchDay(el){
     renderDispatchPipeline() // show loading state first
     loadLiveJobsIntoPipeline()
   }
+}
+
+function onDispatchDayFilterChange(sel){
+  const day = sel.value
+  if(!day){
+    // "All Days" selected — clear pill selection so all days load
+    document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>p.classList.remove('on'))
+    const inp = document.getElementById('dispatch-day-val')
+    if(inp) inp.value = ''
+  } else {
+    // Specific day selected — sync to pill if it exists
+    const inp = document.getElementById('dispatch-day-val')
+    if(inp) inp.value = day
+    document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>{
+      if(p.dataset.day===day) p.classList.add('on')
+      else p.classList.remove('on')
+    })
+  }
+  // Always reload from DB with new filter
+  window._livePipelineBatches = null
+  loadLiveJobsIntoPipeline()
 }
 
 async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
@@ -14422,8 +14444,7 @@ function initDispatchDayPills(){
         p.classList.add('on')
         const inp = document.getElementById('dispatch-day-val')
         if(inp) inp.value = p.dataset.day
-        const pf = document.getElementById('dispatch-day-filter')
-        if(pf) pf.value = p.dataset.day
+        // Don't force the filter dropdown — let it stay on "All Days" by default
       }
     }
   })
@@ -15076,23 +15097,32 @@ async function initDispatchPage(){
     })
   })
 
-  // Init day pills
+  // Init day pills — but don't override the "All Days" dropdown default
   initDispatchDayPills()
   updateDispatchStats()
 
-  // Auto-load live jobs for the currently selected day into the pipeline
+  // Start with All Days view — clear the hidden pill value so dropdown wins
+  const inp = document.getElementById('dispatch-day-val')
+  if(inp) inp.value = ''
+
+  // Auto-load all active routes across next 7 days
   await loadLiveJobsIntoPipeline()
 }
 
 // Load active (non-complete) jobs from Supabase for the selected day
 // and render them in the pipeline so admin can see live status at a glance
 async function loadLiveJobsIntoPipeline(){
-  const dayPillVal  = document.getElementById('dispatch-day-val')?.value || ''
-  const dayFilterEl = document.getElementById('dispatch-day-filter')
-  const dayFilterVal = dayFilterEl?.value || ''
+  // Dropdown filter takes priority over pill selection
+  // "All Days" dropdown (empty value) = load all days regardless of pill
+  const dayFilterVal = document.getElementById('dispatch-day-filter')?.value || ''
+  const dayPillVal   = document.getElementById('dispatch-day-val')?.value || ''
 
-  // Effective day = pill selection overrides dropdown; blank = all days
-  const effectiveDay = dayPillVal || dayFilterVal || ''
+  // If dropdown says All Days (empty), load all — ignore pill
+  // If dropdown has a specific day, use that
+  // If dropdown is empty and pill has a day, use pill
+  const effectiveDay = dayFilterVal !== '' ? dayFilterVal
+                     : dayPillVal !== ''   ? dayPillVal
+                     : ''
 
   const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   const today = new Date(); today.setHours(0,0,0,0)
