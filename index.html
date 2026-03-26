@@ -3906,10 +3906,10 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <span class="badge" style="background:rgba(245,158,11,.15);color:#f59e0b" id="pipeline-badge">--</span>
                 <button onclick="loadLiveJobsIntoPipeline()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer" title="Refresh live status">⟳ Refresh</button>
                 <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
-                  <select id="dispatch-zone-filter" style="font-size:11px;padding:3px 8px" onchange="renderDispatchPipeline()">
+                  <select id="dispatch-zone-filter" style="font-size:11px;padding:3px 8px" onchange="loadLiveJobsIntoPipeline()">
                     <option value="">All Zones</option>
                   </select>
-                  <select id="dispatch-day-filter" style="font-size:11px;padding:3px 8px" onchange="renderDispatchPipeline()">
+                  <select id="dispatch-day-filter" style="font-size:11px;padding:3px 8px" onchange="loadLiveJobsIntoPipeline()">
                     <option value="">All Days</option>
                     <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
                     <option>Thursday</option><option>Friday</option>
@@ -14808,6 +14808,7 @@ function renderDispatchPipeline(){
 
   let batches = batchSource
   if(zoneFil) batches = batches.filter(b=>b.zoneId===zoneFil)
+  if(dayFil)  batches = batches.filter(b=>normDay(b.day)===normDay(dayFil)||normDay(b.date?.split('T')[0])===normDay(dayFil))
 
   const titleEl = document.getElementById('pipeline-title')
   const badgeEl = document.getElementById('pipeline-badge')
@@ -14815,7 +14816,8 @@ function renderDispatchPipeline(){
   if(isLiveView){
     const accepted = batches.filter(b=>['accepted','in_progress'].includes(b.status)).length
     const offered  = batches.filter(b=>['offered','broadcast'].includes(b.status)).length
-    if(titleEl) titleEl.textContent = `Live Routes — ${dayFil||'Today'} · ${accepted} accepted · ${offered} awaiting`
+    const dayLabel = dayFil || (document.getElementById('dispatch-day-val')?.value) || 'All Days'
+    if(titleEl) titleEl.textContent = `Live Routes — ${dayLabel} · ${accepted} accepted · ${offered} awaiting`
     if(badgeEl) badgeEl.textContent = batches.length+' active route'+(batches.length!==1?'s':'')+' · click to manage'
   } else {
     if(titleEl) titleEl.textContent = 'Route Preview — '+(dayFil||'All Days')+(allPreview?' · Not sent yet':'')
@@ -15085,39 +15087,47 @@ async function initDispatchPage(){
 // Load active (non-complete) jobs from Supabase for the selected day
 // and render them in the pipeline so admin can see live status at a glance
 async function loadLiveJobsIntoPipeline(){
-  const day = document.getElementById('dispatch-day-val')?.value || ''
-  if(!day) return
+  const dayPillVal  = document.getElementById('dispatch-day-val')?.value || ''
+  const dayFilterEl = document.getElementById('dispatch-day-filter')
+  const dayFilterVal = dayFilterEl?.value || ''
+
+  // Effective day = pill selection overrides dropdown; blank = all days
+  const effectiveDay = dayPillVal || dayFilterVal || ''
 
   const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   const today = new Date(); today.setHours(0,0,0,0)
-  const targetIdx = dayNames.findIndex(d => normDay(d) === normDay(day))
-  if(targetIdx < 0) return
-  const diff = (targetIdx - today.getDay() + 7) % 7
-  const scheduledDate = new Date(today); scheduledDate.setDate(today.getDate() + diff)
-  const scheduledDateStr = scheduledDate.toISOString().slice(0,10)
+
+  let dateRange = []
+  if(effectiveDay){
+    // Single day: find the next occurrence of that day
+    const targetIdx = dayNames.findIndex(d => normDay(d) === normDay(effectiveDay))
+    if(targetIdx < 0){ renderDispatchPipeline(); return }
+    const diff = (targetIdx - today.getDay() + 7) % 7
+    const d = new Date(today); d.setDate(today.getDate() + diff)
+    dateRange.push(d.toISOString().slice(0,10))
+    // Also tomorrow for BIN_IN
+    const tom = new Date(d); tom.setDate(d.getDate() + 1)
+    dateRange.push(tom.toISOString().slice(0,10))
+  } else {
+    // All days — load the next 7 days
+    for(let i = 0; i <= 7; i++){
+      const d = new Date(today); d.setDate(today.getDate() + i)
+      dateRange.push(d.toISOString().slice(0,10))
+    }
+  }
 
   try {
-    const { data: liveJobs } = await _supa.from('jobs')
+    let query = _supa.from('jobs')
       .select('*')
-      .eq('scheduled_date', scheduledDateStr)
+      .in('scheduled_date', dateRange)
       .not('status', 'in', '("complete","cancelled")')
-      .order('visit_type', { ascending: true })  // BIN_IN before BIN_OUT alphabetically, swap below
-      .order('created_at', { ascending: true })
+      .order('scheduled_date', { ascending: true })
+      .order('visit_type',     { ascending: true })
+      .order('created_at',     { ascending: true })
 
-    // Also load tomorrow's BIN_IN jobs (created after tonight's BIN_OUT completes)
-    const tomorrow = new Date(scheduledDate); tomorrow.setDate(scheduledDate.getDate() + 1)
-    const tomorrowStr = tomorrow.toISOString().slice(0,10)
-    const { data: binInJobs } = await _supa.from('jobs')
-      .select('*')
-      .eq('scheduled_date', tomorrowStr)
-      .eq('visit_type', 'BIN_IN')
-      .not('status', 'in', '("complete","cancelled")')
-      .order('created_at', { ascending: true })
+    const { data: allJobs } = await query
 
-    const allJobs = [...(liveJobs||[]), ...(binInJobs||[])]
-
-    if(!allJobs.length){
-      // No live jobs — show the empty preview prompt
+    if(!allJobs?.length){
       if(!generatedBatches.length) renderDispatchPipeline()
       return
     }
@@ -15127,12 +15137,16 @@ async function loadLiveJobsIntoPipeline(){
     allJobs.forEach(j => {
       const key = j.batch_id || j.id
       if(!batchMap[key]) {
-        const runner = RUNNERS.find(r=>r.id===j.runner_id||r.name===j.runner_name)
-        const zone   = ADMIN_ZONES.find(z=>z.id===j.zone_id)
+        const runner    = RUNNERS.find(r=>r.id===j.runner_id||r.name===j.runner_name)
+        const zone      = ADMIN_ZONES.find(z=>z.id===j.zone_id)
         const visitLabel = j.visit_type==='BIN_IN' ? '☀️ BIN IN' : '🌙 BIN OUT'
+        const jDay      = j.scheduled_date
+          ? dayNames[new Date(j.scheduled_date+'T12:00:00').getDay()]
+          : effectiveDay
         batchMap[key] = {
           id:        key,
-          day:       day,
+          day:       jDay,
+          date:      j.scheduled_date,
           zoneId:    j.zone_id,
           zoneName:  (zone?.name || 'Zone') + ' · ' + visitLabel,
           visitType: j.visit_type,
@@ -15149,23 +15163,23 @@ async function loadLiveJobsIntoPipeline(){
       }
       const hw = HOMEOWNERS.find(h=>h.email===j.homeowner_email)
       batchMap[key].stops.push({
-        name:         hw?.name || j.homeowner_email?.split('@')[0] || '--',
-        email:        j.homeowner_email,
-        address:      hw?.address || '--',
-        zip:          hw?.zip || '',
-        service:      hw?.service || 'RECYCLING',
-        bins:         hw?.bins || 1,
-        gate:         hw?.gate || '--',
-        gateCode:     hw?.gateCode || '',
-        pets:         hw?.pets || '--',
-        svcNotes:     hw?.svcNotes || '',
-        assignedRunner: hw?.assignedRunner,
-        jobId:        j.id,
-        jobStatus:    j.status,
+        name:          hw?.name || j.homeowner_email?.split('@')[0] || '--',
+        email:         j.homeowner_email,
+        address:       hw?.address || '--',
+        zip:           hw?.zip || '',
+        service:       hw?.service || 'RECYCLING',
+        bins:          hw?.bins || 1,
+        gate:          hw?.gate || '--',
+        gateCode:      hw?.gateCode || '',
+        pets:          hw?.pets || '--',
+        svcNotes:      hw?.svcNotes || '',
+        assignedRunner:hw?.assignedRunner,
+        jobId:         j.id,
+        jobStatus:     j.status,
       })
       batchMap[key].earnTotal = (batchMap[key].stops.length * 3.25).toFixed(2)
       const statusRank = {offered:1, broadcast:1, accepted:2, in_progress:3}
-      if((statusRank[j.status]||0) > (statusRank[batchMap[key].status]||0)) {
+      if((statusRank[j.status]||0) > (statusRank[batchMap[key].status]||0)){
         batchMap[key].status = j.status
       }
     })
