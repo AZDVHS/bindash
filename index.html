@@ -3490,6 +3490,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div class="nav-i" onclick="adNav(this,'ad-payments')"><span class="ic">💳</span> Payments <span id="pay-alert-badge" style="background:#ef4444;color:#fff;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">!</span></div>
       <div class="nav-i" onclick="adNav(this,'ad-jobs')"><span class="ic">📋</span> Jobs</div>
       <div class="nav-i" onclick="adNav(this,'ad-zones')"><span class="ic">📍</span> Zones</div>
+      <div class="nav-i" onclick="adNav(this,'ad-rules')"><span class="ic">⚙️</span> Dispatch Rules</div>
       <div class="s-bot">
         <div class="u-chip" style="margin-bottom:10px"><div class="avatar" style="background:linear-gradient(135deg,var(--red),var(--amber))">AD</div><div><div class="u-name" id="ad-sidebar-name">Admin</div><div class="u-role">Super Admin</div></div></div>
         <button class="btn btn-ghost btn-full btn-sm" onclick="adminLogout()">Log Out</button>
@@ -3961,6 +3962,152 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           </div>
 
           <div id="admin-zone-list" style="display:flex;flex-direction:column;gap:10px"></div>
+
+        </div>
+
+        <!-- AD RULES -->
+        <div class="pg" id="ad-rules">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+            <div style="font-size:13px;color:var(--sub)">Rule-based auto-dispatch engine. Changes take effect on the next dispatch cycle.</div>
+            <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+              <span style="font-size:12px;color:var(--muted)">Auto-dispatch</span>
+              <div id="rules-autodispatch-wrap" style="display:flex;align-items:center;gap:6px">
+                <label style="position:relative;width:36px;height:20px;flex-shrink:0;cursor:pointer">
+                  <input type="checkbox" id="rule-auto-dispatch" style="opacity:0;position:absolute;width:100%;height:100%;margin:0;cursor:pointer" onchange="saveDispatchRules()">
+                  <div id="rule-auto-dispatch-track" style="position:absolute;inset:0;border-radius:10px;background:var(--border2);transition:background .2s"></div>
+                  <div id="rule-auto-dispatch-thumb" style="position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .2s"></div>
+                </label>
+                <span id="rule-auto-dispatch-lbl" style="font-size:12px;font-weight:700;color:var(--muted)">Off</span>
+              </div>
+              <button class="btn btn-cyan btn-sm" onclick="saveDispatchRules()">Save All Rules</button>
+            </div>
+          </div>
+
+          <!-- TABS -->
+          <div style="display:flex;gap:0;border-bottom:1.5px solid var(--border);margin-bottom:16px">
+            <button class="rules-tab on" onclick="switchRulesTab('zone',this)" style="padding:7px 14px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2.5px solid var(--cyan);color:var(--cyan);cursor:pointer;margin-bottom:-1.5px">Zone</button>
+            <button class="rules-tab" onclick="switchRulesTab('dispatch',this)" style="padding:7px 14px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2.5px solid transparent;color:var(--muted);cursor:pointer;margin-bottom:-1.5px">Dispatch</button>
+            <button class="rules-tab" onclick="switchRulesTab('runners',this)" style="padding:7px 14px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2.5px solid transparent;color:var(--muted);cursor:pointer;margin-bottom:-1.5px">Runners</button>
+            <button class="rules-tab" onclick="switchRulesTab('customers',this)" style="padding:7px 14px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2.5px solid transparent;color:var(--muted);cursor:pointer;margin-bottom:-1.5px">Customers</button>
+            <button class="rules-tab" onclick="switchRulesTab('alerts',this)" style="padding:7px 14px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2.5px solid transparent;color:var(--muted);cursor:pointer;margin-bottom:-1.5px">Alerts</button>
+          </div>
+
+          <!-- ZONE TAB -->
+          <div id="rules-tab-zone">
+            <div class="card" style="margin-bottom:10px">
+              <div class="card-ttl">Zone structure</div>
+              <div class="dl"><div class="dl-l">Zone unit</div><div><span class="badge" style="background:rgba(34,197,94,.15);color:#22c55e">1 ZIP = 1 zone</span></div></div>
+              <div class="dl"><div class="dl-l">Sub-zones (single-visit-type runners only)</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-subzones" onchange="saveDispatchRules()" style="width:auto"> <span style="font-size:12px">Allow within same ZIP</span></label></div></div>
+              <div class="dl"><div class="dl-l">Priority runner slots per zone</div><div><select id="rule-priority-slots" onchange="saveDispatchRules()" style="font-size:12px;padding:3px 7px"><option value="1">1 runner (Bin Out + In both)</option><option value="2">Up to 2 (split by visit type — auto by completion chain)</option></select></div></div>
+              <div class="dl"><div class="dl-l">Bin In assignment</div><div><span style="font-size:12px;color:var(--cyan);font-weight:700">Always chains to Bin Out runner</span></div></div>
+            </div>
+            <div class="card" style="margin-bottom:10px">
+              <div class="card-ttl">Waitlist automation</div>
+              <div class="dl"><div class="dl-l">Auto-activate zone when first runner approved</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-auto-activate" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Auto-notify waitlisted HOs on zone activation</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-notify-waitlist" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Auto-assign waitlisted HOs to new zone runner</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-auto-assign-waitlist" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+            </div>
+            <!-- Per-zone runner cards -->
+            <div class="card">
+              <div class="card-ttl">Zone runner assignments <span style="font-size:11px;color:var(--muted);font-weight:400">(click zone to manage)</span></div>
+              <div id="rules-zone-runner-list"><div style="font-size:12px;color:var(--muted);padding:8px 0">Loading zones...</div></div>
+            </div>
+          </div>
+
+          <!-- DISPATCH TAB -->
+          <div id="rules-tab-dispatch" style="display:none">
+            <div class="card" style="margin-bottom:10px">
+              <div class="card-ttl">Auto-dispatch timing</div>
+              <div class="dl"><div class="dl-l">Generate routes ahead of collection</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-gen-hours" value="24" min="1" max="48" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">hours</span></div></div>
+              <div class="dl"><div class="dl-l">Require admin review before sending</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-require-review" onchange="saveDispatchRules()" style="width:auto"> <span style="font-size:12px;color:var(--muted)">Off — routes launch automatically</span></label></div></div>
+            </div>
+            <div class="card" style="margin-bottom:10px">
+              <div class="card-ttl">Offer chain windows</div>
+              <div class="dl"><div class="dl-l">Priority runner (loyalty window)</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-window-priority" value="25" min="5" max="120" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">min</span></div></div>
+              <div class="dl"><div class="dl-l">Zone secondary runners</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-window-zone" value="45" min="5" max="120" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">min</span></div></div>
+              <div class="dl"><div class="dl-l">All-system broadcast</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-window-broadcast" value="30" min="5" max="120" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">min</span></div></div>
+              <div class="dl"><div class="dl-l">Urgency bonus (broadcast step)</div><div style="display:flex;align-items:center;gap:6px"><span style="font-size:12px">$</span><input type="number" id="rule-urgency-bonus" value="1.00" min="0" max="5" step="0.25" style="width:60px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">/stop</span></div></div>
+            </div>
+            <div class="card" style="margin-bottom:10px">
+              <div class="card-ttl">Bin In chain (always follows Bin Out runner)</div>
+              <div class="dl"><div class="dl-l">Bin In loyalty window (same runner first)</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-binin-window" value="25" min="5" max="60" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">min after Bin Out complete</span></div></div>
+              <div class="dl"><div class="dl-l">Require truck confirm before Bin In dispatch</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-truck-confirm" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+            </div>
+            <div class="card">
+              <div class="card-ttl">Route splitting (referred customers)</div>
+              <div class="dl"><div class="dl-l">Split route for referred customer</div><div><select id="rule-split-mode" onchange="saveDispatchRules()" style="font-size:12px;padding:3px 7px"><option value="always">Always route to referring runner</option><option value="available">Only if referring runner available</option><option value="never">Never — priority runner gets all</option></select></div></div>
+              <div class="dl"><div class="dl-l">Min stops to create a split route</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-split-min" value="1" min="1" max="10" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">stop(s)</span></div></div>
+            </div>
+          </div>
+
+          <!-- RUNNERS TAB -->
+          <div id="rules-tab-runners" style="display:none">
+            <div class="card" style="margin-bottom:10px">
+              <div class="card-ttl">Priority runner rules</div>
+              <div class="dl"><div class="dl-l">Capacity warning threshold</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-capacity-warn" value="15" min="5" max="100" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">stops/week</span></div></div>
+              <div class="dl"><div class="dl-l">When at capacity, overflow goes to</div><div><select id="rule-overflow-mode" onchange="saveDispatchRules()" style="font-size:12px;padding:3px 7px"><option value="simultaneous">All secondaries simultaneously (first accept wins)</option><option value="tier">Highest loyalty tier first</option><option value="seniority">Longest serving first</option></select></div></div>
+              <div class="dl"><div class="dl-l">Auto-promote secondary if priority goes inactive</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-auto-promote" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Auto-promote by</div><div><select id="rule-promote-by" onchange="saveDispatchRules()" style="font-size:12px;padding:3px 7px"><option value="tier">Highest loyalty tier</option><option value="stops">Most stops completed</option><option value="referrals">Most referrals</option><option value="manual">Admin picks manually</option></select></div></div>
+              <div class="dl"><div class="dl-l">Promotion reversal window</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-promote-window" value="24" min="1" max="72" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">hours to reverse</span></div></div>
+            </div>
+            <div class="card" style="margin-bottom:10px">
+              <div class="card-ttl">Loyalty & referrals</div>
+              <div class="dl"><div class="dl-l">Referral bonus per HO signup via link</div><div style="display:flex;align-items:center;gap:4px"><span style="font-size:12px">$</span><input type="number" id="rule-ref-bonus" value="10" min="0" max="50" style="width:60px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"></div></div>
+              <div class="dl"><div class="dl-l">Loyalty credit on any completed stop</div><div><span style="font-size:12px;color:var(--cyan)">Always — cannot be disabled</span></div></div>
+              <div class="dl"><div class="dl-l">Loyalty credit decreases on reassignment</div><div><span style="font-size:12px;color:var(--green)">Never — credits only go up</span></div></div>
+            </div>
+            <div class="card" style="margin-bottom:10px">
+              <div class="card-ttl">Loyalty tier thresholds (referrals)</div>
+              <div class="dl"><div class="dl-l">Standard → Builder</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-tier-builder" value="1" min="1" max="20" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">referrals · $3.50/stop</span></div></div>
+              <div class="dl"><div class="dl-l">Builder → Growth</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-tier-growth" value="3" min="2" max="50" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">referrals · $3.75/stop</span></div></div>
+              <div class="dl"><div class="dl-l">Growth → Elite</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-tier-elite" value="7" min="5" max="100" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">referrals · $4.00/stop</span></div></div>
+            </div>
+            <div class="card">
+              <div class="card-ttl">Performance thresholds</div>
+              <div class="dl"><div class="dl-l">Flag runner for admin review below</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-flag-rating" value="3.5" min="1" max="5" step="0.5" style="width:60px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">★</span></div></div>
+              <div class="dl"><div class="dl-l">Auto-remove from zone below</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-remove-rating" value="2.0" min="1" max="5" step="0.5" style="width:60px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">★</span></div></div>
+              <div class="dl"><div class="dl-l">Auto-flag after consecutive declines</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-decline-limit" value="3" min="1" max="10" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">in a row</span></div></div>
+            </div>
+          </div>
+
+          <!-- CUSTOMERS TAB -->
+          <div id="rules-tab-customers" style="display:none">
+            <div class="card" style="margin-bottom:10px">
+              <div class="card-ttl">Runner reassignment</div>
+              <div class="dl"><div class="dl-l">Allow homeowner to request new runner</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-hw-reassign" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Show available runners popup to homeowner</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-hw-popup" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Notify homeowner if no alternative available</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-hw-no-alt-notify" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Cooldown between reassignment requests</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-reassign-cooldown" value="30" min="0" max="365" style="width:60px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">days</span></div></div>
+            </div>
+            <div class="card">
+              <div class="card-ttl">Default dispatch target for new customers</div>
+              <div class="dl"><div class="dl-l">New customer defaults to</div><div><select id="rule-new-hw-default" onchange="saveDispatchRules()" style="font-size:12px;padding:3px 7px"><option value="priority">Zone priority runner</option><option value="referrer">Referring runner (if set)</option><option value="manual">Admin assigns manually</option></select></div></div>
+              <div class="dl"><div class="dl-l">Performance-based rotation after poor ratings</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-perf-rotate" onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Trigger rotation after consecutive poor ratings</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-rotate-after" value="2" min="1" max="5" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">in a row</span></div></div>
+            </div>
+          </div>
+
+          <!-- ALERTS TAB -->
+          <div id="rules-tab-alerts" style="display:none">
+            <div class="card" style="margin-bottom:10px">
+              <div class="card-ttl">Admin alert triggers</div>
+              <div class="dl"><div class="dl-l">Runner at capacity (warn at)</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-alert-capacity" value="15" min="5" max="100" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">stops</span></div></div>
+              <div class="dl"><div class="dl-l">Zone near capacity (% of max)</div><div style="display:flex;align-items:center;gap:6px"><input type="number" id="rule-alert-zone-pct" value="80" min="50" max="100" style="width:56px;font-size:12px;padding:3px 7px" onchange="saveDispatchRules()"> <span style="font-size:12px;color:var(--muted)">%</span></div></div>
+              <div class="dl"><div class="dl-l">Offer expired — no runner accepted</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-alert-expired" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Route overdue past scheduled date</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-alert-overdue" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Runner rating drops below review threshold</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-alert-rating" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">New HO signup in waitlist ZIP</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-alert-waitlist-hw" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Runner declines 3+ offers in a row</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-alert-declines" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Priority runner inactive 7+ days</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-alert-inactive" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Priority runner auto-promoted</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-alert-promoted" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+            </div>
+            <div class="card">
+              <div class="card-ttl">Alert delivery</div>
+              <div class="dl"><div class="dl-l">In-app notification bell</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-notif-inapp" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Email alerts to admin</div><div><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="rule-notif-email" checked onchange="saveDispatchRules()" style="width:auto"></label></div></div>
+              <div class="dl"><div class="dl-l">Alert digest frequency</div><div><select id="rule-notif-freq" onchange="saveDispatchRules()" style="font-size:12px;padding:3px 7px"><option value="immediate">Immediately</option><option value="hourly" selected>Hourly digest</option><option value="daily">Daily digest</option></select></div></div>
+            </div>
+          </div>
 
         </div>
 
@@ -5958,7 +6105,7 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
     const binInDate  = new Date(binOutDate); binInDate.setDate(binOutDate.getDate() + 1)
     const tomorrowStr = binInDate.toISOString().slice(0,10)
     const inBatchId = (ref.batch_id || ref.id) + '-IN'
-    const loyaltyExpiry = new Date(Date.now() + 25 * 60 * 1000).toISOString()
+    const loyaltyExpiry = new Date(Date.now() + (DISPATCH_RULES?.binInWindow||25) * 60 * 1000).toISOString()
 
     const stopNames = binOutJobs.slice(0,3).map(j=>{
       const hw = (window.NAV_STOPS||[]).find(s=>s.email===j.homeowner_email)
@@ -6216,6 +6363,7 @@ async function initApp(){
       loadRunnerZoneRequestsBadge()
       loadHomeownersFromSupabase()
       loadRunnersFromSupabase()
+      loadDispatchRules()
     } else if(role === 'rn'){
       setCurrentUser(user)
       go('S-rn-dash')
@@ -7906,6 +8054,7 @@ function adNav(el, pg){
     'ad-jobs':       'Jobs',
     'ad-zones':      'Zone Management',
     'ad-dispatch':   'Dispatch',
+    'ad-rules':      'Dispatch Rules',
   }
   const titleEl = document.getElementById('ad-pg-title')
   if(titleEl) titleEl.textContent = t[pg] || pg
@@ -7922,6 +8071,387 @@ function adNav(el, pg){
   if(pg === 'ad-runner-zone-requests') setTimeout(renderRunnerZoneRequests, 50)
   if(pg === 'ad-runner-requests') setTimeout(loadRunnerRequests, 50)
   if(pg === 'ad-jobs')            setTimeout(loadAdminJobs, 50)
+  if(pg === 'ad-rules')           setTimeout(initRulesPage, 50)
+}
+
+// =================================================================
+// DISPATCH RULES ENGINE
+// =================================================================
+
+// Default rules — all overridable by admin
+let DISPATCH_RULES = {
+  // Zone
+  subZonesAllowed:       false,
+  prioritySlots:         1,
+  autoActivateZone:      true,
+  notifyWaitlist:        true,
+  autoAssignWaitlist:    true,
+  // Dispatch timing
+  autoDispatch:          false,
+  genHoursAhead:         24,
+  requireReview:         false,
+  windowPriority:        25,
+  windowZone:            45,
+  windowBroadcast:       30,
+  urgencyBonus:          1.00,
+  // Bin In (always chains to Bin Out runner)
+  binInWindow:           25,
+  requireTruckConfirm:   true,
+  // Route splitting
+  splitMode:             'always',
+  splitMin:              1,
+  // Runners
+  capacityWarn:          15,
+  overflowMode:          'simultaneous',
+  autoPromote:           true,
+  promoteBy:             'tier',
+  promoteWindow:         24,
+  refBonus:              10,
+  tierBuilder:           1,
+  tierGrowth:            3,
+  tierElite:             7,
+  flagRating:            3.5,
+  removeRating:          2.0,
+  declineLimit:          3,
+  // Customers
+  hwReassign:            true,
+  hwPopup:               true,
+  hwNoAltNotify:         true,
+  reassignCooldown:      30,
+  newHwDefault:          'priority',
+  perfRotate:            false,
+  rotateAfter:           2,
+  // Alerts
+  alertCapacity:         15,
+  alertZonePct:          80,
+  alertExpired:          true,
+  alertOverdue:          true,
+  alertRating:           true,
+  alertWaitlistHw:       true,
+  alertDeclines:         true,
+  alertInactive:         true,
+  alertPromoted:         true,
+  notifInapp:            true,
+  notifEmail:            true,
+  notifFreq:             'hourly',
+}
+
+async function loadDispatchRules(){
+  try {
+    const { data } = await _supa.from('admins')
+      .select('dispatch_rules').eq('email', currentUser?.email).maybeSingle()
+    if(data?.dispatch_rules) DISPATCH_RULES = { ...DISPATCH_RULES, ...data.dispatch_rules }
+  } catch(e){ console.warn('[Rules] load:', e.message) }
+}
+
+async function saveDispatchRules(){
+  // Read all form values
+  const g = id => { const el=document.getElementById(id); if(!el) return null; return el.type==='checkbox'?el.checked:el.value }
+  const n = id => { const v=parseFloat(g(id)); return isNaN(v)?null:v }
+
+  const updates = {
+    autoDispatch:        g('rule-auto-dispatch') ?? DISPATCH_RULES.autoDispatch,
+    subZonesAllowed:     g('rule-subzones')      ?? DISPATCH_RULES.subZonesAllowed,
+    prioritySlots:       n('rule-priority-slots')|| DISPATCH_RULES.prioritySlots,
+    autoActivateZone:    g('rule-auto-activate') ?? DISPATCH_RULES.autoActivateZone,
+    notifyWaitlist:      g('rule-notify-waitlist')??DISPATCH_RULES.notifyWaitlist,
+    autoAssignWaitlist:  g('rule-auto-assign-waitlist')??DISPATCH_RULES.autoAssignWaitlist,
+    genHoursAhead:       n('rule-gen-hours')     || DISPATCH_RULES.genHoursAhead,
+    requireReview:       g('rule-require-review')??DISPATCH_RULES.requireReview,
+    windowPriority:      n('rule-window-priority')||DISPATCH_RULES.windowPriority,
+    windowZone:          n('rule-window-zone')   || DISPATCH_RULES.windowZone,
+    windowBroadcast:     n('rule-window-broadcast')||DISPATCH_RULES.windowBroadcast,
+    urgencyBonus:        n('rule-urgency-bonus') ?? DISPATCH_RULES.urgencyBonus,
+    binInWindow:         n('rule-binin-window')  || DISPATCH_RULES.binInWindow,
+    requireTruckConfirm: g('rule-truck-confirm') ?? DISPATCH_RULES.requireTruckConfirm,
+    splitMode:           g('rule-split-mode')    || DISPATCH_RULES.splitMode,
+    splitMin:            n('rule-split-min')     || DISPATCH_RULES.splitMin,
+    capacityWarn:        n('rule-capacity-warn') || DISPATCH_RULES.capacityWarn,
+    overflowMode:        g('rule-overflow-mode') || DISPATCH_RULES.overflowMode,
+    autoPromote:         g('rule-auto-promote')  ?? DISPATCH_RULES.autoPromote,
+    promoteBy:           g('rule-promote-by')    || DISPATCH_RULES.promoteBy,
+    promoteWindow:       n('rule-promote-window')|| DISPATCH_RULES.promoteWindow,
+    refBonus:            n('rule-ref-bonus')     ?? DISPATCH_RULES.refBonus,
+    tierBuilder:         n('rule-tier-builder')  || DISPATCH_RULES.tierBuilder,
+    tierGrowth:          n('rule-tier-growth')   || DISPATCH_RULES.tierGrowth,
+    tierElite:           n('rule-tier-elite')    || DISPATCH_RULES.tierElite,
+    flagRating:          n('rule-flag-rating')   ?? DISPATCH_RULES.flagRating,
+    removeRating:        n('rule-remove-rating') ?? DISPATCH_RULES.removeRating,
+    declineLimit:        n('rule-decline-limit') || DISPATCH_RULES.declineLimit,
+    hwReassign:          g('rule-hw-reassign')   ?? DISPATCH_RULES.hwReassign,
+    hwPopup:             g('rule-hw-popup')      ?? DISPATCH_RULES.hwPopup,
+    hwNoAltNotify:       g('rule-hw-no-alt-notify')??DISPATCH_RULES.hwNoAltNotify,
+    reassignCooldown:    n('rule-reassign-cooldown')??DISPATCH_RULES.reassignCooldown,
+    newHwDefault:        g('rule-new-hw-default')|| DISPATCH_RULES.newHwDefault,
+    perfRotate:          g('rule-perf-rotate')   ?? DISPATCH_RULES.perfRotate,
+    rotateAfter:         n('rule-rotate-after')  || DISPATCH_RULES.rotateAfter,
+    alertCapacity:       n('rule-alert-capacity')|| DISPATCH_RULES.alertCapacity,
+    alertZonePct:        n('rule-alert-zone-pct')|| DISPATCH_RULES.alertZonePct,
+    alertExpired:        g('rule-alert-expired') ?? DISPATCH_RULES.alertExpired,
+    alertOverdue:        g('rule-alert-overdue') ?? DISPATCH_RULES.alertOverdue,
+    alertRating:         g('rule-alert-rating')  ?? DISPATCH_RULES.alertRating,
+    alertWaitlistHw:     g('rule-alert-waitlist-hw')??DISPATCH_RULES.alertWaitlistHw,
+    alertDeclines:       g('rule-alert-declines')??DISPATCH_RULES.alertDeclines,
+    alertInactive:       g('rule-alert-inactive')??DISPATCH_RULES.alertInactive,
+    alertPromoted:       g('rule-alert-promoted')??DISPATCH_RULES.alertPromoted,
+    notifInapp:          g('rule-notif-inapp')   ?? DISPATCH_RULES.notifInapp,
+    notifEmail:          g('rule-notif-email')   ?? DISPATCH_RULES.notifEmail,
+    notifFreq:           g('rule-notif-freq')    || DISPATCH_RULES.notifFreq,
+  }
+  DISPATCH_RULES = { ...DISPATCH_RULES, ...updates }
+
+  // Update toggle visual
+  const track = document.getElementById('rule-auto-dispatch-track')
+  const thumb = document.getElementById('rule-auto-dispatch-thumb')
+  const lbl   = document.getElementById('rule-auto-dispatch-lbl')
+  if(track) track.style.background = DISPATCH_RULES.autoDispatch ? '#22c55e' : 'var(--border2)'
+  if(thumb) thumb.style.transform  = DISPATCH_RULES.autoDispatch ? 'translateX(16px)' : ''
+  if(lbl)   { lbl.textContent = DISPATCH_RULES.autoDispatch ? 'Live' : 'Off'; lbl.style.color = DISPATCH_RULES.autoDispatch ? '#22c55e' : 'var(--muted)' }
+
+  // Persist to Supabase on the admin record
+  try {
+    await _supa.from('admins').update({ dispatch_rules: DISPATCH_RULES }).eq('email', currentUser?.email)
+    showToast('Rules saved ✅', 'ok')
+  } catch(e){
+    // Fallback: store in localStorage for now
+    try { localStorage.setItem('bindash_dispatch_rules', JSON.stringify(DISPATCH_RULES)) } catch{}
+    showToast('Saved locally (DB unavailable)', 'info')
+  }
+}
+
+function initRulesPage(){
+  // Load saved values into form fields
+  const set = (id, val) => {
+    const el = document.getElementById(id)
+    if(!el) return
+    if(el.type === 'checkbox') el.checked = !!val
+    else el.value = val
+  }
+  set('rule-auto-dispatch',       DISPATCH_RULES.autoDispatch)
+  set('rule-subzones',            DISPATCH_RULES.subZonesAllowed)
+  set('rule-priority-slots',      DISPATCH_RULES.prioritySlots)
+  set('rule-auto-activate',       DISPATCH_RULES.autoActivateZone)
+  set('rule-notify-waitlist',     DISPATCH_RULES.notifyWaitlist)
+  set('rule-auto-assign-waitlist',DISPATCH_RULES.autoAssignWaitlist)
+  set('rule-gen-hours',           DISPATCH_RULES.genHoursAhead)
+  set('rule-require-review',      DISPATCH_RULES.requireReview)
+  set('rule-window-priority',     DISPATCH_RULES.windowPriority)
+  set('rule-window-zone',         DISPATCH_RULES.windowZone)
+  set('rule-window-broadcast',    DISPATCH_RULES.windowBroadcast)
+  set('rule-urgency-bonus',       DISPATCH_RULES.urgencyBonus)
+  set('rule-binin-window',        DISPATCH_RULES.binInWindow)
+  set('rule-truck-confirm',       DISPATCH_RULES.requireTruckConfirm)
+  set('rule-split-mode',          DISPATCH_RULES.splitMode)
+  set('rule-split-min',           DISPATCH_RULES.splitMin)
+  set('rule-capacity-warn',       DISPATCH_RULES.capacityWarn)
+  set('rule-overflow-mode',       DISPATCH_RULES.overflowMode)
+  set('rule-auto-promote',        DISPATCH_RULES.autoPromote)
+  set('rule-promote-by',          DISPATCH_RULES.promoteBy)
+  set('rule-promote-window',      DISPATCH_RULES.promoteWindow)
+  set('rule-ref-bonus',           DISPATCH_RULES.refBonus)
+  set('rule-tier-builder',        DISPATCH_RULES.tierBuilder)
+  set('rule-tier-growth',         DISPATCH_RULES.tierGrowth)
+  set('rule-tier-elite',          DISPATCH_RULES.tierElite)
+  set('rule-flag-rating',         DISPATCH_RULES.flagRating)
+  set('rule-remove-rating',       DISPATCH_RULES.removeRating)
+  set('rule-decline-limit',       DISPATCH_RULES.declineLimit)
+  set('rule-hw-reassign',         DISPATCH_RULES.hwReassign)
+  set('rule-hw-popup',            DISPATCH_RULES.hwPopup)
+  set('rule-hw-no-alt-notify',    DISPATCH_RULES.hwNoAltNotify)
+  set('rule-reassign-cooldown',   DISPATCH_RULES.reassignCooldown)
+  set('rule-new-hw-default',      DISPATCH_RULES.newHwDefault)
+  set('rule-perf-rotate',         DISPATCH_RULES.perfRotate)
+  set('rule-rotate-after',        DISPATCH_RULES.rotateAfter)
+  set('rule-alert-capacity',      DISPATCH_RULES.alertCapacity)
+  set('rule-alert-zone-pct',      DISPATCH_RULES.alertZonePct)
+  set('rule-alert-expired',       DISPATCH_RULES.alertExpired)
+  set('rule-alert-overdue',       DISPATCH_RULES.alertOverdue)
+  set('rule-alert-rating',        DISPATCH_RULES.alertRating)
+  set('rule-alert-waitlist-hw',   DISPATCH_RULES.alertWaitlistHw)
+  set('rule-alert-declines',      DISPATCH_RULES.alertDeclines)
+  set('rule-alert-inactive',      DISPATCH_RULES.alertInactive)
+  set('rule-alert-promoted',      DISPATCH_RULES.alertPromoted)
+  set('rule-notif-inapp',         DISPATCH_RULES.notifInapp)
+  set('rule-notif-email',         DISPATCH_RULES.notifEmail)
+  set('rule-notif-freq',          DISPATCH_RULES.notifFreq)
+
+  // Update toggle visual state
+  const track = document.getElementById('rule-auto-dispatch-track')
+  const thumb = document.getElementById('rule-auto-dispatch-thumb')
+  const lbl   = document.getElementById('rule-auto-dispatch-lbl')
+  if(track) track.style.background = DISPATCH_RULES.autoDispatch ? '#22c55e' : 'var(--border2)'
+  if(thumb) thumb.style.transform  = DISPATCH_RULES.autoDispatch ? 'translateX(16px)' : ''
+  if(lbl)   { lbl.textContent = DISPATCH_RULES.autoDispatch ? 'Live' : 'Off'; lbl.style.color = DISPATCH_RULES.autoDispatch ? '#22c55e' : 'var(--muted)' }
+
+  renderRulesZoneList()
+}
+
+function switchRulesTab(tab, btn){
+  document.querySelectorAll('[id^="rules-tab-"]').forEach(el => el.style.display = 'none')
+  const el = document.getElementById('rules-tab-'+tab)
+  if(el) el.style.display = ''
+  document.querySelectorAll('.rules-tab').forEach(t => {
+    t.style.borderBottomColor = 'transparent'
+    t.style.color = 'var(--muted)'
+  })
+  if(btn){
+    btn.style.borderBottomColor = 'var(--cyan)'
+    btn.style.color = 'var(--cyan)'
+  }
+}
+
+function renderRulesZoneList(){
+  const el = document.getElementById('rules-zone-runner-list')
+  if(!el) return
+  if(!ADMIN_ZONES.length){ el.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">No zones yet</div>'; return }
+  el.innerHTML = ADMIN_ZONES.map(z => {
+    const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
+    const hwCount = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))).length
+    const runners = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id)||zips.includes(r.zip))
+    const priority = runners.find(r=>r.isPriority||r.id===z.priorityRunnerId)
+    const secondaries = runners.filter(r=>r!==priority)
+    const atCapacity = priority && (priority.weeklyStops||0) >= DISPATCH_RULES.capacityWarn
+    return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:6px">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+      +'<span style="font-size:13px;font-weight:700">'+z.name+'</span>'
+      +'<span style="font-size:10px;font-family:monospace;color:var(--muted)">'+zips.join(' · ')+'</span>'
+      +'<span style="font-size:10px;padding:1px 7px;border-radius:99px;background:rgba(34,197,94,.12);color:#22c55e;margin-left:auto">'+hwCount+' HOs</span>'
+      +'</div>'
+      +'<div style="display:flex;flex-direction:column;gap:4px">'
+      +(priority
+        ? '<div style="display:flex;align-items:center;gap:6px;font-size:12px">'
+          +'<span style="width:6px;height:6px;border-radius:50%;background:#22c55e;flex-shrink:0"></span>'
+          +'<span style="font-weight:700">'+priority.name+'</span>'
+          +(atCapacity?'<span style="background:rgba(245,158,11,.15);color:#fbbf24;font-size:10px;padding:1px 6px;border-radius:4px">⚠️ At capacity</span>':'')
+          +'<span style="color:var(--muted);font-size:11px">Priority · Bin Out + In</span>'
+          +'<button onclick="showAdminSetPriority(\''+z.id+'\')" style="margin-left:auto;font-size:10px;padding:1px 7px;border-radius:4px;border:0.5px solid var(--border2);background:transparent;cursor:pointer;color:var(--muted)">Change</button>'
+          +'</div>'
+        : '<div style="font-size:12px;color:#ef4444">⚠️ No priority runner — zone cannot auto-dispatch</div>'
+          +'<button onclick="showAdminSetPriority(\''+z.id+'\')" style="font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid rgba(6,214,160,.3);background:transparent;color:var(--cyan);cursor:pointer;margin-top:2px">Assign priority runner</button>')
+      +secondaries.map(r=>'<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)">'
+        +'<span style="width:6px;height:6px;border-radius:50%;background:#a5b4fc;flex-shrink:0"></span>'
+        +r.name+' <span style="color:var(--muted);font-size:11px">Secondary</span>'
+        +'<button onclick="setZonePriorityRunner(\''+z.id+'\',\''+r.id+'\')" style="margin-left:auto;font-size:10px;padding:1px 7px;border-radius:4px;border:0.5px solid var(--border2);background:transparent;cursor:pointer;color:var(--muted)">Promote</button>'
+        +'</div>').join('')
+      +'</div></div>'
+  }).join('')
+}
+
+// ── Rule-enforcement helpers ──────────────────────────────────────
+
+function ruleGetPriorityRunner(zoneId){
+  const z = ADMIN_ZONES.find(x=>x.id===zoneId)
+  if(!z) return null
+  const zips = (z.zips?.length?z.zips:[z.zip]).filter(Boolean)
+  const candidates = RUNNERS.filter(r=>r.zoneId===zoneId||r.coverageZones?.includes(zoneId)||zips.includes(r.zip))
+  return candidates.find(r=>r.isPriority||r.id===z.priorityRunnerId) || candidates[0] || null
+}
+
+function ruleGetSecondaryRunners(zoneId){
+  const priority = ruleGetPriorityRunner(zoneId)
+  const z = ADMIN_ZONES.find(x=>x.id===zoneId)
+  if(!z) return []
+  const zips = (z.zips?.length?z.zips:[z.zip]).filter(Boolean)
+  return RUNNERS.filter(r=>(r.zoneId===zoneId||r.coverageZones?.includes(zoneId)||zips.includes(r.zip))&&r!==priority&&r.status!=='INACTIVE')
+}
+
+function ruleIsAtCapacity(runner){
+  if(!runner) return false
+  return (runner.weeklyStops||0) >= DISPATCH_RULES.capacityWarn
+}
+
+function ruleGetDispatchTarget(hw){
+  // Returns the runner who should receive this homeowner's Bin Out job
+  // 1. If referred customer and split mode allows: use referring runner
+  if(hw.referredBy && DISPATCH_RULES.splitMode !== 'never'){
+    const referrer = RUNNERS.find(r=>r.name===hw.referredBy||r.ownRefCode===hw.referredByCode)
+    if(referrer && referrer.status!=='INACTIVE'){
+      if(DISPATCH_RULES.splitMode==='always') return referrer
+      if(DISPATCH_RULES.splitMode==='available'&&referrer.status==='AVAILABLE') return referrer
+    }
+  }
+  // 2. Priority runner (if not at capacity)
+  const priority = ruleGetPriorityRunner(hw.zoneId)
+  if(priority && !ruleIsAtCapacity(priority) && priority.status!=='INACTIVE') return priority
+  // 3. Capacity overflow — secondaries
+  const secondaries = ruleGetSecondaryRunners(hw.zoneId)
+  if(DISPATCH_RULES.overflowMode==='simultaneous') return secondaries[0]||null // offer to all simultaneously in dispatch
+  if(DISPATCH_RULES.overflowMode==='tier') return secondaries.sort((a,b)=>{const t={elite:4,growth:3,builder:2,standard:1};return (t[b.loyaltyTier||'standard']||1)-(t[a.loyaltyTier||'standard']||1)})[0]||null
+  return secondaries.sort((a,b)=>new Date(a.createdAt||0)-new Date(b.createdAt||0))[0]||null
+}
+
+function ruleBinInTarget(binOutRunner){
+  // Bin In ALWAYS chains to whoever completed Bin Out — no exceptions
+  return binOutRunner
+}
+
+async function ruleCheckAlerts(){
+  // Run rule-based alert checks against live data
+  const now = new Date()
+  const alerts = []
+  RUNNERS.filter(r=>r.status!=='INACTIVE').forEach(r=>{
+    if(DISPATCH_RULES.alertCapacity && (r.weeklyStops||0) >= DISPATCH_RULES.alertCapacity)
+      alerts.push({ type:'capacity', msg:'Runner '+r.name+' at '+r.weeklyStops+' stops — at capacity threshold', level:'warn' })
+    if(DISPATCH_RULES.alertRating && r.rating && r.rating < DISPATCH_RULES.flagRating)
+      alerts.push({ type:'rating', msg:'Runner '+r.name+' rating '+r.rating+'★ below '+DISPATCH_RULES.flagRating+'★ threshold', level:'warn' })
+    if(DISPATCH_RULES.alertInactive && r.lastActiveAt){
+      const daysSince = (now - new Date(r.lastActiveAt)) / 86400000
+      if(daysSince >= 7 && ruleGetPriorityRunner(r.zoneId)?.id === r.id)
+        alerts.push({ type:'inactive', msg:'Priority runner '+r.name+' inactive '+Math.round(daysSince)+' days', level:'err' })
+    }
+  })
+  ADMIN_ZONES.forEach(z=>{
+    const cap = z.capacity || 15
+    const hw  = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id)).length
+    if(DISPATCH_RULES.alertZonePct && hw/cap*100 >= DISPATCH_RULES.alertZonePct)
+      alerts.push({ type:'zone-cap', msg:'Zone '+z.name+' at '+Math.round(hw/cap*100)+'% capacity', level:'warn' })
+    if(!ruleGetPriorityRunner(z.id) && hw > 0)
+      alerts.push({ type:'no-priority', msg:'Zone '+z.name+' has '+hw+' HOs but no priority runner', level:'err' })
+  })
+  // Post alerts to notification system
+  alerts.forEach(a=>{
+    addNotif({ title: a.level==='err'?'🚨 Action required':'⚠️ Alert', body: a.msg, type: a.level })
+  })
+  return alerts
+}
+
+async function setZonePriorityRunner(zoneId, runnerId){
+  const z = ADMIN_ZONES.find(x=>x.id===zoneId)
+  const r = RUNNERS.find(x=>x.id===runnerId)
+  if(!z||!r) return
+  // Clear existing priority flags for this zone
+  RUNNERS.filter(x=>x.zoneId===zoneId||x.coverageZones?.includes(zoneId)).forEach(x=>{ x.isPriority=false })
+  r.isPriority = true
+  z.priorityRunnerId = runnerId
+  try {
+    await _supa.from('runners').update({ is_priority:false }).or('zone_id.eq.'+zoneId+',coverage_zones.cs.{"'+zoneId+'"}')
+    await _supa.from('runners').update({ is_priority:true  }).eq('id', runnerId)
+    await _supa.from('zones').update({ priority_runner_id: runnerId }).eq('id', zoneId)
+  } catch(e){ console.warn('[Rules] setZonePriority:', e.message) }
+  showToast(r.name+' set as priority runner for '+z.name+' ✅','ok')
+  renderRulesZoneList()
+}
+
+function showAdminSetPriority(zoneId){
+  const z = ADMIN_ZONES.find(x=>x.id===zoneId)
+  if(!z) return
+  const zips = (z.zips?.length?z.zips:[z.zip]).filter(Boolean)
+  const eligible = RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===zoneId||r.coverageZones?.includes(zoneId)||zips.includes(r.zip)))
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh"><div style="font-size:15px;font-weight:700">Set Priority Runner — ${z.name}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+  <div class="mb">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">The priority runner receives all new customer dispatches for this zone (unless a referred customer directs to another runner). Bin In always chains to whoever completed the Bin Out.</div>
+    ${eligible.length
+      ? eligible.map(r=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;background:${r.isPriority?'rgba(34,197,94,.06)':'transparent'}" onclick="setZonePriorityRunner('${zoneId}','${r.id}');closeM()">
+        <div style="width:30px;height:30px;border-radius:50%;background:${r.color||'var(--cyan)'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#07090f">${r.initials}</div>
+        <div style="flex:1"><div style="font-size:13px;font-weight:700">${r.name}</div><div style="font-size:11px;color:var(--muted)">${r.loyaltyTier||'standard'} tier · ${r.weeklyStops||0} stops/wk · ${r.rating||0}★</div></div>
+        ${r.isPriority?'<span style="background:rgba(34,197,94,.15);color:#22c55e;font-size:10px;padding:2px 8px;border-radius:99px">Current priority</span>':''}
+      </div>`)
+      .join('')
+      : '<div style="font-size:12px;color:var(--muted);padding:12px 0">No eligible runners in this zone yet.</div>'}
+  </div>
+  <div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button></div>`
+  openM()
 }
 
 // Admin actions
