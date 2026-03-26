@@ -3678,177 +3678,63 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- AD PAYMENTS -->
         <div class="pg" id="ad-payments">
-
-          <!-- SUB-TABS -->
-          <div style="display:flex;gap:0;margin-bottom:20px;border-bottom:1.5px solid var(--border)">
-            <button id="pay-tab-hw"     onclick="switchPayTab('hw')"     style="padding:9px 18px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2.5px solid var(--cyan);color:var(--cyan);cursor:pointer;margin-bottom:-1.5px">🏠 Homeowner Payments</button>
-            <button id="pay-tab-runner" onclick="switchPayTab('runner')" style="padding:9px 18px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2.5px solid transparent;color:var(--muted);cursor:pointer;margin-bottom:-1.5px">🚐 Runner Payouts</button>
-            <button id="pay-tab-profit" onclick="switchPayTab('profit')" style="padding:9px 18px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2.5px solid transparent;color:var(--muted);cursor:pointer;margin-bottom:-1.5px">📊 Profit Overview</button>
+          <!-- Sub-tabs -->
+          <div style="display:flex;gap:0;margin-bottom:18px;border-bottom:1.5px solid var(--border)">
+            <button id="pay-tab-hw"     onclick="switchPayTab('hw')"     style="padding:8px 16px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2.5px solid var(--cyan);color:var(--cyan);cursor:pointer;margin-bottom:-1.5px">🏠 Homeowner Billing</button>
+            <button id="pay-tab-runner" onclick="switchPayTab('runner')" style="padding:8px 16px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2.5px solid transparent;color:var(--muted);cursor:pointer;margin-bottom:-1.5px">🚐 Runner Payouts</button>
+            <button id="pay-tab-profit" onclick="switchPayTab('profit')" style="padding:8px 16px;font-size:13px;font-weight:700;background:none;border:none;border-bottom:2.5px solid transparent;color:var(--muted);cursor:pointer;margin-bottom:-1.5px">📊 Profit</button>
           </div>
 
-          <!-- -- HOMEOWNER PAYMENTS TAB -- -->
+          <!-- HOMEOWNER BILLING TAB -->
           <div id="pay-panel-hw">
-            <!-- SUMMARY STATS -->
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
-              <div class="card" style="text-align:center;padding:16px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">MRR</div>
-                <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;color:var(--cyan)" id="pay-mrr">$0</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">Monthly recurring</div>
-              </div>
-              <div class="card" style="text-align:center;padding:16px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Active Subs</div>
-                <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;color:var(--green)" id="pay-active-subs">0</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">Paying homeowners</div>
-              </div>
-              <div class="card" style="text-align:center;padding:16px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Paused</div>
-                <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;color:var(--amber)" id="pay-paused-subs">0</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">Subscriptions paused</div>
-              </div>
-              <div class="card" style="text-align:center;padding:16px;border-color:rgba(239,68,68,.3)">
-                <div style="font-size:11px;font-weight:700;color:#ef4444;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Failed</div>
-                <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;color:#ef4444" id="pay-failed-subs">0</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">Needs attention</div>
-              </div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+              <div class="sc2"><div class="sn" style="color:var(--cyan)" id="pay-mrr">$0</div><div class="sl2">MRR</div></div>
+              <div class="sc2"><div class="sn" style="color:var(--green)" id="pay-active-subs">0</div><div class="sl2">Active subs</div></div>
+              <div class="sc2"><div class="sn" style="color:var(--amber)" id="pay-paused-subs">0</div><div class="sl2">Paused</div></div>
+              <div class="sc2" style="border-color:rgba(239,68,68,.3)"><div class="sn" style="color:#ef4444" id="pay-failed-subs">0</div><div class="sl2">Failed</div></div>
             </div>
-
-            <!-- FILTER ROW -->
-            <div class="toolbar" style="margin-bottom:14px">
-              <input placeholder="Search homeowner..." style="width:200px" oninput="filterHWPayments(this.value)">
+            <div class="toolbar" style="margin-bottom:12px">
+              <input placeholder="Search homeowner..." style="width:200px" oninput="filterHWPayments(this.value)" id="hwpay-search">
               <select id="hwpay-filter-status" onchange="filterHWPayments()" style="width:auto">
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="paused">Paused</option>
-                <option value="failed">Failed</option>
-                <option value="cancelled">Cancelled</option>
+                <option value="">All Status</option><option value="active">Active</option><option value="paused">Paused</option><option value="failed">Failed</option>
               </select>
               <select id="hwpay-filter-plan" onchange="filterHWPayments()" style="width:auto">
-                <option value="">All Plans</option>
-                <option value="plan_a">1 Can -- $34.99</option>
-                <option value="plan_b">2 Cans Same Day -- $44.99</option>
-                <option value="plan_c">2 Cans Split -- $54.99</option>
+                <option value="">All Plans</option><option value="plan_a">1 Can</option><option value="plan_b">2 Cans Same Day</option><option value="plan_c">2 Cans Split</option><option value="oan_a">OAN-A</option><option value="oan_b">OAN-B</option><option value="oan_c">OAN-C</option>
               </select>
               <span class="tc" id="hwpay-count">0 homeowners</span>
-              <button class="btn btn-outline btn-sm" onclick="exportHWPayments()">⬇ Export CSV</button>
+              <button class="btn btn-outline btn-sm" onclick="exportHWPayments()">⬇ CSV</button>
             </div>
-
-            <!-- PAYMENTS TABLE -->
-            <div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
-              <table>
-                <thead><tr>
-                  <th>Homeowner</th><th>Plan</th><th>Monthly</th><th>Status</th>
-                  <th>Next Charge</th><th>Last Charged</th><th>Card</th><th>Stripe</th><th></th>
-                </tr></thead>
-                <tbody id="hwpay-tbody">
-                  <tr><td colspan="9" style="text-align:center;color:var(--muted);padding:28px">Loading payment data...</td></tr>
-                </tbody>
-              </table>
+            <div id="hwpay-card-list" style="display:flex;flex-direction:column;gap:8px">
+              <div style="text-align:center;padding:32px;color:var(--muted)">Loading payment data...</div>
             </div>
           </div>
 
-          <!-- -- RUNNER PAYOUTS TAB -- -->
+          <!-- RUNNER PAYOUTS TAB -->
           <div id="pay-panel-runner" style="display:none">
-
-            <!-- PAYOUT SUMMARY -->
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
-              <div class="card" style="text-align:center;padding:16px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Pending This Week</div>
-                <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;color:var(--amber)" id="rp-pending-total">$0.00</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">Across all runners</div>
-              </div>
-              <div class="card" style="text-align:center;padding:16px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Paid This Month</div>
-                <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;color:var(--green)" id="rp-paid-month">$0.00</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">Completed payouts</div>
-              </div>
-              <div class="card" style="text-align:center;padding:16px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Runners on Auto-Pay</div>
-                <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:853;color:var(--cyan)" id="rp-autopay-count">0</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">Auto-scheduled</div>
-              </div>
-              <div class="card" style="text-align:center;padding:16px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Next Auto-Pay Run</div>
-                <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:853;color:var(--text);margin-top:4px" id="rp-next-run">--</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">Based on auto-pay settings</div>
-              </div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+              <div class="sc2"><div class="sn" style="color:var(--amber)" id="rp-pending-total">$0.00</div><div class="sl2">Pending this week</div></div>
+              <div class="sc2"><div class="sn" style="color:var(--green)" id="rp-paid-month">$0.00</div><div class="sl2">Paid this month</div></div>
+              <div class="sc2"><div class="sn" style="color:var(--cyan)" id="rp-autopay-count">0</div><div class="sl2">On auto-pay</div></div>
+              <div class="sc2"><div class="sn" style="font-size:16px;padding-top:4px" id="rp-next-run">--</div><div class="sl2">Next auto-pay</div></div>
             </div>
-
-            <!-- MANUAL PAYOUT CONTROLS -->
-            <div class="card" style="margin-bottom:16px">
-              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-                <div>
-                  <div style="font-size:14px;font-weight:700;margin-bottom:4px">Manual Payout Run</div>
-                  <div style="font-size:12px;color:var(--sub)">Reviews all runners with pending earnings and queues transfers via Stripe Connect. Only runners with a connected Stripe account will receive payment.</div>
-                </div>
-                <div style="display:flex;gap:8px;align-items:center">
-                  <button class="btn btn-outline btn-sm" onclick="previewPayoutRun()">👁 Preview Run</button>
-                  <button class="btn btn-cyan" onclick="confirmPayoutRun()">💸 Run Payouts Now</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- RUNNER PAYOUT TABLE -->
-            <div class="card" style="padding:0;overflow:hidden;overflow-x:auto;margin-bottom:16px">
-              <table>
-                <thead><tr>
-                  <th>Runner</th><th>Zone</th><th>Stops This Week</th><th>Pending</th>
-                  <th>Auto-Pay</th><th>Pay Day</th><th>Stripe Connect</th><th>Last Paid</th><th></th>
-                </tr></thead>
-                <tbody id="rp-tbody">
-                  <tr><td colspan="9" style="text-align:center;color:var(--muted);padding:28px">Loading runner payout data...</td></tr>
-                </tbody>
-              </table>
-            </div>
-
-            <!-- PAYOUT HISTORY -->
-            <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Payout History</div>
-            <div class="card" style="padding:0;overflow:hidden;overflow-x:auto">
-              <table>
-                <thead><tr><th>Date</th><th>Runner</th><th>Stops</th><th>Amount</th><th>Method</th><th>Status</th><th>Ref</th></tr></thead>
-                <tbody id="rp-history-tbody">
-                  <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:28px">No payout history yet.</td></tr>
-                </tbody>
-              </table>
+            <div id="rp-card-list" style="display:flex;flex-direction:column;gap:8px">
+              <div style="text-align:center;padding:32px;color:var(--muted)">Loading payout data...</div>
             </div>
           </div>
 
-          <!-- -- PROFIT OVERVIEW TAB -- -->
+          <!-- PROFIT OVERVIEW TAB -->
           <div id="pay-panel-profit" style="display:none">
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
-              <div class="card" style="text-align:center;padding:20px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Gross Revenue</div>
-                <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:853;color:var(--cyan)" id="prof-revenue">$0</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:4px">This month from homeowners</div>
-              </div>
-              <div class="card" style="text-align:center;padding:20px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Runner Costs</div>
-                <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:853;color:var(--amber)" id="prof-costs">$0</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:4px">Paid out to runners</div>
-              </div>
-              <div class="card" style="text-align:center;padding:20px;border-color:rgba(6,214,160,.3)">
-                <div style="font-size:11px;font-weight:700;color:var(--cyan);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Net Profit</div>
-                <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:853;color:var(--green)" id="prof-net">$0</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:4px">Before Stripe fees</div>
-              </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+              <div class="sc2" style="border-color:rgba(6,214,160,.3)"><div class="sn" style="color:var(--cyan)" id="prof-mrr">$0</div><div class="sl2">Gross MRR</div></div>
+              <div class="sc2"><div class="sn" style="color:var(--amber)" id="prof-costs">$0</div><div class="sl2">Runner Costs</div></div>
+              <div class="sc2" style="border-color:rgba(6,214,160,.3)"><div class="sn" style="color:var(--green)" id="prof-net">$0</div><div class="sl2">Net Profit</div></div>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
-              <div class="card" style="text-align:center;padding:16px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Stripe Fees (est.)</div>
-                <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:853;color:#ef4444" id="prof-stripe-fees">$0</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">2.9% + $0.30/charge</div>
-              </div>
-              <div class="card" style="text-align:center;padding:16px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Margin</div>
-                <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:853;color:var(--blue)" id="prof-margin">0%</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">Net / gross</div>
-              </div>
-              <div class="card" style="text-align:center;padding:16px">
-                <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Revenue / Homeowner</div>
-                <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:853;color:var(--text)" id="prof-per-hw">$0</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">Avg monthly per account</div>
-              </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+              <div class="sc2"><div class="sn" style="color:#ef4444" id="prof-stripe-fees">$0</div><div class="sl2">Stripe Fees (est.)</div></div>
+              <div class="sc2"><div class="sn" style="color:var(--blue)" id="prof-margin">0%</div><div class="sl2">Margin</div></div>
+              <div class="sc2"><div class="sn" id="prof-per-hw">$0</div><div class="sl2">Revenue / Homeowner</div></div>
             </div>
-            <div class="info-box">📌 Profit figures are estimates based on plan prices and completed jobs. Stripe fees are calculated at 2.9% + $0.30 per charge. Connect your Stripe account for live figures.</div>
+            <div class="info-box">📌 Estimates based on plan prices and completed jobs. Stripe fees at 2.9% + $0.30/charge.</div>
           </div>
 
         </div>
@@ -11304,26 +11190,67 @@ function renderHWPayments(){
     ? `<a href="https://dashboard.stripe.com/subscriptions/${id}" target="_blank" style="font-size:11px;color:var(--cyan)">View ↗</a>`
     : `<span style="font-size:11px;color:var(--muted)">Not connected</span>`
 
-  const tbody = document.getElementById('hwpay-tbody')
+  const tbody = document.getElementById('hwpay-card-list')
   if(!tbody) return
   if(!rows.length){
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:28px">No homeowners match filters.</td></tr>'
+    tbody.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted)">No homeowners match filters.</div>'
     return
   }
-  tbody.innerHTML = rows.map(p=>`
-    <tr>
-      <td><div style="font-weight:600;font-size:13px">${p.name}</div><div style="font-size:11px;color:var(--muted)">${p.email}</div></td>
-      <td><span style="font-size:12px">${p.planLabel}</span></td>
-      <td><span style="font-family:'DM Mono',monospace;font-weight:700;color:var(--cyan)">$${p.monthly.toFixed(2)}</span></td>
-      <td>${statusBadge(p.status)}</td>
-      <td style="font-size:12px;color:var(--sub)">${p.nextCharge}</td>
-      <td style="font-size:12px;color:var(--sub)">${p.lastCharged}</td>
-      <td style="font-family:'DM Mono',monospace;font-size:12px">•••• ${p.cardLast4}</td>
-      <td>${stripeLink(p.stripeSubId)}</td>
-      <td>
-        <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="showHWPaymentDetail('${p.hwId}')">Detail</button>
-      </td>
-    </tr>`).join('')
+
+  const sc = {active:'#22c55e', paused:'#f59e0b', failed:'#ef4444', cancelled:'#64748b'}
+  const sl = {active:'Active', paused:'Paused', failed:'Failed', cancelled:'Cancelled'}
+  const planIcons = {plan_a:'🗑️', plan_b:'🗑️🗑️', plan_c:'♻️🗑️', oan_a:'📅', oan_b:'📅', oan_c:'📅'}
+
+  tbody.innerHTML = rows.map((p,idx)=>{
+    const col = sc[p.status]||'#64748b'
+    const isOAN = p.plan?.startsWith('oan')
+    const hw = HOMEOWNERS.find(h=>h.email===p.email)
+    const addr = hw?.address ? hw.address+(hw.zip?', '+hw.zip:'') : p.email
+    return `<div style="border:1px solid rgba(255,255,255,.06);border-left:4px solid ${col};border-radius:10px;overflow:hidden;background:var(--surface)">
+      <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer" onclick="payToggle('hw-pay-${idx}')">
+        <div style="width:30px;height:30px;border-radius:50%;background:rgba(99,102,241,.15);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#a5b4fc;flex-shrink:0">${(p.name||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700;cursor:pointer" onclick="event.stopPropagation();_adminNavToHW('${p.email}')">${p.name||'--'}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:1px">📍 ${addr}</div>
+        </div>
+        <span style="font-size:11px;padding:2px 8px;border-radius:99px;border:0.5px solid var(--border2);color:var(--sub)">${planIcons[p.plan]||''} ${p.planLabel}</span>
+        <div style="text-align:right;min-width:56px">
+          <div style="font-size:15px;font-weight:700;color:var(--cyan)">$${p.monthly.toFixed(2)}</div>
+          <div style="font-size:10px;color:var(--muted)">/mo</div>
+        </div>
+        <span style="background:${col}22;color:${col};font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;flex-shrink:0">${sl[p.status]||p.status}</span>
+        <span id="pay-chev-hw-${idx}" style="font-size:11px;color:var(--muted);transition:transform .2s">▼</span>
+      </div>
+      <div id="hw-pay-${idx}-body" style="display:none;border-top:1px solid var(--border);padding:12px 14px;background:var(--surface2)">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:10px">
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Billing</div>
+            <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Next charge</span><span>${p.nextCharge}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Last charged</span><span>${p.lastCharged}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Card on file</span><span style="font-family:'DM Mono',monospace">···· ${p.cardLast4}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Stripe</span><span>${p.stripeSubId?`<a href="https://dashboard.stripe.com/subscriptions/${p.stripeSubId}" target="_blank" style="color:var(--cyan);font-size:11px">View ↗</a>`:'<span style="color:var(--muted);font-size:11px">Not connected</span>'}</span></div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Service</div>
+            <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Collection day</span><span>${hw?.day||'--'}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Zone</span><span>${ADMIN_ZONES.find(z=>z.id===hw?.zoneId)?.name||'--'}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Runner</span><span>${RUNNERS.find(r=>r.id===hw?.assignedRunner)?.name||'Unassigned'}</span></div>
+              ${isOAN?'<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Usage this month</span><span style="color:var(--green)">Check OAN log</span></div>':''}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="_adminNavToHW('${p.email}')">View homeowner</button>
+          ${p.stripeSubId?`<a href="https://dashboard.stripe.com/subscriptions/${p.stripeSubId}" target="_blank" class="btn btn-outline btn-sm">View in Stripe ↗</a>`:''}
+          ${p.status==='active'?`<button class="btn btn-ghost btn-sm" style="color:#fbbf24" onclick="showToast('Pause flow coming soon','info')">⏸ Pause</button>`:''}
+          ${p.status==='paused'?`<button class="btn btn-outline btn-sm" onclick="showToast('Resume flow coming soon','info')">▶ Resume</button>`:''}
+        </div>
+      </div>
+    </div>`
+  }).join('')
 }
 
 function exportHWPayments(){
@@ -11397,41 +11324,70 @@ function renderRunnerPayouts(){
     ? `<span class="badge" style="background:#22c55e22;color:#22c55e">● Connected</span>`
     : `<span class="badge" style="background:rgba(239,68,68,.15);color:#ef4444">⚠ Not set up</span>`
 
-  const tbody = document.getElementById('rp-tbody')
+  const tbody = document.getElementById('rp-card-list')
   if(!tbody) return
   if(!RUNNER_PAYOUTS.length){
-    tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:28px">No active runners.</td></tr>'
+    tbody.innerHTML='<div style="text-align:center;padding:32px;color:var(--muted)">No active runners.</div>'
     return
   }
-  tbody.innerHTML = RUNNER_PAYOUTS.map(r=>`
-    <tr>
-      <td><div style="font-weight:600;font-size:13px">${r.name}</div></td>
-      <td style="font-size:12px;color:var(--sub)">${r.zone}</td>
-      <td style="text-align:center;font-weight:700">${r.stopsThisWeek}</td>
-      <td><span style="font-family:'DM Mono',monospace;font-weight:700;color:var(--amber)">$${parseFloat(r.pendingAmt).toFixed(2)}</span></td>
-      <td>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-          <input type="checkbox" ${r.autoPay?'checked':''} onchange="toggleRunnerAutoPay('${r.runnerId}',this.checked)" style="width:auto">
-          <span style="font-size:12px">${r.autoPay?'Auto':'Manual'}</span>
-        </label>
-      </td>
-      <td>
-        <select style="font-size:12px;padding:4px 8px;width:auto" onchange="setRunnerPayDay('${r.runnerId}',this.value)" ${!r.autoPay?'disabled':''}>
-          ${['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d=>`<option ${r.payDay===d?'selected':''}>${d}</option>`).join('')}
-        </select>
-      </td>
-      <td>${connectBadge(r.stripeConnectId)}</td>
-      <td style="font-size:12px;color:var(--sub)">${r.lastPaidAt ? new Date(r.lastPaidAt).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '--'}</td>
-      <td>
-        <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="payRunnerNow('${r.runnerId}')">Pay Now</button>
-      </td>
-    </tr>`).join('')
+  tbody.innerHTML = RUNNER_PAYOUTS.map((r,idx)=>{
+    const hasPending = parseFloat(r.pendingAmt||0) > 0
+    const col = hasPending ? '#f59e0b' : '#64748b'
+    const ri  = (r.name||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)
+    const runner = RUNNERS.find(x=>x.id===r.runnerId||x.name===r.name)
+    return `<div style="border:1px solid rgba(255,255,255,.06);border-left:4px solid ${col};border-radius:10px;overflow:hidden;background:var(--surface)">
+      <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer" onclick="payToggle('rp-pay-${idx}')">
+        <div style="width:30px;height:30px;border-radius:50%;background:${runner?.color||'rgba(6,214,160,.2)'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#07090f;flex-shrink:0">${ri}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700;cursor:pointer" onclick="event.stopPropagation();_adminNavToRunner('${r.name}')">${r.name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:1px">${r.zone} · ${r.stopsThisWeek} stop${r.stopsThisWeek!==1?'s':''} this week</div>
+        </div>
+        <div style="text-align:right;min-width:70px">
+          <div style="font-size:15px;font-weight:700;color:${hasPending?'var(--amber)':'var(--muted)'}">$${parseFloat(r.pendingAmt||0).toFixed(2)}</div>
+          <div style="font-size:10px;color:var(--muted)">${hasPending?'pending · pays '+r.payDay:'nothing pending'}</div>
+        </div>
+        <span style="background:${r.stripeConnectId?'#22c55e22':'rgba(239,68,68,.1)'};color:${r.stripeConnectId?'#22c55e':'#ef4444'};font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;flex-shrink:0">${r.stripeConnectId?'Connected':'Not set up'}</span>
+        <span id="pay-chev-rp-${idx}" style="font-size:11px;color:var(--muted);transition:transform .2s">▼</span>
+      </div>
+      <div id="rp-pay-${idx}-body" style="display:none;border-top:1px solid var(--border);padding:12px 14px;background:var(--surface2)">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:10px">
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">This pay period</div>
+            <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Stops</span><span>${r.stopsThisWeek}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Earned</span><span style="color:var(--green);font-weight:700">$${parseFloat(r.pendingAmt||0).toFixed(2)}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Pays on</span><span>${r.payDay}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Last paid</span><span>${r.lastPaidAt?new Date(r.lastPaidAt).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'--'} ${r.lastPaidAmt?'· $'+parseFloat(r.lastPaidAmt).toFixed(2):''}</span></div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Payout details</div>
+            <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Method</span><span>Stripe Connect</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Account</span><span style="color:${r.stripeConnectId?'#22c55e':'#ef4444'}">${r.stripeConnectId?'Setup complete':'Not connected'}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Auto-pay</span><span>${r.autoPay?'✅ Enabled':'Off'}</span></div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${hasPending?`<button class="btn btn-outline btn-sm" style="color:#22c55e;border-color:#22c55e" onclick="showToast('Manual payout — connect Stripe to process','info')">Pay now — $${parseFloat(r.pendingAmt).toFixed(2)}</button>`:''}
+          <button class="btn btn-outline btn-sm" onclick="_adminNavToRunner('${r.name}')">View runner</button>
+        </div>
+      </div>
+    </div>`
+  }).join('')
+}
 
-  // History table
-  const histTbody = document.getElementById('rp-history-tbody')
-  if(histTbody && !PAYOUT_HISTORY.length){
-    histTbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:28px">No payout history yet. Payouts will appear here once processed.</td></tr>'
-  }
+function payToggle(cardId){
+  const body = document.getElementById(cardId+'-body')
+  // Find chevron by card id pattern
+  const chevId = cardId.startsWith('hw-pay-') ? 'pay-chev-hw-'+cardId.replace('hw-pay-','')
+               : cardId.startsWith('rp-pay-') ? 'pay-chev-rp-'+cardId.replace('rp-pay-','') : null
+  const chev = chevId ? document.getElementById(chevId) : null
+  if(!body) return
+  const open = body.style.display==='block'
+  body.style.display = open?'none':'block'
+  if(chev) chev.style.transform = open?'':'rotate(180deg)'
 }
 
 async function toggleRunnerAutoPay(runnerId, enabled){
@@ -11466,13 +11422,7 @@ function previewPayoutRun(){
     <div class="info-box" style="margin-bottom:14px">This shows what will be transferred to each runner's Stripe Connect account. Only runners marked as Connected will receive payment.</div>
     <div class="card" style="padding:0;overflow:hidden;margin-bottom:14px">
       <table><thead><tr><th>Runner</th><th>Stops</th><th>Amount</th><th>Stripe</th></tr></thead>
-      <tbody>${pending.map(r=>`
-        <tr>
-          <td style="font-weight:600;font-size:13px">${r.name}</td>
-          <td style="text-align:center">${r.stopsThisWeek}</td>
-          <td style="font-family:'DM Mono',monospace;font-weight:700;color:var(--amber)">$${parseFloat(r.pendingAmt).toFixed(2)}</td>
-          <td>${r.stripeConnectId?'<span style="color:#22c55e">● Will pay</span>':'<span style="color:#ef4444">⚠ Skipped -- not connected</span>'}</td>
-        </tr>`).join('')}
+      <tbody>${pending.map(r=>'<tr><td style="font-weight:600;font-size:13px">'+r.name+'</td><td style="text-align:center">'+r.stopsThisWeek+'</td><td style="font-family:\'DM Mono\',monospace;font-weight:700;color:var(--amber)">$'+parseFloat(r.pendingAmt).toFixed(2)+'</td><td>'+(r.stripeConnectId?'<span style="color:#22c55e">● Will pay</span>':'<span style="color:#ef4444">⚠ Skipped</span>')+'</td></tr>').join('')}
         <tr style="border-top:2px solid var(--border2)">
           <td colspan="2" style="font-weight:700">Total</td>
           <td style="font-family:'DM Mono',monospace;font-weight:700;color:var(--cyan)">$${total.toFixed(2)}</td>
@@ -15432,61 +15382,141 @@ function renderAdminZones(){
     </div>`
     return
   }
-  el.innerHTML = ADMIN_ZONES.map(z => {
-    const sc = z.status==='live'&&!z.pilot?'#22c55e':z.pilot?'#a5b4fc':z.status==='waitlist'?'#f59e0b':'#6b7280'
-    const sl = z.status==='live'&&!z.pilot?'Live':z.pilot?'Pilot':z.status==='waitlist'?'Waitlist':'Inactive'
+
+  el.innerHTML = ADMIN_ZONES.map((z,idx) => {
+    const sc   = z.status==='live'&&!z.pilot?'#22c55e':z.pilot?'#a5b4fc':z.status==='waitlist'?'#f59e0b':'#6b7280'
+    const sl   = z.status==='live'&&!z.pilot?'Live':z.pilot?'Pilot':z.status==='waitlist'?'Waitlist':'Inactive'
     const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
-    const hwCount = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))).length
-    const rnList  = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id)||zips.includes(r.zip))
-    const rnAssigned = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))&&h.assignedRunner).map(h=>h.assignedRunner)
-    const uniqueAssigned = [...new Set(rnAssigned)]
-    const wlCount = WAITLIST_SIGNUPS.filter(s=>s.status==='waitlist'&&zips.some(z2=>s.zip===z2)).length
-    const days    = [...new Set(HOMEOWNERS.filter(h=>h.zoneId===z.id||zips.includes(h.zip)).map(h=>h.day).filter(d=>d&&d!=='--'))].join(', ')
-    const pct     = z.threshold>0 ? Math.min(100,Math.round((hwCount/z.threshold)*100)) : 0
-    const zipTags = zips.map(zip=>`<span style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.25);border-radius:6px;padding:2px 8px;font-family:'DM Mono',monospace;font-size:12px;font-weight:600;color:#a5b4fc">${zip}</span>`).join('')
+    const hwCount  = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))).length
+    const rnList   = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id)||zips.includes(r.zip))
+    const wlCount  = WAITLIST_SIGNUPS.filter(s=>s.status==='waitlist'&&zips.some(z2=>s.zip===z2)).length
+    const days     = [...new Set(HOMEOWNERS.filter(h=>h.zoneId===z.id||zips.includes(h.zip)).map(h=>h.day).filter(d=>d&&d!=='--'))].join(', ')
+    const pct      = z.threshold>0 ? Math.min(100,Math.round((hwCount/z.threshold)*100)) : 0
+    const planRates= { plan_a:34.99, plan_b:44.99, plan_c:54.99, oan_a:19.99, oan_b:19.99, oan_c:19.99 }
+    const zoneMRR  = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip)))
+                     .reduce((t,h)=>t+(planRates[h.plan]||34.99),0)
+    const recentJobs= (_adminJobsCache||[]).filter(j=>HOMEOWNERS.some(h=>h.zoneId===z.id&&h.email===j.homeowner_email))
+    const completedJobs = recentJobs.filter(j=>j.status==='complete').length
+    const zipTags  = zips.map(zip=>`<span style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:4px;padding:1px 7px;font-family:'DM Mono',monospace;font-size:11px;color:#a5b4fc">${zip}</span>`).join('')
+    const rgba     = sc==='#22c55e'?'34,197,94':sc==='#a5b4fc'?'165,180,252':sc==='#f59e0b'?'245,158,11':'107,114,128'
 
-    return `<div style="border:1px solid rgba(255,255,255,.06);border-left:4px solid ${sc};border-radius:10px;background:var(--surface);padding:14px 16px;margin-bottom:0">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    return `<div style="border:1px solid rgba(${rgba},.25);border-left:4px solid ${sc};border-radius:10px;overflow:hidden;background:var(--surface)">
+      <!-- HEADER — always visible -->
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer" onclick="zoneCardToggle('zc-${idx}')">
+        <div style="width:10px;height:10px;border-radius:50%;background:${sc};flex-shrink:0"></div>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-            <span style="font-size:15px;font-weight:700">${z.name}</span>
-            <span style="background:rgba(99,102,241,.12);color:#a5b4fc;border-radius:6px;padding:2px 7px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.04em">${zoneLabel(z)}</span>
-            <span style="background:${sc}22;color:${sc};border-radius:99px;padding:2px 8px;font-size:10px;font-weight:700">${sl}</span>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:14px;font-weight:700">${z.name}</span>
+            <span style="background:rgba(99,102,241,.12);color:#a5b4fc;border-radius:5px;padding:1px 7px;font-family:'DM Mono',monospace;font-size:11px">${zoneLabel(z)}</span>
+            <span style="background:${sc}22;color:${sc};border-radius:99px;padding:1px 8px;font-size:10px;font-weight:700">${sl}</span>
+            ${wlCount?`<span style="background:rgba(245,158,11,.15);color:#fbbf24;border-radius:99px;padding:1px 8px;font-size:10px;font-weight:700">⏳ ${wlCount} waitlisted</span>`:''}
           </div>
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap">
-            <span style="font-size:11px;color:var(--muted)">ZIP codes:</span>
-            ${zipTags}
+          <div style="font-size:11px;color:var(--muted);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap">
+            <span>🏠 ${hwCount} HOs</span>
+            <span>🚐 ${rnList.length} runners</span>
+            ${days?`<span>📅 ${days}</span>`:''}
           </div>
-          <div style="display:flex;gap:16px;font-size:12px;color:var(--sub);flex-wrap:wrap;margin-bottom:8px">
-            <span>🏠 <strong style="color:var(--text)">${hwCount}</strong> homeowners</span>
-            <span>🚐 <strong style="color:var(--text)">${rnList.length}</strong> enrolled${uniqueAssigned.length ? ' . <strong style="color:#22c55e">'+uniqueAssigned.length+' assigned</strong>' : ''}</span>
-            ${wlCount ? `<span>⏳ <strong style="color:#f59e0b">${wlCount}</strong> waitlisted</span>` : ''}
-            ${days ? `<span>📅 <strong style="color:var(--text)">${days}</strong></span>` : ''}
-            <span style="color:var(--muted)">Cap: ${hwCount}/${z.capacity}</span>
-          </div>
-
-          ${z.status==='waitlist'&&pct<100 ? `<div style="margin-bottom:10px">
-            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px"><span>Interest</span><span>${hwCount}/${z.threshold}</span></div>
-            <div style="background:rgba(0,0,0,.2);border-radius:99px;height:4px"><div style="width:${pct}%;height:100%;background:#f59e0b;border-radius:99px"></div></div>
-          </div>` : ''}
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <span style="font-size:11px;color:var(--muted)">Runners:</span>
-            ${rnList.length ? rnList.map(r=>`<span style="background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.2);border-radius:99px;padding:2px 8px;font-size:11px;color:#a5b4fc">${r.name.split(' ')[0]} . ZIP ${r.zip||'--'}</span>`).join('') : '<span style="font-size:11px;color:var(--muted)">None assigned</span>'}
-            <button onclick="showZoneCoverageEdit('${z.id}')" style="background:none;border:1px dashed var(--border2);border-radius:99px;padding:2px 8px;font-size:10px;color:var(--muted);cursor:pointer">+ Assign runner</button>
-          </div>
-
-          ${z.notes ? `<div style="margin-top:6px;font-size:11px;color:var(--muted);font-style:italic">${z.notes}</div>` : ''}
         </div>
-        <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;flex-shrink:0">
-          ${z.status==='waitlist' ? `<button class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3);font-size:11px" onclick="activateZone('${z.id}')">⚡ Activate</button>` : ''}
-          ${z.pilot ? `<button class="btn btn-sm" style="background:#22c55e22;color:#22c55e;border:1px solid rgba(34,197,94,.3);font-size:11px" onclick="promoteToLive('${z.id}')">↑ Go Live</button>` : ''}
-          <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="showEditZone('${z.id}')">✏️ Edit</button>
-          <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="showSplitZone('${z.id}')">✂️ Split</button>
-          <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#ef4444" onclick="confirmDeleteZone('${z.id}','${z.name}')">🗑</button>
+        <!-- ZIP tags (compact) -->
+        <div style="display:flex;gap:4px;flex-wrap:wrap;max-width:180px">${zipTags}</div>
+        <!-- MRR -->
+        <div style="text-align:right;min-width:60px;flex-shrink:0">
+          <div style="font-size:14px;font-weight:700;color:var(--green)">$${zoneMRR.toFixed(0)}</div>
+          <div style="font-size:10px;color:var(--muted)">zone MRR</div>
+        </div>
+        <span id="zc-chev-${idx}" style="font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0">▼</span>
+      </div>
+
+      <!-- EXPANDED DETAIL -->
+      <div id="zc-${idx}-body" style="display:none;border-top:1px solid var(--border)">
+        <div style="padding:12px 14px;background:var(--surface2)">
+          <!-- Stats row -->
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+            <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:18px;font-weight:700;color:var(--cyan)">${hwCount}</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Active HOs</div>
+            </div>
+            <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:18px;font-weight:700;color:#a5b4fc">${rnList.length}</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Runners</div>
+            </div>
+            <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:18px;font-weight:700;color:var(--green)">$${zoneMRR.toFixed(0)}</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Zone MRR</div>
+            </div>
+            <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:18px;font-weight:700;color:#fbbf24">${wlCount}</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Waitlisted</div>
+            </div>
+          </div>
+
+          <!-- Content grid -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:12px">
+            <!-- Homeowners -->
+            <div>
+              <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Homeowners</div>
+              ${HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))).slice(0,5).map(h=>`
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
+                  <span style="color:var(--cyan);cursor:pointer" onclick="_adminNavToHW('${h.email}')">${h.name}</span>
+                  <span style="color:var(--muted);font-size:11px">${h.day||'--'}</span>
+                </div>`).join('')}
+              ${hwCount>5?`<div style="font-size:11px;color:var(--muted);padding-top:4px">+${hwCount-5} more</div>`:''}
+              ${!hwCount?'<div style="font-size:12px;color:var(--muted)">No active homeowners</div>':''}
+            </div>
+            <!-- Runners -->
+            <div>
+              <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Runners</div>
+              ${rnList.length ? rnList.map(r=>`
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
+                  <span style="color:var(--cyan);cursor:pointer" onclick="_adminNavToRunner('${r.name}')">${r.name.split(' ')[0]}</span>
+                  <span style="background:${r.status==='AVAILABLE'?'#22c55e22':'rgba(245,158,11,.15)'};color:${r.status==='AVAILABLE'?'#22c55e':'#fbbf24'};font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px">${r.status}</span>
+                </div>`).join('') : '<div style="font-size:12px;color:var(--muted)">No runners assigned</div>'}
+              <button onclick="showZoneCoverageEdit('${z.id}')" style="margin-top:6px;background:none;border:1px dashed var(--border2);border-radius:6px;padding:2px 8px;font-size:10px;color:var(--muted);cursor:pointer">+ Assign runner</button>
+            </div>
+            <!-- Stats -->
+            <div>
+              <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Zone info</div>
+              <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
+                <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Capacity</span><span>${hwCount} / ${z.capacity||15}</span></div>
+                <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Schedule</span><span>${days||'--'}</span></div>
+                <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Completed routes</span><span>${completedJobs}</span></div>
+                <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Threshold</span><span>${pct}% to activate</span></div>
+              </div>
+              ${z.status==='waitlist'&&pct<100?`
+              <div style="margin-top:8px">
+                <div style="height:4px;background:var(--surface3);border-radius:99px;overflow:hidden">
+                  <div style="height:100%;width:${pct}%;background:#f59e0b;border-radius:99px"></div>
+                </div>
+                <div style="font-size:10px;color:var(--muted);margin-top:3px">${hwCount}/${z.threshold} HOs to activate</div>
+              </div>`:''}
+            </div>
+          </div>
+
+          ${z.notes?`<div style="font-size:12px;color:var(--muted);font-style:italic;margin-bottom:10px">📝 ${z.notes}</div>`:''}
+
+          <!-- Action buttons -->
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${z.status==='waitlist'?`<button class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3)" onclick="activateZone('${z.id}')">⚡ Activate</button>`:''}
+            ${z.pilot?`<button class="btn btn-sm" style="background:#22c55e22;color:#22c55e;border:1px solid rgba(34,197,94,.3)" onclick="promoteToLive('${z.id}')">↑ Go Live</button>`:''}
+            <button class="btn btn-outline btn-sm" onclick="showZoneDetail('${z.id}')">📋 Route Order</button>
+            <button class="btn btn-outline btn-sm" onclick="showEditZone('${z.id}')">✏️ Edit</button>
+            <button class="btn btn-outline btn-sm" onclick="showSplitZone('${z.id}')">✂️ Split</button>
+            <button class="btn btn-ghost btn-sm" style="color:#ef4444;margin-left:auto" onclick="confirmDeleteZone('${z.id}','${z.name}')">🗑 Delete</button>
+          </div>
         </div>
       </div>
     </div>`
   }).join('')
+}
+
+function zoneCardToggle(cardId){
+  const body  = document.getElementById(cardId+'-body')
+  const chevIdx = cardId.replace('zc-','')
+  const chev  = document.getElementById('zc-chev-'+chevIdx)
+  if(!body) return
+  const open = body.style.display==='block'
+  body.style.display = open?'none':'block'
+  if(chev) chev.style.transform = open?'':'rotate(180deg)'
 }
 
 function activateZone(zId){
