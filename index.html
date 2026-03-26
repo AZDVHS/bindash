@@ -14782,7 +14782,7 @@ function renderDispatchPipeline(){
   const zoneFil = document.getElementById('dispatch-zone-filter')?.value || ''
   const dayFil  = document.getElementById('dispatch-day-filter')?.value  || ''
 
-  // Populate zone filter dropdown
+  // Populate zone filter dropdown once
   const zf = document.getElementById('dispatch-zone-filter')
   if(zf && zf.options.length <= 1){
     ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
@@ -14790,7 +14790,6 @@ function renderDispatchPipeline(){
     })
   }
 
-  // Use live DB batches if no preview batches have been generated
   const batchSource = generatedBatches.length ? generatedBatches : (window._livePipelineBatches || [])
   const isLiveView  = !generatedBatches.length && batchSource.length > 0
 
@@ -14803,194 +14802,181 @@ function renderDispatchPipeline(){
     return
   }
 
+  // Remember which cards are open so we can re-open them after re-render
+  const openCards = new Set()
+  pipeline.querySelectorAll('[data-dispatch-card-open="1"]').forEach(el => openCards.add(el.dataset.batchId))
+
   let batches = batchSource
   if(zoneFil) batches = batches.filter(b=>b.zoneId===zoneFil)
 
   const titleEl = document.getElementById('pipeline-title')
   const badgeEl = document.getElementById('pipeline-badge')
   const allPreview = batches.every(b=>b.status==='preview')
-
   if(isLiveView){
-    const accepted  = batches.filter(b=>['accepted','in_progress'].includes(b.status)).length
-    const offered   = batches.filter(b=>['offered','broadcast'].includes(b.status)).length
+    const accepted = batches.filter(b=>['accepted','in_progress'].includes(b.status)).length
+    const offered  = batches.filter(b=>['offered','broadcast'].includes(b.status)).length
     if(titleEl) titleEl.textContent = `Live Routes — ${dayFil||'Today'} · ${accepted} accepted · ${offered} awaiting`
     if(badgeEl) badgeEl.textContent = batches.length+' active route'+(batches.length!==1?'s':'')+' · click to manage'
   } else {
-    if(titleEl) titleEl.textContent = 'Route Preview — ' + (dayFil||'All Days') + (allPreview ? ' · Not sent yet' : '')
+    if(titleEl) titleEl.textContent = 'Route Preview — '+(dayFil||'All Days')+(allPreview?' · Not sent yet':'')
     if(badgeEl) badgeEl.textContent = batches.length+' batch'+(batches.length!==1?'es':'')+' · '+RUNNERS.filter(r=>r.status==='AVAILABLE').length+' runners available'
   }
 
-  // Check for merge opportunities — same runner assigned to multiple batches
+  // Merge suggestions
   const runnerBatches = {}
-  batches.forEach(b => {
-    if(b.runner?.id){
-      if(!runnerBatches[b.runner.id]) runnerBatches[b.runner.id] = []
-      runnerBatches[b.runner.id].push(b)
-    }
-  })
-  const mergeSuggestions = Object.entries(runnerBatches).filter(([,bs]) => bs.length > 1)
+  batches.forEach(b => { if(b.runner?.id){ if(!runnerBatches[b.runner.id]) runnerBatches[b.runner.id]=[]; runnerBatches[b.runner.id].push(b) } })
+  const mergeSuggestions = Object.entries(runnerBatches).filter(([,bs])=>bs.length>1)
   const mergeHtml = mergeSuggestions.length ? `
-  <div style="background:rgba(6,214,160,.07);border:1px solid rgba(6,214,160,.25);border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-    <div style="flex:1">
-      <div style="font-size:12px;font-weight:700;color:var(--cyan);margin-bottom:2px">💡 Merge opportunity</div>
-      ${mergeSuggestions.map(([rid, bs]) => {
-        const name = bs[0].runner.name
-        const ids = bs.map(b=>b.id).join('|')
-        const totalStops = bs.reduce((s,b)=>s+b.stops.length,0)
-        return `<div style="font-size:11px;color:var(--sub)">${name} has ${bs.length} separate routes (${totalStops} stops total) — merge into one?
-          <button onclick="mergeBatches('${ids}')" style="margin-left:6px;background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:5px;padding:2px 10px;font-size:10px;cursor:pointer">Merge</button>
-        </div>`
-      }).join('')}
-    </div>
+  <div style="background:rgba(6,214,160,.07);border:1px solid rgba(6,214,160,.25);border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px">
+    <span style="color:var(--cyan);font-weight:700">💡 Merge opportunity —</span>
+    ${mergeSuggestions.map(([,bs])=>{
+      const ids = bs.map(x=>x.id).join('|')
+      return '<span style="color:var(--sub)">'+bs[0].runner.name+' has '+bs.length+' routes ('+bs.reduce((s,b)=>s+b.stops.length,0)+' stops)</span> <button onclick="mergeBatches(\''+ids+'\')" style="margin-left:4px;background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:5px;padding:1px 8px;font-size:10px;cursor:pointer">Merge</button>'
+    }).join(' · ')}
   </div>` : ''
 
-  pipeline.innerHTML = mergeHtml + batches.map(b=>{
-    const isPreview  = b.status === 'preview'
-    const borderCol  = isPreview ? '#a5b4fc'
-      : b.status==='accepted' ? '#22c55e'
-      : b.status==='offered'  ? '#f59e0b'
-      : b.status==='broadcast'? '#3b82f6' : '#ef4444'
-    const bgCol = isPreview ? 'rgba(165,180,252,.04)'
-      : b.status==='accepted' ? 'rgba(34,197,94,.04)'
-      : b.status==='offered'  ? 'rgba(245,158,11,.04)'
-      : b.status==='broadcast'? 'rgba(59,130,246,.04)' : 'rgba(239,68,68,.05)'
-    const loyalTag   = b.offerBadge || ''
-    const badgeTxt   = isPreview    ? '👁 Preview'
-      : b.status==='accepted'  ? '✓ Accepted'
-      : b.status==='in_progress'?'🔄 In Progress'
-      : b.status==='offered'   ? '⏳ Offer sent'
-      : b.status==='broadcast' ? '📡 Broadcast' : '🚨 Unassigned'
-    const badgeStyle = isPreview   ? 'background:rgba(165,180,252,.2);color:#a5b4fc'
-      : b.status==='accepted'  ? 'background:#22c55e22;color:#22c55e'
-      : b.status==='in_progress'?'background:rgba(6,214,160,.15);color:var(--cyan)'
-      : b.status==='offered'   ? 'background:rgba(245,158,11,.15);color:#f59e0b'
-      : b.status==='broadcast' ? 'background:rgba(59,130,246,.15);color:#3b82f6' : 'background:rgba(239,68,68,.15);color:#ef4444'
-    const offerChainStyle = b.offerType==='loyalty' ? 'background:rgba(6,214,160,.1);color:var(--cyan)'
-      : b.offerType==='zone'     ? 'background:rgba(59,130,246,.1);color:var(--blue)'
-      : b.offerType==='broadcast'? 'background:rgba(245,158,11,.1);color:var(--amber)' : ''
+  const sc = { preview:'#a5b4fc', accepted:'#22c55e', in_progress:'#06d6a0', offered:'#f59e0b', broadcast:'#3b82f6', unassigned:'#ef4444' }
+  const si = { preview:'👁 Preview', accepted:'✓ Accepted', in_progress:'🔄 In Progress', offered:'⏳ Offer sent', broadcast:'📡 Broadcast', unassigned:'🚨 Unassigned' }
 
-    const stopList = b.stops.map((h,idx)=>{
+  const cardsHtml = batches.map(b=>{
+    const isPreview = b.status==='preview'
+    const isBinIn   = b.visitType==='BIN_IN'||b.id?.endsWith('-IN')
+    const statusKey = b.status==='unassigned'||!b.status?'unassigned':b.status
+    const borderCol = isBinIn ? '#06d6a0' : (sc[statusKey]||'#64748b')
+    const badgeTxt  = si[statusKey]||b.status
+    const badgeCol  = sc[statusKey]||'#64748b'
+    const isOpen    = openCards.has(b.id)
+    const ri        = b.runner ? (b.runner.initials||b.runner.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)) : null
+    const batchName = (b.zoneName||'Route').replace(/ · ☀️ BIN IN| · 🌙 BIN OUT/,'')
+    const vtLabel   = isBinIn ? '☀️ BIN IN' : '🌙 BIN OUT'
+    const completedStops = b.stops.filter(s=>s.status==='complete').length
+    const pct = b.stops.length ? Math.round(completedStops*100/b.stops.length) : 0
+
+    // Build stop rows for expanded view — all string concat, no nested backticks
+    const stopRows = b.stops.map((h,idx)=>{
       const isSplit = h.service==='SPLIT'
-      let svcLabel, svcBg
-      if(isSplit){
-        const isRecyclingDay = normDay(h.dayRecycling) === normDay(b.day)
-        svcLabel = isRecyclingDay ? '♻️ Recycling bin' : '🗑️ General waste bin'
-        svcBg = isRecyclingDay ? 'background:rgba(6,214,160,.12);color:var(--cyan)' : 'background:rgba(239,68,68,.1);color:#fca5a5'
-      } else if(h.service==='BOTH' || (h.bins&&h.bins>=2)){
-        svcLabel = '♻️🗑️ Both bins'
-        svcBg = 'background:rgba(99,102,241,.12);color:#a5b4fc'
-      } else if(h.service==='GENERAL'){
-        svcLabel = '🗑️ General waste'
-        svcBg = 'background:rgba(245,158,11,.1);color:#fbbf24'
-      } else {
-        svcLabel = '♻️ Recycling'
-        svcBg = 'background:rgba(6,214,160,.1);color:var(--cyan)'
-      }
-
+      const isRecDay = isSplit && normDay(h.dayRecycling)===normDay(b.day)
+      const svcLabel = isSplit ? (isRecDay?'♻️ Recycling':'🗑️ Waste') : h.service==='BOTH'||(h.bins&&h.bins>=2) ? '♻️🗑️ Both' : h.service==='GENERAL' ? '🗑️ Waste' : '♻️ Recycling'
+      const addr = h.address&&h.address!=='--' ? h.address+(h.zip?' · '+h.zip:'') : (h.zip||'No address')
       const alerts = []
-      if(h.gate && h.gate!=='No gate' && h.gate!=='--') alerts.push('🔑 '+h.gate+(h.gateCode?' · '+h.gateCode:''))
-      if(h.pets && h.pets!=='No pets' && h.pets!=='None' && h.pets!=='--') alerts.push('🐾 '+h.pets)
-      if(h.storage && h.storage!=='--') alerts.push('📦 '+h.storage)
-      const addr = h.address && h.address!=='--' ? h.address+(h.zip?' · '+h.zip:'') : (h.zip||'No address')
+      if(h.gate&&h.gate!=='No gate'&&h.gate!=='--') alerts.push('🔑 '+h.gate+(h.gateCode?' · '+h.gateCode:''))
+      if(h.pets&&h.pets!=='No pets'&&h.pets!=='None'&&h.pets!=='--') alerts.push('🐾 '+h.pets)
+      if(h.storage&&h.storage!=='--') alerts.push('📦 '+h.storage)
+      const otherBatches = generatedBatches.filter(ob=>ob.id!==b.id)
+      const moveOpts = otherBatches.map(ob=>'<option value="'+ob.id+'">'+(ob.runner?.name||'Unassigned')+' · '+(ob.zoneName||'')+'</option>').join('')
 
-      // Other batches this stop could move to
-      const otherBatches = generatedBatches.filter(ob => ob.id !== b.id)
-      const moveOpts = otherBatches.map(ob =>
-        `<option value="${ob.id}">${ob.runner?.name||'Unassigned'} · ${ob.zoneName} (${ob.stops.length} stops)</option>`
-      ).join('')
-
-      return `<div style="padding:8px 0;border-bottom:1px solid var(--border);${idx===b.stops.length-1?'border-bottom:none':''}">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="width:20px;height:20px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${idx+1}</div>
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-              <span style="font-size:12px;font-weight:700">${h.name}</span>
-              <span style="font-size:10px;font-weight:600;padding:1px 7px;border-radius:4px;${svcBg}">${svcLabel}</span>
-              ${h.assignedRunner ? '<span style="font-size:9px;color:var(--cyan)">★ assigned</span>' : ''}
-            </div>
-            <div style="font-size:11px;color:var(--sub);margin-top:1px">📍 ${addr}</div>
-            ${alerts.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:3px">${alerts.map(a=>`<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;padding:1px 6px;border-radius:4px">${a}</span>`).join('')}</div>` : ''}
-            ${h.svcNotes ? `<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic">📝 ${h.svcNotes}</div>` : ''}
-          </div>
-          ${isPreview ? `<div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
-            ${otherBatches.length ? `<select style="font-size:10px;padding:2px 4px;border-radius:5px;background:var(--surface2);border:1px solid var(--border);color:var(--text);max-width:130px" onchange="moveStopToBatch('${b.id}',${idx},this.value);this.value=''" title="Move to another route">
-              <option value="">↔ Move to...</option>
-              ${moveOpts}
-            </select>` : ''}
-            <button onclick="removeStopFromBatch('${b.id}',${idx})" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:5px;padding:2px 6px;font-size:10px;cursor:pointer;flex-shrink:0" title="Remove stop">✕</button>
-          </div>` : ''}
-        </div>
-      </div>`
+      return '<div style="padding:8px 0;border-bottom:'+(idx===b.stops.length-1?'none':'1px solid var(--border)')+';">'
+        +'<div style="display:flex;align-items:center;gap:8px">'
+        +'<div style="width:20px;height:20px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(idx+1)+'</div>'
+        +'<div style="flex:1;min-width:0">'
+        +'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+        +'<span style="font-size:12px;font-weight:700">'+h.name+'</span>'
+        +'<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(99,102,241,.12);color:#a5b4fc">'+svcLabel+'</span>'
+        +(h.assignedRunner?'<span style="font-size:9px;color:var(--cyan)">★ assigned</span>':'')
+        +'</div>'
+        +'<div style="font-size:11px;color:var(--sub);margin-top:1px">📍 '+addr+'</div>'
+        +(alerts.length?'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">'+alerts.map(a=>'<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;padding:1px 6px;border-radius:4px">'+a+'</span>').join('')+'</div>':'')
+        +(h.svcNotes?'<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic">📝 '+h.svcNotes+'</div>':'')
+        +'</div>'
+        +(isPreview
+          ? '<div style="display:flex;gap:4px;align-items:center;flex-shrink:0">'
+            +(otherBatches.length
+              ? '<select style="font-size:10px;padding:2px 4px;border-radius:5px;background:var(--surface2);border:1px solid var(--border);color:var(--text);max-width:130px" onchange="moveStopToBatch(\''+b.id+'\','+idx+',this.value);this.value=\'\'" title="Move to another route"><option value="">↔ Move to...</option>'+moveOpts+'</select>'
+              : '')
+            +'<button onclick="removeStopFromBatch(\''+b.id+'\','+idx+')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:5px;padding:2px 6px;font-size:10px;cursor:pointer" title="Remove">✕</button>'
+            +'</div>'
+          : '')
+        +'</div></div>'
     }).join('')
 
-    const isBinIn    = b.visitType === 'BIN_IN' || b.id?.endsWith('-IN')
-    const vtClass    = isBinIn ? 'vt-in' : 'vt-out'
-    const vtLabel    = isBinIn ? '☀️ BIN IN' : '🌙 BIN OUT'
-    const vtSubLabel = isBinIn
-      ? 'Returns bins to property after truck'
-      : '☀️ Bin In auto-queues on complete'
+    // Runner footer — use data attributes for onchange to avoid re-render collapse
+    const runnerOpts = RUNNERS.filter(r=>r.status!=='INACTIVE').map(r=>'<option value="'+r.id+'" '+(b.runner?.id===r.id?'selected':'')+'>'+(r.name||'')+'</option>').join('')
+    const runnerFooter = b.runner
+      ? '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--border);font-size:12px;flex-wrap:wrap;background:var(--surface2)">'
+        +'<div style="width:26px;height:26px;border-radius:50%;background:'+(b.runner.color||'var(--cyan)')+';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#07090f;flex-shrink:0">'+(ri||'RN')+'</div>'
+        +'<div style="flex:1"><span style="font-weight:600">'+b.runner.name+'</span> <span style="color:var(--muted);font-size:11px">· '+(b.runner.visitType||'BOTH')+' · '+(b.runner.rating||0)+'★</span></div>'
+        +'<div style="display:flex;gap:6px;align-items:center">'
+        +(isPreview
+          ? '<select style="font-size:11px;padding:3px 6px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text)" data-batch-id="'+b.id+'" onchange="swapBatchRunnerKeepOpen(this)"><option value="">↔ Change runner</option>'+runnerOpts+'</select>'
+          : '<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="showRunnerUnavailable(\''+b.runner.id+'\')">⚠️ Mark unavailable</button>'
+            +'<button class="btn btn-outline btn-sm" style="font-size:10px" onclick="adForceReassign(\''+b.id+'\')">Reassign</button>')
+        +'</div></div>'
+      : '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--border);font-size:12px;background:var(--surface2)">'
+        +'<span style="color:#ef4444">⚠️ No runner assigned</span>'
+        +'<select style="margin-left:auto;font-size:11px;padding:3px 6px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text)" data-batch-id="'+b.id+'" onchange="swapBatchRunnerKeepOpen(this)"><option value="">Assign runner →</option>'+runnerOpts+'</select>'
+        +'</div>'
 
-    // Human-readable batch name: "Zone · Visit type · #N"
-    const batchDisplayName = `${b.zoneName?.replace(/ · ☀️ BIN IN| · 🌙 BIN OUT/,'')} · ${isBinIn?'Bin In':'Bin Out'}`
+    return '<div style="border:1px solid rgba('+
+        (borderCol==='#22c55e'?'34,197,94':borderCol==='#06d6a0'?'6,214,160':borderCol==='#a5b4fc'?'165,180,252':borderCol==='#f59e0b'?'245,158,11':borderCol==='#3b82f6'?'59,130,246':'239,68,68')
+      +',.3);border-left:4px solid '+borderCol+';border-radius:10px;overflow:hidden;background:var(--surface)"'
+      +' data-batch-id="'+b.id+'"'+(isOpen?' data-dispatch-card-open="1"':'')+' id="dbc-'+b.id+'">'
 
-    return `<div style="border:1px solid rgba(${borderCol==='#22c55e'?'34,197,94':borderCol==='#a5b4fc'?'165,180,252':borderCol==='#f59e0b'?'245,158,11':borderCol==='#3b82f6'?'59,130,246':'239,68,68'},.3);border-left:4px solid ${isBinIn?'#06d6a0':borderCol};border-radius:10px;overflow:hidden;margin-bottom:10px">
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:${isBinIn?'rgba(6,214,160,.03)':bgCol}">
-        <div style="flex-shrink:0">
-          <span class="${vtClass}" style="font-size:12px;padding:4px 10px">${vtLabel}</span>
-          <div style="font-size:9px;color:var(--muted);margin-top:3px;text-align:center">${vtSubLabel}</div>
-        </div>
-        <div style="flex:1">
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <span style="font-size:12px;font-weight:700">${batchDisplayName}</span>
-            ${b.hasSplit?'<span style="background:rgba(34,197,94,.15);color:#22c55e;font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px">split stops</span>':''}
-            ${loyalTag?`<span style="font-size:10px;font-weight:600;padding:1px 7px;border-radius:5px;${offerChainStyle}">${loyalTag}</span>`:''}
-          </div>
-          <div style="font-size:10px;color:var(--muted)">${b.stops.length} stop${b.stops.length!==1?'s':''} ${isBinIn ? '· scheduled for after truck collection' : `· Bin In unlocks ~${b.binInUnlock||'afternoon'}`}</div>
-        </div>
-        <span class="badge" style="${badgeStyle}">${badgeTxt}</span>
-        <div style="text-align:right;flex-shrink:0">
-          <div style="font-size:13px;font-weight:700;color:var(--green)">$${b.earnTotal}</div>
-          <div style="font-size:10px;color:var(--muted)">${isBinIn?'bin in':'both visits'}</div>
-        </div>
-        ${isPreview ? `<button onclick="deleteBatchFromPreview('${b.id}')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;flex-shrink:0" title="Remove this batch">🗑</button>` : ''}
-      </div>
+      // ── COLLAPSED HEADER ──────────────────────────────────────────────
+      +'<div style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer" onclick="toggleDispatchCard(\''+b.id+'\')">'
+      +'<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;'+(isBinIn?'background:rgba(6,214,160,.15);color:#06d6a0':'background:rgba(99,102,241,.15);color:#a5b4fc')+';flex-shrink:0">'+vtLabel+'</span>'
+      +'<div style="flex:1;min-width:0">'
+      +'<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">'
+      +'<span style="font-size:13px;font-weight:700">'+batchName+'</span>'
+      +(b.hasSplit?'<span style="background:rgba(34,197,94,.15);color:#22c55e;font-size:10px;padding:1px 6px;border-radius:4px">split</span>':'')
+      +'</div>'
+      +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'
+      +(b.runner?b.runner.name:'⚠️ No runner')+' · '+b.stops.length+' stop'+(b.stops.length!==1?'s':'')+' · $'+b.earnTotal
+      +(isLiveView&&b.stops.length?' · '+completedStops+'/'+b.stops.length+' done':'')
+      +'</div>'
+      +'</div>'
+      // Progress bar (live view only)
+      +(isLiveView?'<div style="width:60px;flex-shrink:0"><div style="height:4px;background:var(--surface3);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+borderCol+';border-radius:99px"></div></div><div style="font-size:9px;color:var(--muted);text-align:center;margin-top:2px">'+pct+'%</div></div>':'')
+      +'<span style="background:'+badgeCol+'22;color:'+badgeCol+';font-size:10px;font-weight:700;padding:2px 9px;border-radius:99px;flex-shrink:0;white-space:nowrap">'+badgeTxt+'</span>'
+      +(isPreview?'<button onclick="event.stopPropagation();deleteBatchFromPreview(\''+b.id+'\')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;flex-shrink:0">🗑</button>':'')
+      +'<span id="dbc-chev-'+b.id+'" style="font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0;'+(isOpen?'transform:rotate(180deg)':'')+'">▼</span>'
+      +'</div>'
 
-      <div style="padding:6px 14px 2px;background:var(--surface2);border-top:1px solid var(--border);max-height:280px;overflow-y:auto">
-        ${stopList}
-      </div>
-      <div style="padding:8px 14px;display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap;border-top:1px solid var(--border)">
-        ${b.runner ? `
-          <div style="width:26px;height:26px;border-radius:50%;background:${b.runner.color||'var(--cyan)'};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#07090f;flex-shrink:0">${b.runner.initials||'RN'}</div>
-          <div><span style="font-weight:600">${b.runner.name}</span> <span style="color:var(--muted);font-size:11px">· ${b.runner.visitType||'BOTH'} · ${b.runner.rating||0}★ · ${b.offerType==='loyalty'?'<span style="color:var(--cyan)">assigned runner</span>':'zone runner'}</span></div>
-          <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
-            ${isPreview ? `<select style="font-size:11px;padding:3px 6px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text)" onchange="swapBatchRunner('${b.id}',this.value)">
-              <option value="">↔ Change runner</option>
-              ${RUNNERS.filter(r=>r.status!=='INACTIVE').map(r=>`<option value="${r.id}" ${b.runner?.id===r.id?'selected':''}>${r.name}</option>`).join('')}
-            </select>` : `<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="showRunnerUnavailable('${b.runner.id}')">⚠️ Mark unavailable</button>
-            <button class="btn btn-outline btn-sm" style="font-size:10px" onclick="adForceReassign('${b.id}')">Reassign</button>`}
-          </div>` : `
-          <span style="color:#ef4444;font-size:12px">⚠️ No runner assigned</span>
-          <select style="margin-left:auto;font-size:11px;padding:3px 6px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text)" onchange="swapBatchRunner('${b.id}',this.value)">
-            <option value="">Assign runner →</option>
-            ${RUNNERS.filter(r=>r.status!=='INACTIVE').map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}
-          </select>`}
-      </div>
-    </div>`
+      // ── EXPANDED BODY ─────────────────────────────────────────────────
+      +'<div id="dbc-body-'+b.id+'" style="display:'+(isOpen?'block':'none')+';border-top:1px solid var(--border)">'
+      +'<div style="padding:6px 14px 4px;background:var(--surface2);max-height:320px;overflow-y:auto">'+stopRows+'</div>'
+      +runnerFooter
+      +'</div>'
+      +'</div>'
   }).join('')
+
+  pipeline.innerHTML = mergeHtml + cardsHtml
 }
 
-// Expose render to adNav
-function swapBatchRunner(batchId, runnerId){
+function toggleDispatchCard(batchId){
+  const card  = document.getElementById('dbc-'+batchId)
+  const body  = document.getElementById('dbc-body-'+batchId)
+  const chev  = document.getElementById('dbc-chev-'+batchId)
+  if(!body) return
+  const open = body.style.display==='block'
+  body.style.display = open?'none':'block'
+  if(chev) chev.style.transform = open?'':'rotate(180deg)'
+  if(card){
+    if(open){ card.removeAttribute('data-dispatch-card-open') }
+    else { card.dataset.dispatchCardOpen='1' }
+  }
+}
+
+// Swap runner WITHOUT collapsing — reads batch id from data attribute
+function swapBatchRunnerKeepOpen(selectEl){
+  const batchId  = selectEl.dataset.batchId
+  const runnerId = selectEl.value
+  if(!batchId) return
   const b = generatedBatches.find(x=>x.id===batchId)
   if(!b) return
   const r = RUNNERS.find(x=>x.id===runnerId)
-  b.runner    = r || null
-  b.offerType = r ? 'loyalty' : 'unassigned'
+  b.runner     = r || null
+  b.offerType  = r ? 'loyalty' : 'unassigned'
   b.offerBadge = r ? '🔒 Assigned runner (25 min)' : '⚠️ Unassigned'
-  b.status    = 'preview'
+  b.status     = 'preview'
+  if(r) showToast('Runner changed to '+r.name+' ✅','ok')
+  // Re-render but card will stay open because we track open state
   renderDispatchPipeline()
-  if(r) showToast(`Runner changed to ${r.name} ✅`, 'ok')
 }
+
+  // Use live DB batches if no preview batches have been generated
+  const batchSource = generatedBatches.length ? generatedBatches : (window._livePipelineBatches || [])
+  const isLiveView  = !generatedBatches.length && batchSource.length > 0
+
 
 function moveStopToBatch(fromBatchId, stopIdx, toBatchId){
   const from = generatedBatches.find(x=>x.id===fromBatchId)
