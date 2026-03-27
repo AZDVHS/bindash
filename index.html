@@ -3839,6 +3839,9 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <span style="font-size:11px;font-weight:700;color:var(--text)" id="pipeline-title"></span>
           </div>
 
+          <!-- APPROVALS STRIP — pending drafts and change detections -->
+          <div id="dispatch-approvals-strip" style="display:none;border:1px solid rgba(245,158,11,.3);border-radius:10px;overflow:hidden;margin-bottom:10px;background:rgba(245,158,11,.04)"></div>
+
           <!-- MAIN PIPELINE -->
           <div id="dispatch-pipeline" style="display:flex;flex-direction:column;gap:8px">
             <div style="text-align:center;padding:60px 20px;color:var(--muted);font-size:13px">
@@ -4150,6 +4153,23 @@ function showToast(msg, type='ok', duration=3200){
     t.style.opacity='0'; t.style.transform='translateY(8px)'
     setTimeout(()=>t.remove(), 200)
   }, duration)
+}
+
+// In-app notification — shows as a toast and logs to a persistent bell list
+function addNotif({ title='', body='', type='info', action='' }){
+  // Show as a toast immediately
+  showToast(title + (body ? ' — ' + body : ''), type==='err'?'err':type==='warn'?'warn':'info', 5000)
+  // Store in localStorage for notification bell
+  try {
+    const notifs = JSON.parse(localStorage.getItem('bindash_notifs')||'[]')
+    notifs.unshift({ title, body, type, action, ts: Date.now(), read: false })
+    if(notifs.length > 50) notifs.splice(50)
+    localStorage.setItem('bindash_notifs', JSON.stringify(notifs))
+    // Update bell badge if it exists
+    const badge = document.getElementById('notif-badge')
+    const unread = notifs.filter(n=>!n.read).length
+    if(badge){ badge.textContent = unread; badge.style.display = unread ? 'inline-flex' : 'none' }
+  } catch(e){}
 }
 
 function go(id){
@@ -14868,6 +14888,218 @@ function affected_reassign(fromId, toId){
 
 let generatedBatches = []
 
+// ── ROUTE LIFECYCLE STATE MACHINE ────────────────────────────────────────────
+// States: draft | change_detected | queued | sent | accepted | in_progress | complete
+// Route templates stored in localStorage keyed by "zone:day"
+// Scheduler runs at 10am (generate) and 1pm (release) via setInterval polling
+
+const ROUTE_STATUS = {
+  draft:            { label: 'Created · awaiting approval', color: '#f59e0b', bg: 'rgba(245,158,11,.15)' },
+  change_detected:  { label: 'Change detected · awaiting approval', color: '#ef4444', bg: 'rgba(239,68,68,.15)' },
+  queued:           { label: 'Approved · sends at 1pm', color: '#3b82f6', bg: 'rgba(59,130,246,.15)' },
+  sent:             { label: 'Sent · awaiting acceptance', color: '#f59e0b', bg: 'rgba(245,158,11,.15)' },
+  accepted:         { label: 'Accepted', color: '#22c55e', bg: 'rgba(34,197,94,.15)' },
+  in_progress:      { label: 'In progress', color: '#06d6a0', bg: 'rgba(6,214,160,.15)' },
+  complete:         { label: 'Complete', color: '#64748b', bg: 'rgba(100,116,139,.15)' },
+  preview:          { label: 'Preview · not sent', color: '#a5b4fc', bg: 'rgba(165,180,252,.15)' },
+  unassigned:       { label: 'Unassigned', color: '#ef4444', bg: 'rgba(239,68,68,.15)' },
+}
+
+function getRouteTemplateKey(zoneId, day){ return 'rt:' + zoneId + ':' + normDay(day) }
+
+function loadRouteTemplate(zoneId, day){
+  try {
+    const raw = localStorage.getItem(getRouteTemplateKey(zoneId, day))
+    return raw ? JSON.parse(raw) : null
+  } catch(e){ return null }
+}
+
+function saveRouteTemplate(zoneId, day, stops, runnerId){
+  try {
+    const key = getRouteTemplateKey(zoneId, day)
+    const tpl = { zoneId, day: normDay(day), stops: stops.map(s=>s.email||s), runnerId, savedAt: new Date().toISOString() }
+    localStorage.setItem(key, JSON.stringify(tpl))
+  } catch(e){ console.warn('[Routes] saveTemplate:', e) }
+}
+
+function detectRouteChanges(zoneId, day, newStops, newRunnerId){
+  const tpl = loadRouteTemplate(zoneId, day)
+  if(!tpl) return { isNew: true, changes: [] }
+  const oldEmails = new Set(tpl.stops)
+  const newEmails = newStops.map(s=>s.email||s)
+  const added   = newEmails.filter(e => !oldEmails.has(e))
+  const removed = [...oldEmails].filter(e => !newEmails.includes(e))
+  const runnerChanged = tpl.runnerId && newRunnerId && tpl.runnerId !== newRunnerId
+  const changes = []
+  if(added.length)    changes.push(`${added.length} stop${added.length>1?'s':''} added`)
+  if(removed.length)  changes.push(`${removed.length} stop${removed.length>1?'s':''} removed`)
+  if(runnerChanged)   changes.push('runner changed')
+  return { isNew: false, changes }
+}
+
+// Start the scheduler that polls for 10am generate and 1pm release
+function startRouteScheduler(){
+  if(window._routeSchedulerRunning) return
+  window._routeSchedulerRunning = true
+  window._lastSchedulerCheck = null
+  setInterval(async ()=>{
+    const now  = new Date()
+    const hhmm = now.getHours() * 100 + now.getMinutes()
+    const key  = now.toDateString()
+    if(window._lastSchedulerCheck === key) return // already ran today
+    // 10:00am — auto-generate drafts for tomorrow's zones
+    if(hhmm >= 1000 && hhmm < 1001){
+      console.log('[Scheduler] 10am — auto-generating drafts')
+      await autoGenerateDrafts()
+    }
+    // 1:00pm — release all queued routes
+    if(hhmm >= 1300 && hhmm < 1301){
+      console.log('[Scheduler] 1pm — releasing queued routes')
+      await releaseQueuedRoutes()
+      window._lastSchedulerCheck = key
+    }
+  }, 30000) // check every 30 seconds
+}
+
+async function autoGenerateDrafts(){
+  if(DISPATCH_RULES.requireReview === false && !ADMIN_ZONES.length) return
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
+  const tomorrowDay = FULL_DAYS[tomorrow.getDay()]
+  // Filter zones that have active HOs scheduled tomorrow
+  ADMIN_ZONES.forEach(z => {
+    const hws = HOMEOWNERS.filter(hw=>{
+      if(hw.status!=='active') return false
+      if(hw.zoneId!==z.id && !((z.zips||[]).includes(hw.zip))) return false
+      return normDay(hw.day)===normDay(tomorrowDay)||normDay(hw.dayRecycling)===normDay(tomorrowDay)||normDay(hw.dayWaste)===normDay(tomorrowDay)
+    })
+    if(!hws.length) return
+    const priority = ruleGetPriorityRunner(z.id)
+    const { isNew, changes } = detectRouteChanges(z.id, tomorrowDay, hws, priority?.id)
+    const status = isNew ? 'draft' : changes.length ? 'change_detected' : 'queued'
+    const key = 'pending_route:'+z.id+':'+normDay(tomorrowDay)
+    const pending = { zoneId:z.id, zoneName:z.name, day:tomorrowDay, date:tomorrow.toISOString().slice(0,10), stops:hws, runner:priority, status, changes, isNew, generatedAt: new Date().toISOString() }
+    localStorage.setItem(key, JSON.stringify(pending))
+    if(status==='draft'||status==='change_detected'){
+      addNotif({ title:'🗺️ Route needs approval', body:`${z.name} · ${tomorrowDay} · ${hws.length} stops${changes.length?' · '+changes.join(', '):''}`, type:'warn', action:`adNav(null,'ad-dispatch')` })
+    }
+  })
+  showToast('Routes drafted for tomorrow — check Dispatch for approvals', 'info', 4000)
+}
+
+async function releaseQueuedRoutes(){
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
+  const tomorrowDay = FULL_DAYS[tomorrow.getDay()]
+  let released = 0
+  ADMIN_ZONES.forEach(z => {
+    const key = 'pending_route:'+z.id+':'+normDay(tomorrowDay)
+    const raw = localStorage.getItem(key)
+    if(!raw) return
+    const pending = JSON.parse(raw)
+    if(pending.status!=='queued') return
+    // Save template and launch
+    saveRouteTemplate(z.id, tomorrowDay, pending.stops, pending.runner?.id)
+    pending.status = 'sent'
+    localStorage.setItem(key, JSON.stringify(pending))
+    released++
+  })
+  if(released) showToast(`🚀 ${released} route${released>1?'s':''} released to runners at 1pm`, 'ok', 5000)
+}
+
+function getPendingRoutes(){
+  const results = []
+  for(let i=0; i<localStorage.length; i++){
+    const k = localStorage.key(i)
+    if(!k.startsWith('pending_route:')) continue
+    try { results.push(JSON.parse(localStorage.getItem(k))) } catch(e){}
+  }
+  return results
+}
+
+function approvePendingRoute(zoneId, day, permanent=true){
+  const key = 'pending_route:'+zoneId+':'+normDay(day)
+  const raw = localStorage.getItem(key)
+  if(!raw) return
+  const pending = JSON.parse(raw)
+  pending.status = 'queued'
+  pending.approvedAt = new Date().toISOString()
+  pending.permanent = permanent
+  if(!permanent) pending.oneTime = true
+  localStorage.setItem(key, JSON.stringify(pending))
+  if(permanent) saveRouteTemplate(zoneId, day, pending.stops, pending.runner?.id)
+  showToast(`Route approved — will send at 1pm ✅`, 'ok')
+  renderDispatchPipeline()
+  loadPendingApprovalsIntoDispatch()
+}
+
+function rejectPendingRoute(zoneId, day){
+  const key = 'pending_route:'+zoneId+':'+normDay(day)
+  localStorage.removeItem(key)
+  showToast('Route draft discarded', 'info')
+  renderDispatchPipeline()
+  loadPendingApprovalsIntoDispatch()
+}
+
+function showRouteApprovalModal(zoneId, day){
+  const key = 'pending_route:'+zoneId+':'+normDay(day)
+  const raw = localStorage.getItem(key)
+  if(!raw){ showToast('Route not found','err'); return }
+  const p = JSON.parse(raw)
+  const z = ADMIN_ZONES.find(x=>x.id===zoneId)
+  const isChange = p.status==='change_detected'
+  const stopList = (p.stops||[]).slice(0,5).map((s,i)=>`<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">${i+1}. ${s.name||s.email||s}</div>`).join('')
+  const moreStops = p.stops.length > 5 ? `<div style="font-size:11px;color:var(--muted);padding-top:4px">+ ${p.stops.length-5} more</div>` : ''
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh" style="background:rgba(${isChange?'239,68,68':'245,158,11'},.07)">
+    <div>
+      <div style="font-size:15px;font-weight:700;color:${isChange?'#ef4444':'#fbbf24'}">${isChange?'⚠️ Route change detected':'🗺️ New route — approval needed'}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">${z?.name||zoneId} · ${day} · ${p.stops.length} stops</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    ${isChange ? `<div style="background:rgba(239,68,68,.08);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#ef4444"><strong>Changes from last week:</strong> ${p.changes.join(' · ')}</div>` : `<div style="background:rgba(245,158,11,.08);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#fbbf24">First time this route has been dispatched — once approved it becomes the template for future auto-dispatch.</div>`}
+    <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">Runner: <span style="color:var(--text)">${p.runner?.name||'Unassigned'}</span></div>
+    <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:4px">${stopList}${moreStops}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">Route will send to runner at 1pm after approval.</div>
+  </div>
+  <div class="mf" style="gap:8px;flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm" onclick="closeM();rejectPendingRoute('${zoneId}','${day}')">Discard</button>
+    ${isChange ? `
+    <button class="btn btn-outline btn-sm" style="color:#fbbf24;border-color:rgba(245,158,11,.4)" onclick="closeM();approvePendingRoute('${zoneId}','${day}',false)">Approve once</button>
+    <button class="btn btn-cyan btn-sm" onclick="closeM();approvePendingRoute('${zoneId}','${day}',true)">Approve + save as new template</button>
+    ` : `
+    <button class="btn btn-cyan btn-sm" onclick="closeM();approvePendingRoute('${zoneId}','${day}',true)">Approve route ✓</button>
+    `}
+  </div>`
+  openM()
+}
+
+function loadPendingApprovalsIntoDispatch(){
+  const pending = getPendingRoutes().filter(p=>p.status==='draft'||p.status==='change_detected'||p.status==='queued')
+  if(!pending.length){
+    const el = document.getElementById('dispatch-approvals-strip')
+    if(el) el.style.display = 'none'
+    return
+  }
+  const el = document.getElementById('dispatch-approvals-strip')
+  if(!el) return
+  el.style.display = 'block'
+  const needApproval = pending.filter(p=>p.status==='draft'||p.status==='change_detected')
+  const queued = pending.filter(p=>p.status==='queued')
+  el.innerHTML = needApproval.map(p=>`
+  <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+    <span style="width:8px;height:8px;border-radius:50%;background:${p.status==='change_detected'?'#ef4444':'#f59e0b'};flex-shrink:0"></span>
+    <span style="font-size:12px;font-weight:700">${p.zoneName}</span>
+    <span style="font-size:11px;color:var(--muted)">${p.day} · ${p.stops.length} stops · ${p.runner?.name||'no runner'}</span>
+    ${p.status==='change_detected'?`<span style="font-size:10px;background:rgba(239,68,68,.12);color:#ef4444;padding:1px 7px;border-radius:4px">⚠️ ${p.changes.join(', ')}</span>`:'<span style="font-size:10px;background:rgba(245,158,11,.12);color:#fbbf24;padding:1px 7px;border-radius:4px">New route</span>'}
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="showRouteApprovalModal('${p.zoneId}','${p.day}')">Review →</button>
+      <button class="btn btn-cyan btn-sm" style="font-size:10px" onclick="approvePendingRoute('${p.zoneId}','${p.day}',true)">✓ Approve</button>
+    </div>
+  </div>`).join('')
+  + (queued.length ? `<div style="padding:7px 14px;font-size:11px;color:var(--muted);background:rgba(59,130,246,.06)">🕐 ${queued.length} route${queued.length>1?'s':''} queued — sending at 1pm · ${queued.map(p=>p.zoneName).join(', ')}</div>` : '')
+}
+
 // Full day names for matching
 const FULL_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 
@@ -15223,6 +15455,10 @@ async function _adGenerateBatchesAsync(){
                          : offer.offerType==='broadcast' ? '📢 Broadcast + bonus (30 min)'
                          : '⚠️ Unassigned'
 
+        // Detect if this is first-time or a changed route
+        const { isNew, changes } = detectRouteChanges(zId, day, chunk, offer.runner?.id)
+        const lifecycleStatus = isNew ? 'draft' : changes.length ? 'change_detected' : 'queued'
+
         generatedBatches.push({
           id: (()=>{
             const _abbr = zoneLabel(zone||{id:zId,name:zoneName,zip:'',area:'A1'}).split('-').slice(0,2).join('-')
@@ -15233,7 +15469,9 @@ async function _adGenerateBatchesAsync(){
           zoneId: zId, zoneName, day,
           stops: chunk,
           runner:        offer.runner || null,
-          status:        'preview',      // ← preview state, not yet sent
+          status:        lifecycleStatus,
+          isNew,
+          changes,
           offerType:     offer.offerType,
           offerBadge,
           windowMins:    offer.windowMins,
@@ -15242,32 +15480,69 @@ async function _adGenerateBatchesAsync(){
           binInUnlock: unlock.time, unlockMethod: unlock.method,
           hasSplit: chunk.some(h=>h.service==='SPLIT'),
         })
+
+        // Save to pending_route localStorage for scheduler + approval strip
+        const scheduledDate = (() => {
+          const d = new Date(); d.setHours(0,0,0,0)
+          const tIdx = FULL_DAYS.findIndex(x=>normDay(x)===normDay(day))
+          const diff = (tIdx - d.getDay() + 7) % 7
+          d.setDate(d.getDate() + diff)
+          return d.toISOString().slice(0,10)
+        })()
+        const pKey = 'pending_route:'+zId+':'+normDay(day)
+        localStorage.setItem(pKey, JSON.stringify({
+          zoneId: zId, zoneName, day: normDay(day), date: scheduledDate,
+          stops: chunk, runner: offer.runner,
+          status: lifecycleStatus, isNew, changes,
+          generatedAt: new Date().toISOString()
+        }))
       }
     })
   })
 
   renderDispatchPipeline()
-  // Show the launch button now that routes are previewed
+  loadPendingApprovalsIntoDispatch()
+
+  // Show the launch button only for queued (auto-approved) batches
+  const needApproval = generatedBatches.filter(b=>b.status==='draft'||b.status==='change_detected').length
+  const readyToLaunch = generatedBatches.filter(b=>b.status==='queued').length
   const launchBtn = document.getElementById('dispatch-launch-btn')
   if(launchBtn){
-    launchBtn.style.display = 'block'
-    launchBtn.textContent = `🚀 Launch ${generatedBatches.length} Route${generatedBatches.length!==1?'s':''} to Runners`
+    if(readyToLaunch > 0){
+      launchBtn.style.display = 'block'
+      launchBtn.textContent = `🚀 Launch ${readyToLaunch} Route${readyToLaunch!==1?'s':''} Now`
+    } else {
+      launchBtn.style.display = 'none'
+    }
   }
-  showToast(`${generatedBatches.length} route${generatedBatches.length!==1?'s':''} previewed — review then click Launch ✅`, 'ok', 4000)
+  if(needApproval > 0 && readyToLaunch === 0){
+    showToast(`${needApproval} route${needApproval>1?'s':''} need your approval before sending`, 'info', 5000)
+  } else if(needApproval > 0){
+    showToast(`${readyToLaunch} ready · ${needApproval} need approval — review above`, 'info', 5000)
+  } else {
+    showToast(`${generatedBatches.length} route${generatedBatches.length!==1?'s':''} ready — queued for 1pm or launch now ✅`, 'ok', 4000)
+  }
 }
 
 // Phase 2: Admin reviews, then clicks Launch — sends offers + saves to DB
 async function launchDispatchRoutes(){
-  if(!generatedBatches.length){ showToast('No routes to launch — generate first','err'); return }
+  const toSend = generatedBatches.filter(b=>b.status==='queued'||b.status==='preview')
+  if(!toSend.length){ showToast('No approved routes to launch — approve drafts first','err'); return }
 
   const btn = document.getElementById('dispatch-launch-btn')
   if(btn){ btn.disabled=true; btn.textContent='Launching...' }
 
-  // Mark all batches as offered
-  generatedBatches.forEach(b=>{ b.status = b.runner ? 'offered' : 'unassigned' })
+  // Save templates for auto-approved routes, mark as sent
+  toSend.forEach(b=>{
+    if(b.status==='queued') saveRouteTemplate(b.zoneId, b.day, b.stops, b.runner?.id)
+    b.status = b.runner ? 'sent' : 'unassigned'
+    // Update pending_route in localStorage
+    const pKey = 'pending_route:'+b.zoneId+':'+normDay(b.day)
+    try { const p=JSON.parse(localStorage.getItem(pKey)||'{}'); p.status='sent'; localStorage.setItem(pKey,JSON.stringify(p)) } catch(e){}
+  })
 
   // Send offer emails
-  generatedBatches.forEach(batch=>{
+  toSend.forEach(batch=>{
     if(batch.runner?.email){
       const urgencyNote = batch.offerType==='broadcast' ? ' · urgency bonus included' : batch.offerType==='loyalty' ? ' · you have first refusal' : ''
       sendEmail(batch.runner.email,
@@ -15288,7 +15563,7 @@ async function launchDispatchRoutes(){
     const now = new Date()
     const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 
-    generatedBatches.forEach(batch => {
+    toSend.forEach(batch => {
       const expiresAt = new Date(now.getTime() + (batch.windowMins||45) * 60 * 1000).toISOString()
       const targetNorm = normDay(batch.day)
       const targetIdx  = dayNames.findIndex(d => normDay(d)===targetNorm)
@@ -15335,7 +15610,7 @@ async function launchDispatchRoutes(){
         showToast('⚠️ Routes sent but DB write failed: ' + error.message, 'err', 8000)
       } else {
         console.log('[BinDash] ✅ Wrote', inserted?.length, 'jobs to Supabase')
-        showToast(`🚀 ${generatedBatches.length} routes launched · ${jobRows.length} jobs saved · offers sent ✅`, 'ok', 6000)
+        showToast(`🚀 ${toSend.length} route${toSend.length!==1?'s':''} launched · ${jobRows.length} jobs saved · offers sent ✅`, 'ok', 6000)
       }
     }
   } catch(e){
@@ -15344,10 +15619,12 @@ async function launchDispatchRoutes(){
   }
 
   renderDispatchPipeline()
+  loadPendingApprovalsIntoDispatch()
   if(btn){ btn.disabled=false; btn.style.display='none' }
-  // Clear generated batches so re-clicking Preview doesn't duplicate
-  generatedBatches = []
-  showToast('Routes launched and locked ✅ — regenerate only if needed', 'ok', 4000)
+  // Keep unapproved drafts visible — only clear launched batches
+  generatedBatches = generatedBatches.filter(b=>b.status==='draft'||b.status==='change_detected')
+  if(!generatedBatches.length) window._livePipelineBatches = null
+  await loadLiveJobsIntoPipeline()
 }
 
 function renderRunnerAvailabilityAlerts(unzoned){
@@ -15426,8 +15703,8 @@ function renderDispatchPipeline(){
     }).join(' · ')}
   </div>` : ''
 
-  const sc = { preview:'#a5b4fc', accepted:'#22c55e', in_progress:'#06d6a0', offered:'#f59e0b', broadcast:'#3b82f6', unassigned:'#ef4444' }
-  const si = { preview:'👁 Preview', accepted:'✓ Accepted', in_progress:'🔄 In Progress', offered:'⏳ Offer sent', broadcast:'📡 Broadcast', unassigned:'🚨 Unassigned' }
+  const sc = { preview:'#a5b4fc', draft:'#f59e0b', change_detected:'#ef4444', queued:'#3b82f6', sent:'#f59e0b', accepted:'#22c55e', in_progress:'#06d6a0', offered:'#f59e0b', broadcast:'#3b82f6', unassigned:'#ef4444' }
+  const si = { preview:'👁 Preview', draft:'🕐 Created · awaiting approval', change_detected:'⚠️ Change detected', queued:'🕐 Queued · sends 1pm', sent:'📤 Sent', accepted:'✓ Accepted', in_progress:'🔄 In progress', offered:'⏳ Offer sent', broadcast:'📡 Broadcast', unassigned:'🚨 Unassigned' }
 
   const cardsHtml = batches.map(b=>{
     const isPreview = b.status==='preview'
@@ -15642,9 +15919,10 @@ function mergeBatches(idsStr){
 function updateLaunchButton(){
   const btn = document.getElementById('dispatch-launch-btn')
   if(!btn) return
-  if(generatedBatches.length > 0){
+  const readyToLaunch = generatedBatches.filter(b=>b.status==='queued'||b.status==='preview').length
+  if(readyToLaunch > 0){
     btn.style.display = 'block'
-    btn.textContent = `🚀 Launch ${generatedBatches.length} Route${generatedBatches.length!==1?'s':''} to Runners`
+    btn.textContent = `🚀 Launch ${readyToLaunch} Route${readyToLaunch!==1?'s':''} Now`
   } else {
     btn.style.display = 'none'
   }
@@ -15683,6 +15961,12 @@ async function initDispatchPage(){
   // Start with All Days view — clear the hidden pill value so dropdown wins
   const inp = document.getElementById('dispatch-day-val')
   if(inp) inp.value = ''
+
+  // Load pending route approvals into the strip above the pipeline
+  loadPendingApprovalsIntoDispatch()
+
+  // Start the 10am generate / 1pm release scheduler (idempotent)
+  startRouteScheduler()
 
   // Auto-load all active routes across next 7 days
   await loadLiveJobsIntoPipeline()
