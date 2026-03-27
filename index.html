@@ -15104,8 +15104,12 @@ async function _launchSingleBatch(batch){
     const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
     const targetIdx = dayNames.findIndex(d=>normDay(d)===normDay(batch.day))
     const d = new Date(); d.setHours(0,0,0,0)
-    const diff = (targetIdx - d.getDay() + 7) % 7
+    let diff = targetIdx - d.getDay()
+    if(diff > 3)  diff -= 7
+    if(diff < -3) diff += 7
     d.setDate(d.getDate() + diff)
+    // Bin Out night = day before collection
+    d.setDate(d.getDate() - 1)
     const scheduledDate = d.toISOString().slice(0,10)
     const expiresAt = new Date(now.getTime() + (batch.windowMins||45)*60*1000).toISOString()
     const jobRows = batch.stops.map(hw=>({
@@ -15575,10 +15579,15 @@ async function _adGenerateBatchesAsync(){
       if(targetIdx >= 0){
         const today = new Date()
         today.setHours(0,0,0,0)
-        let diff = (targetIdx - today.getDay() + 7) % 7
-        const scheduledDate = new Date(today)
-        scheduledDate.setDate(today.getDate() + diff)
-        const scheduledDateStr = scheduledDate.toISOString().slice(0,10)
+        let diff = targetIdx - today.getDay()
+        if(diff > 3)  diff -= 7
+        if(diff < -3) diff += 7
+        const collectionDate = new Date(today)
+        collectionDate.setDate(today.getDate() + diff)
+        // Bin Out date = evening before collection day
+        const binOutDate = new Date(collectionDate)
+        binOutDate.setDate(collectionDate.getDate() - 1)
+        const scheduledDateStr = binOutDate.toISOString().slice(0,10)
         const displayDay = dayNames[targetIdx]
 
         if(diff > 5){
@@ -15588,10 +15597,11 @@ async function _adGenerateBatchesAsync(){
           return
         }
 
-        // Check for existing active jobs on that exact date
+        // Check for existing active Bin Out jobs on the Bin Out night date
         const { data: existing } = await _supa.from('jobs')
           .select('id, status')
           .eq('scheduled_date', scheduledDateStr)
+          .eq('visit_type', 'BIN_OUT')
           .in('status', ['offered', 'accepted', 'in_progress'])
           .limit(1)
 
@@ -15603,7 +15613,7 @@ async function _adGenerateBatchesAsync(){
           </div>
           <div class="mb">
             <div style="font-size:14px;color:var(--text);margin-bottom:8px">
-              Routes for <strong>${displayDay} ${scheduledDateStr}</strong> have already been launched and are currently offered or accepted by runners.
+              Bin Out routes for <strong>${displayDay} collection (${scheduledDateStr} evening)</strong> have already been launched.
             </div>
             <div style="font-size:13px;color:var(--sub);line-height:1.6">
               Re-generating will create duplicate jobs. Only continue if you need to add missed homeowners or if all previous routes were cancelled.
@@ -15823,11 +15833,18 @@ async function launchDispatchRoutes(){
       const expiresAt = new Date(now.getTime() + (batch.windowMins||45) * 60 * 1000).toISOString()
       const targetNorm = normDay(batch.day)
       const targetIdx  = dayNames.findIndex(d => normDay(d)===targetNorm)
+      // scheduled_date = the BIN OUT night = evening BEFORE the collection day
+      // Cindy's collection is Friday → Bin Out dispatched Thursday → scheduled_date = Thursday
       const scheduledDate = (() => {
         if(targetIdx < 0) return now.toISOString().slice(0,10)
         const d = new Date(); d.setHours(0,0,0,0)
-        const diff = (targetIdx - d.getDay() + 7) % 7
+        // Use signed diff so past days resolve correctly
+        let diff = targetIdx - d.getDay()
+        if(diff > 3)  diff -= 7
+        if(diff < -3) diff += 7
         d.setDate(d.getDate() + diff)
+        // Subtract 1 day: Bin Out is the evening BEFORE collection
+        d.setDate(d.getDate() - 1)
         return d.toISOString().slice(0,10)
       })()
 
@@ -15981,7 +15998,10 @@ function renderDispatchPipeline(){
     const offered  = batches.filter(b=>['offered','broadcast'].includes(b.status)).length
     const sent     = batches.filter(b=>b.status==='sent').length
     const dayLabel = dayFil || selectedDay || 'All Days'
-    if(titleEl) titleEl.textContent = `${dayLabel}${selectedDay?' — '+selDateStr:''} · ${accepted} accepted · ${offered+sent} awaiting`
+    // selDateStr is like "Friday, Mar 27" — strip the day name if dayLabel already has it
+    const dateOnly = selDateStr.replace(/^[A-Za-z]+,\s*/,'') // "Mar 27"
+    const headerDate = selectedDay ? ` · ${dateOnly}` : ''
+    if(titleEl) titleEl.textContent = `${dayLabel}${headerDate} — ${accepted} accepted · ${offered+sent} awaiting`
     if(badgeEl) badgeEl.textContent = batches.length+' route'+(batches.length!==1?'s':'')+' · click to expand'
   } else {
     if(titleEl) titleEl.textContent = 'Route Preview — '+(dayFil||selectedDay||'All Days')+(allPreview?' · Pending approval/launch':'')
@@ -16121,16 +16141,18 @@ function renderDispatchPipeline(){
   // Render with BIN_OUT first, then BIN_IN, each with a clear section header
   let html = mergeHtml
   if(binOutBatches.length){
+    // Collection day = the day AFTER the Bin Out night
+    const collectionDayName = selectedDay || dayFil || ''
+    const collectionLabel = collectionDayName ? `→ ${collectionDayName} collection` : 'Place bins at curb before 6am'
     html += sectionHeader('🌙 Bin Out — evening', binOutBatches.length, '#a5b4fc',
-      binOutBatches[0]?.dateLabel || (selectedDay ? 'Place bins at curb before 6am' : ''))
+      (binOutBatches[0]?.dateLabel ? binOutBatches[0].dateLabel+' · ' : '') + collectionLabel)
     html += binOutBatches.map(renderBatchCard).join('')
   }
   if(binInBatches.length){
-    // Check if any Bin Out is still pending — if so, warn
     const anyBinOutPending = binOutBatches.some(b=>['offered','sent','accepted'].includes(b.status))
     const binInSublabel = anyBinOutPending
-      ? '⏳ Awaiting Bin Out completion'
-      : binInBatches[0]?.dateLabel || 'Bring bins in after truck passes'
+      ? '⏳ Awaiting Bin Out completion before runners are notified'
+      : (binInBatches[0]?.dateLabel ? binInBatches[0].dateLabel+' · ' : '') + 'Bring bins in after truck passes'
     html += sectionHeader('☀️ Bin In — morning', binInBatches.length, '#06d6a0', binInSublabel)
     html += binInBatches.map(renderBatchCard).join('')
   }
