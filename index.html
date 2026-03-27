@@ -15915,11 +15915,46 @@ function renderDispatchPipeline(){
   const batchSource = generatedBatches.length ? generatedBatches : (window._livePipelineBatches || [])
   const isLiveView  = !generatedBatches.length && batchSource.length > 0
 
+  // Determine day context for better labeling
+  const selectedDay  = document.getElementById('dispatch-day-val')?.value || ''
+  const dayNames7    = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  const today7       = new Date(); today7.setHours(0,0,0,0)
+  const todayIdx7    = today7.getDay()
+  const selIdx7      = selectedDay ? dayNames7.findIndex(d=>d===selectedDay) : todayIdx7
+  let selDiff = selIdx7 - todayIdx7
+  if(selDiff > 3) selDiff -= 7
+  if(selDiff < -3) selDiff += 7
+  const selDate = new Date(today7); selDate.setDate(today7.getDate() + selDiff)
+  const selDateStr = selDate.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})
+  const isPastSel = selDiff < 0
+  const isFutureSel = selDiff > 0
+
+  // Context labels — what this day means in the BinDash 3-day cycle
+  // Day N: generate & approve | Day N+1: Bin Out (evening) | Day N+2: Bin In (morning)
+  // So: if today is the Bin Out day, this day's pipeline shows BIN_OUT jobs
+  //     if today is the day after Bin Out, pipeline should show BIN_IN jobs
+
   if(!batchSource.length){
-    pipeline.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px">
+    // Smart empty state based on selected day
+    let emptyMsg = ''
+    let emptyAction = ''
+    if(!selectedDay || selDiff === 0){
+      emptyMsg = 'No active routes for today'
+      emptyAction = `<button class="btn btn-cyan btn-sm" onclick="adGenerateBatches()" style="margin:0 4px">🔍 Preview Today's Routes</button>`
+    } else if(isFutureSel){
+      const genDay = new Date(selDate); genDay.setDate(selDate.getDate() - 1)
+      const genDayName = dayNames7[genDay.getDay()]
+      emptyMsg = `No routes dispatched for ${selectedDay} yet`
+      emptyAction = `<div style="font-size:12px;color:var(--muted);margin-top:6px">Routes generate at 10am on ${genDayName} and send at 1pm after approval.</div>`
+    } else {
+      emptyMsg = `No route history for ${selectedDay} (${selDateStr})`
+      emptyAction = ''
+    }
+    pipeline.innerHTML = `
+    <div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px">
       <div style="font-size:32px;margin-bottom:10px">🗺️</div>
-      Click <strong style="color:var(--text)">Preview Routes</strong> to build routes from today's scheduled homeowners.<br>
-      <span style="font-size:12px">Review stops and runner assignments before launching.</span>
+      <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px">${emptyMsg}</div>
+      ${emptyAction}
     </div>`
     return
   }
@@ -15932,40 +15967,55 @@ function renderDispatchPipeline(){
   if(zoneFil) batches = batches.filter(b=>b.zoneId===zoneFil)
   if(dayFil)  batches = batches.filter(b=>normDay(b.day)===normDay(dayFil)||normDay(b.date?.split('T')[0])===normDay(dayFil))
 
+  // Separate BIN_OUT and BIN_IN for grouped display
+  const binOutBatches = batches.filter(b=>b.visitType!=='BIN_IN'&&!b.id?.endsWith('-IN'))
+  const binInBatches  = batches.filter(b=>b.visitType==='BIN_IN'||b.id?.endsWith('-IN'))
+
+  // Pipeline header
   const titleEl = document.getElementById('pipeline-title')
   const badgeEl = document.getElementById('pipeline-badge')
-  const allPreview = batches.every(b=>b.status==='preview')
+  const allPreview = batches.every(b=>b.status==='preview'||b.status==='draft'||b.status==='queued')
+
   if(isLiveView){
     const accepted = batches.filter(b=>['accepted','in_progress'].includes(b.status)).length
     const offered  = batches.filter(b=>['offered','broadcast'].includes(b.status)).length
-    const dayLabel = dayFil || (document.getElementById('dispatch-day-val')?.value) || 'All Days'
-    if(titleEl) titleEl.textContent = `Live Routes — ${dayLabel} · ${accepted} accepted · ${offered} awaiting`
-    if(badgeEl) badgeEl.textContent = batches.length+' active route'+(batches.length!==1?'s':'')+' · click to manage'
+    const sent     = batches.filter(b=>b.status==='sent').length
+    const dayLabel = dayFil || selectedDay || 'All Days'
+    if(titleEl) titleEl.textContent = `${dayLabel}${selectedDay?' — '+selDateStr:''} · ${accepted} accepted · ${offered+sent} awaiting`
+    if(badgeEl) badgeEl.textContent = batches.length+' route'+(batches.length!==1?'s':'')+' · click to expand'
   } else {
-    if(titleEl) titleEl.textContent = 'Route Preview — '+(dayFil||'All Days')+(allPreview?' · Not sent yet':'')
+    if(titleEl) titleEl.textContent = 'Route Preview — '+(dayFil||selectedDay||'All Days')+(allPreview?' · Pending approval/launch':'')
     if(badgeEl) badgeEl.textContent = batches.length+' batch'+(batches.length!==1?'es':'')+' · '+RUNNERS.filter(r=>r.status==='AVAILABLE').length+' runners available'
   }
 
-  // Merge suggestions
-  const runnerBatches = {}
-  batches.forEach(b => { if(b.runner?.id){ if(!runnerBatches[b.runner.id]) runnerBatches[b.runner.id]=[]; runnerBatches[b.runner.id].push(b) } })
-  const mergeSuggestions = Object.entries(runnerBatches).filter(([,bs])=>bs.length>1)
-  const mergeHtml = mergeSuggestions.length ? `
-  <div style="background:rgba(6,214,160,.07);border:1px solid rgba(6,214,160,.25);border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px">
-    <span style="color:var(--cyan);font-weight:700">💡 Merge opportunity —</span>
-    ${mergeSuggestions.map(([,bs])=>{
-      const ids = bs.map(x=>x.id).join('|')
-      return '<span style="color:var(--sub)">'+bs[0].runner.name+' has '+bs.length+' routes ('+bs.reduce((s,b)=>s+b.stops.length,0)+' stops)</span> <button onclick="mergeBatches(\''+ids+'\')" style="margin-left:4px;background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:5px;padding:1px 8px;font-size:10px;cursor:pointer">Merge</button>'
-    }).join(' · ')}
-  </div>` : ''
+  const sc = { preview:'#a5b4fc', draft:'#f59e0b', change_detected:'#ef4444', queued:'#3b82f6', sent:'#f59e0b', accepted:'#22c55e', in_progress:'#06d6a0', offered:'#f59e0b', broadcast:'#3b82f6', unassigned:'#ef4444', complete:'#64748b' }
+  const si = {
+    preview:'👁 Preview',
+    draft:'🕐 Awaiting approval',
+    change_detected:'⚠️ Change detected',
+    queued:'🕐 Queued · sends 1pm',
+    sent:'📤 Offer sent',
+    accepted:'✓ Accepted',
+    in_progress:'🔄 In progress',
+    offered:'⏳ Offer sent',
+    broadcast:'📡 Broadcast',
+    unassigned:'🚨 Unassigned',
+    complete:'✓ Complete',
+  }
 
-  const sc = { preview:'#a5b4fc', draft:'#f59e0b', change_detected:'#ef4444', queued:'#3b82f6', sent:'#f59e0b', accepted:'#22c55e', in_progress:'#06d6a0', offered:'#f59e0b', broadcast:'#3b82f6', unassigned:'#ef4444' }
-  const si = { preview:'👁 Preview', draft:'🕐 Created · awaiting approval', change_detected:'⚠️ Change detected', queued:'🕐 Queued · sends 1pm', sent:'📤 Sent', accepted:'✓ Accepted', in_progress:'🔄 In progress', offered:'⏳ Offer sent', broadcast:'📡 Broadcast', unassigned:'🚨 Unassigned' }
+  // Section header for BIN_OUT / BIN_IN grouping
+  function sectionHeader(label, count, color, sublabel){
+    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 4px;margin-bottom:6px;border-bottom:1px solid var(--border)">
+      <span style="font-size:11px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:.06em">${label}</span>
+      <span style="font-size:11px;color:var(--muted)">${sublabel}</span>
+      <span style="margin-left:auto;font-size:11px;color:var(--muted)">${count} route${count!==1?'s':''}</span>
+    </div>`
+  }
 
-  const cardsHtml = batches.map(b=>{
-    const isPreview = b.status==='preview'
+  function renderBatchCard(b){
+    const isPreview = b.status==='preview'||b.status==='draft'||b.status==='queued'
     const isBinIn   = b.visitType==='BIN_IN'||b.id?.endsWith('-IN')
-    const statusKey = b.status==='unassigned'||!b.status?'unassigned':b.status
+    const statusKey = b.status||'unassigned'
     const borderCol = isBinIn ? '#06d6a0' : (sc[statusKey]||'#64748b')
     const badgeTxt  = si[statusKey]||b.status
     const badgeCol  = sc[statusKey]||'#64748b'
@@ -15976,7 +16026,6 @@ function renderDispatchPipeline(){
     const completedStops = b.stops.filter(s=>s.status==='complete').length
     const pct = b.stops.length ? Math.round(completedStops*100/b.stops.length) : 0
 
-    // Build stop rows for expanded view — all string concat, no nested backticks
     const stopRows = b.stops.map((h,idx)=>{
       const isSplit = h.service==='SPLIT'
       const isRecDay = isSplit && normDay(h.dayRecycling)===normDay(b.day)
@@ -15988,7 +16037,6 @@ function renderDispatchPipeline(){
       if(h.storage&&h.storage!=='--') alerts.push('📦 '+h.storage)
       const otherBatches = generatedBatches.filter(ob=>ob.id!==b.id)
       const moveOpts = otherBatches.map(ob=>'<option value="'+ob.id+'">'+(ob.runner?.name||'Unassigned')+' · '+(ob.zoneName||'')+'</option>').join('')
-
       return '<div style="padding:8px 0;border-bottom:'+(idx===b.stops.length-1?'none':'1px solid var(--border)')+';">'
         +'<div style="display:flex;align-items:center;gap:8px">'
         +'<div style="width:20px;height:20px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(idx+1)+'</div>'
@@ -16013,7 +16061,6 @@ function renderDispatchPipeline(){
         +'</div></div>'
     }).join('')
 
-    // Runner footer — use data attributes for onchange to avoid re-render collapse
     const runnerOpts = RUNNERS.filter(r=>r.status!=='INACTIVE').map(r=>'<option value="'+r.id+'" '+(b.runner?.id===r.id?'selected':'')+'>'+(r.name||'')+'</option>').join('')
     const runnerFooter = b.runner
       ? '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--border);font-size:12px;flex-wrap:wrap;background:var(--surface2)">'
@@ -16030,12 +16077,9 @@ function renderDispatchPipeline(){
         +'<select style="margin-left:auto;font-size:11px;padding:3px 6px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text)" data-batch-id="'+b.id+'" onchange="swapBatchRunnerKeepOpen(this)"><option value="">Assign runner →</option>'+runnerOpts+'</select>'
         +'</div>'
 
-    return '<div style="border:1px solid rgba('+
-        (borderCol==='#22c55e'?'34,197,94':borderCol==='#06d6a0'?'6,214,160':borderCol==='#a5b4fc'?'165,180,252':borderCol==='#f59e0b'?'245,158,11':borderCol==='#3b82f6'?'59,130,246':'239,68,68')
-      +',.3);border-left:4px solid '+borderCol+';border-radius:10px;overflow:hidden;background:var(--surface)"'
+    const borderRgb = borderCol==='#22c55e'?'34,197,94':borderCol==='#06d6a0'?'6,214,160':borderCol==='#a5b4fc'?'165,180,252':borderCol==='#f59e0b'?'245,158,11':borderCol==='#3b82f6'?'59,130,246':'239,68,68'
+    return '<div style="border:1px solid rgba('+borderRgb+',.3);border-left:4px solid '+borderCol+';border-radius:10px;overflow:hidden;background:var(--surface);margin-bottom:8px"'
       +' data-batch-id="'+b.id+'"'+(isOpen?' data-dispatch-card-open="1"':'')+' id="dbc-'+b.id+'">'
-
-      // ── COLLAPSED HEADER ──────────────────────────────────────────────
       +'<div style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer" onclick="toggleDispatchCard(\''+b.id+'\')">'
       +'<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;'+(isBinIn?'background:rgba(6,214,160,.15);color:#06d6a0':'background:rgba(99,102,241,.15);color:#a5b4fc')+';flex-shrink:0">'+vtLabel+'</span>'
       +'<div style="flex:1;min-width:0">'
@@ -16049,22 +16093,49 @@ function renderDispatchPipeline(){
       +(isLiveView&&b.stops.length?' · '+completedStops+'/'+b.stops.length+' done':'')
       +'</div>'
       +'</div>'
-      // Progress bar (live view only)
       +(isLiveView?'<div style="width:60px;flex-shrink:0"><div style="height:4px;background:var(--surface3);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+borderCol+';border-radius:99px"></div></div><div style="font-size:9px;color:var(--muted);text-align:center;margin-top:2px">'+pct+'%</div></div>':'')
       +'<span style="background:'+badgeCol+'22;color:'+badgeCol+';font-size:10px;font-weight:700;padding:2px 9px;border-radius:99px;flex-shrink:0;white-space:nowrap">'+badgeTxt+'</span>'
       +(isPreview?'<button onclick="event.stopPropagation();deleteBatchFromPreview(\''+b.id+'\')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;flex-shrink:0">🗑</button>':'')
       +'<span id="dbc-chev-'+b.id+'" style="font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0;'+(isOpen?'transform:rotate(180deg)':'')+'">▼</span>'
       +'</div>'
-
-      // ── EXPANDED BODY ─────────────────────────────────────────────────
       +'<div id="dbc-body-'+b.id+'" style="display:'+(isOpen?'block':'none')+';border-top:1px solid var(--border)">'
       +'<div style="padding:6px 14px 4px;background:var(--surface2);max-height:320px;overflow-y:auto">'+stopRows+'</div>'
       +runnerFooter
       +'</div>'
       +'</div>'
-  }).join('')
+  }
 
-  pipeline.innerHTML = mergeHtml + cardsHtml
+  // Merge suggestions
+  const runnerBatches = {}
+  batches.forEach(b => { if(b.runner?.id){ if(!runnerBatches[b.runner.id]) runnerBatches[b.runner.id]=[]; runnerBatches[b.runner.id].push(b) } })
+  const mergeSuggestions = Object.entries(runnerBatches).filter(([,bs])=>bs.length>1)
+  const mergeHtml = mergeSuggestions.length ? `
+  <div style="background:rgba(6,214,160,.07);border:1px solid rgba(6,214,160,.25);border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px">
+    <span style="color:var(--cyan);font-weight:700">💡 Merge opportunity —</span>
+    ${mergeSuggestions.map(([,bs])=>{
+      const ids = bs.map(x=>x.id).join('|')
+      return '<span style="color:var(--sub)">'+bs[0].runner.name+' has '+bs.length+' routes ('+bs.reduce((s,b)=>s+b.stops.length,0)+' stops)</span> <button onclick="mergeBatches(\''+ids+'\')" style="margin-left:4px;background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:5px;padding:1px 8px;font-size:10px;cursor:pointer">Merge</button>'
+    }).join(' · ')}
+  </div>` : ''
+
+  // Render with BIN_OUT first, then BIN_IN, each with a clear section header
+  let html = mergeHtml
+  if(binOutBatches.length){
+    html += sectionHeader('🌙 Bin Out — evening', binOutBatches.length, '#a5b4fc',
+      binOutBatches[0]?.dateLabel || (selectedDay ? 'Place bins at curb before 6am' : ''))
+    html += binOutBatches.map(renderBatchCard).join('')
+  }
+  if(binInBatches.length){
+    // Check if any Bin Out is still pending — if so, warn
+    const anyBinOutPending = binOutBatches.some(b=>['offered','sent','accepted'].includes(b.status))
+    const binInSublabel = anyBinOutPending
+      ? '⏳ Awaiting Bin Out completion'
+      : binInBatches[0]?.dateLabel || 'Bring bins in after truck passes'
+    html += sectionHeader('☀️ Bin In — morning', binInBatches.length, '#06d6a0', binInSublabel)
+    html += binInBatches.map(renderBatchCard).join('')
+  }
+
+  pipeline.innerHTML = html
 }
 
 function toggleDispatchCard(batchId){
