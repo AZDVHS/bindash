@@ -15276,6 +15276,9 @@ function pickDispatchDay(el){
 
 function onDispatchDayFilterChange(sel){
   const day = sel.value
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  const today = new Date(); today.setHours(0,0,0,0)
+
   if(!day){
     document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>p.classList.remove('on'))
     const inp = document.getElementById('dispatch-day-val')
@@ -15283,11 +15286,28 @@ function onDispatchDayFilterChange(sel){
   } else {
     const inp = document.getElementById('dispatch-day-val')
     if(inp) inp.value = day
+    // Sync pill — find the pill matching this day name
     document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>{
-      if(p.dataset.day===day) p.classList.add('on')
-      else p.classList.remove('on')
+      p.classList.toggle('on', p.dataset.day === day)
     })
+    // Update date label using signed diff
+    const tIdx = dayNames.findIndex(d => d === day)
+    let diff = tIdx - today.getDay()
+    if(diff > 3)  diff -= 7
+    if(diff < -3) diff += 7
+    const d = new Date(today); d.setDate(today.getDate() + diff)
+    const dateLabel = document.getElementById('dispatch-date-label')
+    if(dateLabel){
+      const ds = d.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+      const suffix = diff===0?' (today)':diff===-1?' (yesterday)':diff===1?' (tomorrow)':diff<0?` (${Math.abs(diff)}d ago)`:''
+      dateLabel.textContent = ds + suffix
+    }
+    updateDispatchStats()
+    const dateStr2 = d.toISOString().slice(0,10)
+    const dateStr  = d.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+    _showDispatchDayStatus(day, dateStr2, dateStr)
   }
+  loadPendingApprovalsIntoDispatch()
   window._livePipelineBatches = null
   loadLiveJobsIntoPipeline()
 }
@@ -16022,6 +16042,7 @@ function renderDispatchPipeline(){
       +'<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">'
       +'<span style="font-size:13px;font-weight:700">'+batchName+'</span>'
       +(b.hasSplit?'<span style="background:rgba(34,197,94,.15);color:#22c55e;font-size:10px;padding:1px 6px;border-radius:4px">split</span>':'')
+      +(b.dateLabel?'<span style="font-size:10px;color:var(--muted)">'+b.dateLabel+'</span>':'')
       +'</div>'
       +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'
       +(b.runner?b.runner.name:'⚠️ No runner')+' · '+b.stops.length+' stop'+(b.stops.length!==1?'s':'')+' · $'+b.earnTotal
@@ -16211,48 +16232,46 @@ async function initDispatchPage(){
 // Load active (non-complete) jobs from Supabase for the selected day
 // and render them in the pipeline so admin can see live status at a glance
 async function loadLiveJobsIntoPipeline(){
-  // Dropdown filter takes priority over pill selection
-  // "All Days" dropdown (empty value) = load all days regardless of pill
   const dayFilterVal = document.getElementById('dispatch-day-filter')?.value || ''
   const dayPillVal   = document.getElementById('dispatch-day-val')?.value || ''
-
-  // If dropdown says All Days (empty), load all — ignore pill
-  // If dropdown has a specific day, use that
-  // If dropdown is empty and pill has a day, use pill
   const effectiveDay = dayFilterVal !== '' ? dayFilterVal
-                     : dayPillVal !== ''   ? dayPillVal
+                     : dayPillVal   !== '' ? dayPillVal
                      : ''
 
   const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   const today = new Date(); today.setHours(0,0,0,0)
 
-  let dateRange = []
-  if(effectiveDay){
-    const targetIdx = dayNames.findIndex(d => normDay(d) === normDay(effectiveDay))
-    if(targetIdx < 0){ renderDispatchPipeline(); return }
-    // Signed diff — same as pills so past days query correctly
-    let diff = targetIdx - today.getDay()
+  // Resolve effectiveDay to an actual calendar date using signed diff (3-back/3-forward)
+  function resolveDate(dayName){
+    const idx = dayNames.findIndex(d => normDay(d) === normDay(dayName))
+    if(idx < 0) return null
+    let diff = idx - today.getDay()
     if(diff > 3)  diff -= 7
     if(diff < -3) diff += 7
     const d = new Date(today); d.setDate(today.getDate() + diff)
+    return d
+  }
+
+  let dateRange = []
+  let isPastDay = false
+
+  if(effectiveDay){
+    const d = resolveDate(effectiveDay)
+    if(!d){ renderDispatchPipeline(); return }
+    // The selected day itself — BIN_OUT jobs scheduled this date
     dateRange.push(d.toISOString().slice(0,10))
-    // Include next day for BIN_IN jobs
-    const tom = new Date(d); tom.setDate(d.getDate() + 1)
-    dateRange.push(tom.toISOString().slice(0,10))
+    // Also include previous day — BIN_IN jobs from yesterday's BIN_OUT complete today
+    const prev = new Date(d); prev.setDate(d.getDate() - 1)
+    dateRange.push(prev.toISOString().slice(0,10))
+    isPastDay = d < today
   } else {
-    // All days — 3 days back through 3 days forward (matches pill window)
-    for(let i = -3; i <= 4; i++){
+    // All days — full 3-back/3-forward window
+    for(let i = -3; i <= 3; i++){
       const d = new Date(today); d.setDate(today.getDate() + i)
       dateRange.push(d.toISOString().slice(0,10))
     }
+    isPastDay = false
   }
-
-  // For past days also include complete/cancelled jobs (history view)
-  const isPastDay = effectiveDay && (() => {
-    const tIdx = dayNames.findIndex(d=>normDay(d)===normDay(effectiveDay))
-    let df = tIdx - today.getDay(); if(df>3)df-=7; if(df<-3)df+=7
-    return df < 0
-  })()
 
   try {
     let query = _supa.from('jobs')
@@ -16262,7 +16281,6 @@ async function loadLiveJobsIntoPipeline(){
       .order('visit_type',     { ascending: true })
       .order('created_at',     { ascending: true })
 
-    // For future/today: exclude complete + cancelled; for past: show everything (history)
     if(!isPastDay){
       query = query.not('status', 'in', '("complete","cancelled")')
     }
@@ -16285,10 +16303,14 @@ async function loadLiveJobsIntoPipeline(){
         const jDay      = j.scheduled_date
           ? dayNames[new Date(j.scheduled_date+'T12:00:00').getDay()]
           : effectiveDay
+        const jDateFormatted = j.scheduled_date
+          ? new Date(j.scheduled_date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})
+          : ''
         batchMap[key] = {
           id:        key,
           day:       jDay,
           date:      j.scheduled_date,
+          dateLabel: jDateFormatted,
           zoneId:    j.zone_id,
           zoneName:  (zone?.name || 'Zone') + ' · ' + visitLabel,
           visitType: j.visit_type,
