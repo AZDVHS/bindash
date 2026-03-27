@@ -4135,25 +4135,51 @@ function showPhotoLightbox(src){
 
 // Returns true if we're within the 1-hour lock window before route generation (9am–1pm)
 // during which changes to HOs, zones, or runners that affect tomorrow's route are blocked.
-function isDispatchLocked(hwOrZoneDay){
+function isDispatchLocked(){
   const now  = new Date()
   const hour = now.getHours()
-  const min  = now.getMinutes()
   // Lock window: 9:00am – 1:00pm (route generates 10am, sends 1pm)
   if(hour < 9 || hour >= 13) return false
   return true
 }
 
-function checkDispatchLock(context){
+function checkDispatchLock(context, overrideFn){
   if(!isDispatchLocked()) return false
   const now = new Date()
   const minsTill10 = now.getHours() < 10
     ? (10 - now.getHours()) * 60 - now.getMinutes()
     : 0
-  const msg = minsTill10 > 0
-    ? `Changes locked — route generation starts in ${minsTill10} min. Edits that affect today's routes can't be made after 9am.`
-    : `Changes locked — routes are generating/dispatching right now (9am–1pm window). Try again after 1pm or contact runner directly.`
-  showToast(msg, 'warn', 6000)
+  const contextLabel = context==='homeowner' ? 'homeowner details'
+    : context==='runner' ? 'runner details'
+    : context==='zone'   ? 'zone settings'
+    : 'this record'
+  const timeMsg = minsTill10 > 0
+    ? `Route generation starts in <strong>${minsTill10} min</strong> (10am).`
+    : `Routes are currently generating and dispatching.`
+  // Store override globally so onclick string can call it
+  window._dispatchLockOverride = overrideFn || null
+  const mb = document.getElementById('modal-box')
+  if(!mb) return true
+  mb.innerHTML = `
+  <div class="mh" style="background:rgba(245,158,11,.07)">
+    <div>
+      <div style="font-size:15px;font-weight:700;color:#fbbf24">🔒 Dispatch window active</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">9am – 1pm · Changes may affect today's routes</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:10px">
+      Editing <strong>${contextLabel}</strong> during the dispatch window could conflict with routes currently being generated or offered to runners.
+    </div>
+    <div style="font-size:12px;color:var(--muted)">${timeMsg} Lock lifts automatically at <strong>1pm</strong>.</div>
+    ${overrideFn ? `<div style="margin-top:12px;padding:10px 12px;background:rgba(239,68,68,.06);border-radius:8px;font-size:12px;color:#fca5a5">⚠️ Override won't update routes already sent to runners — you may need to reassign manually.</div>` : ''}
+  </div>
+  <div class="mf" style="gap:8px">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    ${overrideFn ? `<button class="btn btn-outline btn-sm" style="color:#fbbf24;border-color:rgba(245,158,11,.4)" onclick="closeM();window._dispatchLockOverride&&window._dispatchLockOverride()">⚠️ Edit anyway</button>` : ''}
+  </div>`
+  openM()
   return true
 }
 
@@ -8781,7 +8807,10 @@ function rejectR(id, name){
 }
 
 function showRnEdit(rId){
-  if(checkDispatchLock('runner')) return
+  if(checkDispatchLock('runner', ()=>showRnEditForce(rId))) return
+  showRnEditForce(rId)
+}
+function showRnEditForce(rId){
   const r = RUNNERS.find(x=>x.id===rId)
   if(!r) return
   const rSafeName = r.name.replace(/'/g,'')
@@ -12164,7 +12193,10 @@ function renderProfitOverview(){
 }
 
 function showHWDetail(hwId){
-  if(checkDispatchLock('homeowner')) return
+  if(checkDispatchLock('homeowner', ()=>showHWDetailForce(hwId))) return
+  showHWDetailForce(hwId)
+}
+function showHWDetailForce(hwId){
   const hw = HOMEOWNERS.find(x=>x.id===hwId); if(!hw) return
   const availRunners = RUNNERS.filter(r=>r.status!=='INACTIVE')
   const isSplit = hw.service === 'SPLIT'
@@ -15683,7 +15715,16 @@ async function _adGenerateBatchesAsync(silent=false){
   })
 
   if(!scheduled.length){
-    showToast('No active homeowners scheduled for '+day+(zoneId?' in selected zone':''),'info')
+    if(!silent) showToast('No active homeowners scheduled for '+collectionDayName+(zoneId?' in selected zone':''),'info')
+    else {
+      // In silent mode render an informative empty state
+      const pipeline = document.getElementById('dispatch-pipeline')
+      if(pipeline) pipeline.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px">
+        <div style="font-size:32px;margin-bottom:10px">🗓️</div>
+        <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px">No ${collectionDayName} collection scheduled</div>
+        <div style="font-size:12px">No active homeowners have ${collectionDayName} as their collection day.</div>
+      </div>`
+    }
     return
   }
 
@@ -15970,6 +16011,9 @@ function renderDispatchPipeline(){
 
   const zoneFil = document.getElementById('dispatch-zone-filter')?.value || ''
   const dayFil  = document.getElementById('dispatch-day-filter')?.value  || ''
+  // Always filter by the active pill day — dayFil from dropdown, or pillDay as fallback
+  const pillDay = document.getElementById('dispatch-day-val')?.value || ''
+  const effectiveDayFil = dayFil || pillDay  // use dropdown if set, else pill
 
   // Populate zone filter dropdown once
   const zf = document.getElementById('dispatch-zone-filter')
@@ -16002,24 +16046,35 @@ function renderDispatchPipeline(){
   //     if today is the day after Bin Out, pipeline should show BIN_IN jobs
 
   if(!batchSource.length){
-    // Smart empty state based on selected day
-    let emptyMsg = ''
-    let emptyAction = ''
+    // Smart empty state — pill = physical work night, collection = pill+1
+    const d7 = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+    const pillCollectionDay = selectedDay ? d7[(d7.findIndex(x=>x===selectedDay)+1)%7] : ''
+    let emptyIcon = '🗺️', emptyMsg = '', emptyAction = ''
     if(!selectedDay || selDiff === 0){
-      emptyMsg = 'Loading today\'s routes...'
-      emptyAction = ''
+      emptyIcon = '⏳'
+      emptyMsg = `No routes dispatched for ${selectedDay || 'today'} yet`
+      emptyAction = pillCollectionDay
+        ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">
+            This is the Bin Out night for <strong>${pillCollectionDay}</strong> collection.<br>
+            Routes will appear here once dispatched. Check the approvals strip above to approve pending drafts.
+           </div>`
+        : ''
     } else if(isFutureSel){
-      const genDay = new Date(selDate); genDay.setDate(selDate.getDate() - 1)
-      const genDayName = dayNames7[genDay.getDay()]
-      emptyMsg = `No routes dispatched for ${selectedDay} yet`
-      emptyAction = `<div style="font-size:12px;color:var(--muted);margin-top:6px">Routes generate at 10am on ${genDayName} and send at 1pm after approval.</div>`
+      const prevDayName = d7[(selIdx7+6)%7]
+      emptyIcon = '📅'
+      emptyMsg = `No Bin Out routes dispatched for ${selectedDay} yet`
+      emptyAction = `<div style="font-size:12px;color:var(--muted);margin-top:6px">
+        This is the Bin Out night for <strong>${pillCollectionDay}</strong> collection.<br>
+        Route generates at 10am on <strong>${prevDayName}</strong> and sends at 1pm after approval.
+      </div>`
     } else {
+      emptyIcon = '📋'
       emptyMsg = `No route history for ${selectedDay} (${selDateStr})`
       emptyAction = ''
     }
     pipeline.innerHTML = `
     <div style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px">
-      <div style="font-size:32px;margin-bottom:10px">🗺️</div>
+      <div style="font-size:32px;margin-bottom:10px">${emptyIcon}</div>
       <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px">${emptyMsg}</div>
       ${emptyAction}
     </div>`
@@ -16032,7 +16087,7 @@ function renderDispatchPipeline(){
 
   let batches = batchSource
   if(zoneFil) batches = batches.filter(b=>b.zoneId===zoneFil)
-  if(dayFil)  batches = batches.filter(b=>normDay(b.day)===normDay(dayFil)||normDay(b.date?.split('T')[0])===normDay(dayFil))
+  if(effectiveDayFil) batches = batches.filter(b=>normDay(b.day)===normDay(effectiveDayFil)||normDay(b.date?.split('T')[0])===normDay(effectiveDayFil))
 
   // Separate BIN_OUT and BIN_IN for grouped display
   const binOutBatches = batches.filter(b=>b.visitType!=='BIN_IN'&&!b.id?.endsWith('-IN'))
@@ -16047,14 +16102,14 @@ function renderDispatchPipeline(){
     const accepted = batches.filter(b=>['accepted','in_progress'].includes(b.status)).length
     const offered  = batches.filter(b=>['offered','broadcast'].includes(b.status)).length
     const sent     = batches.filter(b=>b.status==='sent').length
-    const dayLabel = dayFil || selectedDay || 'All Days'
+    const dayLabel = effectiveDayFil || 'All Days'
     // selDateStr is like "Friday, Mar 27" — strip the day name if dayLabel already has it
     const dateOnly = selDateStr.replace(/^[A-Za-z]+,\s*/,'') // "Mar 27"
     const headerDate = selectedDay ? ` · ${dateOnly}` : ''
     if(titleEl) titleEl.textContent = `${dayLabel}${headerDate} — ${accepted} accepted · ${offered+sent} awaiting`
     if(badgeEl) badgeEl.textContent = batches.length+' route'+(batches.length!==1?'s':'')+' · click to expand'
   } else {
-    if(titleEl) titleEl.textContent = 'Route Preview — '+(dayFil||selectedDay||'All Days')+(allPreview?' · Pending approval/launch':'')
+    if(titleEl) titleEl.textContent = 'Route Preview — '+(effectiveDayFil||'All Days')+(allPreview?' · Pending approval/launch':'')
     if(badgeEl) badgeEl.textContent = batches.length+' batch'+(batches.length!==1?'es':'')+' · '+RUNNERS.filter(r=>r.status==='AVAILABLE').length+' runners available'
   }
 
@@ -16361,14 +16416,12 @@ async function initDispatchPage(){
   initDispatchDayPills()
   updateDispatchStats()
 
-  // Auto-select today's pill and generate preview
+  // Auto-select today's pill
   const todayName = FULL_DAYS[new Date().getDay()]
   const inp = document.getElementById('dispatch-day-val')
   if(inp) inp.value = todayName
-  // Sync dropdown filter
   const df = document.getElementById('dispatch-day-filter')
   if(df) df.value = todayName
-  // Highlight today's pill
   document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>{
     p.classList.toggle('on', p.dataset.day === todayName)
   })
@@ -16379,8 +16432,12 @@ async function initDispatchPage(){
   // Start the 10am generate / 1pm release scheduler (idempotent)
   startRouteScheduler()
 
-  // Auto-generate today's preview — no button needed
-  await _adGenerateBatchesAsync(true)
+  // On startup: load live jobs from DB for today. If none exist, auto-generate preview.
+  await loadLiveJobsIntoPipeline()
+  // If no live jobs were found, auto-generate a preview for today's Bin Out night
+  if(!window._livePipelineBatches?.length && !generatedBatches.length){
+    await _adGenerateBatchesAsync(true)
+  }
 }
 
 // Load active (non-complete) jobs from Supabase for the selected day
@@ -17174,7 +17231,10 @@ function promoteToLive(zId){
 }
 
 function showEditZone(zId){
-  if(checkDispatchLock('zone')) return
+  if(checkDispatchLock('zone', ()=>showEditZoneForce(zId))) return
+  showEditZoneForce(zId)
+}
+function showEditZoneForce(zId){
   const z = ADMIN_ZONES.find(x=>x.id===zId); if(!z) return
   const zipVal = (z.zips?.length ? z.zips : [z.zip]).join(', ')
   document.getElementById('modal-box').innerHTML=`
