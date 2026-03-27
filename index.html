@@ -3516,56 +3516,194 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- AD OVERVIEW -->
         <div class="pg" id="ad-overview">
+
+          <!-- HEADER ROW -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+            <div>
+              <div id="ov-greeting" style="font-size:13px;color:var(--muted);font-weight:500;letter-spacing:.04em;text-transform:uppercase"></div>
+              <div style="font-size:22px;font-weight:800;color:var(--text);margin-top:2px" id="ov-date-line"></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div id="ov-clock" style="font-family:'Syne',sans-serif;font-size:28px;font-weight:700;color:var(--cyan);letter-spacing:-.02em"></div>
+            </div>
+          </div>
+
+          <!-- MISSED ROUTE ALERT BANNER (shown if any) -->
+          <div id="ov-missed-banner" style="display:none;background:rgba(239,68,68,.08);border:1.5px solid rgba(239,68,68,.35);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px;animation:pulse-amber 2s infinite">
+            <span style="font-size:20px">🚨</span>
+            <div style="flex:1;font-size:13px"><strong style="color:#ef4444" id="ov-missed-text">Missed routes require action</strong> <span style="color:var(--muted)">— HO apologies sent, runners need to be reassigned or credited</span></div>
+            <button class="btn btn-sm" style="background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.4);color:#ef4444;font-weight:700" onclick="adNav(null,'ad-jobs')">View missed →</button>
+          </div>
+
+          <!-- KPI STAT TILES -->
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
-            <div class="sc2" onclick="adNav(document.querySelector('#S-admin .nav-i:nth-child(8)'),'ad-homeowners')" style="cursor:pointer"><div class="sn" style="color:var(--blue)" id="ov-hw-count">0</div><div class="sl2">Active Homeowners</div></div>
-            <div class="sc2" onclick="adNav(document.querySelector('#S-admin .nav-i:nth-child(9)'),'ad-runners')" style="cursor:pointer"><div class="sn" style="color:var(--green)" id="ov-rn-count">0</div><div class="sl2">Active Runners</div></div>
-            <div class="sc2" onclick="adNav(null,'ad-pending-hw')" style="cursor:pointer"><div class="sn" style="color:var(--amber)" id="ov-pending-count">0</div><div class="sl2">Pending Review</div></div>
-            <div class="sc2"><div class="sn" style="color:var(--indigo)" id="ov-jobs-count">0</div><div class="sl2">Jobs Today</div></div>
+
+            <div onclick="adNav(null,'ad-homeowners')" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;transition:border-color .2s;position:relative;overflow:hidden" onmouseover="this.style.borderColor='rgba(59,130,246,.5)'" onmouseout="this.style.borderColor='var(--border)'">
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">Active HOs</div>
+              <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;color:#3b82f6;line-height:1" id="ov-hw-count">0</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px" id="ov-hw-sub">homeowners</div>
+              <div style="position:absolute;right:12px;top:12px;font-size:22px;opacity:.15">🏠</div>
+            </div>
+
+            <div onclick="adNav(null,'ad-runners')" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;transition:border-color .2s;position:relative;overflow:hidden" onmouseover="this.style.borderColor='rgba(34,197,94,.5)'" onmouseout="this.style.borderColor='var(--border)'">
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">Active Runners</div>
+              <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;color:#22c55e;line-height:1" id="ov-rn-count">0</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px" id="ov-rn-sub">available now</div>
+              <div style="position:absolute;right:12px;top:12px;font-size:22px;opacity:.15">🏃</div>
+            </div>
+
+            <div onclick="adNav(null,'ad-pending-hw')" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;transition:border-color .2s;position:relative;overflow:hidden" onmouseover="this.style.borderColor='rgba(245,158,11,.5)'" onmouseout="this.style.borderColor='var(--border)'">
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">Pending Review</div>
+              <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;color:#f59e0b;line-height:1" id="ov-pending-count">0</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px" id="ov-pending-sub">applications</div>
+              <div style="position:absolute;right:12px;top:12px;font-size:22px;opacity:.15">⏳</div>
+            </div>
+
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;position:relative;overflow:hidden">
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">Jobs Today</div>
+              <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;color:#a5b4fc;line-height:1" id="ov-jobs-count">0</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px" id="ov-jobs-sub">dispatched</div>
+              <div style="position:absolute;right:12px;top:12px;font-size:22px;opacity:.15">📋</div>
+            </div>
+
+          </div>
+
+          <!-- DISPATCH STATUS STRIP -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+
+            <!-- TONIGHT BIN OUT -->
+            <div style="border:1px solid rgba(165,180,252,.25);background:rgba(165,180,252,.04);border-radius:12px;padding:16px" id="ov-binout-card">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                <span style="font-size:16px">🌙</span>
+                <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#a5b4fc">Tonight's Bin Out</span>
+                <span id="ov-binout-time" style="font-size:10px;color:var(--muted);margin-left:auto"></span>
+              </div>
+              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px">
+                <div style="font-family:'Syne',sans-serif;font-size:36px;font-weight:800;color:#a5b4fc;line-height:1" id="ov-out-routes">--</div>
+                <div style="font-size:12px;color:var(--muted)" id="ov-out-label">routes</div>
+              </div>
+              <div style="font-size:12px;color:var(--muted);margin-bottom:10px" id="ov-out-sub">No batches dispatched yet</div>
+              <!-- Mini status bar -->
+              <div id="ov-binout-bar" style="height:4px;background:var(--surface3);border-radius:99px;overflow:hidden;margin-bottom:10px"><div id="ov-binout-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#a5b4fc,#6366f1);transition:width .6s;border-radius:99px"></div></div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <span id="ov-binout-stat" style="font-size:11px;color:var(--muted)"></span>
+                <button class="btn btn-sm" style="margin-left:auto;background:rgba(165,180,252,.12);color:#a5b4fc;border:1px solid rgba(165,180,252,.25);font-size:11px" onclick="adNav(null,'ad-dispatch')">Go to Dispatch →</button>
+              </div>
+            </div>
+
+            <!-- TOMORROW BIN IN -->
+            <div style="border:1px solid rgba(6,214,160,.2);background:rgba(6,214,160,.04);border-radius:12px;padding:16px" id="ov-binin-card">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                <span style="font-size:16px">☀️</span>
+                <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#06d6a0">Tomorrow's Bin In</span>
+                <span id="ov-binin-time" style="font-size:10px;color:var(--muted);margin-left:auto"></span>
+              </div>
+              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px">
+                <div style="font-family:'Syne',sans-serif;font-size:36px;font-weight:800;color:#06d6a0;line-height:1" id="ov-in-routes">--</div>
+                <div style="font-size:12px;color:var(--muted)" id="ov-in-label">routes</div>
+              </div>
+              <div style="font-size:12px;color:var(--muted);margin-bottom:10px" id="ov-in-sub">Pre-queued after Bin Out completes</div>
+              <div id="ov-binin-bar" style="height:4px;background:var(--surface3);border-radius:99px;overflow:hidden;margin-bottom:10px"><div id="ov-binin-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#06d6a0,#22c55e);transition:width .6s;border-radius:99px"></div></div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <span id="ov-binin-stat" style="font-size:11px;color:var(--muted)"></span>
+                <button class="btn btn-sm" style="margin-left:auto;background:rgba(6,214,160,.1);color:#06d6a0;border:1px solid rgba(6,214,160,.2);font-size:11px" onclick="adNav(null,'ad-dispatch')">Go to Dispatch →</button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- APPROVALS + ACTIVITY + QUICK ACTIONS -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+
+            <!-- LEFT: Pending approvals + recent activity -->
+            <div style="display:flex;flex-direction:column;gap:10px">
+
+              <!-- HW Pending -->
+              <div id="ov-hw-pending-card" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="adNav(null,'ad-pending-hw')" onmouseover="this.style.borderColor='rgba(245,158,11,.4)'" onmouseout="this.style.borderColor='var(--border)'">
+                <div style="width:38px;height:38px;border-radius:10px;background:rgba(245,158,11,.12);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🏠</div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:700;color:var(--text)" id="ov-hw-pending-label">0 Homeowner Applications</div>
+                  <div style="font-size:11px;color:var(--muted)">Verify address · assign zone · approve</div>
+                </div>
+                <div style="font-size:11px;color:#f59e0b;font-weight:700;white-space:nowrap">Review →</div>
+              </div>
+
+              <!-- Runner Pending -->
+              <div id="ov-rn-pending-card" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="adNav(null,'ad-pending')" onmouseover="this.style.borderColor='rgba(245,158,11,.4)'" onmouseout="this.style.borderColor='var(--border)'">
+                <div style="width:38px;height:38px;border-radius:10px;background:rgba(245,158,11,.12);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🚐</div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:700;color:var(--text)" id="ov-rn-pending-label">0 Runner Applications</div>
+                  <div style="font-size:11px;color:var(--muted)">1099 · background check · assign zone</div>
+                </div>
+                <div style="font-size:11px;color:#f59e0b;font-weight:700;white-space:nowrap">Review →</div>
+              </div>
+
+              <!-- Recent Activity -->
+              <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;flex:1">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:10px">Recent Activity</div>
+                <div id="ov-activity-feed" style="display:flex;flex-direction:column;gap:0">
+                  <div style="font-size:12px;color:var(--muted);text-align:center;padding:16px">No activity yet</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- RIGHT: Quick actions -->
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px">
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:12px">Quick Actions</div>
+              <div style="display:flex;flex-direction:column;gap:7px">
+                <button onclick="adNav(null,'ad-pending-hw')" style="display:flex;align-items:center;gap:10px;background:rgba(6,214,160,.08);border:1px solid rgba(6,214,160,.2);border-radius:8px;padding:10px 14px;cursor:pointer;text-align:left;width:100%;transition:background .15s" onmouseover="this.style.background='rgba(6,214,160,.14)'" onmouseout="this.style.background='rgba(6,214,160,.08)'">
+                  <span style="font-size:16px">🏠</span>
+                  <span style="flex:1;font-size:13px;font-weight:600;color:var(--text)">Review Pending Homeowners</span>
+                  <span id="ov-hw-badge" style="background:rgba(6,214,160,.2);color:#06d6a0;border-radius:99px;font-size:10px;font-weight:700;padding:1px 8px;min-width:20px;text-align:center">0</span>
+                </button>
+                <button onclick="adNav(null,'ad-pending')" style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;cursor:pointer;text-align:left;width:100%;transition:background .15s" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='var(--surface2)'">
+                  <span style="font-size:16px">🚐</span>
+                  <span style="flex:1;font-size:13px;font-weight:600;color:var(--text)">Review Pending Runners</span>
+                  <span id="ov-rn-badge" style="background:var(--surface3);color:var(--muted);border-radius:99px;font-size:10px;font-weight:700;padding:1px 8px;min-width:20px;text-align:center">0</span>
+                </button>
+                <button onclick="adNav(null,'ad-dispatch')" style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;cursor:pointer;text-align:left;width:100%;transition:background .15s" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='var(--surface2)'">
+                  <span style="font-size:16px">🗺️</span>
+                  <span style="flex:1;font-size:13px;font-weight:600;color:var(--text)">Open Dispatch</span>
+                  <span style="font-size:11px;color:var(--muted)" id="ov-dispatch-hint">View routes</span>
+                </button>
+                <button onclick="adNav(null,'ad-jobs')" style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;cursor:pointer;text-align:left;width:100%;transition:background .15s" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='var(--surface2)'">
+                  <span style="font-size:16px">📋</span>
+                  <span style="flex:1;font-size:13px;font-weight:600;color:var(--text)">All Jobs</span>
+                  <span style="font-size:11px;color:var(--muted)" id="ov-jobs-hint">History &amp; status</span>
+                </button>
+                <button onclick="adNav(null,'ad-runners')" style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;cursor:pointer;text-align:left;width:100%;transition:background .15s" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='var(--surface2)'">
+                  <span style="font-size:16px">🏃</span>
+                  <span style="flex:1;font-size:13px;font-weight:600;color:var(--text)">Manage Runners</span>
+                  <span style="font-size:11px;color:var(--muted)" id="ov-runners-hint"></span>
+                </button>
+                <button onclick="adNav(null,'ad-homeowners')" style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;cursor:pointer;text-align:left;width:100%;transition:background .15s" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='var(--surface2)'">
+                  <span style="font-size:16px">🏘️</span>
+                  <span style="flex:1;font-size:13px;font-weight:600;color:var(--text)">Manage Homeowners</span>
+                  <span style="font-size:11px;color:var(--muted)" id="ov-hw-hint"></span>
+                </button>
+              </div>
+
+              <!-- Revenue snapshot -->
+              <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:8px">Revenue snapshot</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                  <div style="background:var(--surface2);border-radius:8px;padding:8px 10px">
+                    <div style="font-size:10px;color:var(--muted)">MRR</div>
+                    <div style="font-size:16px;font-weight:800;color:#06d6a0" id="ov-mrr">$0</div>
+                  </div>
+                  <div style="background:var(--surface2);border-radius:8px;padding:8px 10px">
+                    <div style="font-size:10px;color:var(--muted)">Active subs</div>
+                    <div style="font-size:16px;font-weight:800;color:#a5b4fc" id="ov-subs">0</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
           </div>
 
           <!-- DENSITY ALERTS (rendered by JS) -->
-          <div id="density-alerts" style="display:none;margin-bottom:14px"></div>
+          <div id="density-alerts" style="display:none;margin-top:14px"></div>
 
-          <!-- TODAY'S DISPATCH SUMMARY -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-            <div style="border:1px solid rgba(99,102,241,.3);background:rgba(99,102,241,.06);border-radius:10px;padding:14px">
-              <div class="card-ttl" style="color:#a5b4fc">🌙 Tonight's Bin Out Batches</div>
-              <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;color:#a5b4fc" id="ov-out-routes">--</div>
-              <div style="font-size:12px;color:var(--sub);margin-top:4px" id="ov-out-sub">No batches generated yet</div>
-              <button class="btn btn-sm" style="margin-top:10px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3)" onclick="adNav(null,'ad-dispatch')">View Dispatch -></button>
-            </div>
-            <div style="border:1px solid rgba(6,214,160,.3);background:rgba(6,214,160,.05);border-radius:10px;padding:14px">
-              <div class="card-ttl" style="color:#6ee7b7">☀️ Tomorrow's Bin In Batches</div>
-              <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;color:#6ee7b7" id="ov-in-routes">--</div>
-              <div style="font-size:12px;color:var(--sub);margin-top:4px" id="ov-in-sub">Pre-queued after Bin Out is generated</div>
-              <button class="btn btn-sm" style="margin-top:10px;background:rgba(6,214,160,.1);color:#6ee7b7;border:1px solid rgba(6,214,160,.25)" onclick="adNav(null,'ad-dispatch')">View Dispatch -></button>
-            </div>
-          </div>
-
-          <div class="card" style="border-left:4px solid var(--amber);margin-bottom:10px">
-            <div style="display:flex;align-items:center;gap:12px"><div style="font-size:22px">🏠</div><div><div style="font-weight:700;color:#fbbf24" id="ov-hw-pending-label">2 Homeowner Applications Awaiting Review</div><div style="font-size:13px;color:var(--muted)">Verify address, assign zone, then approve to activate their account</div></div><button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="adNav(null,'ad-pending-hw')">Review -></button></div>
-          </div>
-          <div class="card" style="border-left:4px solid var(--amber);margin-bottom:14px">
-            <div style="display:flex;align-items:center;gap:12px"><div style="font-size:22px">🚐</div><div><div style="font-weight:700;color:#fbbf24" id="ov-rn-pending-label">0 Runner Applications Awaiting Review</div><div style="font-size:13px;color:var(--muted)">Check 1099, background check, assign zone, then approve</div></div><button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="adNav(null,'ad-pending')">Review -></button></div>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-            <div class="card">
-              <div class="card-ttl">Recent Activity</div>
-              <table><thead><tr><th>Event</th><th>Time</th></tr></thead><tbody>
-<tr id="activity-feed-empty"><td colspan="2" style="text-align:center;color:var(--muted);padding:18px">No activity yet</td></tr>
-              </tbody></table>
-            </div>
-            <div class="card">
-              <div class="card-ttl">Quick Actions</div>
-              <div style="display:flex;flex-direction:column;gap:7px">
-                <button class="btn btn-cyan btn-full" onclick="adNav(null,'ad-pending-hw')">🏠 Review Pending Homeowners <span id="ov-hw-badge" style="background:rgba(0,0,0,.3);border-radius:99px;font-size:10px;padding:1px 7px;margin-left:4px">2</span></button>
-                <button class="btn btn-outline btn-full" onclick="adNav(null,'ad-pending')">🚐 Review Pending Runners (<span id="ov-rn-badge">0</span>)</button>
-                <button class="btn btn-outline btn-full" onclick="adNav(null,'ad-dispatch')">🗺️ View Tonight's Dispatch</button>
-                <button class="btn btn-outline btn-full" onclick="adNav(null,'ad-runners')">🚐 Manage Runners</button>
-                <button class="btn btn-outline btn-full" onclick="adNav(null,'ad-homeowners')">🏠 Manage Homeowners</button>
-              </div>
-            </div>
-          </div>
         </div>
 
         <!-- AD PENDING -->
@@ -13548,38 +13686,177 @@ function toggleStopLog(btn){
 function updateOverviewCounts(){
   const activeHW  = HOMEOWNERS.filter(h=>h.status==='active').length
   const activeRN  = RUNNERS.filter(r=>r.status!=='INACTIVE').length
+  const availRN   = RUNNERS.filter(r=>r.status==='AVAILABLE').length
   const pendingHW = PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length
-  const pendingRN = PENDING_RUNNERS.length   // driven by Supabase, not pc
-  pc = pendingRN                             // keep pc in sync for legacy code
+  const pendingRN = PENDING_RUNNERS.length
+  pc = pendingRN
   const totalPending = pendingHW + pendingRN
 
-  const ovHW = document.getElementById('ov-hw-count')
-  const ovRN = document.getElementById('ov-rn-count')
-  const ovP  = document.getElementById('ov-pending-count')
-  const ovPLabel = document.getElementById('ov-hw-pending-label')
-  const ovPBadge = document.getElementById('ov-hw-badge')
-  const hwBadge  = document.getElementById('hw-pcount')
+  // MRR estimate from active HW payments
+  const mrr = (HW_PAYMENTS||[]).filter(p=>p.status==='active').reduce((s,p)=>s+(parseFloat(p.amount)||34.99),0)
+  const activeSubs = (HW_PAYMENTS||[]).filter(p=>p.status==='active').length
 
-  if(ovHW) ovHW.textContent = activeHW
-  if(ovRN) ovRN.textContent = activeRN
-  if(ovP)  ovP.textContent  = totalPending
-  if(ovPLabel) ovPLabel.textContent = pendingHW + ' Homeowner Application' + (pendingHW!==1?'s':'') + ' Awaiting Review'
-  if(ovPBadge) ovPBadge.textContent = pendingHW
-  if(hwBadge)  hwBadge.textContent  = pendingHW
+  const safe = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v }
 
-  // Update runner pending label & sidebar badge
-  const rnPendingLabel = document.getElementById('ov-rn-pending-label')
-  const rnBadge = document.getElementById('pcount')
-  if(rnPendingLabel) rnPendingLabel.textContent = pendingRN + ' Runner Application' + (pendingRN!==1?'s':'') + ' Awaiting Review'
-  if(rnBadge) rnBadge.textContent = pendingRN
+  // Clock + greeting
+  const now = new Date()
+  const h = now.getHours()
+  const greeting = h<12 ? 'Good morning' : h<17 ? 'Good afternoon' : 'Good evening'
+  const dateStr = now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})
+  safe('ov-greeting', greeting + ' · BinDash Admin')
+  safe('ov-date-line', dateStr)
 
-  // Update sidebar pending badges visibility
+  // Live clock
+  const clockEl = document.getElementById('ov-clock')
+  if(clockEl){
+    const updateClock = () => {
+      const n = new Date()
+      clockEl.textContent = n.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true})
+    }
+    updateClock()
+    if(!window._ovClockTimer) window._ovClockTimer = setInterval(updateClock, 1000)
+  }
+
+  // KPI tiles
+  safe('ov-hw-count', activeHW)
+  safe('ov-hw-sub',   activeHW === 1 ? 'homeowner' : 'homeowners')
+  safe('ov-rn-count', activeRN)
+  safe('ov-rn-sub',   availRN + ' available now')
+  safe('ov-pending-count', totalPending)
+  safe('ov-pending-sub',   totalPending === 1 ? 'application' : 'applications')
+
+  // Pending approval cards
+  safe('ov-hw-pending-label', pendingHW + ' Homeowner Application' + (pendingHW!==1?'s':'') + ' Awaiting Review')
+  safe('ov-rn-pending-label', pendingRN + ' Runner Application' + (pendingRN!==1?'s':'') + ' Awaiting Review')
+
+  // Highlight pending cards amber if non-zero
+  const hwCard = document.getElementById('ov-hw-pending-card')
+  const rnCard = document.getElementById('ov-rn-pending-card')
+  if(hwCard) hwCard.style.borderColor = pendingHW > 0 ? 'rgba(245,158,11,.5)' : 'var(--border)'
+  if(rnCard) rnCard.style.borderColor = pendingRN > 0 ? 'rgba(245,158,11,.4)' : 'var(--border)'
+
+  // Quick action badges
+  safe('ov-hw-badge', pendingHW)
+  safe('ov-rn-badge', pendingRN)
+  safe('ov-runners-hint', activeRN + ' active · ' + availRN + ' available')
+  safe('ov-hw-hint', activeHW + ' active')
+
+  // Revenue snapshot
+  safe('ov-mrr', '$' + mrr.toFixed(0))
+  safe('ov-subs', activeSubs)
+
+  // Dispatch hint
+  const todayJobs = (window._livePipelineBatches||[]).length || 0
+  safe('ov-dispatch-hint', todayJobs > 0 ? todayJobs + ' route' + (todayJobs!==1?'s':'') + ' active' : 'No routes yet')
+
+  // Jobs today count — live from DB (approximate from in-memory if available)
+  const todayStr = new Date().toISOString().slice(0,10)
+  safe('ov-jobs-count', todayJobs)
+  safe('ov-jobs-sub', 'dispatched today')
+  safe('ov-jobs-hint', todayJobs + ' dispatched')
+
+  // Load jobs count from Supabase for accurate today count
+  _supa.from('jobs').select('id',{count:'exact',head:true})
+    .eq('scheduled_date', todayStr)
+    .not('status','in','("cancelled","missed")')
+    .then(({count}) => {
+      if(count != null){ safe('ov-jobs-count', count); safe('ov-jobs-sub', 'dispatched today') }
+    }).catch(()=>{})
+
+  // Load dispatch status for tonight's Bin Out
+  _supa.from('jobs').select('id,status,visit_type,batch_id')
+    .eq('scheduled_date', todayStr)
+    .eq('visit_type', 'BIN_OUT')
+    .then(({data:jobs}) => {
+      if(!jobs?.length){
+        safe('ov-out-routes', '0')
+        safe('ov-out-sub', 'No Bin Out dispatched tonight')
+        safe('ov-out-label', 'routes')
+        safe('ov-binout-stat', '')
+        const fill = document.getElementById('ov-binout-fill')
+        if(fill) fill.style.width = '0%'
+      } else {
+        const batches = [...new Set(jobs.map(j=>j.batch_id||j.id))]
+        const accepted = jobs.filter(j=>['accepted','in_progress','complete'].includes(j.status)).length
+        const total = jobs.length
+        const pct = total ? Math.round(accepted*100/total) : 0
+        safe('ov-out-routes', batches.length)
+        safe('ov-out-label', batches.length===1?'route':'routes')
+        safe('ov-out-sub', total + ' stops dispatched tonight')
+        safe('ov-binout-stat', accepted + '/' + total + ' stops accepted')
+        safe('ov-binout-time', pct + '% accepted')
+        const fill = document.getElementById('ov-binout-fill')
+        if(fill) fill.style.width = pct + '%'
+      }
+    }).catch(()=>{})
+
+  // Bin In for tomorrow
+  const tomorrowStr = new Date(new Date().setDate(new Date().getDate()+1)).toISOString().slice(0,10)
+  _supa.from('jobs').select('id,status,batch_id')
+    .eq('scheduled_date', tomorrowStr)
+    .eq('visit_type', 'BIN_IN')
+    .then(({data:jobs}) => {
+      if(!jobs?.length){
+        safe('ov-in-routes', '--')
+        safe('ov-in-label', '')
+        safe('ov-in-sub', 'Generated after tonight\'s Bin Out completes')
+        const fill = document.getElementById('ov-binin-fill')
+        if(fill) fill.style.width = '0%'
+      } else {
+        const batches = [...new Set(jobs.map(j=>j.batch_id||j.id))]
+        safe('ov-in-routes', batches.length)
+        safe('ov-in-label', batches.length===1?'route':'routes')
+        safe('ov-in-sub', jobs.length + ' stops · morning after truck')
+        const fill = document.getElementById('ov-binin-fill')
+        if(fill) fill.style.width = '100%'
+      }
+    }).catch(()=>{})
+
+  // Check for missed routes — show banner
+  _supa.from('jobs').select('id,batch_id',{count:'exact',head:false})
+    .eq('status','missed')
+    .then(({data:missed}) => {
+      const banner = document.getElementById('ov-missed-banner')
+      const missedText = document.getElementById('ov-missed-text')
+      if(missed?.length > 0){
+        const batches = [...new Set(missed.map(j=>j.batch_id||j.id))].length
+        if(banner){ banner.style.display='flex' }
+        if(missedText) missedText.textContent = batches + ' missed route' + (batches!==1?'s':'') + ' require action'
+      } else {
+        if(banner){ banner.style.display='none' }
+      }
+    }).catch(()=>{})
+
+  // Sidebar badges
   const hwPcountEl = document.getElementById('hw-pcount')
   const rnPcountEl = document.getElementById('pcount')
   const wlBadgeEl  = document.getElementById('waitlist-badge')
   if(hwPcountEl){ hwPcountEl.textContent = pendingHW; hwPcountEl.style.display = pendingHW > 0 ? 'inline' : 'none' }
   if(rnPcountEl){ rnPcountEl.textContent = pendingRN; rnPcountEl.style.display = pendingRN > 0 ? 'inline' : 'none' }
   if(wlBadgeEl){  wlBadgeEl.textContent  = WAITLIST_SIGNUPS.length; wlBadgeEl.style.display = WAITLIST_SIGNUPS.length > 0 ? 'inline' : 'none' }
+
+  // Activity feed
+  const feed = document.getElementById('ov-activity-feed')
+  if(feed){
+    const notifs = JSON.parse(localStorage.getItem('bindash_notifs')||'[]').slice(0,6)
+    if(notifs.length){
+      feed.innerHTML = notifs.map(n=>{
+        const ts = new Date(n.ts)
+        const timeStr = ts.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
+        const col = n.type==='err'?'#ef4444':n.type==='warn'?'#f59e0b':n.type==='ok'?'#22c55e':'var(--muted)'
+        return `<div style="display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);last-child{border:none}">
+          <div style="width:6px;height:6px;border-radius:50%;background:${col};flex-shrink:0;margin-top:5px"></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:600;color:var(--text)">${n.title}</div>
+            ${n.body?`<div style="font-size:11px;color:var(--muted);margin-top:1px">${n.body}</div>`:''}
+          </div>
+          <div style="font-size:10px;color:var(--muted);flex-shrink:0">${timeStr}</div>
+        </div>`
+      }).join('')
+    } else {
+      feed.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px">No recent activity</div>'
+    }
+  }
 }
 
 
