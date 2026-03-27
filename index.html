@@ -757,6 +757,18 @@ const EMAIL = {
     <p>Put your bins out the night before and your runner will handle the rest. No action needed.</p>
   `),
 
+  overdueApology: (email, dateLabel, runnerName) => emailBase(`
+    <h1>We're sorry — a service issue occurred 🙏</h1>
+    <p>We sincerely apologize that your scheduled Bin Out service on <strong>${dateLabel}</strong> was not completed on time.</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Scheduled date</div><div class="val">${dateLabel}</div></div>
+      <div class="row"><div class="lbl">Status</div><div class="val"><strong style="color:#ef4444">Missed — being resolved</strong></div></div>
+    </div>
+    <p>Our admin team has been alerted and is working to get someone out as quickly as possible. You will receive a <strong>prorated credit</strong> for this collection on your next bill — no action needed on your part.</p>
+    <p style="color:#64748b;font-size:13px">If you have questions, reply to this email or contact us directly. We take service reliability seriously and apologize for the inconvenience.</p>
+    <p>— The BinDash Team</p>
+  `),
+
 }
 // END EMAIL TEMPLATES
 
@@ -3748,6 +3760,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <input placeholder="Search routes..." id="jobs-search" oninput="filterAdminJobs()" style="width:150px">
             <select id="jobs-status-filter" onchange="filterAdminJobs()" style="width:auto">
               <option value="">All Status</option>
+              <option value="missed">🚨 Missed</option>
               <option value="offered">Offered</option>
               <option value="accepted">Accepted</option>
               <option value="in_progress">In Progress</option>
@@ -5228,23 +5241,25 @@ function filterAdminJobs(){
   Object.values(batchMap).forEach(b => {
     const statuses = b.jobs.map(j=>j.status)
     const allComplete  = statuses.every(s=>s==='complete')
+    const anyMissed    = statuses.some(s=>s==='missed')
     const anyLate      = statuses.some(s=>s==='late')
     const anyInProg    = statuses.some(s=>s==='in_progress')
     const anyAccepted  = statuses.some(s=>s==='accepted')
     const anyOffered   = statuses.some(s=>['offered','broadcast'].includes(s))
     const allExpired   = b.jobs.every(j=>j.status==='offered'&&j.offer_expires_at&&new Date(j.offer_expires_at)<now)
-    b.routeStatus = allComplete?'complete':anyLate?'late':anyInProg?'in_progress':anyAccepted?'accepted':allExpired?'expired':anyOffered?'offered':'unassigned'
+    b.routeStatus = anyMissed?'missed':allComplete?'complete':anyLate?'late':anyInProg?'in_progress':anyAccepted?'accepted':allExpired?'expired':anyOffered?'offered':'unassigned'
     b.completedCount = statuses.filter(s=>s==='complete').length
     b.totalCount = b.jobs.length
     b.earnTotal  = (b.totalCount*3.25).toFixed(2)
-    b.isOverdue  = ['accepted','in_progress','late'].includes(b.routeStatus)&&b.date&&now>new Date(b.date+'T23:59:00')
+    b.isOverdue  = b.routeStatus==='missed'||(['accepted','in_progress','late'].includes(b.routeStatus)&&b.date&&now>new Date(b.date+'T23:59:00'))
   })
 
   // Filter
   const allBatches = Object.values(batchMap).filter(b => {
     if(status){
-      if(status==='late' && !['late','expired'].includes(b.routeStatus)) return false
-      if(status!=='late' && b.routeStatus!==status) return false
+      if(status==='late'   && !['late','expired'].includes(b.routeStatus)) return false
+      if(status==='missed' && b.routeStatus!=='missed') return false
+      if(status!=='late' && status!=='missed' && b.routeStatus!==status) return false
     }
     if(type && b.visitType!==type) return false
     if(q){
@@ -5255,14 +5270,26 @@ function filterAdminJobs(){
     }
     return true
   })
-  allBatches.sort((a,b)=>{if(a.isOverdue&&!b.isOverdue)return -1;if(!a.isOverdue&&b.isOverdue)return 1;return(b.date||'')>(a.date||'')?1:-1})
+  // Sort: missed first, then overdue, then by date descending
+  allBatches.sort((a,b)=>{
+    if(a.routeStatus==='missed'&&b.routeStatus!=='missed') return -1
+    if(a.routeStatus!=='missed'&&b.routeStatus==='missed') return  1
+    if(a.isOverdue&&!b.isOverdue) return -1
+    if(!a.isOverdue&&b.isOverdue) return  1
+    return (b.date||'')>(a.date||'')?1:-1
+  })
 
   if(countEl) countEl.textContent = allBatches.length+' route'+(allBatches.length!==1?'s':'')
 
-  // Overdue banner — compact count only
+  // Overdue banner — compact count only, includes missed routes
   const overdueCount = Object.values(batchMap).filter(b=>b.isOverdue).length
+  const missedCount  = Object.values(batchMap).filter(b=>b.routeStatus==='missed').length
   if(banner){
-    if(overdueCount){
+    if(missedCount){
+      banner.style.display='block'
+      banner.innerHTML=`🚨 <strong>${missedCount} missed route${missedCount!==1?'s':''}</strong> — HO apology sent · prorated credit pending. ${overdueCount-missedCount>0?`<strong>${overdueCount-missedCount} more overdue</strong> — not yet completed.`:''}
+      <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fca5a5;margin-left:8px" onclick="document.getElementById('jobs-status-filter').value='missed';filterAdminJobs()">View missed →</button>`
+    } else if(overdueCount){
       banner.style.display='block'
       banner.innerHTML=`🚨 <strong>${overdueCount} overdue route${overdueCount!==1?'s':''}</strong> — accepted but not completed past scheduled date. <button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fca5a5;margin-left:8px" onclick="document.getElementById('jobs-status-filter').value='late';filterAdminJobs()">View overdue →</button>`
     } else banner.style.display='none'
@@ -5273,9 +5300,9 @@ function filterAdminJobs(){
     return
   }
 
-  const sc={complete:'#22c55e',accepted:'#6366f1',in_progress:'#06d6a0',offered:'#f59e0b',broadcast:'#3b82f6',late:'#ef4444',expired:'#ef4444',unassigned:'#64748b'}
-  const si={complete:'✓',accepted:'✅',in_progress:'🔄',offered:'📬',broadcast:'📡',late:'🚨',expired:'⚠️',unassigned:'⚠️'}
-  const sl={complete:'Complete',accepted:'Accepted',in_progress:'In Progress',offered:'Offer Sent',broadcast:'Broadcast',late:'Flagged Late',expired:'All Timers Expired',unassigned:'Unassigned'}
+  const sc={missed:'#ef4444',complete:'#22c55e',accepted:'#6366f1',in_progress:'#06d6a0',offered:'#f59e0b',broadcast:'#3b82f6',late:'#ef4444',expired:'#ef4444',unassigned:'#64748b'}
+  const si={missed:'🚨',complete:'✓',accepted:'✅',in_progress:'🔄',offered:'📬',broadcast:'📡',late:'🚨',expired:'⚠️',unassigned:'⚠️'}
+  const sl={missed:'MISSED — action required',complete:'Complete',accepted:'Accepted',in_progress:'In Progress',offered:'Offer Sent',broadcast:'Broadcast',late:'Flagged Late',expired:'All Timers Expired',unassigned:'Unassigned'}
 
   if(list) list.innerHTML = allBatches.map(b=>{
     const col=sc[b.routeStatus]||'#64748b', icon=si[b.routeStatus]||'·', lbl=sl[b.routeStatus]||b.routeStatus
@@ -5307,14 +5334,19 @@ function filterAdminJobs(){
       </div>`
     }).join('')
 
-    return `<div style="border:1px solid rgba(${rgba},.25);border-left:4px solid ${col};border-radius:10px;overflow:hidden;background:var(--surface)">
+    return `<div style="border:${b.routeStatus==='missed'?'2px':'1px'} solid rgba(${rgba},.25);border-left:4px solid ${col};border-radius:10px;overflow:hidden;background:var(--surface);${b.routeStatus==='missed'?'box-shadow:0 0 12px rgba(239,68,68,.12)':''}">
+      ${b.routeStatus==='missed'?`<div style="background:rgba(239,68,68,.08);border-bottom:1px solid rgba(239,68,68,.25);padding:7px 16px;font-size:12px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:16px">🚨</span>
+        <span style="color:#ef4444;font-weight:700">Missed route — HO apology sent, prorated credit pending</span>
+        <button onclick="adForceReassign('${b.batchId}')" style="margin-left:auto;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">Reassign now →</button>
+      </div>`:''}
       <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer" onclick="toggleJobBatch('${b.id}')">
         <span class="${isBinIn?'vt-in':'vt-out'}" style="font-size:11px;flex-shrink:0">${isBinIn?'☀️ BIN IN':'🌙 BIN OUT'}</span>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span style="font-size:13px;font-weight:700">${b.zoneName}</span>
             <span style="font-size:10px;color:var(--muted);font-family:monospace">${b.batchId.slice(0,20)}</span>
-            ${b.isOverdue?'<span style="background:rgba(239,68,68,.15);color:#ef4444;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px">OVERDUE</span>':''}
+            ${b.routeStatus==='missed'?'<span style="background:rgba(239,68,68,.2);color:#ef4444;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px;animation:pulse 1s infinite">🚨 MISSED</span>':b.isOverdue?'<span style="background:rgba(239,68,68,.15);color:#ef4444;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px">OVERDUE</span>':''}
           </div>
           <div style="font-size:11px;color:var(--muted);margin-top:2px">📅 ${dt} &nbsp;·&nbsp; ${b.completedCount}/${b.totalCount} stops complete</div>
         </div>
@@ -5691,6 +5723,66 @@ async function loadRNEarnings(){
     console.warn('[BinDash] loadRNEarnings:', e)
   }
 }
+// Called when a BIN_OUT route is detected as missed (past scheduled date, not complete)
+// Sends apology email to HO, alert email to admin, marks job missed in DB
+async function triggerOverdueEscalation(jobs, runnerRow){
+  if(!jobs?.length) return
+  const batchId = jobs[0].batch_id || jobs[0].id
+  const alreadyAlerted = localStorage.getItem('overdue_alerted:' + batchId)
+  if(alreadyAlerted) return  // only alert once per session
+  localStorage.setItem('overdue_alerted:' + batchId, '1')
+
+  const scheduledDate = jobs[0].scheduled_date
+  const dateLabel = scheduledDate
+    ? new Date(scheduledDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})
+    : 'your scheduled date'
+  const runnerName = runnerRow ? ((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).trim() : 'your runner'
+  const uniqueHOs = [...new Set(jobs.map(j=>j.homeowner_email).filter(Boolean))]
+
+  try {
+    // Mark all jobs in this batch as missed
+    await _supa.from('jobs')
+      .update({ status:'missed', updated_at: new Date().toISOString() })
+      .eq('batch_id', batchId)
+      .in('status', ['offered','accepted','in_progress','scheduled'])
+
+    // Send apology email to each affected homeowner
+    uniqueHOs.forEach(email => {
+      sendEmail(email,
+        'Service update — your BinDash collection was missed',
+        EMAIL.overdueApology ? EMAIL.overdueApology(email, dateLabel, runnerName)
+        : `<p>Hi,</p>
+           <p>We're sorry — your Bin Out service scheduled for <strong>${dateLabel}</strong> was not completed by your runner on time.</p>
+           <p>Our admin team has been notified and is working to resolve this as quickly as possible. You will receive a prorated credit for this collection.</p>
+           <p>We apologize for the inconvenience. — The BinDash Team</p>`,
+        'service_missed'
+      )
+    })
+
+    // Alert admin
+    const adminEmail = 'alpha1miller@gmail.com'
+    sendEmail(adminEmail,
+      `🚨 Missed route alert — ${uniqueHOs.length} HO${uniqueHOs.length!==1?'s':''} on ${dateLabel}`,
+      `<p><strong>MISSED ROUTE ALERT</strong></p>
+       <p>Batch: ${batchId}<br>Runner: ${runnerName}<br>Date: ${dateLabel}<br>Homeowners affected: ${uniqueHOs.join(', ')}</p>
+       <p>Action required: reassign immediately or issue prorated refund. Jobs have been marked as "missed" in the system.</p>`,
+      'admin_missed_alert'
+    )
+
+    // Add admin notification bell
+    addNotif({
+      title: '🚨 Missed route',
+      body: `${uniqueHOs.length} HO${uniqueHOs.length!==1?'s':''} · ${dateLabel} · ${runnerName} · Apology sent`,
+      type: 'err',
+      action: `adNav(null,'ad-jobs')`
+    })
+
+    showToast(`🚨 Missed route detected — apology sent to ${uniqueHOs.length} homeowner${uniqueHOs.length!==1?'s':''}`, 'warn', 8000)
+  } catch(e){
+    console.warn('[BinDash] overdueEscalation error:', e.message)
+  }
+}
+
 async function loadRunnerRoutes(runnerRow){
   try {
     const rid        = runnerRow.id
@@ -5706,7 +5798,22 @@ async function loadRunnerRoutes(runnerRow){
 
     if(error) throw error
 
-    // Also fetch completed jobs (last 30 days) for stat display
+    // Detect missed routes — jobs whose scheduled_date is in the past and status is still open
+    const today = new Date(); today.setHours(0,0,0,0)
+    const missedJobs = (jobs||[]).filter(j=>{
+      if(j.visit_type !== 'BIN_OUT') return false
+      if(!j.scheduled_date) return false
+      const jobDate = new Date(j.scheduled_date + 'T00:00:00')
+      return jobDate < today  // strictly before today = missed
+    })
+    if(missedJobs.length > 0){
+      // Group by batch and trigger escalation for each missed batch
+      const missedBatches = {}
+      missedJobs.forEach(j=>{ const k=j.batch_id||j.id; if(!missedBatches[k])missedBatches[k]=[]; missedBatches[k].push(j) })
+      for(const batchJobs of Object.values(missedBatches)){
+        await triggerOverdueEscalation(batchJobs, runnerRow)
+      }
+    }
     const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate()-30)
     const { data: completedJobs } = await _supa
       .from('jobs')
@@ -5865,9 +5972,10 @@ async function loadRunnerRoutes(runnerRow){
         ? `https://www.google.com/maps/dir/?api=1&destination=${addrs.at(-1)}&waypoints=${addrs.slice(0,-1).join('|')}&travelmode=driving`
         : '#'
       const win = batch.type==='BIN_OUT' ? getBinOutWindow(batch.date) : null
+      const isMissed = win?.urgency === 'missed'
       const isToday = batch.date && new Date(batch.date+'T12:00:00').toDateString() === new Date().toDateString()
       const isOffer = batch.isOffer || batch.status==='offered'
-      const urgencyBar = win && (isToday||isOffer) ? `
+      const urgencyBar = (win && (isToday||isOffer||isMissed)) ? `
         <div style="background:${win.color}18;border-top:1px solid ${win.color}30;padding:6px 16px;display:flex;align-items:center;gap:10px;font-size:11px">
           <span style="font-size:14px">${win.icon}</span>
           <div style="flex:1">
@@ -5877,9 +5985,12 @@ async function loadRunnerRoutes(runnerRow){
           ${win.urgency==='active'?'<span style="background:rgba(34,197,94,.15);color:#22c55e;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">GO TIME</span>':''}
           ${win.urgency==='late'?'<span style="background:rgba(245,158,11,.15);color:#f59e0b;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">RUNNING LATE</span>':''}
           ${win.urgency==='overdue'?'<span style="background:rgba(239,68,68,.15);color:#ef4444;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">OVERDUE</span>':''}
+          ${isMissed?'<span style="background:rgba(239,68,68,.2);color:#ef4444;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;animation:pulse 1s infinite">🚨 MISSED</span>':''}
         </div>` : ''
       const statusBadge = isOffer
         ? '<span style="background:rgba(245,158,11,.2);color:#fbbf24;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite">⏳ Awaiting response</span>'
+        : isMissed
+        ? '<span style="background:rgba(239,68,68,.2);color:#ef4444;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700;animation:pulse 1s infinite">🚨 MISSED — action needed</span>'
         : batch.status==='in_progress'
         ? '<span style="background:#22c55e22;color:#22c55e;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700">● In Progress</span>'
         : win?.urgency==='active'
@@ -5892,7 +6003,7 @@ async function loadRunnerRoutes(runnerRow){
         ? '<span style="background:rgba(99,102,241,.2);color:#a5b4fc;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700">Today</span>'
         : '<span style="background:var(--surface2);color:var(--muted);font-size:10px;padding:2px 8px;border-radius:4px">Upcoming</span>'
 
-      return `<div class="batch-card" style="margin-bottom:14px;${isOffer?'border:2px solid rgba(245,158,11,.5);box-shadow:0 0 16px rgba(245,158,11,.12)':win?.urgency==='overdue'?'border:1.5px solid rgba(239,68,68,.4)':win?.urgency==='late'?'border:1.5px solid rgba(245,158,11,.3)':''}">
+      return `<div class="batch-card" style="margin-bottom:14px;${isOffer?'border:2px solid rgba(245,158,11,.5);box-shadow:0 0 16px rgba(245,158,11,.12)':(isMissed||win?.urgency==='overdue')?'border:2px solid rgba(239,68,68,.5);box-shadow:0 0 16px rgba(239,68,68,.1)':win?.urgency==='late'?'border:1.5px solid rgba(245,158,11,.3)':''}">
         <div class="batch-head ${batch.type==='BIN_OUT'?'out':'in'}" ${isOffer?'style="background:rgba(245,158,11,.08)"':''}>
           <div>
             <div style="display:flex;align-items:center;gap:8px">
@@ -5980,15 +6091,31 @@ async function loadRunnerRoutes(runnerRow){
 function getBinOutWindow(scheduledDateStr){
   const now = new Date()
   const workDate = scheduledDateStr ? new Date(scheduledDateStr + 'T00:00:00') : new Date()
-  const isToday = workDate.toDateString() === now.toDateString()
-  const isTomorrow = new Date(workDate.getTime() - 86400000).toDateString() === now.toDateString()
+  const isToday    = workDate.toDateString() === now.toDateString()
+  const isPastDate = workDate < new Date(now.toDateString())  // strictly before today (midnight)
+  const isTomorrow = (() => { const t=new Date(now); t.setDate(t.getDate()+1); return workDate.toDateString()===t.toDateString() })()
 
   // Key times on the work date
   const windowOpen  = new Date(workDate); windowOpen.setHours(15, 0, 0, 0)  // 3pm
-  const windowClose = new Date(workDate); windowClose.setHours(19, 0, 0, 0)  // 7pm (recommended end)
-  const deadline    = new Date(workDate); deadline.setHours(21, 0, 0, 0)     // 9pm (hard deadline)
+  const windowClose = new Date(workDate); windowClose.setHours(19, 0, 0, 0)  // 7pm recommended
+  const deadline    = new Date(workDate); deadline.setHours(21, 0, 0, 0)     // 9pm hard deadline
 
-  if(!isToday) {
+  // Past date — missed entirely
+  if(isPastDate){
+    const dayLabel = workDate.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})
+    const daysLate = Math.round((now - workDate) / 86400000)
+    return {
+      urgency: 'missed',
+      label: `${dayLabel} — MISSED`,
+      windowStr: `Route was not completed (${daysLate} day${daysLate!==1?'s':''} ago)`,
+      deadlineStr: 'Admin alert sent — action required',
+      color: '#ef4444',
+      icon: '🚨',
+      daysLate,
+    }
+  }
+
+  if(!isToday){
     const label = isTomorrow ? 'Tomorrow' : workDate.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})
     return { urgency:'future', label, windowStr:'3pm–7pm recommended', deadlineStr:'9pm deadline', color:'#a5b4fc', icon:'🌙' }
   }
@@ -6009,7 +6136,7 @@ function getBinOutWindow(scheduledDateStr){
     const h = Math.floor(minsToDeadline/60), m = minsToDeadline%60
     return { urgency:'late', label:'Today · Past recommended window', windowStr:`${h>0?h+'h ':''}${m}m until 9pm deadline`, deadlineStr:'⚠️ Complete before 9pm', color:'#f59e0b', icon:'⚠️' }
   }
-  return { urgency:'overdue', label:'Today · PAST DEADLINE', windowStr:'Route is past the 9pm deadline', deadlineStr:'Contact admin', color:'#ef4444', icon:'🚨' }
+  return { urgency:'overdue', label:'Today · PAST DEADLINE', windowStr:'Route is past the 9pm deadline', deadlineStr:'Contact admin immediately', color:'#ef4444', icon:'🚨' }
 }
 
 function startOfferCountdown(expiresAt, windowMins){
@@ -16234,12 +16361,14 @@ function renderDispatchPipeline(){
   }
 
   function renderBatchCard(b){
+    const isMissed  = b._missed === true
     const isPreview = b.status==='preview'||b.status==='draft'||b.status==='queued'
     const isBinIn   = b.visitType==='BIN_IN'||b.id?.endsWith('-IN')
     const statusKey = b.status||'unassigned'
-    const borderCol = isBinIn ? '#06d6a0' : (sc[statusKey]||'#64748b')
-    const badgeTxt  = si[statusKey]||b.status
-    const badgeCol  = sc[statusKey]||'#64748b'
+    // Missed overrides normal color
+    const borderCol = isMissed ? '#ef4444' : isBinIn ? '#06d6a0' : (sc[statusKey]||'#64748b')
+    const badgeTxt  = isMissed ? '🚨 MISSED' : (si[statusKey]||b.status)
+    const badgeCol  = isMissed ? '#ef4444' : (sc[statusKey]||'#64748b')
     const isOpen    = openCards.has(b.id)
     const ri        = b.runner ? (b.runner.initials||b.runner.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)) : null
     const batchName = (b.zoneName||'Route').replace(/ · ☀️ BIN IN| · 🌙 BIN OUT/,'')
@@ -16299,8 +16428,16 @@ function renderDispatchPipeline(){
         +'</div>'
 
     const borderRgb = borderCol==='#22c55e'?'34,197,94':borderCol==='#06d6a0'?'6,214,160':borderCol==='#a5b4fc'?'165,180,252':borderCol==='#f59e0b'?'245,158,11':borderCol==='#3b82f6'?'59,130,246':'239,68,68'
-    return '<div style="border:1px solid rgba('+borderRgb+',.3);border-left:4px solid '+borderCol+';border-radius:10px;overflow:hidden;background:var(--surface);margin-bottom:8px"'
+    const missedBar = isMissed
+      ? '<div style="background:rgba(239,68,68,.08);border-bottom:1px solid rgba(239,68,68,.3);padding:8px 14px;font-size:12px;display:flex;align-items:center;gap:10px">'
+        +'<span style="font-size:16px">🚨</span>'
+        +'<div style="flex:1"><strong style="color:#ef4444">Missed route</strong> <span style="color:var(--muted)">— HO apology sent · prorated credit pending</span></div>'
+        +'<button onclick="adForceReassign(\''+b.id+'\')" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">Reassign now</button>'
+        +'</div>'
+      : ''
+    return '<div style="border:'+(isMissed?'2px':'1px')+' solid rgba('+borderRgb+(isMissed?',.5':',.3')+');border-left:4px solid '+borderCol+';border-radius:10px;overflow:hidden;background:var(--surface);margin-bottom:8px'+(isMissed?';box-shadow:0 0 12px rgba(239,68,68,.15)':'')+'"'
       +' data-batch-id="'+b.id+'"'+(isOpen?' data-dispatch-card-open="1"':'')+' id="dbc-'+b.id+'">'
+      +missedBar
       +'<div style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer" onclick="toggleDispatchCard(\''+b.id+'\')">'
       +'<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;'+(isBinIn?'background:rgba(6,214,160,.15);color:#06d6a0':'background:rgba(99,102,241,.15);color:#a5b4fc')+';flex-shrink:0">'+vtLabel+'</span>'
       +'<div style="flex:1;min-width:0">'
@@ -16667,6 +16804,31 @@ async function loadLiveJobsIntoPipeline(){
     if(!generatedBatches.length) {
       // Show live batches in pipeline without replacing generatedBatches
       window._livePipelineBatches = Object.values(batchMap)
+
+      // Admin-side overdue detection — flag any BIN_OUT batches from past dates still in open status
+      const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0)
+      const missedAdminBatches = window._livePipelineBatches.filter(b=>{
+        if(b.visitType==='BIN_IN') return false
+        if(!b.date) return false
+        return new Date(b.date+'T00:00:00') < todayMidnight
+      })
+      if(missedAdminBatches.length){
+        // Mark them in-memory for the admin pipeline render
+        missedAdminBatches.forEach(b=>{ b._missed = true })
+        // Fire admin escalation for any not yet alerted
+        missedAdminBatches.forEach(b=>{
+          const alerted = localStorage.getItem('overdue_alerted:'+b.id)
+          if(!alerted){
+            localStorage.setItem('overdue_alerted:'+b.id, '1')
+            addNotif({
+              title: '🚨 Missed Bin Out',
+              body: `${b.zoneName?.replace(/ · .*/,'')||'Route'} · ${b.date} · ${b.runner?.name||'unassigned'} · ${b.stops?.length||0} HOs affected`,
+              type: 'err',
+              action: `adNav(null,'ad-dispatch')`
+            })
+          }
+        })
+      }
     } else {
       window._livePipelineBatches = null
     }
