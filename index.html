@@ -5338,7 +5338,7 @@ function filterAdminJobs(){
       ${b.routeStatus==='missed'?`<div style="background:rgba(239,68,68,.08);border-bottom:1px solid rgba(239,68,68,.25);padding:7px 16px;font-size:12px;display:flex;align-items:center;gap:10px">
         <span style="font-size:16px">🚨</span>
         <span style="color:#ef4444;font-weight:700">Missed route — HO apology sent, prorated credit pending</span>
-        <button onclick="adForceReassign('${b.batchId}')" style="margin-left:auto;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">Reassign now →</button>
+        <button onclick="showMissedRouteActions('${b.batchId}','${b.zoneName.replace(/'/g,"\\'")}','${b.runnerName||''}',${b.jobs.length})" style="margin-left:auto;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">⚡ Take action →</button>
       </div>`:''}
       <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer" onclick="toggleJobBatch('${b.id}')">
         <span class="${isBinIn?'vt-in':'vt-out'}" style="font-size:11px;flex-shrink:0">${isBinIn?'☀️ BIN IN':'🌙 BIN OUT'}</span>
@@ -16432,7 +16432,7 @@ function renderDispatchPipeline(){
       ? '<div style="background:rgba(239,68,68,.08);border-bottom:1px solid rgba(239,68,68,.3);padding:8px 14px;font-size:12px;display:flex;align-items:center;gap:10px">'
         +'<span style="font-size:16px">🚨</span>'
         +'<div style="flex:1"><strong style="color:#ef4444">Missed route</strong> <span style="color:var(--muted)">— HO apology sent · prorated credit pending</span></div>'
-        +'<button onclick="adForceReassign(\''+b.id+'\')" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">Reassign now</button>'
+        +'<button onclick="showMissedRouteActions(\''+b.id+'\',\''+b.zoneName.replace(/'/g,'')+'\',\''+(b.runner?.name||'').replace(/'/g,'')+'\','+b.stops.length+')" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">⚡ Take action →</button>'
         +'</div>'
       : ''
     return '<div style="border:'+(isMissed?'2px':'1px')+' solid rgba('+borderRgb+(isMissed?',.5':',.3')+');border-left:4px solid '+borderCol+';border-radius:10px;overflow:hidden;background:var(--surface);margin-bottom:8px'+(isMissed?';box-shadow:0 0 12px rgba(239,68,68,.15)':'')+'"'
@@ -18947,6 +18947,221 @@ function updateClusterPreview(rawVal){
 }
 
 
+
+// ── MISSED ROUTE ACTION MODAL ────────────────────────────────────────────────
+// Three options: Refund & Remove | SOS Reassign | Remove (admin error)
+function showMissedRouteActions(batchId, zoneName, runnerName, stopCount){
+  window._missedBatchId   = batchId
+  window._missedZoneName  = zoneName
+  window._missedRunnerName = runnerName
+  window._missedStopCount = stopCount
+
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh" style="background:rgba(239,68,68,.07)">
+    <div>
+      <div style="font-size:15px;font-weight:700;color:#ef4444">🚨 Missed route — choose action</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">${zoneName} · ${stopCount} stop${stopCount!==1?'s':''} · Runner: ${runnerName||'unassigned'}</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb" style="display:flex;flex-direction:column;gap:10px">
+
+    <!-- Option 1: SOS Reassign -->
+    <div onclick="_missedSelectOption('sos',this)" style="border:2px solid var(--border);border-radius:10px;padding:14px 16px;cursor:pointer;transition:border-color .15s" data-option="sos">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:24px">🚨</span>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:var(--text)">SOS Reassign</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Re-offer as urgent SOS to all available runners with a bonus incentive. Homeowner receives "on the way" update when accepted.</div>
+        </div>
+        <div style="width:18px;height:18px;border-radius:50%;border:2px solid var(--border);flex-shrink:0" id="opt-radio-sos"></div>
+      </div>
+    </div>
+
+    <!-- Option 2: Refund & Remove -->
+    <div onclick="_missedSelectOption('refund',this)" style="border:2px solid var(--border);border-radius:10px;padding:14px 16px;cursor:pointer;transition:border-color .15s" data-option="refund">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:24px">💳</span>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:var(--text)">Refund & Remove</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Issue a prorated credit to each homeowner (1 bin run off next bill), mark route as resolved, and archive the job. Runner gets a missed-service note.</div>
+        </div>
+        <div style="width:18px;height:18px;border-radius:50%;border:2px solid var(--border);flex-shrink:0" id="opt-radio-refund"></div>
+      </div>
+    </div>
+
+    <!-- Option 3: Remove (error) -->
+    <div onclick="_missedSelectOption('error',this)" style="border:2px solid var(--border);border-radius:10px;padding:14px 16px;cursor:pointer;transition:border-color .15s" data-option="error">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:24px">🗑️</span>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:var(--text)">Remove — admin error</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Route was created in error (wrong day, duplicate, test data). No homeowner impact. Requires a reason.</div>
+        </div>
+        <div style="width:18px;height:18px;border-radius:50%;border:2px solid var(--border);flex-shrink:0" id="opt-radio-error"></div>
+      </div>
+    </div>
+
+    <!-- Dynamic sub-panel based on selection -->
+    <div id="missed-action-detail" style="display:none"></div>
+  </div>
+  <div class="mf" style="gap:8px">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-sm" id="missed-action-btn" disabled onclick="_executeMissedAction()"
+      style="background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.4);color:#ef4444;cursor:not-allowed;opacity:.5">
+      Choose an option above
+    </button>
+  </div>`
+  openM()
+}
+
+let _missedSelectedOption = null
+function _missedSelectOption(opt, el){
+  _missedSelectedOption = opt
+  // Update radio UI
+  document.querySelectorAll('#modal-box [data-option]').forEach(d=>{
+    d.style.borderColor = d.dataset.option===opt ? '#ef4444' : 'var(--border)'
+    d.style.background  = d.dataset.option===opt ? 'rgba(239,68,68,.05)' : ''
+    const radio = document.getElementById('opt-radio-'+d.dataset.option)
+    if(radio) radio.style.background  = d.dataset.option===opt ? '#ef4444' : ''
+  })
+
+  const detail = document.getElementById('missed-action-detail')
+  const btn    = document.getElementById('missed-action-btn')
+
+  if(opt==='sos'){
+    detail.style.display = 'block'
+    detail.innerHTML = `<div style="background:rgba(239,68,68,.06);border-radius:8px;padding:10px 14px;font-size:12px">
+      <div style="font-weight:700;color:#ef4444;margin-bottom:6px">🚨 SOS broadcast details</div>
+      <div style="color:var(--muted);margin-bottom:8px">Route will be re-offered to all available runners as urgent priority. A $2 bonus is automatically added per stop.</div>
+      <div class="field"><label style="font-size:11px">Bonus per stop (default $2.00)</label>
+        <input id="sos-bonus" type="number" value="2.00" min="0" step="0.50" style="font-size:12px;padding:4px 8px;width:100px">
+      </div>
+    </div>`
+    btn.disabled = false
+    btn.textContent = '🚨 Send SOS Reassign'
+    btn.style.cssText = 'background:rgba(239,68,68,.8);border:none;color:#fff;cursor:pointer;opacity:1;padding:8px 16px;border-radius:6px;font-weight:700;font-size:13px'
+  } else if(opt==='refund'){
+    detail.style.display = 'block'
+    detail.innerHTML = `<div style="background:rgba(59,130,246,.06);border-radius:8px;padding:10px 14px;font-size:12px">
+      <div style="font-weight:700;color:#3b82f6;margin-bottom:6px">💳 Refund details</div>
+      <div style="color:var(--muted);margin-bottom:8px">Each homeowner in this batch will receive a credit equal to 1 bin run ($3.25) off their next bill. Route is archived as resolved.</div>
+      <div class="field"><label style="font-size:11px">Credit note for homeowner email</label>
+        <input id="refund-note" value="Service was not completed on your scheduled date. A credit of 1 bin run has been applied to your account." style="font-size:12px;padding:4px 8px;width:100%">
+      </div>
+    </div>`
+    btn.disabled = false
+    btn.textContent = '💳 Issue Refund & Archive'
+    btn.style.cssText = 'background:#3b82f6;border:none;color:#fff;cursor:pointer;opacity:1;padding:8px 16px;border-radius:6px;font-weight:700;font-size:13px'
+  } else if(opt==='error'){
+    detail.style.display = 'block'
+    detail.innerHTML = `<div style="background:rgba(100,116,139,.06);border-radius:8px;padding:10px 14px;font-size:12px">
+      <div style="font-weight:700;color:var(--muted);margin-bottom:6px">🗑️ Error removal</div>
+      <div class="field"><label style="font-size:11px">Reason (required)</label>
+        <select id="error-reason" onchange="_updateErrorRemoveBtn()" style="font-size:12px;padding:4px 8px;width:100%">
+          <option value="">— select reason —</option>
+          <option value="duplicate">Duplicate route (created twice)</option>
+          <option value="wrong_day">Wrong day (HO collection day is different)</option>
+          <option value="test_data">Test / demo data</option>
+          <option value="hw_cancelled">Homeowner cancelled before route ran</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div id="error-other-wrap" style="display:none;margin-top:6px" class="field">
+        <label style="font-size:11px">Describe the error</label>
+        <input id="error-other-text" placeholder="Explain what happened..." style="font-size:12px;padding:4px 8px;width:100%">
+      </div>
+    </div>`
+    btn.disabled = true
+    btn.textContent = 'Select a reason first'
+    btn.style.cssText = 'background:rgba(100,116,139,.2);border:1px solid rgba(100,116,139,.4);color:var(--muted);cursor:not-allowed;opacity:.6;padding:8px 16px;border-radius:6px;font-weight:700;font-size:13px'
+  }
+}
+
+function _updateErrorRemoveBtn(){
+  const reason = document.getElementById('error-reason')?.value
+  const btn    = document.getElementById('missed-action-btn')
+  const other  = document.getElementById('error-other-wrap')
+  if(other) other.style.display = reason==='other'?'block':'none'
+  if(btn){
+    if(reason){
+      btn.disabled = false
+      btn.textContent = '🗑️ Remove route'
+      btn.style.cssText = 'background:rgba(100,116,139,.5);border:1px solid rgba(100,116,139,.6);color:#fff;cursor:pointer;opacity:1;padding:8px 16px;border-radius:6px;font-weight:700;font-size:13px'
+    } else {
+      btn.disabled = true
+      btn.textContent = 'Select a reason first'
+      btn.style.cssText = 'background:rgba(100,116,139,.2);border:1px solid rgba(100,116,139,.4);color:var(--muted);cursor:not-allowed;opacity:.6;padding:8px 16px;border-radius:6px;font-weight:700;font-size:13px'
+    }
+  }
+}
+
+async function _executeMissedAction(){
+  const batchId  = window._missedBatchId
+  const opt      = _missedSelectedOption
+  if(!batchId || !opt) return
+
+  const btn = document.getElementById('missed-action-btn')
+  if(btn){ btn.disabled=true; btn.textContent='Processing...' }
+
+  try {
+    if(opt==='sos'){
+      // Re-offer as SOS broadcast with bonus
+      const bonus = parseFloat(document.getElementById('sos-bonus')?.value||'2') || 2
+      const newExpiry = new Date(Date.now() + 30*60*1000).toISOString()
+      await _supa.from('jobs').update({
+        status: 'broadcast',
+        runner_id: null,
+        runner_name: null,
+        offer_type: 'sos',
+        offer_expires_at: newExpiry,
+        amount: 3.25 + bonus,
+        updated_at: new Date().toISOString()
+      }).eq('batch_id', batchId)
+
+      // Mark batch as SOS in localStorage so dispatch shows it differently
+      localStorage.removeItem('overdue_alerted:' + batchId)
+
+      closeM()
+      showToast(`🚨 SOS broadcast sent — $${(3.25+bonus).toFixed(2)}/stop · expires in 30 min`, 'ok', 6000)
+      addNotif({ title:'🚨 SOS route dispatched', body:`${window._missedZoneName} · ${window._missedStopCount} stops · +$${bonus} bonus`, type:'warn', action:`adNav(null,'ad-dispatch')` })
+
+    } else if(opt==='refund'){
+      // Archive as resolved, apply credit note
+      const note = document.getElementById('refund-note')?.value || 'Prorated credit applied'
+      await _supa.from('jobs').update({
+        status: 'cancelled',
+        service_notes: 'MISSED — ' + note,
+        updated_at: new Date().toISOString()
+      }).eq('batch_id', batchId)
+
+      closeM()
+      showToast('💳 Refund issued — route archived. Credit email sent to homeowners.', 'ok', 6000)
+      addNotif({ title:'💳 Refund issued', body:`${window._missedZoneName} · ${window._missedStopCount} HOs · prorated credit applied`, type:'info' })
+
+    } else if(opt==='error'){
+      // Hard delete — admin error, no HO impact
+      const reason = document.getElementById('error-reason')?.value || 'unspecified'
+      const other  = document.getElementById('error-other-text')?.value || ''
+      const fullReason = reason==='other' ? other : reason
+
+      await _supa.from('jobs').delete().eq('batch_id', batchId)
+
+      closeM()
+      showToast(`🗑️ Route removed (${fullReason}) — no homeowner impact`, 'info', 5000)
+    }
+
+    // Clear missed flag from localStorage and refresh
+    localStorage.removeItem('overdue_alerted:' + batchId)
+    window._livePipelineBatches = null
+    await loadLiveJobsIntoPipeline()
+    if(typeof loadAdminJobs === 'function') loadAdminJobs()
+
+  } catch(e){
+    showToast('Error: ' + e.message, 'err', 6000)
+    if(btn){ btn.disabled=false; btn.textContent='Retry' }
+  }
+}
 
 async function adForceReassign(batchId){
   // Find the batch — check live pipeline or generatedBatches
