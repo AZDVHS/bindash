@@ -15266,7 +15266,10 @@ function pickDispatchDay(el){
   }
 
   updateDispatchStats()
-  _showDispatchDayStatus(day, dateStr2, dateStr)
+  // Status query uses the Bin Out night date (collection day - 1) since that's what's in the DB
+  const binOutNight = new Date(date); binOutNight.setDate(date.getDate() - 1)
+  const binOutNightStr = binOutNight.toISOString().slice(0,10)
+  _showDispatchDayStatus(day, binOutNightStr, dateStr)
   loadPendingApprovalsIntoDispatch()
 
   // Always clear previous day's preview and load the new day
@@ -15313,9 +15316,10 @@ function onDispatchDayFilterChange(sel){
       dateLabel.textContent = ds + suffix
     }
     updateDispatchStats()
-    const dateStr2 = d.toISOString().slice(0,10)
     const dateStr  = d.toLocaleDateString('en-US',{month:'short',day:'numeric'})
-    _showDispatchDayStatus(day, dateStr2, dateStr)
+    // Status query uses Bin Out night (collection day - 1)
+    const binOutD = new Date(d); binOutD.setDate(d.getDate() - 1)
+    _showDispatchDayStatus(day, binOutD.toISOString().slice(0,10), dateStr)
   }
   loadPendingApprovalsIntoDispatch()
   generatedBatches = []
@@ -16366,6 +16370,12 @@ async function initDispatchPage(){
 
 // Load active (non-complete) jobs from Supabase for the selected day
 // and render them in the pipeline so admin can see live status at a glance
+// KEY MODEL: 
+//   scheduled_date in jobs = BIN OUT night (the evening before collection day)
+//   Pill = collection day (e.g. "Friday" = Friday collection)
+//   BIN_OUT jobs for Friday collection → scheduled_date = Thursday
+//   BIN_IN jobs for Friday collection → also scheduled_date = Thursday (same batch)
+// So: clicking Friday pill → query Thursday's scheduled_date
 async function loadLiveJobsIntoPipeline(){
   const dayFilterVal = document.getElementById('dispatch-day-filter')?.value || ''
   const dayPillVal   = document.getElementById('dispatch-day-val')?.value || ''
@@ -16376,7 +16386,6 @@ async function loadLiveJobsIntoPipeline(){
   const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   const today = new Date(); today.setHours(0,0,0,0)
 
-  // Resolve effectiveDay to an actual calendar date using signed diff (3-back/3-forward)
   function resolveDate(dayName){
     const idx = dayNames.findIndex(d => normDay(d) === normDay(dayName))
     if(idx < 0) return null
@@ -16389,18 +16398,20 @@ async function loadLiveJobsIntoPipeline(){
 
   let dateRange = []
   let isPastDay = false
+  let collectionDayName = effectiveDay
 
   if(effectiveDay){
-    const d = resolveDate(effectiveDay)
-    if(!d){ renderDispatchPipeline(); return }
-    // The selected day itself — BIN_OUT jobs scheduled this date
-    dateRange.push(d.toISOString().slice(0,10))
-    // Also include previous day — BIN_IN jobs from yesterday's BIN_OUT complete today
-    const prev = new Date(d); prev.setDate(d.getDate() - 1)
-    dateRange.push(prev.toISOString().slice(0,10))
-    isPastDay = d < today
+    const collectionDate = resolveDate(effectiveDay)
+    if(!collectionDate){ renderDispatchPipeline(); return }
+    // BIN_OUT jobs live on the night BEFORE collection (Thursday for Friday collection)
+    const binOutDate = new Date(collectionDate)
+    binOutDate.setDate(collectionDate.getDate() - 1)
+    dateRange.push(binOutDate.toISOString().slice(0,10))
+    // Also include next day in case BIN_IN is written on collection day itself
+    dateRange.push(collectionDate.toISOString().slice(0,10))
+    isPastDay = collectionDate < today
   } else {
-    // All days — full 3-back/3-forward window
+    // All days — 3-back/3-forward window, each day and its bin-out-night
     for(let i = -3; i <= 3; i++){
       const d = new Date(today); d.setDate(today.getDate() + i)
       dateRange.push(d.toISOString().slice(0,10))
