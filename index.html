@@ -15033,11 +15033,27 @@ async function releaseQueuedRoutes(){
 
 function getPendingRoutes(){
   const results = []
+  const now = new Date()
+  const today = new Date(); today.setHours(0,0,0,0)
+  const keysToDelete = []
   for(let i=0; i<localStorage.length; i++){
     const k = localStorage.key(i)
-    if(!k.startsWith('pending_route:')) continue
-    try { results.push(JSON.parse(localStorage.getItem(k))) } catch(e){}
+    if(!k || !k.startsWith('pending_route:')) continue
+    try {
+      const p = JSON.parse(localStorage.getItem(k))
+      // Auto-expire: remove entries older than 3 days or already sent/complete
+      if(p.date){
+        const entryDate = new Date(p.date + 'T12:00:00')
+        const ageDays = Math.round((today - entryDate) / 86400000)
+        if(ageDays > 2 || p.status === 'sent' || p.status === 'complete'){
+          keysToDelete.push(k)
+          continue
+        }
+      }
+      results.push(p)
+    } catch(e){ keysToDelete.push(k) }
   }
+  keysToDelete.forEach(k => localStorage.removeItem(k))
   return results
 }
 
@@ -15154,29 +15170,48 @@ function showRouteApprovalModal(zoneId, day){
 }
 
 function loadPendingApprovalsIntoDispatch(){
-  const pending = getPendingRoutes().filter(p=>p.status==='draft'||p.status==='change_detected'||p.status==='queued')
-  if(!pending.length){
-    const el = document.getElementById('dispatch-approvals-strip')
-    if(el) el.style.display = 'none'
-    return
-  }
   const el = document.getElementById('dispatch-approvals-strip')
   if(!el) return
+
+  // Get currently selected day — only show relevant approvals
+  const selectedDay = document.getElementById('dispatch-day-val')?.value || ''
+  const allPending = getPendingRoutes().filter(p=>p.status==='draft'||p.status==='change_detected'||p.status==='queued')
+
+  // Filter to selected day if one is chosen, otherwise show all pending
+  const pending = selectedDay
+    ? allPending.filter(p => normDay(p.day) === normDay(selectedDay))
+    : allPending
+
+  // Also show queued for next 3 days even if different day selected (so admin sees upcoming)
+  const allQueued = allPending.filter(p=>p.status==='queued')
+
+  if(!pending.length && !allQueued.length){
+    el.style.display = 'none'
+    return
+  }
+
   el.style.display = 'block'
   const needApproval = pending.filter(p=>p.status==='draft'||p.status==='change_detected')
-  const queued = pending.filter(p=>p.status==='queued')
+  const dayQueued = pending.filter(p=>p.status==='queued')
+
+  // All queued routes (across days) shown as a compact summary line
+  const otherQueued = allQueued.filter(q=>!dayQueued.includes(q))
+
   el.innerHTML = needApproval.map(p=>`
   <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
     <span style="width:8px;height:8px;border-radius:50%;background:${p.status==='change_detected'?'#ef4444':'#f59e0b'};flex-shrink:0"></span>
     <span style="font-size:12px;font-weight:700">${p.zoneName}</span>
-    <span style="font-size:11px;color:var(--muted)">${p.day} · ${p.stops.length} stops · ${p.runner?.name||'no runner'}</span>
-    ${p.status==='change_detected'?`<span style="font-size:10px;background:rgba(239,68,68,.12);color:#ef4444;padding:1px 7px;border-radius:4px">⚠️ ${p.changes.join(', ')}</span>`:'<span style="font-size:10px;background:rgba(245,158,11,.12);color:#fbbf24;padding:1px 7px;border-radius:4px">New route</span>'}
+    <span style="font-size:11px;color:var(--muted)">${p.day} · ${(p.stops||[]).length} stops · ${p.runner?.name||'no runner'}</span>
+    ${p.status==='change_detected'
+      ? `<span style="font-size:10px;background:rgba(239,68,68,.12);color:#ef4444;padding:1px 7px;border-radius:4px">⚠️ ${(p.changes||[]).join(', ')}</span>`
+      : '<span style="font-size:10px;background:rgba(245,158,11,.12);color:#fbbf24;padding:1px 7px;border-radius:4px">New route</span>'}
     <div style="margin-left:auto;display:flex;gap:6px">
       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="showRouteApprovalModal('${p.zoneId}','${p.day}')">Review →</button>
       <button class="btn btn-cyan btn-sm" style="font-size:10px" onclick="approvePendingRoute('${p.zoneId}','${p.day}',true)">✓ Approve</button>
     </div>
   </div>`).join('')
-  + (queued.length ? `<div style="padding:7px 14px;font-size:11px;color:var(--muted);background:rgba(59,130,246,.06)">🕐 ${queued.length} route${queued.length>1?'s':''} queued — sending at 1pm · ${queued.map(p=>p.zoneName).join(', ')}</div>` : '')
+  + (dayQueued.length ? `<div style="padding:7px 14px;font-size:11px;color:var(--muted);background:rgba(59,130,246,.06);border-bottom:1px solid var(--border)">🕐 ${dayQueued.map(p=>p.zoneName).join(', ')} — queued · sends at 1pm · <button onclick="${dayQueued.map(p=>`approvePendingRoute('${p.zoneId}','${p.day}',true)`).join(';')}" style="background:none;border:none;color:var(--cyan);font-size:11px;cursor:pointer;padding:0">Send now →</button></div>` : '')
+  + (otherQueued.length ? `<div style="padding:6px 14px;font-size:11px;color:var(--muted);opacity:.7">Also queued: ${otherQueued.map(p=>p.zoneName+' ('+p.day+')').join(' · ')}</div>` : '')
 }
 
 // Full day names for matching
@@ -15186,8 +15221,10 @@ const FULL_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','
 function normDay(d){
   if(!d) return ''
   const s = d.trim().toLowerCase()
-  const map = {mon:'monday',tue:'tuesday',wed:'wednesday',thu:'thursday',fri:'friday',
-               monday:'monday',tuesday:'tuesday',wednesday:'wednesday',thursday:'thursday',friday:'friday'}
+  const map = {
+    sun:'sunday', mon:'monday', tue:'tuesday', wed:'wednesday', thu:'thursday', fri:'friday', sat:'saturday',
+    sunday:'sunday', monday:'monday', tuesday:'tuesday', wednesday:'wednesday', thursday:'thursday', friday:'friday', saturday:'saturday'
+  }
   return map[s] || s
 }
 
@@ -15208,8 +15245,8 @@ function pickDispatchDay(el){
   const dateStr = date.toLocaleDateString('en-US',{month:'short',day:'numeric'})
   const dateStr2 = date.toISOString().slice(0,10)
 
-  if(diff < -2 || diff > 3){
-    showToast(`${day} is outside the 2-day history / 3-day forward window`, 'err', 3000)
+  if(diff < -3 || diff > 3){
+    showToast(`${day} is outside the 3-day history / 3-day forward window`, 'err', 3000)
     return
   }
 
@@ -15228,6 +15265,7 @@ function pickDispatchDay(el){
 
   updateDispatchStats()
   _showDispatchDayStatus(day, dateStr2, dateStr)
+  loadPendingApprovalsIntoDispatch()
 
   if(!generatedBatches.length){
     window._livePipelineBatches = null
@@ -15418,20 +15456,20 @@ function initDispatchDayPills(){
   pills.forEach(p => {
     const day = p.dataset.day
     const targetIdx = dayNames.findIndex(d => d === day)
-    // Signed diff: negative = past, 0 = today, positive = future
-    // Always pick the closest occurrence (prefer ±3 over wrapping full week)
+    // Signed diff — negative = past, 0 = today, positive = future
+    // Pick closest occurrence (3 back / 3 forward)
     let diff = targetIdx - todayIdx
-    if(diff > 3)  diff -= 7   // e.g. Mon(1) from Thu(4) = -3 not +4
-    if(diff < -3) diff += 7   // e.g. Fri(5) from Mon(1) = +4 not -3
+    if(diff > 3)  diff -= 7
+    if(diff < -3) diff += 7
 
     const date = new Date(today); date.setDate(today.getDate() + diff)
     const dateStr = date.toLocaleDateString('en-US',{month:'short',day:'numeric'})
 
-    // Show 2 past + today + 3 future; gray out anything beyond
-    if(diff < -2 || diff > 3){
+    // Show 3 past + today + 3 future; gray out anything beyond
+    if(diff < -3 || diff > 3){
       p.style.opacity = '0.3'
       p.style.cursor = 'not-allowed'
-      p.title = `${day} — outside the 2-day history / 3-day forward window`
+      p.title = `${day} — outside the 3-day history / 3-day forward window`
       p.innerHTML = day.slice(0,3) + '<br><span style="font-size:9px;opacity:.5">' + dateStr + '</span>'
     } else {
       p.style.opacity = ''
@@ -15443,7 +15481,6 @@ function initDispatchDayPills(){
       else if(isPast)  p.innerHTML += '<br><span style="font-size:8px;color:var(--muted)">history</span>'
       p.title = day + ' · ' + dateStr + (isPast?' (history)':isToday?' (today)':'')
       p.style.opacity = isPast ? '0.65' : ''
-
       if(isToday){
         p.classList.add('on')
         const inp = document.getElementById('dispatch-day-val')
@@ -16203,8 +16240,8 @@ async function loadLiveJobsIntoPipeline(){
     const tom = new Date(d); tom.setDate(d.getDate() + 1)
     dateRange.push(tom.toISOString().slice(0,10))
   } else {
-    // All days — 2 days back through 3 days forward (matches pill window)
-    for(let i = -2; i <= 4; i++){
+    // All days — 3 days back through 3 days forward (matches pill window)
+    for(let i = -3; i <= 4; i++){
       const d = new Date(today); d.setDate(today.getDate() + i)
       dateRange.push(d.toISOString().slice(0,10))
     }
