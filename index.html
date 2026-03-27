@@ -15020,15 +15020,68 @@ function approvePendingRoute(zoneId, day, permanent=true){
   const raw = localStorage.getItem(key)
   if(!raw) return
   const pending = JSON.parse(raw)
-  pending.status = 'queued'
-  pending.approvedAt = new Date().toISOString()
+
+  // If past 1pm — launch immediately instead of queuing
+  const now = new Date()
+  const isPast1pm = now.getHours() >= 13
+  const newStatus = isPast1pm ? 'sent' : 'queued'
+
+  pending.status = newStatus
+  pending.approvedAt = now.toISOString()
   pending.permanent = permanent
   if(!permanent) pending.oneTime = true
   localStorage.setItem(key, JSON.stringify(pending))
   if(permanent) saveRouteTemplate(zoneId, day, pending.stops, pending.runner?.id)
-  showToast(`Route approved — will send at 1pm ✅`, 'ok')
+
+  // Sync status on any matching in-memory batch
+  generatedBatches.forEach(b=>{
+    if(b.zoneId===zoneId && normDay(b.day)===normDay(day)){
+      b.status = newStatus
+    }
+  })
+
+  const msg = isPast1pm
+    ? 'Route approved — launching now (past 1pm) ✅'
+    : 'Route approved — queued for 1pm ✅'
+  showToast(msg, 'ok')
+
+  // If past 1pm, trigger actual launch of just this batch
+  if(isPast1pm){
+    const batch = generatedBatches.find(b=>b.zoneId===zoneId&&normDay(b.day)===normDay(day))
+    if(batch) _launchSingleBatch(batch)
+  }
+
   renderDispatchPipeline()
   loadPendingApprovalsIntoDispatch()
+}
+
+async function _launchSingleBatch(batch){
+  if(!batch) return
+  try {
+    const now = new Date()
+    const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+    const targetIdx = dayNames.findIndex(d=>normDay(d)===normDay(batch.day))
+    const d = new Date(); d.setHours(0,0,0,0)
+    const diff = (targetIdx - d.getDay() + 7) % 7
+    d.setDate(d.getDate() + diff)
+    const scheduledDate = d.toISOString().slice(0,10)
+    const expiresAt = new Date(now.getTime() + (batch.windowMins||45)*60*1000).toISOString()
+    const jobRows = batch.stops.map(hw=>({
+      batch_id: batch.id, homeowner_email: hw.email,
+      runner_id: batch.runner?.id||null, runner_name: batch.runner?.name||null,
+      visit_type: 'BIN_OUT', job_type: 'subscription',
+      service_type: hw.service==='BOTH'?'Recycling + General Waste':hw.service==='GENERAL'?'General Waste':'Recycling',
+      status: batch.runner?'offered':'unassigned', offer_type: batch.offerType||'zone',
+      offer_expires_at: expiresAt, scheduled_date: scheduledDate,
+      amount: 3.25, zone_id: batch.zoneId||null,
+      created_at: now.toISOString(), updated_at: now.toISOString()
+    }))
+    if(jobRows.length){
+      const { error } = await _supa.from('jobs').insert(jobRows)
+      if(error) console.warn('[BinDash] single batch launch:', error.message)
+      else { window._livePipelineBatches = null; await loadLiveJobsIntoPipeline() }
+    }
+  } catch(e){ console.warn('[BinDash] _launchSingleBatch:', e.message) }
 }
 
 function rejectPendingRoute(zoneId, day){
@@ -15116,15 +15169,21 @@ function normDay(d){
 function pickDispatchDay(el){
   const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   const today = new Date(); today.setHours(0,0,0,0)
+  const todayIdx = today.getDay()
   const day = el.dataset.day
   const targetIdx = dayNames.findIndex(d => d === day)
-  const diff = (targetIdx - today.getDay() + 7) % 7
-  const scheduledDate = new Date(today); scheduledDate.setDate(today.getDate() + diff)
-  const dateStr = scheduledDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})
-  const scheduledDateStr = scheduledDate.toISOString().slice(0,10)
 
-  if(diff > 5){
-    showToast(`${day} (${dateStr}) is ${diff} days away — max 5 days ahead`, 'err', 4000)
+  // Signed diff — same logic as initDispatchDayPills
+  let diff = targetIdx - todayIdx
+  if(diff > 3)  diff -= 7
+  if(diff < -3) diff += 7
+
+  const date = new Date(today); date.setDate(today.getDate() + diff)
+  const dateStr = date.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+  const dateStr2 = date.toISOString().slice(0,10)
+
+  if(diff < -2 || diff > 3){
+    showToast(`${day} is outside the 2-day history / 3-day forward window`, 'err', 3000)
     return
   }
 
@@ -15136,10 +15195,13 @@ function pickDispatchDay(el){
   if(pf) pf.value = day
 
   const dateLabel = document.getElementById('dispatch-date-label')
-  if(dateLabel) dateLabel.textContent = dateStr + (diff===0?' (today)':diff===1?' (tomorrow)':'')
+  if(dateLabel){
+    const suffix = diff===0?' (today)':diff===-1?' (yesterday)':diff===1?' (tomorrow)':diff<0?` (${Math.abs(diff)}d ago)`:''
+    dateLabel.textContent = dateStr + suffix
+  }
 
   updateDispatchStats()
-  _showDispatchDayStatus(day, scheduledDateStr, dateStr)
+  _showDispatchDayStatus(day, dateStr2, dateStr)
 
   if(!generatedBatches.length){
     window._livePipelineBatches = null
@@ -15226,26 +15288,39 @@ async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
 
 function initDispatchDayPills(){
   const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
-  const today = new Date(); today.setHours(0,0,0,0)
+  const today = new Date(); today.getDay(); today.setHours(0,0,0,0)
+  const todayIdx = today.getDay()
   const pills = document.querySelectorAll('#dispatch-day-pills .ob-day-pill')
   pills.forEach(p => {
     const day = p.dataset.day
     const targetIdx = dayNames.findIndex(d => d === day)
-    const diff = (targetIdx - today.getDay() + 7) % 7
+    // Signed diff: negative = past, 0 = today, positive = future
+    // Always pick the closest occurrence (prefer ±3 over wrapping full week)
+    let diff = targetIdx - todayIdx
+    if(diff > 3)  diff -= 7   // e.g. Mon(1) from Thu(4) = -3 not +4
+    if(diff < -3) diff += 7   // e.g. Fri(5) from Mon(1) = +4 not -3
+
     const date = new Date(today); date.setDate(today.getDate() + diff)
     const dateStr = date.toLocaleDateString('en-US',{month:'short',day:'numeric'})
 
-    if(diff > 5){
-      p.style.opacity = '0.35'
+    // Show 2 past + today + 3 future; gray out anything beyond
+    if(diff < -2 || diff > 3){
+      p.style.opacity = '0.3'
       p.style.cursor = 'not-allowed'
-      p.title = `${day} (${dateStr}) — more than 5 days out`
+      p.title = `${day} — outside the 2-day history / 3-day forward window`
+      p.innerHTML = day.slice(0,3) + '<br><span style="font-size:9px;opacity:.5">' + dateStr + '</span>'
     } else {
       p.style.opacity = ''
       p.style.cursor = ''
+      const isPast   = diff < 0
+      const isToday  = diff === 0
       p.innerHTML = day.slice(0,3) + '<br><span style="font-size:9px;opacity:.7">' + dateStr + '</span>'
-      if(diff === 0) p.innerHTML += '<br><span style="font-size:8px;color:var(--cyan)">today</span>'
-      p.title = day + ' · ' + dateStr
-      if(day === dayNames[today.getDay()]){
+      if(isToday)      p.innerHTML += '<br><span style="font-size:8px;color:var(--cyan)">today</span>'
+      else if(isPast)  p.innerHTML += '<br><span style="font-size:8px;color:var(--muted)">history</span>'
+      p.title = day + ' · ' + dateStr + (isPast?' (history)':isToday?' (today)':'')
+      p.style.opacity = isPast ? '0.65' : ''
+
+      if(isToday){
         p.classList.add('on')
         const inp = document.getElementById('dispatch-day-val')
         if(inp) inp.value = day
@@ -15994,28 +16069,42 @@ async function loadLiveJobsIntoPipeline(){
   if(effectiveDay){
     const targetIdx = dayNames.findIndex(d => normDay(d) === normDay(effectiveDay))
     if(targetIdx < 0){ renderDispatchPipeline(); return }
-    const diff = (targetIdx - today.getDay() + 7) % 7
+    // Signed diff — same as pills so past days query correctly
+    let diff = targetIdx - today.getDay()
+    if(diff > 3)  diff -= 7
+    if(diff < -3) diff += 7
     const d = new Date(today); d.setDate(today.getDate() + diff)
     dateRange.push(d.toISOString().slice(0,10))
     // Include next day for BIN_IN jobs
     const tom = new Date(d); tom.setDate(d.getDate() + 1)
     dateRange.push(tom.toISOString().slice(0,10))
   } else {
-    // All days — next 7 days
-    for(let i = 0; i <= 7; i++){
+    // All days — 2 days back through 3 days forward (matches pill window)
+    for(let i = -2; i <= 4; i++){
       const d = new Date(today); d.setDate(today.getDate() + i)
       dateRange.push(d.toISOString().slice(0,10))
     }
   }
 
+  // For past days also include complete/cancelled jobs (history view)
+  const isPastDay = effectiveDay && (() => {
+    const tIdx = dayNames.findIndex(d=>normDay(d)===normDay(effectiveDay))
+    let df = tIdx - today.getDay(); if(df>3)df-=7; if(df<-3)df+=7
+    return df < 0
+  })()
+
   try {
     let query = _supa.from('jobs')
       .select('*')
       .in('scheduled_date', dateRange)
-      .not('status', 'in', '("complete","cancelled")')
       .order('scheduled_date', { ascending: true })
       .order('visit_type',     { ascending: true })
       .order('created_at',     { ascending: true })
+
+    // For future/today: exclude complete + cancelled; for past: show everything (history)
+    if(!isPastDay){
+      query = query.not('status', 'in', '("complete","cancelled")')
+    }
 
     const { data: allJobs } = await query
 
@@ -18196,22 +18285,88 @@ function updateClusterPreview(rawVal){
 
 
 
-function adForceReassign(batchId){
-  document.getElementById('modal-box').innerHTML=`
-  <div class="mh"><div style="font-size:15px;font-weight:700">Reassign ${batchId}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
-  <div class="mb">
-    <div style="font-size:13px;color:var(--sub);margin-bottom:14px">Aisha Patel hasn't responded. Choose a runner to re-offer to, or broadcast to all available.</div>
-    <div style="display:flex;flex-direction:column;gap:8px">
-      ${RUNNERS.length ? RUNNERS.map(r=>r.name+' . '+r.rating+'★ . '+(r.area||'your zone')) : ['No runners available in this zone'].map(r=>`
-        <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border-radius:8px;padding:9px 12px;font-size:13px">
-          <span>${r}</span>
-          <button class="btn btn-outline btn-sm" style="font-size:10px" onclick="closeM();showToast('Offer sent to ${r.split(' .')[0]} ✅','ok')">Offer -></button>
-        </div>`).join('')}
+async function adForceReassign(batchId){
+  // Find the batch — check live pipeline or generatedBatches
+  const batch = generatedBatches.find(b=>b.id===batchId)
+    || (window._livePipelineBatches||[]).find(b=>b.id===batchId)
+
+  // Get available runners — zone-matched first, then all
+  const zoneId = batch?.zoneId || ''
+  const allRunners = RUNNERS.filter(r=>r.status!=='INACTIVE')
+  const zoneRunners = allRunners.filter(r=>r.zoneId===zoneId||r.coverageZones?.includes(zoneId))
+  const otherRunners = allRunners.filter(r=>!zoneRunners.includes(r))
+  const orderedRunners = [...zoneRunners, ...otherRunners]
+
+  async function offerToRunner(runnerId){
+    const r = RUNNERS.find(x=>x.id===runnerId)
+    if(!r) return
+    try {
+      await _supa.from('jobs')
+        .update({ runner_id: runnerId, runner_name: r.name, status: 'offered',
+          offer_expires_at: new Date(Date.now()+(batch?.windowMins||45)*60*1000).toISOString() })
+        .eq('batch_id', batchId)
+      // Update in-memory
+      if(batch){ batch.runner = r; batch.status = 'offered' }
+      window._livePipelineBatches = null
+      closeM()
+      showToast(`Route re-offered to ${r.name} ✅`, 'ok')
+      renderDispatchPipeline()
+      await loadLiveJobsIntoPipeline()
+    } catch(e){ showToast('Error offering to runner: '+e.message,'err') }
+  }
+  window._offerToRunner = offerToRunner
+
+  async function broadcastAll(){
+    try {
+      await _supa.from('jobs')
+        .update({ runner_id: null, runner_name: null, status: 'broadcast',
+          offer_expires_at: new Date(Date.now()+30*60*1000).toISOString() })
+        .eq('batch_id', batchId)
+      if(batch){ batch.runner = null; batch.status = 'broadcast' }
+      window._livePipelineBatches = null
+      closeM()
+      showToast('Route broadcast to all available runners ✅', 'ok')
+      renderDispatchPipeline()
+      await loadLiveJobsIntoPipeline()
+    } catch(e){ showToast('Error broadcasting: '+e.message,'err') }
+  }
+  window._broadcastAll = broadcastAll
+
+  const runnerRows = orderedRunners.map(r=>{
+    const isZone = zoneRunners.includes(r)
+    const avail  = r.status==='AVAILABLE'
+    const tierBadge = r.loyaltyTier&&r.loyaltyTier!=='standard'
+      ? `<span style="font-size:9px;background:rgba(6,214,160,.12);color:var(--cyan);padding:1px 5px;border-radius:3px">${r.loyaltyTier}</span>`
+      : ''
+    return `<div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:6px;opacity:${avail?1:0.55}">
+      <div style="width:30px;height:30px;border-radius:50%;background:${r.color||'var(--cyan)'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#07090f;flex-shrink:0">${r.initials||'?'}</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:700">${r.name}</span>
+          ${tierBadge}
+          ${isZone?'<span style="font-size:9px;color:var(--cyan)">zone</span>':''}
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${r.rating||0}★ · ${r.area||r.zip||'--'} · <span style="color:${avail?'#22c55e':'#94a3b8'}">${avail?'Available':'Busy'}</span></div>
+      </div>
+      <button onclick="_offerToRunner('${r.id}')" style="font-size:11px;padding:4px 12px;border-radius:6px;border:1px solid rgba(6,214,160,.4);background:rgba(6,214,160,.08);color:var(--cyan);cursor:pointer;white-space:nowrap">Offer →</button>
+    </div>`
+  }).join('')
+
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh">
+    <div>
+      <div style="font-size:15px;font-weight:700">Reassign route</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">${batch?.zoneName||batchId} · ${batch?.stops?.length||'?'} stops</div>
     </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
   </div>
-  <div class="mf">
+  <div class="mb">
+    <div style="font-size:12px;color:var(--sub);margin-bottom:12px">Choose a runner to re-offer to, or broadcast to all zone runners simultaneously.</div>
+    ${runnerRows||'<div style="font-size:12px;color:var(--muted)">No runners available</div>'}
+  </div>
+  <div class="mf" style="gap:8px">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
-    <button class="btn btn-blue btn-sm" onclick="closeM();showToast('${batchId} broadcast to all 6 runners in zone ✅','ok')">📡 Broadcast to all</button>
+    <button class="btn btn-outline btn-sm" style="color:#3b82f6;border-color:rgba(59,130,246,.4)" onclick="_broadcastAll()">📡 Broadcast to all</button>
   </div>`
   openM()
 }
