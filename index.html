@@ -4135,6 +4135,30 @@ function showPhotoLightbox(src){
   document.addEventListener('keydown', esc)
 }
 
+// Returns true if we're within the 1-hour lock window before route generation (9am–1pm)
+// during which changes to HOs, zones, or runners that affect tomorrow's route are blocked.
+function isDispatchLocked(hwOrZoneDay){
+  const now  = new Date()
+  const hour = now.getHours()
+  const min  = now.getMinutes()
+  // Lock window: 9:00am – 1:00pm (route generates 10am, sends 1pm)
+  if(hour < 9 || hour >= 13) return false
+  return true
+}
+
+function checkDispatchLock(context){
+  if(!isDispatchLocked()) return false
+  const now = new Date()
+  const minsTill10 = now.getHours() < 10
+    ? (10 - now.getHours()) * 60 - now.getMinutes()
+    : 0
+  const msg = minsTill10 > 0
+    ? `Changes locked — route generation starts in ${minsTill10} min. Edits that affect today's routes can't be made after 9am.`
+    : `Changes locked — routes are generating/dispatching right now (9am–1pm window). Try again after 1pm or contact runner directly.`
+  showToast(msg, 'warn', 6000)
+  return true
+}
+
 function showToast(msg, type='ok', duration=3200){
   let el = document.getElementById('toast-container')
   if(!el){
@@ -8759,6 +8783,7 @@ function rejectR(id, name){
 }
 
 function showRnEdit(rId){
+  if(checkDispatchLock('runner')) return
   const r = RUNNERS.find(x=>x.id===rId)
   if(!r) return
   const rSafeName = r.name.replace(/'/g,'')
@@ -12141,6 +12166,7 @@ function renderProfitOverview(){
 }
 
 function showHWDetail(hwId){
+  if(checkDispatchLock('homeowner')) return
   const hw = HOMEOWNERS.find(x=>x.id===hwId); if(!hw) return
   const availRunners = RUNNERS.filter(r=>r.status!=='INACTIVE')
   const isSplit = hw.service === 'SPLIT'
@@ -15231,57 +15257,155 @@ function onDispatchDayFilterChange(sel){
 async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
   const statusEl = document.getElementById('dispatch-day-status')
   if(!statusEl) return
-  statusEl.innerHTML = '<div style="font-size:11px;color:var(--muted)">Checking routes...</div>'
-  try {
-    const { data: jobs } = await _supa.from('jobs')
-      .select('id, status, homeowner_email, runner_name, visit_type, offer_expires_at')
-      .eq('scheduled_date', scheduledDateStr)
-      .in('status', ['offered','accepted','in_progress','complete','declined','broadcast'])
-    if(!jobs?.length){
-      statusEl.innerHTML = `<div style="font-size:11px;color:var(--muted)">No routes dispatched for ${dateStr} yet</div>`
+  statusEl.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:4px 0">Loading route status...</div>'
+
+  // Determine if this is a past, today, or future day
+  const today = new Date(); today.setHours(0,0,0,0)
+  const selDate = new Date(scheduledDateStr + 'T12:00:00')
+  const diffDays = Math.round((selDate - today) / 86400000)
+  const isFuture = diffDays > 0
+  const isPast   = diffDays < 0
+
+  // For future days — show potential schedule preview (no DB needed)
+  if(isFuture){
+    const target = normDay(day)
+    const scheduled = HOMEOWNERS.filter(hw=>{
+      if(hw.status!=='active') return false
+      if(hw.service==='SPLIT') return normDay(hw.dayRecycling)===target||normDay(hw.dayWaste)===target
+      return normDay(hw.day)===target
+    })
+    const zones = [...new Set(scheduled.map(h=>h.zoneId).filter(Boolean))]
+    const runners = RUNNERS.filter(r=>r.status!=='INACTIVE'&&zones.some(z=>r.zoneId===z||r.coverageZones?.includes(z)))
+    if(!scheduled.length){
+      statusEl.innerHTML = `<div style="font-size:11px;color:var(--muted);padding:4px 0">No homeowners scheduled for ${day}</div>`
       return
     }
-    // Count by unique homeowner (not raw job count — each HO has BIN_OUT + BIN_IN = 2 jobs)
-    const uniqueHWs = [...new Set(jobs.map(j=>j.homeowner_email))]
-    const totalHWs   = uniqueHWs.length
-    // Route status = per homeowner, use their highest-progress job
-    const hwStatus = {}
-    jobs.forEach(j=>{ if(!hwStatus[j.homeowner_email] || ['complete','in_progress','accepted'].includes(j.status)) hwStatus[j.homeowner_email]=j.status })
-    const accepted  = Object.values(hwStatus).filter(s=>s==='accepted').length
-    const inProg    = Object.values(hwStatus).filter(s=>s==='in_progress').length
-    const complete  = Object.values(hwStatus).filter(s=>s==='complete').length
-    const broadcast = Object.values(hwStatus).filter(s=>s==='broadcast').length
-    const offered   = Object.values(hwStatus).filter(s=>s==='offered').length
-    const total     = totalHWs
+    // Check if within dispatch lock window (1hr before 10am = 9am)
     const now = new Date()
-    const expired   = jobs.filter(j=>j.status==='offered'&&j.offer_expires_at&&new Date(j.offer_expires_at)<now).length
-    const active    = jobs.filter(j=>j.status==='offered'&&(!j.offer_expires_at||new Date(j.offer_expires_at)>now)).length
+    const lockTime = new Date(today); lockTime.setHours(9,0,0,0)
+    const isLocked = diffDays===1 && now >= lockTime
+    statusEl.innerHTML = `
+    <div style="background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:9px;padding:10px 14px;font-size:12px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="font-size:11px;font-weight:700;color:#3b82f6;text-transform:uppercase;letter-spacing:.06em">📅 ${dateStr} — Potential schedule</span>
+        ${isLocked?'<span style="background:rgba(239,68,68,.12);color:#ef4444;font-size:10px;padding:1px 7px;border-radius:4px;margin-left:auto">🔒 Locked — route generates at 10am</span>':''}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px">
+        <div style="background:rgba(59,130,246,.08);border-radius:7px;padding:7px 10px;text-align:center">
+          <div style="font-size:18px;font-weight:800;color:#3b82f6">${scheduled.length}</div>
+          <div style="font-size:9px;color:var(--muted)">Stops scheduled</div>
+        </div>
+        <div style="background:rgba(6,214,160,.08);border-radius:7px;padding:7px 10px;text-align:center">
+          <div style="font-size:18px;font-weight:800;color:var(--cyan)">${zones.length}</div>
+          <div style="font-size:9px;color:var(--muted)">Zones</div>
+        </div>
+        <div style="background:rgba(99,102,241,.08);border-radius:7px;padding:7px 10px;text-align:center">
+          <div style="font-size:18px;font-weight:800;color:#a5b4fc">${runners.length}</div>
+          <div style="font-size:9px;color:var(--muted)">Runners available</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">Route will generate at 10am${diffDays===1?' tomorrow':' on '+day} and send at 1pm after approval.</div>
+      ${isLocked?'<div style="font-size:11px;color:#ef4444;margin-top:4px;font-weight:700">⚠️ Homeowner and zone changes are locked — dispatch window starts at 9am.</div>':''}
+    </div>`
+    return
+  }
+
+  // Past or today — query actual DB jobs
+  try {
+    const { data: jobs } = await _supa.from('jobs')
+      .select('id, status, homeowner_email, runner_name, batch_id, visit_type, offer_expires_at, zone_id')
+      .eq('scheduled_date', scheduledDateStr)
+      .in('status', ['offered','accepted','in_progress','complete','declined','broadcast','unassigned'])
+
+    if(!jobs?.length){
+      statusEl.innerHTML = `<div style="font-size:11px;color:var(--muted);padding:4px 0">No routes dispatched for ${dateStr} yet</div>`
+      return
+    }
+
+    // Per-homeowner status (de-duplicate Bin Out + Bin In)
+    const hwStatus = {}
+    jobs.forEach(j=>{
+      if(!hwStatus[j.homeowner_email]||['complete','in_progress','accepted'].includes(j.status))
+        hwStatus[j.homeowner_email] = j.status
+    })
+    const statuses    = Object.values(hwStatus)
+    const totalStops  = statuses.length
+    const doneStops   = statuses.filter(s=>s==='complete').length
+    const activeStops = statuses.filter(s=>s==='in_progress').length
+    const acceptedStops = statuses.filter(s=>s==='accepted').length
+    const pendingStops  = statuses.filter(s=>['offered','broadcast'].includes(s)).length
+    const remainingStops = totalStops - doneStops
+
+    // Per-batch (route) summary
+    const batchMap = {}
+    jobs.forEach(j=>{
+      const k = j.batch_id||j.id
+      if(!batchMap[k]) batchMap[k]={ status:j.status, runner:j.runner_name, zone:j.zone_id, stops:0, done:0 }
+      batchMap[k].stops++
+      if(j.status==='complete') batchMap[k].done++
+      // Escalate status
+      const rank = {complete:5,in_progress:4,accepted:3,offered:2,broadcast:2,unassigned:1,declined:0}
+      if((rank[j.status]||0)>(rank[batchMap[k].status]||0)) batchMap[k].status=j.status
+    })
+    const batches = Object.values(batchMap)
+    const totalRoutes    = batches.length
+    const acceptedRoutes = batches.filter(b=>['accepted','in_progress','complete'].includes(b.status)).length
+    const doneRoutes     = batches.filter(b=>b.status==='complete').length
+    const pendingRoutes  = batches.filter(b=>['offered','broadcast'].includes(b.status)).length
+
+    const now = new Date()
+    const expired = jobs.filter(j=>j.status==='offered'&&j.offer_expires_at&&new Date(j.offer_expires_at)<now).length
+
+    // Multi-segment route acceptance bar
+    const acceptPct = totalRoutes ? Math.round(acceptedRoutes*100/totalRoutes) : 0
+    const donePct   = totalRoutes ? Math.round(doneRoutes*100/totalRoutes) : 0
+    const stopDonePct = totalStops ? Math.round(doneStops*100/totalStops) : 0
+    const stopActivePct = totalStops ? Math.round(activeStops*100/totalStops) : 0
+
+    // Discrepancy alert: if stops done doesn't match expected for accepted routes
+    const expectedDone = batches.filter(b=>b.status==='complete').reduce((s,b)=>s+b.stops,0)
+    const discrepancy  = doneStops !== expectedDone
 
     statusEl.innerHTML = `
-    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">📋 ${dateStr} Route Status</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
-      ${accepted||inProg ? `<div style="background:rgba(34,197,94,.1);border-radius:7px;padding:7px 10px;text-align:center">
-        <div style="font-size:16px;font-weight:800;color:#22c55e">${accepted+inProg}</div>
-        <div style="font-size:9px;color:var(--muted)">Accepted</div>
-      </div>` : ''}
-      ${active ? `<div style="background:rgba(245,158,11,.1);border-radius:7px;padding:7px 10px;text-align:center">
-        <div style="font-size:16px;font-weight:800;color:#fbbf24">${active}</div>
-        <div style="font-size:9px;color:var(--muted)">Awaiting</div>
-      </div>` : ''}
-      ${complete ? `<div style="background:rgba(99,102,241,.1);border-radius:7px;padding:7px 10px;text-align:center">
-        <div style="font-size:16px;font-weight:800;color:#a5b4fc">${complete}</div>
-        <div style="font-size:9px;color:var(--muted)">Done</div>
-      </div>` : ''}
-      ${broadcast ? `<div style="background:rgba(59,130,246,.1);border-radius:7px;padding:7px 10px;text-align:center">
-        <div style="font-size:16px;font-weight:800;color:#3b82f6">${broadcast}</div>
-        <div style="font-size:9px;color:var(--muted)">Broadcast</div>
-      </div>` : ''}
-    </div>
-    <div style="font-size:11px;color:var(--sub)">${accepted+inProg} of ${total} stops accepted</div>
-    ${expired ? `<div style="font-size:11px;color:#ef4444;font-weight:700;margin-top:4px">⚠️ ${expired} offer${expired!==1?'s':''} expired — no runner accepted yet</div>` : ''}
-    ${expired===total&&total>0 ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">These are from a previous dispatch — use Jobs tab to resolve or re-broadcast.</div>` : ''}
-    <div style="height:6px;background:var(--surface3);border-radius:99px;margin-top:8px;overflow:hidden">
-      <div style="height:100%;width:${total?Math.round((accepted+inProg+complete)*100/total):0}%;background:linear-gradient(90deg,#22c55e,#06d6a0);border-radius:99px;transition:width .4s"></div>
+    <div style="background:var(--surface2);border-radius:9px;padding:10px 14px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">📋 ${dateStr}${isPast?' — history':''}</div>
+
+      <!-- Route acceptance bar -->
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px">
+          <span>Routes accepted</span>
+          <span style="font-weight:700;color:var(--text)">${acceptedRoutes} / ${totalRoutes}</span>
+        </div>
+        <div style="height:8px;background:var(--surface3);border-radius:99px;overflow:hidden;display:flex">
+          <div style="height:100%;width:${donePct}%;background:#22c55e;transition:width .4s"></div>
+          <div style="height:100%;width:${acceptPct-donePct}%;background:#06d6a0;transition:width .4s"></div>
+          <div style="height:100%;width:${pendingRoutes*100/totalRoutes}%;background:#f59e0b;transition:width .4s;opacity:.6"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap">
+          ${doneRoutes?`<span style="font-size:10px;color:#22c55e">✓ ${doneRoutes} done</span>`:''}
+          ${acceptedRoutes-doneRoutes?`<span style="font-size:10px;color:#06d6a0">● ${acceptedRoutes-doneRoutes} in progress</span>`:''}
+          ${pendingRoutes?`<span style="font-size:10px;color:#f59e0b">⏳ ${pendingRoutes} awaiting</span>`:''}
+        </div>
+      </div>
+
+      <!-- Stops done vs remaining -->
+      <div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px">
+          <span>Stops completed</span>
+          <span style="font-weight:700;color:var(--text)">${doneStops + activeStops} / ${totalStops}</span>
+        </div>
+        <div style="height:5px;background:var(--surface3);border-radius:99px;overflow:hidden;display:flex">
+          <div style="height:100%;width:${stopDonePct}%;background:#22c55e;transition:width .4s"></div>
+          <div style="height:100%;width:${stopActivePct}%;background:#06d6a0;transition:width .4s;opacity:.7"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:3px;font-size:10px;color:var(--muted)">
+          <span>${doneStops} done · ${activeStops} active</span>
+          <span style="color:${remainingStops>0&&!isPast?'#f59e0b':'var(--muted)'}">${remainingStops} remaining</span>
+        </div>
+      </div>
+
+      ${discrepancy&&!isPast?'<div style="font-size:11px;color:#f59e0b;font-weight:700;margin-top:4px">⚠️ Stop count discrepancy — check Jobs for details</div>':''}
+      ${expired?`<div style="font-size:11px;color:#ef4444;font-weight:700;margin-top:4px">⚠️ ${expired} offer${expired!==1?'s':''} expired — no runner accepted</div>`:''}
     </div>`
   } catch(e){ statusEl.innerHTML = '' }
 }
@@ -16830,6 +16954,7 @@ function promoteToLive(zId){
 }
 
 function showEditZone(zId){
+  if(checkDispatchLock('zone')) return
   const z = ADMIN_ZONES.find(x=>x.id===zId); if(!z) return
   const zipVal = (z.zips?.length ? z.zips : [z.zip]).join(', ')
   document.getElementById('modal-box').innerHTML=`
