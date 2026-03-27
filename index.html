@@ -891,6 +891,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .batch-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)}
 .batch-head.out{background:rgba(99,102,241,.07);border-bottom-color:rgba(99,102,241,.2)}
 .batch-head.in{background:rgba(6,214,160,.06);border-bottom-color:rgba(6,214,160,.2)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+@keyframes pulse-amber{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.0)}50%{box-shadow:0 0 0 6px rgba(245,158,11,.2)}}
 @keyframes pulse-border{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.0)}50%{box-shadow:0 0 0 3px rgba(239,68,68,.2)}}
 @keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}
 .batch-stops{padding:8px 16px}
@@ -3073,7 +3075,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           </div>
 
           <!-- Incoming offer banner -->
-          <div id="offer-banner" style="display:none;background:rgba(245,158,11,.08);border:1.5px solid rgba(245,158,11,.35);border-radius:12px;padding:14px 16px;margin-bottom:14px"></div>
+          <div id="offer-banner" style="display:none;background:rgba(245,158,11,.08);border:1.5px solid rgba(245,158,11,.35);border-radius:12px;padding:14px 16px;margin-bottom:14px;animation:pulse-amber 2s ease-in-out infinite"></div>
 
           <!-- Greeting -->
           <div style="margin-bottom:14px">
@@ -5821,7 +5823,12 @@ async function loadRunnerRoutes(runnerRow){
     }
 
     // -- ACTIVE / UPCOMING JOBS -------------------------------
-    if(!activeJobs.length){
+    // Include offered jobs in the route display (not just in banner) so runner sees them in My Routes
+    const displayJobs = enriched.filter(j => j.status !== 'offered' || pendingOffers.length > 0)
+    const routeJobs   = enriched.filter(j => ['accepted','in_progress','scheduled'].includes(j.status))
+    const offerJobs   = enriched.filter(j => j.status === 'offered')
+
+    if(!routeJobs.length && !offerJobs.length){
       if(batchArea) batchArea.innerHTML = `
       <div style="text-align:center;padding:40px 20px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--muted)">
         <div style="font-size:36px;margin-bottom:10px">📬</div>
@@ -5831,12 +5838,15 @@ async function loadRunnerRoutes(runnerRow){
       return
     }
 
-    // Group by batch_id
+    // Group by batch_id — include offered AND active jobs
     const batches = {}
-    activeJobs.forEach(j=>{
+    ;[...offerJobs, ...routeJobs].forEach(j=>{
       const key = j.batch_id || j.id
-      if(!batches[key]) batches[key] = { id:key, date:j.scheduled_date, type:j.visit_type, status:j.status, stops:[] }
+      if(!batches[key]) batches[key] = { id:key, date:j.scheduled_date, type:j.visit_type, status:j.status, stops:[], isOffer: j.status==='offered' }
       batches[key].stops.push(j)
+      // Escalate status: in_progress > accepted > scheduled > offered
+      const rank = {in_progress:4, accepted:3, scheduled:2, offered:1}
+      if((rank[j.status]||0) > (rank[batches[key].status]||0)) batches[key].status = j.status
     })
 
     const batchCards = Object.values(batches).map(batch => {
@@ -5845,15 +5855,18 @@ async function loadRunnerRoutes(runnerRow){
       const mapsUrl = addrs.length
         ? `https://www.google.com/maps/dir/?api=1&destination=${addrs.at(-1)}&waypoints=${addrs.slice(0,-1).join('|')}&travelmode=driving`
         : '#'
-      const isToday = batch.date && new Date(batch.date).toDateString() === new Date().toDateString()
-      const statusBadge = batch.status==='in_progress'
+      const isToday = batch.date && new Date(batch.date+'T12:00:00').toDateString() === new Date().toDateString()
+      const isOffer = batch.isOffer || batch.status==='offered'
+      const statusBadge = isOffer
+        ? '<span style="background:rgba(245,158,11,.2);color:#fbbf24;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite">⏳ Awaiting response</span>'
+        : batch.status==='in_progress'
         ? '<span style="background:#22c55e22;color:#22c55e;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700">● In Progress</span>'
         : isToday
         ? '<span style="background:rgba(99,102,241,.2);color:#a5b4fc;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700">Today</span>'
         : '<span style="background:var(--surface2);color:var(--muted);font-size:10px;padding:2px 8px;border-radius:4px">Upcoming</span>'
 
-      return `<div class="batch-card" style="margin-bottom:14px">
-        <div class="batch-head ${batch.type==='BIN_OUT'?'out':'in'}">
+      return `<div class="batch-card" style="margin-bottom:14px;${isOffer?'border:2px solid rgba(245,158,11,.5);box-shadow:0 0 16px rgba(245,158,11,.12)':''}">
+        <div class="batch-head ${batch.type==='BIN_OUT'?'out':'in'}" ${isOffer?'style="background:rgba(245,158,11,.08)"':''}>
           <div>
             <div style="display:flex;align-items:center;gap:8px">
               <span class="${batch.type==='BIN_OUT'?'vt-out':'vt-in'}">${batch.type==='BIN_OUT'?'🌙 BIN OUT':'☀️ BIN IN'}</span>
@@ -5866,10 +5879,15 @@ async function loadRunnerRoutes(runnerRow){
             </div>
           </div>
           <div style="text-align:right">
-            <div style="font-size:18px;font-weight:800;color:${batch.type==='BIN_OUT'?'#a5b4fc':'#6ee7b7'}">$${earn}</div>
+            <div style="font-size:18px;font-weight:800;color:${isOffer?'#fbbf24':batch.type==='BIN_OUT'?'#a5b4fc':'#6ee7b7'}">$${earn}</div>
             <div style="font-size:10px;color:var(--muted)">${batch.stops.length} stop${batch.stops.length!==1?'s':''}</div>
           </div>
         </div>
+        ${isOffer ? `<div style="background:rgba(245,158,11,.06);border-bottom:1px solid rgba(245,158,11,.2);padding:8px 16px;font-size:12px;color:#fbbf24;display:flex;align-items:center;gap:8px">
+          📬 <strong>Route offer pending</strong> — respond before the window closes
+          <button class="btn btn-cyan btn-sm" style="margin-left:auto" onclick="acceptOffer()">✓ Accept $${earn}</button>
+          <button class="btn btn-ghost btn-sm" style="color:#ef4444;font-size:11px" onclick="declineOffer()">Decline</button>
+        </div>` : ''}
         <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
           ${batch.stops.map((s,i)=>`
           <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:${i<batch.stops.length-1?'1px solid rgba(30,40,64,.5)':'none'}">
@@ -5886,7 +5904,7 @@ async function loadRunnerRoutes(runnerRow){
           </div>`).join('')}
         </div>
         <div style="padding:10px 16px 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          ${addrs.length ? `<a href="${mapsUrl}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#1a73e8;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;color:#fff;text-decoration:none">📍 Open in Google Maps</a>` : ''}
+          ${!isOffer && addrs.length ? `<a href="${mapsUrl}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#1a73e8;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;color:#fff;text-decoration:none">📍 Open in Google Maps</a>` : ''}
           ${batch.status==='accepted' ? `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>` : ''}
           ${batch.status==='in_progress' ? `<button class="btn btn-cyan btn-sm" onclick="resumeBatch('${batch.id}')">↺ Resume Route</button>` : ''}
           ${batch.status==='in_progress' ? `<button class="btn btn-green btn-sm" onclick="completeBatch('${batch.id}')">✓ Mark All Complete</button>` : ''}
