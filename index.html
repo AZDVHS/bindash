@@ -3816,7 +3816,6 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <option>Thursday</option><option>Friday</option><option>Saturday</option>
               </select>
               <button onclick="loadLiveJobsIntoPipeline()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--muted);cursor:pointer">⟳ Refresh</button>
-              <button class="btn btn-cyan btn-sm" onclick="adGenerateBatches()">🔍 Preview Routes</button>
               <button id="dispatch-launch-btn" class="btn btn-sm" onclick="launchDispatchRoutes()" style="display:none;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-weight:700;border:none;padding:6px 14px">🚀 Launch Routes</button>
             </div>
           </div>
@@ -3847,9 +3846,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <div style="text-align:center;padding:60px 20px;color:var(--muted);font-size:13px">
               <div style="font-size:36px;margin-bottom:12px">🗺️</div>
               <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px">No active routes today</div>
-              <div style="margin-bottom:18px">Select a collection day and click <strong style="color:var(--text)">Preview Routes</strong> to generate — or routes will appear here automatically once dispatched.</div>
+              <div style="margin-bottom:18px">Select a day above to see routes — or they will appear here automatically once dispatched.</div>
               <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-                <button class="btn btn-cyan btn-sm" onclick="adGenerateBatches()">🔍 Preview Routes for Today</button>
                 <button class="btn btn-outline btn-sm" onclick="adNav(null,'ad-rules')">⚙️ Dispatch Rules</button>
               </div>
             </div>
@@ -15271,10 +15269,18 @@ function pickDispatchDay(el){
   _showDispatchDayStatus(day, dateStr2, dateStr)
   loadPendingApprovalsIntoDispatch()
 
-  if(!generatedBatches.length){
-    window._livePipelineBatches = null
+  // Always clear previous day's preview and load the new day
+  generatedBatches = []
+  window._livePipelineBatches = null
+
+  // Past days: load history from DB
+  // Today/future: auto-generate a preview (doesn't send anything)
+  if(diff < 0){
     renderDispatchPipeline()
     loadLiveJobsIntoPipeline()
+  } else {
+    // Auto-preview: generate routes for this collection day silently
+    _adGenerateBatchesAsync(true)
   }
 }
 
@@ -15312,8 +15318,21 @@ function onDispatchDayFilterChange(sel){
     _showDispatchDayStatus(day, dateStr2, dateStr)
   }
   loadPendingApprovalsIntoDispatch()
+  generatedBatches = []
   window._livePipelineBatches = null
-  loadLiveJobsIntoPipeline()
+  if(day){
+    // Resolve diff for the new day
+    const tIdx = dayNames.findIndex(d => d === day)
+    let df = tIdx - today.getDay(); if(df>3)df-=7; if(df<-3)df+=7
+    if(df < 0){
+      renderDispatchPipeline()
+      loadLiveJobsIntoPipeline()
+    } else {
+      _adGenerateBatchesAsync(true)
+    }
+  } else {
+    loadLiveJobsIntoPipeline()
+  }
 }
 
 async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
@@ -15554,18 +15573,17 @@ function updateDispatchStats(){
   if(zf) zf.value = zoneId
 }
 
-function adGenerateBatches(){ _adGenerateBatchesAsync() }
+function adGenerateBatches(){ _adGenerateBatchesAsync(false) }
 function _adForceGenerateBatches(){ 
-  // Bypasses duplicate check — called when admin confirms override
   window._adForceGenerate = true
-  _adGenerateBatchesAsync()
+  _adGenerateBatchesAsync(false)
 }
 
-async function _adGenerateBatchesAsync(){
+async function _adGenerateBatchesAsync(silent=false){
   const day    = document.getElementById('dispatch-day-val')?.value || FULL_DAYS[new Date().getDay()]
   const zoneId = document.getElementById('dispatch-zone-select')?.value || ''
 
-  if(!day){ showToast('Please select a collection day first','err'); return }
+  if(!day){ if(!silent) showToast('Please select a collection day first','err'); return }
 
   // ── DOUBLE-BOOKING GUARD + 3-DAY WINDOW ─────────────────────────────────
   // Skip if admin explicitly overrode
@@ -15592,8 +15610,6 @@ async function _adGenerateBatchesAsync(){
 
         if(diff > 5){
           showToast(`${displayDay} is ${diff} days away — routes can only be created up to 5 days in advance`, 'err', 5000)
-          const btn = document.getElementById('dispatch-generate-btn')
-          if(btn){ btn.disabled=false; btn.textContent='🔍 Preview Routes' }
           return
         }
 
@@ -15606,6 +15622,12 @@ async function _adGenerateBatchesAsync(){
           .limit(1)
 
         if(existing?.length > 0){
+          if(silent){
+            // In auto-preview mode: just show existing live jobs — don't show modal
+            window._livePipelineBatches = null
+            await loadLiveJobsIntoPipeline()
+            return
+          }
           document.getElementById('modal-box').innerHTML = `
           <div class="mh" style="background:rgba(245,158,11,.07)">
             <div style="font-size:15px;font-weight:700;color:#fbbf24">⚠️ Active Routes Exist</div>
@@ -15725,6 +15747,18 @@ async function _adGenerateBatchesAsync(){
         const { isNew, changes } = detectRouteChanges(zId, day, chunk, offer.runner?.id)
         const lifecycleStatus = isNew ? 'draft' : changes.length ? 'change_detected' : 'queued'
 
+        // Bin Out night = evening before the collection day selected
+        const binOutNightDate = (() => {
+          const d = new Date(); d.setHours(0,0,0,0)
+          const tIdx = FULL_DAYS.findIndex(x=>normDay(x)===normDay(day))
+          let df = tIdx - d.getDay(); if(df>3)df-=7; if(df<-3)df+=7
+          d.setDate(d.getDate() + df - 1)  // -1 = the night before collection
+          return d
+        })()
+        const binOutDateStr  = binOutNightDate.toISOString().slice(0,10)
+        const binOutDayName  = FULL_DAYS[binOutNightDate.getDay()]
+        const binOutLabel    = binOutNightDate.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})
+
         generatedBatches.push({
           id: (()=>{
             const _abbr = zoneLabel(zone||{id:zId,name:zoneName,zip:'',area:'A1'}).split('-').slice(0,2).join('-')
@@ -15733,6 +15767,9 @@ async function _adGenerateBatchesAsync(){
             return _abbr+'-'+_mmdd+'-'+String(batchNum++).padStart(3,'0')
           })(),
           zoneId: zId, zoneName, day,
+          date:      binOutDateStr,    // Bin Out night date (day before collection)
+          dateLabel: binOutLabel,      // e.g. "Thu, Mar 26"
+          collectionDay: day,          // e.g. "Friday"
           stops: chunk,
           runner:        offer.runner || null,
           status:        lifecycleStatus,
@@ -15748,17 +15785,10 @@ async function _adGenerateBatchesAsync(){
         })
 
         // Save to pending_route localStorage for scheduler + approval strip
-        const scheduledDate = (() => {
-          const d = new Date(); d.setHours(0,0,0,0)
-          const tIdx = FULL_DAYS.findIndex(x=>normDay(x)===normDay(day))
-          const diff = (tIdx - d.getDay() + 7) % 7
-          d.setDate(d.getDate() + diff)
-          return d.toISOString().slice(0,10)
-        })()
         const pKey = 'pending_route:'+zId+':'+normDay(day)
         localStorage.setItem(pKey, JSON.stringify({
-          zoneId: zId, zoneName, day: normDay(day), date: scheduledDate,
-          stops: chunk, runner: offer.runner,
+          zoneId: zId, zoneName, day: normDay(day), date: binOutDateStr,
+          collectionDay: day, stops: chunk, runner: offer.runner,
           status: lifecycleStatus, isNew, changes,
           generatedAt: new Date().toISOString()
         }))
@@ -15781,12 +15811,14 @@ async function _adGenerateBatchesAsync(){
       launchBtn.style.display = 'none'
     }
   }
-  if(needApproval > 0 && readyToLaunch === 0){
-    showToast(`${needApproval} route${needApproval>1?'s':''} need your approval before sending`, 'info', 5000)
-  } else if(needApproval > 0){
-    showToast(`${readyToLaunch} ready · ${needApproval} need approval — review above`, 'info', 5000)
-  } else {
-    showToast(`${generatedBatches.length} route${generatedBatches.length!==1?'s':''} ready — queued for 1pm or launch now ✅`, 'ok', 4000)
+  if(!silent){
+    if(needApproval > 0 && readyToLaunch === 0){
+      showToast(`${needApproval} route${needApproval>1?'s':''} need your approval before sending`, 'info', 5000)
+    } else if(needApproval > 0){
+      showToast(`${readyToLaunch} ready · ${needApproval} need approval — review above`, 'info', 5000)
+    } else if(generatedBatches.length > 0){
+      showToast(`${generatedBatches.length} route${generatedBatches.length!==1?'s':''} ready — queued for 1pm or launch now ✅`, 'ok', 4000)
+    }
   }
 }
 
@@ -15956,8 +15988,8 @@ function renderDispatchPipeline(){
     let emptyMsg = ''
     let emptyAction = ''
     if(!selectedDay || selDiff === 0){
-      emptyMsg = 'No active routes for today'
-      emptyAction = `<button class="btn btn-cyan btn-sm" onclick="adGenerateBatches()" style="margin:0 4px">🔍 Preview Today's Routes</button>`
+      emptyMsg = 'Loading today\'s routes...'
+      emptyAction = ''
     } else if(isFutureSel){
       const genDay = new Date(selDate); genDay.setDate(selDate.getDate() - 1)
       const genDayName = dayNames7[genDay.getDay()]
@@ -16141,18 +16173,20 @@ function renderDispatchPipeline(){
   // Render with BIN_OUT first, then BIN_IN, each with a clear section header
   let html = mergeHtml
   if(binOutBatches.length){
-    // Collection day = the day AFTER the Bin Out night
-    const collectionDayName = selectedDay || dayFil || ''
-    const collectionLabel = collectionDayName ? `→ ${collectionDayName} collection` : 'Place bins at curb before 6am'
-    html += sectionHeader('🌙 Bin Out — evening', binOutBatches.length, '#a5b4fc',
-      (binOutBatches[0]?.dateLabel ? binOutBatches[0].dateLabel+' · ' : '') + collectionLabel)
+    // Bin Out is always the night BEFORE collection day
+    // Use the first batch's collectionDay field if available, otherwise infer from selectedDay
+    const colDay = binOutBatches[0]?.collectionDay || selectedDay || dayFil || ''
+    const binOutNightLabel = binOutBatches[0]?.dateLabel || ''
+    const sectionSub = [binOutNightLabel, colDay ? `→ ${colDay} collection` : 'Place bins at curb before 6am'].filter(Boolean).join(' · ')
+    html += sectionHeader('🌙 Bin Out — evening', binOutBatches.length, '#a5b4fc', sectionSub)
     html += binOutBatches.map(renderBatchCard).join('')
   }
   if(binInBatches.length){
     const anyBinOutPending = binOutBatches.some(b=>['offered','sent','accepted'].includes(b.status))
+    const binInNightLabel  = binInBatches[0]?.dateLabel || ''
     const binInSublabel = anyBinOutPending
-      ? '⏳ Awaiting Bin Out completion before runners are notified'
-      : (binInBatches[0]?.dateLabel ? binInBatches[0].dateLabel+' · ' : '') + 'Bring bins in after truck passes'
+      ? '⏳ Auto-created once Bin Out is marked complete'
+      : [binInNightLabel, 'Bring bins in after truck passes'].filter(Boolean).join(' · ')
     html += sectionHeader('☀️ Bin In — morning', binInBatches.length, '#06d6a0', binInSublabel)
     html += binInBatches.map(renderBatchCard).join('')
   }
@@ -16308,9 +16342,17 @@ async function initDispatchPage(){
   initDispatchDayPills()
   updateDispatchStats()
 
-  // Start with All Days view — clear the hidden pill value so dropdown wins
+  // Auto-select today's pill and generate preview
+  const todayName = FULL_DAYS[new Date().getDay()]
   const inp = document.getElementById('dispatch-day-val')
-  if(inp) inp.value = ''
+  if(inp) inp.value = todayName
+  // Sync dropdown filter
+  const df = document.getElementById('dispatch-day-filter')
+  if(df) df.value = todayName
+  // Highlight today's pill
+  document.querySelectorAll('#dispatch-day-pills .ob-day-pill').forEach(p=>{
+    p.classList.toggle('on', p.dataset.day === todayName)
+  })
 
   // Load pending route approvals into the strip above the pipeline
   loadPendingApprovalsIntoDispatch()
@@ -16318,8 +16360,8 @@ async function initDispatchPage(){
   // Start the 10am generate / 1pm release scheduler (idempotent)
   startRouteScheduler()
 
-  // Auto-load all active routes across next 7 days
-  await loadLiveJobsIntoPipeline()
+  // Auto-generate today's preview — no button needed
+  await _adGenerateBatchesAsync(true)
 }
 
 // Load active (non-complete) jobs from Supabase for the selected day
