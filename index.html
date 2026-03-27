@@ -4573,10 +4573,19 @@ async function _populateHWDashData(row, fn, ln, initials){
     safe('hw-next-col-title', 'Next Collection — ' + fmtDate(collectionDate))
     safe('hw-binout-date',    fmtDate(binOutDate) + ' · Evening')
     safe('hw-binin-date',     fmtDate(collectionDate) + ' · Daytime')
+
+    // Show runner expected arrival window on HO dashboard
+    const win = typeof getBinOutWindow === 'function' ? getBinOutWindow(binOutDate.toISOString().slice(0,10)) : null
     const nextColStrip = document.getElementById('hw-next-collection-strip')
-    if(nextColStrip) nextColStrip.innerHTML =
-      'Next collection: <strong style="color:var(--cyan)">' + fmtDate(collectionDate) + '</strong> — Bin Out ' + prevDay + ' evening'
-  }
+    if(nextColStrip){
+      const windowNote = win && (win.urgency==='active'||win.urgency==='upcoming')
+        ? ` · Runner window: ${win.windowStr}`
+        : win?.urgency==='late' ? ` · ⚠️ Runner running late — check back soon`
+        : win?.urgency==='overdue' ? ` · 🚨 Past scheduled window — contact support`
+        : ` · Runner expected 3pm–7pm`
+      nextColStrip.innerHTML = 'Next collection: <strong style="color:var(--cyan)">' + fmtDate(collectionDate) + '</strong> — Bin Out ' + prevDay + ' evening' + windowNote
+    }
+  }  // end if(colDayIdx >= 0)
 
   // Subscription banner
   const planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split Days · $54.99/mo', oan_a:'Bin Out As Needed — 1 Can · $19.99/mo+usage', oan_b:'Bin Out As Needed — 2 Cans Same Day · $19.99/mo+usage', oan_c:'Bin Out As Needed — 2 Cans Split · $19.99/mo+usage' }
@@ -5855,17 +5864,35 @@ async function loadRunnerRoutes(runnerRow){
       const mapsUrl = addrs.length
         ? `https://www.google.com/maps/dir/?api=1&destination=${addrs.at(-1)}&waypoints=${addrs.slice(0,-1).join('|')}&travelmode=driving`
         : '#'
+      const win = batch.type==='BIN_OUT' ? getBinOutWindow(batch.date) : null
       const isToday = batch.date && new Date(batch.date+'T12:00:00').toDateString() === new Date().toDateString()
       const isOffer = batch.isOffer || batch.status==='offered'
+      const urgencyBar = win && (isToday||isOffer) ? `
+        <div style="background:${win.color}18;border-top:1px solid ${win.color}30;padding:6px 16px;display:flex;align-items:center;gap:10px;font-size:11px">
+          <span style="font-size:14px">${win.icon}</span>
+          <div style="flex:1">
+            <span style="color:${win.color};font-weight:700">${win.windowStr}</span>
+            <span style="color:var(--muted);margin-left:8px">${win.deadlineStr}</span>
+          </div>
+          ${win.urgency==='active'?'<span style="background:rgba(34,197,94,.15);color:#22c55e;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">GO TIME</span>':''}
+          ${win.urgency==='late'?'<span style="background:rgba(245,158,11,.15);color:#f59e0b;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">RUNNING LATE</span>':''}
+          ${win.urgency==='overdue'?'<span style="background:rgba(239,68,68,.15);color:#ef4444;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">OVERDUE</span>':''}
+        </div>` : ''
       const statusBadge = isOffer
         ? '<span style="background:rgba(245,158,11,.2);color:#fbbf24;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite">⏳ Awaiting response</span>'
         : batch.status==='in_progress'
         ? '<span style="background:#22c55e22;color:#22c55e;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700">● In Progress</span>'
+        : win?.urgency==='active'
+        ? '<span style="background:rgba(34,197,94,.2);color:#22c55e;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700">🟢 Window open</span>'
+        : win?.urgency==='late'
+        ? '<span style="background:rgba(245,158,11,.2);color:#f59e0b;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite">⚠️ Running late</span>'
+        : win?.urgency==='overdue'
+        ? '<span style="background:rgba(239,68,68,.2);color:#ef4444;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700">🚨 Overdue</span>'
         : isToday
         ? '<span style="background:rgba(99,102,241,.2);color:#a5b4fc;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700">Today</span>'
         : '<span style="background:var(--surface2);color:var(--muted);font-size:10px;padding:2px 8px;border-radius:4px">Upcoming</span>'
 
-      return `<div class="batch-card" style="margin-bottom:14px;${isOffer?'border:2px solid rgba(245,158,11,.5);box-shadow:0 0 16px rgba(245,158,11,.12)':''}">
+      return `<div class="batch-card" style="margin-bottom:14px;${isOffer?'border:2px solid rgba(245,158,11,.5);box-shadow:0 0 16px rgba(245,158,11,.12)':win?.urgency==='overdue'?'border:1.5px solid rgba(239,68,68,.4)':win?.urgency==='late'?'border:1.5px solid rgba(245,158,11,.3)':''}">
         <div class="batch-head ${batch.type==='BIN_OUT'?'out':'in'}" ${isOffer?'style="background:rgba(245,158,11,.08)"':''}>
           <div>
             <div style="display:flex;align-items:center;gap:8px">
@@ -5873,9 +5900,9 @@ async function loadRunnerRoutes(runnerRow){
               <span style="font-weight:700;font-size:13px">${batch.stops.length} stop${batch.stops.length!==1?'s':''} · ${batch.type==='BIN_OUT'?'Bin Out Route':'Bin In Route'}</span>
               ${statusBadge}
             </div>
-            <div style="font-size:11px;color:var(--muted);margin-top:3px">
-              ${batch.date ? new Date(batch.date + 'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}) : '--'}
-              ${batch.type==='BIN_IN' ? ' · After truck collection' : ' · Evening'}
+            <div style="font-size:11px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:8px">
+              <span>${batch.date ? new Date(batch.date + 'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}) : '--'}</span>
+              ${batch.type==='BIN_OUT' ? '<span style="color:#a5b4fc">· 3pm–7pm recommended · 9pm deadline</span>' : '<span style="color:#6ee7b7">· After truck passes · Morning</span>'}
             </div>
           </div>
           <div style="text-align:right">
@@ -5883,10 +5910,11 @@ async function loadRunnerRoutes(runnerRow){
             <div style="font-size:10px;color:var(--muted)">${batch.stops.length} stop${batch.stops.length!==1?'s':''}</div>
           </div>
         </div>
+        ${urgencyBar}
         ${isOffer ? `<div style="background:rgba(245,158,11,.06);border-bottom:1px solid rgba(245,158,11,.2);padding:8px 16px;font-size:12px;color:#fbbf24;display:flex;align-items:center;gap:8px">
           📬 <strong>Route offer pending</strong> — respond before the window closes
           <button class="btn btn-cyan btn-sm" style="margin-left:auto" onclick="acceptOffer()">✓ Accept $${earn}</button>
-          <button class="btn btn-ghost btn-sm" style="color:#ef4444;font-size:11px" onclick="declineOffer()">Decline</button>
+          <button class="btn btn-ghost btn-sm" style="color:#ef4444;font-size:11px" onclick="declineOffer('${batch.id}')">Decline</button>
         </div>` : ''}
         <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
           ${batch.stops.map((s,i)=>`
@@ -5945,6 +5973,43 @@ async function loadRunnerRoutes(runnerRow){
   } catch(err){
     console.warn('[BinDash] Route load failed:', String(err?.message||err))
   }
+}
+
+// Returns display info for the Bin Out time window for a given scheduled_date
+// BinDash recommended window: 3pm–7pm. Hard deadline: 9pm.
+function getBinOutWindow(scheduledDateStr){
+  const now = new Date()
+  const workDate = scheduledDateStr ? new Date(scheduledDateStr + 'T00:00:00') : new Date()
+  const isToday = workDate.toDateString() === now.toDateString()
+  const isTomorrow = new Date(workDate.getTime() - 86400000).toDateString() === now.toDateString()
+
+  // Key times on the work date
+  const windowOpen  = new Date(workDate); windowOpen.setHours(15, 0, 0, 0)  // 3pm
+  const windowClose = new Date(workDate); windowClose.setHours(19, 0, 0, 0)  // 7pm (recommended end)
+  const deadline    = new Date(workDate); deadline.setHours(21, 0, 0, 0)     // 9pm (hard deadline)
+
+  if(!isToday) {
+    const label = isTomorrow ? 'Tomorrow' : workDate.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})
+    return { urgency:'future', label, windowStr:'3pm–7pm recommended', deadlineStr:'9pm deadline', color:'#a5b4fc', icon:'🌙' }
+  }
+
+  const minsToOpen     = Math.max(0, Math.round((windowOpen  - now) / 60000))
+  const minsToClose    = Math.max(0, Math.round((windowClose - now) / 60000))
+  const minsToDeadline = Math.max(0, Math.round((deadline    - now) / 60000))
+
+  if(now < windowOpen){
+    const h = Math.floor(minsToOpen/60), m = minsToOpen%60
+    return { urgency:'upcoming', label:'Today', windowStr:`Window opens in ${h>0?h+'h ':''}${m}m (3pm)`, deadlineStr:'9pm deadline', color:'#a5b4fc', icon:'🌙' }
+  }
+  if(now >= windowOpen && now < windowClose){
+    const h = Math.floor(minsToClose/60), m = minsToClose%60
+    return { urgency:'active', label:'Today · Window open', windowStr:`${h>0?h+'h ':''}${m}m left in recommended window`, deadlineStr:'Deadline 9pm', color:'#22c55e', icon:'🟢' }
+  }
+  if(now >= windowClose && now < deadline){
+    const h = Math.floor(minsToDeadline/60), m = minsToDeadline%60
+    return { urgency:'late', label:'Today · Past recommended window', windowStr:`${h>0?h+'h ':''}${m}m until 9pm deadline`, deadlineStr:'⚠️ Complete before 9pm', color:'#f59e0b', icon:'⚠️' }
+  }
+  return { urgency:'overdue', label:'Today · PAST DEADLINE', windowStr:'Route is past the 9pm deadline', deadlineStr:'Contact admin', color:'#ef4444', icon:'🚨' }
 }
 
 function startOfferCountdown(expiresAt, windowMins){
@@ -6017,20 +6082,33 @@ async function acceptOffer(){
   }
 }
 
-async function declineOffer(){
-  const offerId   = window._currentOfferId
+async function declineOffer(batchId){
+  const offerId   = batchId || window._currentOfferId
   const runnerRow = window._currentRunnerRow
-  if(!offerId || !runnerRow) return
+  if(!offerId){ showToast('No active offer to decline','err'); return }
+
+  const btn = document.querySelector('[onclick*="declineOffer"]')
+  if(btn){ btn.disabled=true; btn.textContent='Declining...' }
 
   try {
-    await _supa.from('jobs')
-      .update({ status:'declined', updated_at:new Date().toISOString() })
+    const { error } = await _supa.from('jobs')
+      .update({ status:'declined', runner_id:null, runner_name:null, updated_at:new Date().toISOString() })
       .eq('batch_id', offerId)
-  } catch(e){ console.warn('Decline error:', e) }
+    if(error) throw error
+  } catch(e){
+    console.warn('Decline error:', e)
+    showToast('Error declining offer — try again','err')
+    if(btn){ btn.disabled=false; btn.textContent='Decline' }
+    return
+  }
 
   clearInterval(window._offerCountdownTimer)
   document.getElementById('offer-banner').style.display = 'none'
-  showToast('Offer declined -- batch sent to next runner','info')
+  window._currentOfferId = null
+  showToast('Offer declined — batch sent to next runner','info')
+
+  // Reload routes to remove the declined card
+  if(runnerRow) await loadRunnerRoutes(runnerRow)
 }
 
 async function resumeBatch(batchId){
