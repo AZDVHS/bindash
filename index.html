@@ -16020,6 +16020,12 @@ async function _launchSingleBatch(batch){
           .eq('zone_id', batch.zoneId)
           .eq('scheduled_date', scheduledDate)
           .then(({ error: dqErr }) => { if(dqErr) console.warn('[BinDash] dispatch_queue sent update:', dqErr.message) })
+        // Clear merge instructions for this runner/day — route is dispatched
+        const _rId = batch.runner?.id || '__unassigned__'
+        const _mk = 'merge_instruction:'+_rId+':'+normDay(batch.day)
+        localStorage.removeItem(_mk)
+        // Clear pending_route
+        localStorage.removeItem('pending_route:'+batch.zoneId+':'+normDay(batch.day))
         window._livePipelineBatches = null
         await loadLiveJobsIntoPipeline()
         console.log('[BinDash] batch launched ✅ — ' + jobRows.length + ' jobs inserted')
@@ -16780,6 +16786,9 @@ async function _adGenerateBatchesAsync(silent=false){
     })
   })
 
+  // Apply any saved merge instructions before rendering
+  _applyMergeInstructions()
+
   renderDispatchPipeline()
   loadPendingApprovalsIntoDispatch()
 
@@ -17354,27 +17363,46 @@ function mergeBatches(idsStr){
   if(batches.length < 2) return
 
   const primary = batches[0]
+  const mergedStops = [...primary.stops]
+  const mergedZones = [{ zoneId: primary.zoneId, day: primary.day }]
+
   // Move all stops from other batches into primary
   for(let i = 1; i < batches.length; i++){
-    primary.stops.push(...batches[i].stops)
-    // Remove the merged batch's pending_route entry from localStorage
     const mb = batches[i]
-    if(mb.zoneId && mb.day) localStorage.removeItem('pending_route:'+mb.zoneId+':'+normDay(mb.day))
+    mergedStops.push(...mb.stops)
+    mergedZones.push({ zoneId: mb.zoneId, day: mb.day })
     const idx = generatedBatches.findIndex(x=>x.id===mb.id)
     if(idx >= 0) generatedBatches.splice(idx, 1)
   }
+
+  primary.stops     = mergedStops
   primary.earnOut   = (primary.stops.length * 3.25).toFixed(2)
   primary.earnTotal = (primary.stops.length * 6.50).toFixed(2)
   primary.hasSplit  = primary.stops.some(h=>h.service==='SPLIT')
+  primary._merged   = true
 
-  // Persist the merged state to localStorage so it survives re-renders
+  // Store the merge instruction in localStorage keyed by runner + day
+  // Format: merge_instruction:runnerId:day = { primaryZoneId, mergedZoneIds[], stops[] }
+  const runnerId = primary.runner?.id || '__unassigned__'
+  const mergeKey = 'merge_instruction:'+runnerId+':'+normDay(primary.day)
+  localStorage.setItem(mergeKey, JSON.stringify({
+    primaryZoneId: primary.zoneId,
+    primaryZoneName: primary.zoneName,
+    mergedZoneIds: mergedZones.map(z=>z.zoneId),
+    runner: primary.runner,
+    stops: primary.stops,
+    status: primary.status || 'draft',
+    day: primary.day,
+    savedAt: new Date().toISOString(),
+  }))
+
+  // Also update the primary pending_route
   if(primary.zoneId && primary.day){
     const pKey = 'pending_route:'+primary.zoneId+':'+normDay(primary.day)
     const raw = localStorage.getItem(pKey)
     const existing = raw ? (() => { try { return JSON.parse(raw) } catch { return null } })() : {}
     localStorage.setItem(pKey, JSON.stringify({
       ...existing,
-      zoneId: primary.zoneId, zoneName: primary.zoneName, day: primary.day,
       stops: primary.stops, runner: primary.runner,
       status: primary.status || existing?.status || 'draft',
       mergedAt: new Date().toISOString(),
@@ -17385,6 +17413,52 @@ function mergeBatches(idsStr){
   renderDispatchPipeline()
   openCards.add(primary.id)
   updateLaunchButton()
+}
+
+// Apply any saved merge instructions after batch generation
+function _applyMergeInstructions(){
+  const day = document.getElementById('dispatch-day-val')?.value || ''
+  if(!day || !generatedBatches.length) return
+
+  // Find all merge instructions for this day
+  for(let i = 0; i < localStorage.length; i++){
+    const k = localStorage.key(i)
+    if(!k || !k.startsWith('merge_instruction:')) continue
+    const parts = k.split(':')
+    if(normDay(parts[2]) !== normDay(day)) continue
+
+    try {
+      const m = JSON.parse(localStorage.getItem(k))
+      if(!m || !m.mergedZoneIds || m.mergedZoneIds.length < 2) continue
+
+      // Find the batches that should be merged
+      const toMerge = generatedBatches.filter(b =>
+        m.mergedZoneIds.includes(b.zoneId) &&
+        (m.runner ? b.runner?.id === m.runner.id : true)
+      )
+      if(toMerge.length < 2) continue
+
+      // Apply merge in-memory
+      const primary = toMerge.find(b => b.zoneId === m.primaryZoneId) || toMerge[0]
+      primary.stops = m.stops || primary.stops
+      primary.runner = m.runner || primary.runner
+      primary.status = m.status || primary.status
+      primary._merged = true
+      primary.earnOut   = (primary.stops.length * 3.25).toFixed(2)
+      primary.earnTotal = (primary.stops.length * 6.50).toFixed(2)
+      primary.hasSplit  = primary.stops.some(h=>h.service==='SPLIT')
+
+      // Remove the other batches
+      toMerge.forEach(b => {
+        if(b.id !== primary.id){
+          const idx = generatedBatches.findIndex(x=>x.id===b.id)
+          if(idx >= 0) generatedBatches.splice(idx, 1)
+        }
+      })
+
+      console.log('[BinDash] merge instruction applied:', m.mergedZoneIds, '→', primary.zoneName)
+    } catch(e) { console.warn('[BinDash] merge instruction error:', e.message) }
+  }
 }
 
 function updateLaunchButton(){
