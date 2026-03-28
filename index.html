@@ -6469,17 +6469,27 @@ async function resumeBatch(batchId){
   // Reload stops from enriched jobs and resume the active tab flow
   const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
   if(batchJobs.length){
-    window.NAV_STOPS = batchJobs.map(j=>({
-      name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.homeowner_email || 'Stop',
-      address:     j.hw?.street_address || '--',
-      gate:        j.hw?.gate_code   || null,
-      pets:        j.hw?.pet_info    || null,
-      binLocation: j.hw?.bin_location|| null,
-      serviceType: j.service_type    || 'Recycling',
-      notes:       j.hw?.service_notes || null,
-      hwEmail:     j.homeowner_email  || null,
-      jobId:       j.id,
-    }))
+    window.NAV_STOPS = batchJobs.map(j=>{
+      const gatePart  = j.hw?.gate_code   ? 'Gate: '+j.hw.gate_code : ''
+      const petsPart  = j.hw?.pet_info    ? 'Pets: '+j.hw.pet_info  : ''
+      const notePart  = j.hw?.service_notes || ''
+      const details   = [gatePart, petsPart, notePart].filter(Boolean).join(' · ') || 'No special notes'
+      return {
+        name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.homeowner_email || 'Stop',
+        address:     j.hw?.street_address || '--',
+        zip:         j.hw?.zip_code || '',
+        gate:        j.hw?.gate_code   || null,
+        pets:        j.hw?.pet_info    || null,
+        binLocation: j.hw?.bin_location|| null,
+        serviceType: j.service_type    || 'Recycling',
+        notes:       j.hw?.service_notes || null,
+        details,
+        bins:        j.hw?.bins || (j.service_type === 'Split days' ? '2 bins' : '1 bin'),
+        email:       j.homeowner_email  || null,
+        hwEmail:     j.homeowner_email  || null,
+        jobId:       j.id,
+      }
+    })
     navBatchId     = batchId
     navVisitType   = batchJobs[0]?.visit_type || 'BIN_OUT'
     navRouteActive = true
@@ -6556,17 +6566,27 @@ async function startBatch(batchId){
     // Build stop list from enriched jobs
     const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
     if(batchJobs.length){
-      window.NAV_STOPS = batchJobs.map(j=>({
-        name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.homeowner_email || 'Stop',
-        address:     j.hw?.street_address || '--',
-        gate:        j.hw?.gate_code  || null,
-        pets:        j.hw?.pet_info   || null,
-        binLocation: j.hw?.bin_location|| null,
-        serviceType: j.service_type   || j.hw?.service_type || 'Recycling',
-        notes:       j.hw?.service_notes || null,
-        hwEmail:     j.homeowner_email || null,
-        jobId:       j.id,
-      }))
+      window.NAV_STOPS = batchJobs.map(j=>{
+        const gatePart = j.hw?.gate_code  ? 'Gate: '+j.hw.gate_code : ''
+        const petsPart = j.hw?.pet_info   ? 'Pets: '+j.hw.pet_info  : ''
+        const notePart = j.hw?.service_notes || ''
+        const details  = [gatePart, petsPart, notePart].filter(Boolean).join(' · ') || 'No special notes'
+        return {
+          name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.homeowner_email || 'Stop',
+          address:     j.hw?.street_address || '--',
+          zip:         j.hw?.zip_code || '',
+          gate:        j.hw?.gate_code  || null,
+          pets:        j.hw?.pet_info   || null,
+          binLocation: j.hw?.bin_location|| null,
+          serviceType: j.service_type   || j.hw?.service_type || 'Recycling',
+          notes:       j.hw?.service_notes || null,
+          details,
+          bins:        j.hw?.bins || (j.service_type === 'Split days' ? '2 bins' : '1 bin'),
+          email:       j.homeowner_email || null,
+          hwEmail:     j.homeowner_email || null,
+          jobId:       j.id,
+        }
+      })
       navBatchId    = batchId
       navVisitType  = batchJobs[0]?.visit_type || 'BIN_OUT'
       navStop       = 0
@@ -6594,17 +6614,27 @@ async function _forceStartBatch(batchId){
     showToast('Route started (override) — complete as quickly as possible ⚠️', 'warn', 5000)
     const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
     if(batchJobs.length){
-      window.NAV_STOPS = batchJobs.map(j=>({
-        name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.homeowner_email || 'Stop',
-        address:     j.hw?.street_address || '--',
-        gate:        j.hw?.gate_code   || null,
-        pets:        j.hw?.pet_info    || null,
-        binLocation: j.hw?.bin_location|| null,
-        serviceType: j.service_type    || 'Recycling',
-        notes:       j.hw?.service_notes || null,
-        hwEmail:     j.homeowner_email  || null,
-        jobId:       j.id,
-      }))
+      window.NAV_STOPS = batchJobs.map(j=>{
+        const gatePart = j.hw?.gate_code  ? 'Gate: '+j.hw.gate_code : ''
+        const petsPart = j.hw?.pet_info   ? 'Pets: '+j.hw.pet_info  : ''
+        const notePart = j.hw?.service_notes || ''
+        const details  = [gatePart, petsPart, notePart].filter(Boolean).join(' · ') || 'No special notes'
+        return {
+          name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.homeowner_email || 'Stop',
+          address:     j.hw?.street_address || '--',
+          zip:         j.hw?.zip_code || '',
+          gate:        j.hw?.gate_code   || null,
+          pets:        j.hw?.pet_info    || null,
+          binLocation: j.hw?.bin_location|| null,
+          serviceType: j.service_type    || 'Recycling',
+          notes:       j.hw?.service_notes || null,
+          details,
+          bins:        j.hw?.bins || '1 bin',
+          email:       j.homeowner_email  || null,
+          hwEmail:     j.homeowner_email  || null,
+          jobId:       j.id,
+        }
+      })
       navBatchId    = batchId
       navVisitType  = batchJobs[0]?.visit_type || 'BIN_OUT'
       navStop       = 0
@@ -6663,6 +6693,15 @@ async function completeBatch(batchId){
     // AUTO-CREATE BIN IN batch if this was BIN OUT
     if(visitType === 'BIN_OUT' && jobs?.length){
       await _autoCreateBinInBatch(jobs, runnerRow)
+    }
+
+    // Mark dispatch_queue row as complete
+    if(jobs?.[0]?.zone_id && jobs?.[0]?.scheduled_date){
+      _supa.from('dispatch_queue')
+        .update({ status: 'complete', completed_at: new Date().toISOString() })
+        .eq('zone_id', jobs[0].zone_id)
+        .eq('scheduled_date', jobs[0].scheduled_date)
+        .then(({ error: dqErr }) => { if(dqErr) console.warn('[BinDash] dispatch_queue complete:', dqErr.message) })
     }
 
     showToast(`Route complete ✅ — $${totalEarned} queued for Friday payout`, 'ok', 5000)
@@ -15907,20 +15946,24 @@ function approvePendingRoute(zoneId, day, permanent=true){
   localStorage.setItem(key, JSON.stringify(pending))
   if(permanent) saveRouteTemplate(zoneId, day, pending.stops, pending.runner?.id)
 
-  // Also write approval to Supabase so the server-side scheduler sees it
-  // Uses upsert so it creates the row if it doesn't exist yet (new routes)
+  // Write approval to Supabase dispatch_queue — try update first, insert if no row exists
   const _dqDate = pending.date || new Date(now.getTime()+86400000).toISOString().slice(0,10)
-  _supa.from('dispatch_queue')
-    .upsert({
-      zone_id: zoneId,
-      scheduled_date: _dqDate,
-      status: 'queued',
-      approved_at: now.toISOString(),
-      runner_id: pending.runner?.id || null,
-      stop_count: (pending.stops||[]).length,
-      created_at: now.toISOString(),
-    }, { onConflict: 'zone_id,scheduled_date' })
-    .then(({ error }) => { if(error) console.warn('[BinDash] dispatch_queue upsert:', error.message) })
+  ;(async () => {
+    const { data: existing } = await _supa.from('dispatch_queue')
+      .select('id').eq('zone_id', zoneId).eq('scheduled_date', _dqDate).maybeSingle()
+    if(existing) {
+      const { error } = await _supa.from('dispatch_queue')
+        .update({ status:'queued', approved_at:now.toISOString(), runner_id:pending.runner?.id||null, stop_count:(pending.stops||[]).length })
+        .eq('id', existing.id)
+      if(error) console.warn('[BinDash] dispatch_queue update:', error.message)
+      else console.log('[BinDash] dispatch_queue updated — queued ✅')
+    } else {
+      const { error } = await _supa.from('dispatch_queue')
+        .insert({ zone_id:zoneId, scheduled_date:_dqDate, status:'queued', approved_at:now.toISOString(), runner_id:pending.runner?.id||null, stop_count:(pending.stops||[]).length, created_at:now.toISOString() })
+      if(error) console.warn('[BinDash] dispatch_queue insert:', error.message)
+      else console.log('[BinDash] dispatch_queue inserted — queued ✅')
+    }
+  })()
 
   // Sync status on any matching in-memory batch so the card turns blue (queued)
   generatedBatches.forEach(b=>{
@@ -15963,8 +16006,20 @@ async function _launchSingleBatch(batch){
     }))
     if(jobRows.length){
       const { error } = await _supa.from('jobs').insert(jobRows)
-      if(error) console.warn('[BinDash] single batch launch:', error.message)
-      else { window._livePipelineBatches = null; await loadLiveJobsIntoPipeline() }
+      if(error){
+        console.warn('[BinDash] single batch launch:', error.message)
+        showToast('Error launching route: ' + error.message.slice(0,60), 'err')
+      } else {
+        // Mark dispatch_queue row as sent
+        _supa.from('dispatch_queue')
+          .update({ status: 'sent', sent_at: now.toISOString() })
+          .eq('zone_id', batch.zoneId)
+          .eq('scheduled_date', scheduledDate)
+          .then(({ error: dqErr }) => { if(dqErr) console.warn('[BinDash] dispatch_queue sent update:', dqErr.message) })
+        window._livePipelineBatches = null
+        await loadLiveJobsIntoPipeline()
+        console.log('[BinDash] batch launched ✅ — ' + jobRows.length + ' jobs inserted')
+      }
     }
   } catch(e){ console.warn('[BinDash] _launchSingleBatch:', e.message) }
 }
@@ -17155,11 +17210,29 @@ function swapBatchRunnerKeepOpen(selectEl){
   // Preserve existing dispatch status — changing runner should not reset queue state
   if(!b.status || b.status === 'preview') b.status = 'preview'
   if(b.status === 'queued' || b.status === 'change_detected' || b.status === 'draft'){
+    // Update localStorage pending route with new runner
     const key = 'pending_route:' + b.zoneId + ':' + normDay(b.day)
     const raw = localStorage.getItem(key)
-    if(raw){ const p = JSON.parse(raw); p.runner = r || null; localStorage.setItem(key, JSON.stringify(p)) }
+    if(raw){
+      const p = JSON.parse(raw)
+      p.runner = r || null
+      localStorage.setItem(key, JSON.stringify(p))
+      // Also update Supabase dispatch_queue runner_id if row exists
+      const _dqDate = p.date || new Date(Date.now()+86400000).toISOString().slice(0,10)
+      _supa.from('dispatch_queue')
+        .select('id').eq('zone_id', b.zoneId).eq('scheduled_date', _dqDate).maybeSingle()
+        .then(({ data }) => {
+          if(data) {
+            _supa.from('dispatch_queue')
+              .update({ runner_id: r?.id || null })
+              .eq('id', data.id)
+              .then(({ error }) => { if(error) console.warn('[BinDash] runner swap DB update:', error.message) })
+          }
+        })
+    }
   }
   if(r) showToast('Runner changed to '+r.name+' — stays queued ✅','ok')
+  else showToast('Runner removed — route unassigned','warn')
   // Re-render but card will stay open because we track open state
   renderDispatchPipeline()
 }
