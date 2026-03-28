@@ -16750,7 +16750,7 @@ async function _adGenerateBatchesAsync(silent=false){
           offerBadge,
           windowMins:    offer.windowMins,
           isLoyalOffer:  offer.offerType==='loyalty',
-          earnOut: earn, earnIn: earn, earnTotal: (chunk.length*6.50).toFixed(2),
+          earnOut: earn, earnIn: earn, earnTotal: earn, earnPotential: (chunk.length*6.50).toFixed(2),
           binInUnlock: unlock.time, unlockMethod: unlock.method,
           hasSplit: chunk.some(h=>h.service==='SPLIT'),
         })
@@ -17170,7 +17170,9 @@ function renderDispatchPipeline(){
       +(b.dateLabel?'<span style="font-size:10px;color:var(--muted)">'+b.dateLabel+'</span>':'')
       +'</div>'
       +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'
-      +(b.runner?b.runner.name:'⚠️ No runner')+' · '+b.stops.length+' stop'+(b.stops.length!==1?'s':'')+' · $'+b.earnTotal
+      +(b.runner?b.runner.name:'⚠️ No runner')+' · '+b.stops.length+' stop'+(b.stops.length!==1?'s':'')
+      +' · <span style="color:var(--green);font-weight:600">$'+b.earnTotal+'</span>'
+      +(b.earnOut&&!isLiveView?' <span style="color:var(--muted);font-size:10px">(+$'+b.earnOut+' if Bin In)</span>':'')
       +(isLiveView&&b.stops.length?' · '+completedStops+'/'+b.stops.length+' done':'')
       +'</div>'
       +'</div>'
@@ -17293,9 +17295,11 @@ function moveStopToBatch(fromBatchId, stopIdx, toBatchId){
   to.stops.push(stop)
   // Recalculate earnings
   from.earnOut  = (from.stops.length * 3.25).toFixed(2)
-  from.earnTotal = (from.stops.length * 6.50).toFixed(2)
+  from.earnTotal = from.earnOut
+  from.earnPotential = (from.stops.length * 6.50).toFixed(2)
   to.earnOut    = (to.stops.length * 3.25).toFixed(2)
-  to.earnTotal  = (to.stops.length * 6.50).toFixed(2)
+  to.earnTotal  = to.earnOut
+  to.earnPotential = (to.stops.length * 6.50).toFixed(2)
   // Remove empty batches
   const idx = generatedBatches.findIndex(x=>x.id===fromBatchId)
   if(from.stops.length === 0 && idx >= 0){
@@ -17313,7 +17317,8 @@ function removeStopFromBatch(batchId, stopIdx){
   if(!b) return
   const removed = b.stops.splice(stopIdx, 1)[0]
   b.earnOut   = (b.stops.length * 3.25).toFixed(2)
-  b.earnTotal = (b.stops.length * 6.50).toFixed(2)
+  b.earnTotal = b.earnOut
+  b.earnPotential = (b.stops.length * 6.50).toFixed(2)
   if(b.stops.length === 0){
     const idx = generatedBatches.findIndex(x=>x.id===batchId)
     if(idx >= 0) generatedBatches.splice(idx, 1)
@@ -17377,7 +17382,8 @@ function mergeBatches(idsStr){
 
   primary.stops     = mergedStops
   primary.earnOut   = (primary.stops.length * 3.25).toFixed(2)
-  primary.earnTotal = (primary.stops.length * 6.50).toFixed(2)
+  primary.earnTotal = primary.earnOut
+  primary.earnPotential = (primary.stops.length * 6.50).toFixed(2)
   primary.hasSplit  = primary.stops.some(h=>h.service==='SPLIT')
   primary._merged   = true
 
@@ -17445,7 +17451,8 @@ function _applyMergeInstructions(){
       primary.status = m.status || primary.status
       primary._merged = true
       primary.earnOut   = (primary.stops.length * 3.25).toFixed(2)
-      primary.earnTotal = (primary.stops.length * 6.50).toFixed(2)
+      primary.earnTotal = primary.earnOut
+      primary.earnPotential = (primary.stops.length * 6.50).toFixed(2)
       primary.hasSplit  = primary.stops.some(h=>h.service==='SPLIT')
 
       // Remove the other batches
