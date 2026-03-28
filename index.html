@@ -15617,7 +15617,9 @@ async function _sendRepeatRoutesImmediately(){
     const raw = localStorage.getItem(key)
     if(!raw) return
     const pending = JSON.parse(raw)
-    // Only auto-send routes with no changes (queued = repeat route, same as template)
+    // Skip if already manually sent (admin pressed Launch / Send now →)
+    if(pending.sentAt || pending.status === 'sent') return
+    // Only auto-send routes with no changes (queued = repeat, same as template)
     if(pending.status !== 'queued') return
     saveRouteTemplate(z.id, tomorrowDay, pending.stops, pending.runner?.id)
     pending.status = 'sent'
@@ -15628,7 +15630,7 @@ async function _sendRepeatRoutesImmediately(){
   })
   if(sent > 0){
     showToast(`🚀 ${sent} repeat route${sent!==1?'s':''} auto-sent at 9am — no changes detected`, 'ok', 5000)
-    addNotif({ title:`🚀 ${sent} routes auto-dispatched`, body:'Repeat routes with no changes sent immediately at 9am', type:'ok', action:`adNav(null,'ad-dispatch')` })
+    addNotif({ title:`🚀 ${sent} routes auto-dispatched`, body:'Repeat routes sent at 9am', type:'ok', action:`adNav(null,'ad-dispatch')` })
   }
 }
 
@@ -15718,14 +15720,16 @@ async function releaseQueuedRoutes(){
     const raw = localStorage.getItem(key)
     if(!raw) return
     const pending = JSON.parse(raw)
-    if(pending.status!=='queued') return
-    // Save template and launch
+    // Skip routes already manually sent (admin used Launch or Send now →)
+    if(pending.sentAt || pending.status === 'sent') return
+    if(pending.status !== 'queued') return
     saveRouteTemplate(z.id, tomorrowDay, pending.stops, pending.runner?.id)
     pending.status = 'sent'
+    pending.sentAt = new Date().toISOString()
     localStorage.setItem(key, JSON.stringify(pending))
     released++
   })
-  if(released) showToast(`🚀 ${released} route${released>1?'s':''} released to runners at 1pm`, 'ok', 5000)
+  if(released) showToast(`🚀 ${released} route${released>1?'s':''} auto-released`, 'ok', 5000)
 }
 
 function getPendingRoutes(){
@@ -15760,33 +15764,28 @@ function approvePendingRoute(zoneId, day, permanent=true){
   if(!raw){ showToast('Route not found in queue','err'); return }
   const pending = JSON.parse(raw)
 
-  const now = new Date()  // ← was missing, caused silent crash
-  const isPast9am = now.getHours() >= 9
-  const newStatus = isPast9am ? 'sent' : 'queued'
+  const now = new Date()
 
-  pending.status = newStatus
+  // Approve ALWAYS sets status to 'queued' — NEVER launches immediately.
+  // The scheduled auto-send (9am) or the explicit "Send now →" / Launch button
+  // are the only triggers that call _launchSingleBatch.
+  pending.status    = 'queued'
   pending.approvedAt = now.toISOString()
-  pending.permanent = permanent
+  pending.permanent  = permanent
   if(!permanent) pending.oneTime = true
   localStorage.setItem(key, JSON.stringify(pending))
   if(permanent) saveRouteTemplate(zoneId, day, pending.stops, pending.runner?.id)
 
-  // Sync status on any matching in-memory batch
+  // Sync status on any matching in-memory batch so the card turns blue (queued)
   generatedBatches.forEach(b=>{
-    if(b.zoneId===zoneId && normDay(b.day)===normDay(day)){
-      b.status = newStatus
-    }
+    if(b.zoneId===zoneId && normDay(b.day)===normDay(day)) b.status = 'queued'
   })
 
-  const msg = isPast9am
-    ? 'Route approved — dispatching now ✅'
-    : 'Route approved — sends automatically at 9am ✅'
-  showToast(msg, 'ok')
-
-  if(isPast9am){
-    const batch = generatedBatches.find(b=>b.zoneId===zoneId&&normDay(b.day)===normDay(day))
-    if(batch) _launchSingleBatch(batch)
-  }
+  const isPast9am = now.getHours() >= 9
+  const releaseMsg = isPast9am
+    ? 'Route approved — queued. Press "Send now →" to dispatch immediately.'
+    : 'Route approved — will auto-send at 9am ✅'
+  showToast(releaseMsg, 'ok', 5000)
 
   renderDispatchPipeline()
   loadPendingApprovalsIntoDispatch()
@@ -15908,14 +15907,49 @@ function loadPendingApprovalsIntoDispatch(){
       <button class="btn btn-cyan btn-sm" style="font-size:10px" onclick="approvePendingRoute('${p.zoneId}','${p.day}',true)">✓ Approve</button>
     </div>
   </div>`).join('')
-  + (dayQueued.length ? `<div style="padding:7px 14px;font-size:11px;color:var(--muted);background:rgba(59,130,246,.06);border-bottom:1px solid var(--border)">🕐 ${dayQueued.map(p=>p.zoneName).join(', ')} — queued · sends at 9am · <button onclick="${dayQueued.map(p=>`approvePendingRoute('${p.zoneId}','${p.day}',true)`).join(';')}" style="background:none;border:none;color:var(--cyan);font-size:11px;cursor:pointer;padding:0">Send now →</button></div>` : '')
+  + (dayQueued.length ? `<div style="padding:7px 14px;font-size:11px;color:var(--muted);background:rgba(59,130,246,.06);border-bottom:1px solid var(--border)">🕐 ${dayQueued.map(p=>p.zoneName).join(', ')} — approved · queued for auto-send · <button onclick="${dayQueued.map(p=>`sendRouteNow('${p.zoneId}','${p.day}')`).join(';')}" style="background:none;border:none;color:var(--cyan);font-size:11px;cursor:pointer;padding:0;text-decoration:underline">Send now →</button></div>` : '')
   + (otherQueued.length ? `<div style="padding:6px 14px;font-size:11px;color:var(--muted);opacity:.7">Also queued: ${otherQueued.map(p=>p.zoneName+' ('+p.day+')').join(' · ')}</div>` : '')
 }
 
 // Full day names for matching
 const FULL_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 
-// Normalize a day value to full name for reliable comparison
+// EXPLICIT immediate dispatch — called only by "Send now →" or the Launch button.
+// Approve button NEVER calls this. This also cancels the scheduled 9am auto-send
+// for any batches it launches (sets sentAt so the scheduler skips them).
+async function sendRouteNow(zoneId, day){
+  const key = 'pending_route:'+zoneId+':'+normDay(day)
+  const raw = localStorage.getItem(key)
+  if(!raw){ showToast('Route not found','err'); return }
+  const pending = JSON.parse(raw)
+
+  // Must be approved (queued) before manual send
+  if(pending.status === 'draft' || pending.status === 'change_detected'){
+    showToast('Approve the route first before sending','warn'); return
+  }
+
+  pending.status = 'sent'
+  pending.sentAt = new Date().toISOString()
+  pending.manualSend = true
+  localStorage.setItem(key, JSON.stringify(pending))
+
+  // Find the in-memory batch and launch it
+  const batch = generatedBatches.find(b=>
+    b.zoneId===zoneId && normDay(b.day)===normDay(day)
+  )
+  if(batch){
+    batch.status = 'sent'
+    await _launchSingleBatch(batch)
+  } else {
+    showToast('Route sent ✅ — runner will receive the offer', 'ok')
+  }
+
+  renderDispatchPipeline()
+  loadPendingApprovalsIntoDispatch()
+}
+
+// Called by the "🚀 Launch X Routes Now" button — sends all approved/queued batches
+// immediately and marks them so the 9am scheduler skips them.
 function normDay(d){
   if(!d) return ''
   const s = d.trim().toLowerCase()
@@ -16545,6 +16579,8 @@ async function _adGenerateBatchesAsync(silent=false){
 }
 
 // Phase 2: Admin reviews, then clicks Launch — sends offers + saves to DB
+// This is the ONLY place (along with sendRouteNow) that calls _launchSingleBatch.
+// Routes stamped with sentAt are skipped by the 9am scheduler.
 async function launchDispatchRoutes(){
   const toSend = generatedBatches.filter(b=>b.status==='queued'||b.status==='preview')
   if(!toSend.length){ showToast('No approved routes to launch — approve drafts first','err'); return }
@@ -16552,13 +16588,21 @@ async function launchDispatchRoutes(){
   const btn = document.getElementById('dispatch-launch-btn')
   if(btn){ btn.disabled=true; btn.textContent='Launching...' }
 
-  // Save templates for auto-approved routes, mark as sent
+  const nowIso = new Date().toISOString()
+
+  // Save templates, mark as sent, stamp sentAt to cancel scheduled auto-send
   toSend.forEach(b=>{
     if(b.status==='queued') saveRouteTemplate(b.zoneId, b.day, b.stops, b.runner?.id)
     b.status = b.runner ? 'sent' : 'unassigned'
-    // Update pending_route in localStorage
+    // Stamp in localStorage so scheduler skips this batch at 9am
     const pKey = 'pending_route:'+b.zoneId+':'+normDay(b.day)
-    try { const p=JSON.parse(localStorage.getItem(pKey)||'{}'); p.status='sent'; localStorage.setItem(pKey,JSON.stringify(p)) } catch(e){}
+    try {
+      const p = JSON.parse(localStorage.getItem(pKey)||'{}')
+      p.status  = 'sent'
+      p.sentAt  = nowIso
+      p.manualSend = true
+      localStorage.setItem(pKey, JSON.stringify(p))
+    } catch(e){}
   })
 
   // Send offer emails
