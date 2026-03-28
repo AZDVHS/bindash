@@ -15946,12 +15946,19 @@ function approvePendingRoute(zoneId, day, permanent=true){
   if(permanent) saveRouteTemplate(zoneId, day, pending.stops, pending.runner?.id)
 
   // Also write approval to Supabase so the server-side scheduler sees it
-  // The 1pm edge function reads dispatch_queue to know what's approved
+  // Uses upsert so it creates the row if it doesn't exist yet (new routes)
+  const _dqDate = pending.date || new Date(now.getTime()+86400000).toISOString().slice(0,10)
   _supa.from('dispatch_queue')
-    .update({ status: 'queued', approved_at: now.toISOString() })
-    .eq('zone_id', zoneId)
-    .eq('scheduled_date', pending.date || new Date(now.getTime()+86400000).toISOString().slice(0,10))
-    .then(({ error }) => { if(error) console.warn('[BinDash] dispatch_queue sync:', error.message) })
+    .upsert({
+      zone_id: zoneId,
+      scheduled_date: _dqDate,
+      status: 'queued',
+      approved_at: now.toISOString(),
+      runner_id: pending.runner?.id || null,
+      stop_count: (pending.stops||[]).length,
+      created_at: now.toISOString(),
+    }, { onConflict: 'zone_id,scheduled_date' })
+    .then(({ error }) => { if(error) console.warn('[BinDash] dispatch_queue upsert:', error.message) })
 
   // Sync status on any matching in-memory batch so the card turns blue (queued)
   generatedBatches.forEach(b=>{
