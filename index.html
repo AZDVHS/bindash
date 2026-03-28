@@ -17076,10 +17076,11 @@ function renderDispatchPipeline(){
         +'<div style="width:26px;height:26px;border-radius:50%;background:'+(b.runner.color||'var(--cyan)')+';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#07090f;flex-shrink:0">'+(ri||'RN')+'</div>'
         +'<div style="flex:1"><span style="font-weight:600">'+b.runner.name+'</span> <span style="color:var(--muted);font-size:11px">· '+(b.runner.visitType||'BOTH')+' · '+(b.runner.rating||0)+'★</span></div>'
         +'<div style="display:flex;gap:6px;align-items:center">'
-        +(isPreview
+        +((isPreview||b.status==='queued'||b.status==='change_detected'||b.status==='draft')
           ? '<select style="font-size:11px;padding:3px 6px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text)" data-batch-id="'+b.id+'" onchange="swapBatchRunnerKeepOpen(this)"><option value="">↔ Change runner</option>'+runnerOpts+'</select>'
           : '<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="showRunnerUnavailable(\''+b.runner.id+'\')">⚠️ Mark unavailable</button>'
             +'<button class="btn btn-outline btn-sm" style="font-size:10px" onclick="adForceReassign(\''+b.id+'\')">Reassign</button>')
+        +'<button onclick="event.stopPropagation();openRouteInMaps(\''+b.id+'\')" style="font-size:10px;padding:3px 9px;border-radius:6px;border:1px solid rgba(99,102,241,.4);background:rgba(99,102,241,.1);color:#a5b4fc;cursor:pointer;white-space:nowrap">🗺️ Maps</button>'
         +'</div></div>'
       : '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--border);font-size:12px;background:var(--surface2)">'
         +'<span style="color:#ef4444">⚠️ No runner assigned</span>'
@@ -17251,6 +17252,28 @@ function deleteBatchFromPreview(batchId){
   showToast(`Route ${b.id} removed (${b.stops.length} stops dropped)`, 'info')
   renderDispatchPipeline()
   updateLaunchButton()
+}
+
+function openRouteInMaps(batchId){
+  const b = generatedBatches.find(x=>x.id===batchId)
+    || (window._livePipelineBatches||[]).find(x=>x.id===batchId)
+  if(!b || !b.stops || !b.stops.length){
+    showToast('No stops to map','warn'); return
+  }
+  // Build addresses from stops — use street_address + zip or address field
+  const addrs = b.stops.map(s=>{
+    const a = (s.address||s.street_address||'').trim()
+    const z = (s.zip||s.zip_code||'85301').trim()
+    return a ? encodeURIComponent(a+', Glendale, AZ '+z) : null
+  }).filter(Boolean)
+
+  if(!addrs.length){ showToast('No addresses found on stops','warn'); return }
+
+  // Google Maps directions URL: origin = first stop, destination = last stop, waypoints = middle
+  // Format: https://www.google.com/maps/dir/addr1/addr2/addr3
+  const allPoints = addrs.join('/')
+  const url = 'https://www.google.com/maps/dir/' + allPoints
+  window.open(url, '_blank')
 }
 
 function mergeBatches(idsStr){
