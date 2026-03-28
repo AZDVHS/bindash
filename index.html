@@ -6215,7 +6215,9 @@ async function loadRunnerRoutes(runnerRow){
       const sched = new Date(j.scheduled_date + 'T23:59:00')
       return sched >= now && ['offered','accepted'].includes(j.status)
     })
-    if(upcomingBadge) upcomingBadge.textContent = upcomingJobs.length
+    // Count distinct batches, not individual stops
+    const upcomingBatchCount = new Set(upcomingJobs.map(j => j.batch_id || j.id)).size
+    if(upcomingBadge) upcomingBadge.textContent = upcomingBatchCount
 
     // Update projected pay
     const todayJobs = activeJobs.filter(j => j.scheduled_date && new Date(j.scheduled_date).toDateString()===new Date().toDateString())
