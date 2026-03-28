@@ -15879,10 +15879,7 @@ function loadPendingApprovalsIntoDispatch(){
     ? allPending.filter(p => normDay(p.day) === normDay(selectedDay))
     : allPending
 
-  // Also show queued for next 3 days even if different day selected (so admin sees upcoming)
-  const allQueued = allPending.filter(p=>p.status==='queued')
-
-  if(!pending.length && !allQueued.length){
+  if(!pending.length){
     el.style.display = 'none'
     return
   }
@@ -15890,9 +15887,6 @@ function loadPendingApprovalsIntoDispatch(){
   el.style.display = 'block'
   const needApproval = pending.filter(p=>p.status==='draft'||p.status==='change_detected')
   const dayQueued = pending.filter(p=>p.status==='queued')
-
-  // All queued routes (across days) shown as a compact summary line
-  const otherQueued = allQueued.filter(q=>!dayQueued.includes(q))
 
   el.innerHTML = needApproval.map(p=>`
   <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
@@ -15908,7 +15902,6 @@ function loadPendingApprovalsIntoDispatch(){
     </div>
   </div>`).join('')
   + (dayQueued.length ? `<div style="padding:7px 14px;font-size:11px;color:var(--muted);background:rgba(59,130,246,.06);border-bottom:1px solid var(--border)">🕐 ${dayQueued.map(p=>p.zoneName).join(', ')} — approved · queued for auto-send · <button onclick="${dayQueued.map(p=>`sendRouteNow('${p.zoneId}','${p.day}')`).join(';')}" style="background:none;border:none;color:var(--cyan);font-size:11px;cursor:pointer;padding:0;text-decoration:underline">Send now →</button></div>` : '')
-  + (otherQueued.length ? `<div style="padding:6px 14px;font-size:11px;color:var(--muted);opacity:.7">Also queued: ${otherQueued.map(p=>p.zoneName+' ('+p.day+')').join(' · ')}</div>` : '')
 }
 
 // Full day names for matching
