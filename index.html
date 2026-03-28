@@ -6182,7 +6182,13 @@ async function loadRunnerRoutes(runnerRow){
         </div>
         <div style="padding:10px 16px 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           ${!isOffer && addrs.length ? `<a href="${mapsUrl}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#1a73e8;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;color:#fff;text-decoration:none">📍 Open in Google Maps</a>` : ''}
-          ${batch.status==='accepted' ? `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>` : ''}
+          ${batch.status==='accepted' ? (() => {
+            const lockCheck = win ? getRouteLockState(batch.date, batch.stops.length) : {locked:false,state:'OPEN'}
+            if(lockCheck.locked){
+              return `<button onclick="startBatch('${batch.id}')" style="display:inline-flex;align-items:center;gap:6px;background:rgba(100,116,139,.2);border:1px solid rgba(100,116,139,.3);color:var(--muted);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer">🔒 ${lockCheck.state==='TOO_EARLY'?'Start on '+new Date(batch.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}):lockCheck.state==='LOCKED_LATE'?'Too late to start':'Locked'}</button>`
+            }
+            return `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>`
+          })() : ''}
           ${batch.status==='in_progress' ? `<button class="btn btn-cyan btn-sm" onclick="resumeBatch('${batch.id}')">↺ Resume Route</button>` : ''}
           ${batch.status==='in_progress' ? `<button class="btn btn-green btn-sm" onclick="completeBatch('${batch.id}')">✓ Mark All Complete</button>` : ''}
           <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600">$${earn}</span>
@@ -6222,6 +6228,74 @@ async function loadRunnerRoutes(runnerRow){
   } catch(err){
     console.warn('[BinDash] Route load failed:', String(err?.message||err))
   }
+}
+
+// ── ROUTE TIME LOCK SYSTEM ───────────────────────────────────────────────────
+// Returns the lock state for a given scheduled_date and stop count.
+// Rules:
+//   TOO_EARLY  — not the day of service yet, can't start
+//   LOCKED_LATE— past the point where runner can finish by 9pm deadline
+//                (7:30pm cutoff for 1 stop, 7pm for 2-3, 6:30pm for 4+)
+//   OVERDUE    — past 9pm hard deadline entirely
+//   OPEN       — within the valid work window (3pm–deadline)
+//   PRE_WINDOW — day of service but before 3pm recommended open (still allowed, just noted)
+function getRouteLockState(scheduledDateStr, stopCount){
+  const now     = new Date()
+  const workDate = scheduledDateStr ? new Date(scheduledDateStr + 'T00:00:00') : new Date()
+  const isToday  = workDate.toDateString() === now.toDateString()
+  const isPast   = workDate < new Date(now.toDateString())  // strictly before today
+
+  if(isPast){
+    return { locked:true, state:'OVERDUE', color:'#ef4444',
+      title:'Route is overdue',
+      reason:'This route\'s service date has passed. Contact your admin.' }
+  }
+
+  if(!isToday){
+    const daysUntil = Math.round((workDate - new Date(now.toDateString())) / 86400000)
+    return { locked:true, state:'TOO_EARLY', color:'#64748b',
+      title:'Not yet — service day is ' + workDate.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}),
+      reason:`This route can only be started on the day of service (${daysUntil} day${daysUntil!==1?'s':''} away). Check back then.` }
+  }
+
+  // Day of service — check time window
+  const stops = Math.max(1, stopCount || 1)
+  // Each stop ~15 min average, plus 20 min buffer, must finish by 9pm
+  const minsNeeded  = stops * 15 + 20
+  const deadline    = new Date(workDate); deadline.setHours(21, 0, 0, 0)      // 9:00pm hard deadline
+  const cutoff      = new Date(deadline.getTime() - minsNeeded * 60000)       // latest possible start
+  const windowOpen  = new Date(workDate); windowOpen.setHours(15, 0, 0, 0)   // 3pm recommended open
+  const h = now.getHours(), m = now.getMinutes()
+
+  if(now >= deadline){
+    return { locked:true, state:'OVERDUE', color:'#ef4444',
+      title:'Past 9pm deadline',
+      reason:'The service window has closed for tonight. This route cannot be started.' }
+  }
+
+  if(now >= cutoff){
+    const minsLeft = Math.round((deadline - now) / 60000)
+    const cutoffStr = cutoff.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
+    return { locked:true, state:'LOCKED_LATE', color:'#ef4444',
+      title:`Too late to start — cutoff was ${cutoffStr}`,
+      reason:`With ${stops} stop${stops!==1?'s':''}, you need at least ${minsNeeded} min to finish before the 9pm deadline. You only have ${minsLeft} min left. Contact your admin.` }
+  }
+
+  if(now < windowOpen){
+    const minsToOpen = Math.round((windowOpen - now) / 60000)
+    const hh = Math.floor(minsToOpen/60), mm = minsToOpen%60
+    return { locked:false, state:'PRE_WINDOW', color:'#a5b4fc',
+      title:`Window opens in ${hh>0?hh+'h ':''}${mm}m`,
+      reason:`The recommended start window is 3pm–7pm. You can start early but bins may not be put out yet.` }
+  }
+
+  // Within recommended window
+  const minsLeft = Math.round((cutoff - now) / 60000)
+  const hh = Math.floor(minsLeft/60), mm = minsLeft%60
+  const cutoffStr = cutoff.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
+  return { locked:false, state:'OPEN', color:'#22c55e',
+    title:'Window open — GO TIME',
+    reason:`Start by ${cutoffStr} to finish all ${stops} stop${stops!==1?'s':''} before the 9pm deadline.` }
 }
 
 // Returns display info for the Bin Out time window for a given scheduled_date
@@ -6303,8 +6377,23 @@ async function acceptOffer(){
   const btn = document.querySelector('#offer-banner .btn-cyan')
   if(btn){ btn.disabled=true; btn.textContent='Accepting...' }
 
+  // Check scheduled date lock before accepting
+  const offerJobs = (window._lastEnrichedJobs||[]).filter(j=>(j.batch_id||j.id)===offerId)
+  const scheduledDate = offerJobs[0]?.scheduled_date || null
+  const stopCount = offerJobs.length || 1
+  const visitType = offerJobs[0]?.visit_type || 'BIN_OUT'
+
+  if(visitType === 'BIN_OUT' && scheduledDate){
+    const lock = getRouteLockState(scheduledDate, stopCount)
+    if(lock.locked && lock.state !== 'PRE_WINDOW'){
+      showToast(`🔒 ${lock.title} — ${lock.reason}`, 'err', 6000)
+      if(btn){ btn.disabled=false; btn.textContent='✓ Accept' }
+      return
+    }
+  }
+
   try {
-    // First check if another runner already accepted (only valid block)
+    // First check if another runner already accepted
     const { data: currentJobs } = await _supa.from('jobs')
       .select('status, runner_id')
       .eq('batch_id', offerId)
@@ -6320,8 +6409,6 @@ async function acceptOffer(){
       if(btn){ btn.disabled=false; btn.textContent='✓ Accept' }
       return
     }
-
-    // Accept regardless of expiry — expired just means it was broadcast, not locked
     const { error } = await _supa.from('jobs')
       .update({ 
         status:          'accepted', 
@@ -6403,6 +6490,53 @@ async function resumeBatch(batchId){
 
 async function startBatch(batchId){
   const runnerRow = window._currentRunnerRow
+
+  // Get the job details to check the scheduled date and stop count
+  const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
+  const scheduledDate = batchJobs[0]?.scheduled_date || null
+  const stopCount = batchJobs.length || 1
+  const visitType = batchJobs[0]?.visit_type || 'BIN_OUT'
+
+  // Only enforce time locks on BIN_OUT routes (BIN_IN is morning, different rules)
+  if(visitType === 'BIN_OUT'){
+    const lock = getRouteLockState(scheduledDate, stopCount)
+    if(lock.locked){
+      // Show a clear modal explaining why they can't start
+      document.getElementById('modal-box').innerHTML = `
+      <div class="mh" style="background:rgba(239,68,68,.07)">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:#ef4444">🔒 ${lock.title}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">Route cannot be started right now</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+      </div>
+      <div class="mb" style="text-align:center;padding:24px 16px">
+        <div style="font-size:40px;margin-bottom:16px">${lock.state==='TOO_EARLY'?'📅':lock.state==='LOCKED_LATE'?'⏰':'🚫'}</div>
+        <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px">${lock.title}</div>
+        <div style="font-size:13px;color:var(--muted);line-height:1.6;max-width:300px;margin:0 auto">${lock.reason}</div>
+        ${lock.state==='TOO_EARLY' ? `
+        <div style="margin-top:16px;background:rgba(165,180,252,.08);border-radius:8px;padding:10px 14px;font-size:12px;color:#a5b4fc">
+          📅 Come back on <strong>${new Date(scheduledDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}</strong> between 3pm–7pm
+        </div>` : ''}
+        ${lock.state==='LOCKED_LATE' ? `
+        <div style="margin-top:16px;background:rgba(239,68,68,.08);border-radius:8px;padding:10px 14px;font-size:12px;color:#ef4444">
+          ⏰ You needed to start by <strong>${new Date(new Date(scheduledDate+'T21:00:00').getTime() - stopCount*15*60000 - 20*60000).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}</strong> to finish ${stopCount} stop${stopCount!==1?'s':''} by 9pm
+        </div>` : ''}
+      </div>
+      <div class="mf">
+        <button class="btn btn-outline btn-sm" onclick="closeM()">Got it</button>
+        ${lock.state!=='TOO_EARLY' ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:11px" onclick="closeM();_forceStartBatch('${batchId}')">Start anyway (override)</button>` : ''}
+      </div>`
+      openM()
+      return
+    }
+
+    // Pre-window advisory — not blocked, just a heads up
+    if(lock.state === 'PRE_WINDOW'){
+      showToast(`⏰ ${lock.title} — ${lock.reason}`, 'info', 5000)
+    }
+  }
+
   try {
     await _supa.from('jobs')
       .update({ status:'in_progress', updated_at:new Date().toISOString() })
@@ -6437,6 +6571,39 @@ async function startBatch(batchId){
     const badge = document.getElementById('rtab-active-count')
     if(badge){ badge.textContent = ''; badge.style.display = 'inline' }
 
+  } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
+}
+
+// Admin/override start — bypasses time locks, used when runner confirms they understand the risk
+async function _forceStartBatch(batchId){
+  const runnerRow = window._currentRunnerRow
+  try {
+    await _supa.from('jobs')
+      .update({ status:'in_progress', override_start:true, updated_at:new Date().toISOString() })
+      .eq('batch_id', batchId)
+    showToast('Route started (override) — complete as quickly as possible ⚠️', 'warn', 5000)
+    const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
+    if(batchJobs.length){
+      window.NAV_STOPS = batchJobs.map(j=>({
+        name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.homeowner_email || 'Stop',
+        address:     j.hw?.street_address || '--',
+        gate:        j.hw?.gate_code   || null,
+        pets:        j.hw?.pet_info    || null,
+        binLocation: j.hw?.bin_location|| null,
+        serviceType: j.service_type    || 'Recycling',
+        notes:       j.hw?.service_notes || null,
+        hwEmail:     j.homeowner_email  || null,
+        jobId:       j.id,
+      }))
+      navBatchId    = batchId
+      navVisitType  = batchJobs[0]?.visit_type || 'BIN_OUT'
+      navStop       = 0
+      navPhase      = 'travelling'
+      navRouteActive = true
+    }
+    await loadRunnerRoutes(runnerRow)
+    switchRouteTab('active')
+    renderActiveRouteTab()
   } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
 }
 
