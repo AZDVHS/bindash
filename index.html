@@ -15833,9 +15833,13 @@ function startRouteScheduler(){
     }
 
     // Continuous UI refresh every 30s when dispatch is active
-    if(document.querySelector('#ad-dispatch')?.style.display !== 'none'){
+    // BUT skip if admin has unsaved in-memory edits (runner changes, merges, reorders)
+    const _hasAdminEdits = generatedBatches.some(b => b._adminOrderModified || b.status === 'preview')
+    if(document.querySelector('#ad-dispatch')?.style.display !== 'none' && !_hasAdminEdits){
+      window._livePipelineBatches = null
       await loadLiveJobsIntoPipeline()
-      renderDispatchPipeline()
+      // Only re-render live view (dispatched routes), not preview batches
+      if(!generatedBatches.length) renderDispatchPipeline()
     }
   }, 30000)
 }
@@ -16194,7 +16198,18 @@ function pickDispatchDay(el){
   _showDispatchDayStatus(day, dateStr2, dateStr)
   loadPendingApprovalsIntoDispatch()
 
-  // Always clear previous day's preview and load the new day
+  // Clear preview and load the new day
+  // If admin has unsaved edits, preserve them in localStorage before clearing
+  generatedBatches.forEach(b => {
+    if((b._adminOrderModified || b.status === 'preview') && b.zoneId && b.day) {
+      const pKey = 'pending_route:'+b.zoneId+':'+normDay(b.day)
+      const raw = localStorage.getItem(pKey)
+      const existing = raw ? (() => { try { return JSON.parse(raw) } catch { return null } })() : {}
+      if(b.runner && existing) {
+        localStorage.setItem(pKey, JSON.stringify({ ...existing, runner: b.runner, stops: b.stops }))
+      }
+    }
+  })
   generatedBatches = []
   window._livePipelineBatches = null
 
@@ -16735,13 +16750,32 @@ async function _adGenerateBatchesAsync(silent=false){
         })
 
         // Save to pending_route localStorage for scheduler + approval strip
+        // BUT: preserve any admin edits (approved, runner changed, stop reordered)
         const pKey = 'pending_route:'+zId+':'+normDay(day)
-        localStorage.setItem(pKey, JSON.stringify({
-          zoneId: zId, zoneName, day: normDay(day), date: binOutDateStr,
-          collectionDay: day, stops: chunk, runner: offer.runner,
-          status: lifecycleStatus, isNew, changes,
-          generatedAt: new Date().toISOString()
-        }))
+        const _existingRaw = localStorage.getItem(pKey)
+        const _existing = _existingRaw ? (() => { try { return JSON.parse(_existingRaw) } catch { return null } })() : null
+        const _adminEdited = _existing && (_existing.approvedAt || _existing.status === 'queued' || _existing.manualSend)
+        if(_adminEdited) {
+          // Admin approved or manually edited this route — preserve runner + status, only update stops if changed
+          const _preserved = {
+            ..._existing,
+            stops: _existing.stops || chunk, // keep admin stops if set, otherwise use fresh
+            isNew, changes,
+            generatedAt: new Date().toISOString()
+          }
+          localStorage.setItem(pKey, JSON.stringify(_preserved))
+          // Also restore the in-memory batch to match admin edits
+          const _thisBatch = generatedBatches[generatedBatches.length-1]
+          if(_thisBatch && _existing.runner) _thisBatch.runner = _existing.runner
+          if(_thisBatch && _existing.status) _thisBatch.status = _existing.status
+        } else {
+          localStorage.setItem(pKey, JSON.stringify({
+            zoneId: zId, zoneName, day: normDay(day), date: binOutDateStr,
+            collectionDay: day, stops: chunk, runner: offer.runner,
+            status: lifecycleStatus, isNew, changes,
+            generatedAt: new Date().toISOString()
+          }))
+        }
       }
     })
   })
@@ -17323,14 +17357,33 @@ function mergeBatches(idsStr){
   // Move all stops from other batches into primary
   for(let i = 1; i < batches.length; i++){
     primary.stops.push(...batches[i].stops)
-    const idx = generatedBatches.findIndex(x=>x.id===batches[i].id)
+    // Remove the merged batch's pending_route entry from localStorage
+    const mb = batches[i]
+    if(mb.zoneId && mb.day) localStorage.removeItem('pending_route:'+mb.zoneId+':'+normDay(mb.day))
+    const idx = generatedBatches.findIndex(x=>x.id===mb.id)
     if(idx >= 0) generatedBatches.splice(idx, 1)
   }
   primary.earnOut   = (primary.stops.length * 3.25).toFixed(2)
   primary.earnTotal = (primary.stops.length * 6.50).toFixed(2)
   primary.hasSplit  = primary.stops.some(h=>h.service==='SPLIT')
-  showToast(`Routes merged into one — ${primary.stops.length} stops for ${primary.runner?.name||'runner'} ✅`, 'ok')
+
+  // Persist the merged state to localStorage so it survives re-renders
+  if(primary.zoneId && primary.day){
+    const pKey = 'pending_route:'+primary.zoneId+':'+normDay(primary.day)
+    const raw = localStorage.getItem(pKey)
+    const existing = raw ? (() => { try { return JSON.parse(raw) } catch { return null } })() : {}
+    localStorage.setItem(pKey, JSON.stringify({
+      ...existing,
+      zoneId: primary.zoneId, zoneName: primary.zoneName, day: primary.day,
+      stops: primary.stops, runner: primary.runner,
+      status: primary.status || existing?.status || 'draft',
+      mergedAt: new Date().toISOString(),
+    }))
+  }
+
+  showToast(`Routes merged — ${primary.stops.length} stops for ${primary.runner?.name||'runner'} ✅`, 'ok')
   renderDispatchPipeline()
+  openCards.add(primary.id)
   updateLaunchButton()
 }
 
