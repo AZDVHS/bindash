@@ -15757,11 +15757,10 @@ function getPendingRoutes(){
 function approvePendingRoute(zoneId, day, permanent=true){
   const key = 'pending_route:'+zoneId+':'+normDay(day)
   const raw = localStorage.getItem(key)
-  if(!raw) return
+  if(!raw){ showToast('Route not found in queue','err'); return }
   const pending = JSON.parse(raw)
 
-  // If past 9am — send immediately (routes already dispatched window)
-  // If before 9am — queue for 9am auto-send
+  const now = new Date()  // ← was missing, caused silent crash
   const isPast9am = now.getHours() >= 9
   const newStatus = isPast9am ? 'sent' : 'queued'
 
