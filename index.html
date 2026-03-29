@@ -4102,8 +4102,12 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
           <div id="micro-zones-panel" style="display:none;margin-bottom:20px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <div style="font-size:13px;font-weight:700">H3 Micro Zones <span style="font-size:11px;font-weight:400;color:var(--muted)">(Resolution 8 · ~0.74km² per hex)</span></div>
-              <button class="btn btn-outline btn-sm" onclick="loadMicroZones()">⟳ Refresh</button>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-outline btn-sm" onclick="geocodeExistingHomeowners()" id="mz-geocode-btn" title="Convert existing homeowner addresses to real H3 hex IDs">📍 Geocode HOs</button>
+                <button class="btn btn-outline btn-sm" onclick="loadMicroZones()">⟳ Refresh</button>
+              </div>
             </div>
+            <div id="mz-geocode-progress" style="display:none;background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px"></div>
             <!-- Stats bar -->
             <div id="mz-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px"></div>
             <!-- Map toggle -->
@@ -7443,7 +7447,7 @@ async function _h3CheckAddress(){
         // Move pin to exact address — smooth animation
         _moveSignupPin(precise.lat, precise.lng, addr)
         // Zoom in closer when we have a precise address
-        if(_signupMap) _signupMap.setView([precise.lat, precise.lng], 16, { animate: true })
+        if(_signupMap) _signupMap.setView([precise.lat, precise.lng], 13, { animate: true })
         const hexId = latLngToHex(precise.lat, precise.lng)
         if(hexId){
           let zone = null
@@ -7482,7 +7486,7 @@ async function _h3CheckAddress(){
   try {
     const { data: nearbyZones } = await _supa
       .from('micro_zones').select('hex_id,status,member_count,waitlist_count,activation_threshold,zip_code,city,zone_label,trash_day,lat,lng')
-      .neq('status','inactive').limit(80)
+      .in('status', ['active','pending','shadow']).limit(200)
     if(nearbyZones?.length && _signupMap) drawHexLayers(_signupMap, nearbyZones)
   } catch(e){ /* ok */ }
 
@@ -7667,9 +7671,9 @@ async function _initSignupMap(lat, lng, zones){
       el.style.height = '220px'
       _signupMap = L.map('h3-signup-map', {
         center:          [lat, lng],
-        zoom:            15,
+        zoom:            12,
         zoomControl:     true,
-        scrollWheelZoom: false,
+        scrollWheelZoom: true,
         attributionControl: false,
       })
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -7832,6 +7836,124 @@ function showMicroZoneDetail(z){
   </div>
   <div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Close</button></div>`
   openM()
+}
+
+// Geocode all existing homeowners that don't have a hex_id yet
+// Runs in the browser, rate-limited to be polite to free geocoding APIs
+async function geocodeExistingHomeowners(){
+  const btn      = document.getElementById('mz-geocode-btn')
+  const progress = document.getElementById('mz-geocode-progress')
+  if(btn) btn.disabled = true
+  if(progress) progress.style.display = 'block'
+
+  const updateProgress = (msg, color='var(--cyan)') => {
+    if(progress) progress.innerHTML = `<span style="color:${color}">${msg}</span>`
+  }
+
+  try {
+    // Load homeowners without hex_id
+    updateProgress('Loading homeowners...')
+    const { data: hws, error } = await _supa
+      .from('homeowners')
+      .select('id, email, street_address, city, zip_code, lat, lng, hex_id')
+      .eq('status', 'active')
+      .is('hex_id', null)
+      .limit(100)
+
+    if(error) throw error
+    if(!hws || !hws.length){
+      updateProgress('✅ All homeowners already have hex IDs!', '#22c55e')
+      await loadMicroZones()
+      if(btn) btn.disabled = false
+      return
+    }
+
+    updateProgress(`Found ${hws.length} homeowners to geocode. Starting...`)
+
+    let done = 0, failed = 0
+
+    for(const hw of hws){
+      updateProgress(`Geocoding ${done + 1}/${hws.length}: ${hw.street_address}...`)
+
+      try {
+        // Use ZIP centroid as fallback if we can't geocode
+        let lat = null, lng = null
+
+        if(hw.street_address && hw.zip_code){
+          const coords = await geocodeAddress(hw.street_address, hw.city||'', 'AZ', hw.zip_code)
+          if(coords){ lat = coords.lat; lng = coords.lng }
+        }
+
+        // Fall back to ZIP centroid
+        if(!lat && hw.zip_code && ZIP_CENTROIDS[hw.zip_code]){
+          lat = ZIP_CENTROIDS[hw.zip_code][0]
+          lng = ZIP_CENTROIDS[hw.zip_code][1]
+        }
+
+        if(!lat){ failed++; continue }
+
+        const hexId = latLngToHex(lat, lng)
+        if(!hexId){ failed++; continue }
+
+        // Update homeowner with hex_id + coords
+        await _supa.from('homeowners').update({
+          hex_id: hexId, lat, lng, updated_at: new Date().toISOString()
+        }).eq('id', hw.id)
+
+        // Create or update micro_zone for this hex
+        const { data: existing } = await _supa.from('micro_zones')
+          .select('hex_id, member_count')
+          .eq('hex_id', hexId).maybeSingle()
+
+        if(existing){
+          await _supa.from('micro_zones').update({
+            member_count: (existing.member_count||0) + 1,
+            status: (existing.member_count||0) + 1 >= 5 ? 'active' : 'pending',
+            updated_at: new Date().toISOString()
+          }).eq('hex_id', hexId)
+        } else {
+          // Get city/zip info from homeowner
+          await _supa.from('micro_zones').upsert({
+            hex_id:     hexId,
+            resolution: 8,
+            lat, lng,
+            city:        hw.city || '',
+            state:       'AZ',
+            zip_code:    hw.zip_code || '',
+            status:      'pending',
+            member_count: 1,
+            waitlist_count: 0,
+            activation_threshold: 5,
+            zone_label:  'AZ-' + (hw.zip_code||''),
+            created_at:  new Date().toISOString(),
+            updated_at:  new Date().toISOString(),
+          }, { onConflict: 'hex_id' })
+        }
+
+        done++
+
+        // Rate limit: 1 geocode per 300ms to be polite to free API
+        await new Promise(r => setTimeout(r, 300))
+
+      } catch(e){
+        console.warn('[Geocode] failed for', hw.email, e.message)
+        failed++
+      }
+    }
+
+    updateProgress(
+      `✅ Done! ${done} geocoded, ${failed} failed. Real H3 hexes created.`,
+      '#22c55e'
+    )
+    // Reload map with new hex data
+    await loadMicroZones()
+
+  } catch(e){
+    updateProgress('❌ Error: ' + e.message, '#ef4444')
+    console.error('[Geocode] geocodeExistingHomeowners:', e)
+  }
+
+  if(btn) btn.disabled = false
 }
 
 function mzSetView(view){
