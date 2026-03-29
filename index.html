@@ -10935,9 +10935,9 @@ function _renderNavModal(){
         ${isDone ? '&#x2713;' : i+1}
       </div>
       <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:700;margin-bottom:2px;
-                    ${isDone ? 'color:var(--muted);text-decoration:line-through' : ''}">
-          ${st.name}
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+          <span style="font-size:13px;font-weight:700;${isDone ? 'color:var(--muted);text-decoration:line-through' : ''}">${st.name}</span>
+          ${st._isNew ? '<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:rgba(6,214,160,.2);color:#06d6a0;font-weight:700">⭐ New stop</span>' : ''}
         </div>
         <div style="font-size:11px;color:var(--sub);margin-bottom:4px">${st.address}</div>
         <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:${isCur?'8px':'0'}">
@@ -15769,24 +15769,30 @@ function loadRouteTemplate(zoneId, day){
 function saveRouteTemplate(zoneId, day, stops, runnerId){
   try {
     const key = getRouteTemplateKey(zoneId, day)
-    const tpl = { zoneId, day: normDay(day), stops: stops.map(s=>s.email||s), runnerId, savedAt: new Date().toISOString() }
+    // Store ordered list of stop emails — this IS the admin order
+    const orderedEmails = stops.map(s=>s.email||s)
+    const tpl = { zoneId, day: normDay(day), stops: orderedEmails, runnerId, savedAt: new Date().toISOString() }
     localStorage.setItem(key, JSON.stringify(tpl))
+    // Also sync admin_route_order to match template order
+    const aoKey = 'admin_route_order:' + zoneId + ':' + normDay(day)
+    localStorage.setItem(aoKey, JSON.stringify({ order: orderedEmails, savedAt: new Date().toISOString(), runnerId }))
+    console.log('[BinDash] route template saved — ' + orderedEmails.length + ' stops in order')
   } catch(e){ console.warn('[Routes] saveTemplate:', e) }
 }
 
 function detectRouteChanges(zoneId, day, newStops, newRunnerId){
   const tpl = loadRouteTemplate(zoneId, day)
-  if(!tpl) return { isNew: true, changes: [] }
+  if(!tpl) return { isNew: true, changes: [], addedEmails: [], removedEmails: [], templateOrder: [] }
   const oldEmails = new Set(tpl.stops)
   const newEmails = newStops.map(s=>s.email||s)
-  const added   = newEmails.filter(e => !oldEmails.has(e))
-  const removed = [...oldEmails].filter(e => !newEmails.includes(e))
+  const addedEmails   = newEmails.filter(e => !oldEmails.has(e))
+  const removedEmails = [...oldEmails].filter(e => !newEmails.includes(e))
   const runnerChanged = tpl.runnerId && newRunnerId && tpl.runnerId !== newRunnerId
   const changes = []
-  if(added.length)    changes.push(`${added.length} stop${added.length>1?'s':''} added`)
-  if(removed.length)  changes.push(`${removed.length} stop${removed.length>1?'s':''} removed`)
-  if(runnerChanged)   changes.push('runner changed')
-  return { isNew: false, changes }
+  if(addedEmails.length)   changes.push(`${addedEmails.length} stop${addedEmails.length>1?'s':''} added`)
+  if(removedEmails.length) changes.push(`${removedEmails.length} stop${removedEmails.length>1?'s':''} removed`)
+  if(runnerChanged)        changes.push('runner changed')
+  return { isNew: false, changes, addedEmails, removedEmails, templateOrder: tpl.stops }
 }
 
 // Browser scheduler — UI refresh only. Actual dispatch is handled by Supabase edge functions.
@@ -15947,8 +15953,64 @@ function approvePendingRoute(zoneId, day, permanent=true){
   pending.approvedAt = now.toISOString()
   pending.permanent  = permanent
   if(!permanent) pending.oneTime = true
+
+  // Build the correct stop order for this approval
+  const tpl = loadRouteTemplate(zoneId, day)
+  if(tpl && tpl.stops && tpl.stops.length) {
+    const tplOrder = tpl.stops  // array of emails in template order
+    const currentEmails = pending.stops.map(s=>s.email||s)
+    const addedEmails = currentEmails.filter(e => !tplOrder.includes(e))
+    const removedEmails = tplOrder.filter(e => !currentEmails.includes(e))
+
+    if(permanent) {
+      // "Approve + save as template": rebuild stop list in template order,
+      // drop removed stops, append new stops to end in their natural position
+      const orderedStops = []
+      tplOrder.forEach(email => {
+        if(!removedEmails.includes(email)) {
+          const stop = pending.stops.find(s=>(s.email||s)===email)
+          if(stop) orderedStops.push(stop)
+        }
+      })
+      // New stops go to end
+      addedEmails.forEach(email => {
+        const stop = pending.stops.find(s=>(s.email||s)===email)
+        if(stop) orderedStops.push(stop)
+      })
+      pending.stops = orderedStops
+      // Mark new stops so runner can see them highlighted
+      pending.stops.forEach(s => { s._isNew = addedEmails.includes(s.email||s) })
+      saveRouteTemplate(zoneId, day, pending.stops, pending.runner?.id)
+    } else {
+      // "Approve once": keep template order, drop removed, append added to end
+      const orderedStops = []
+      tplOrder.forEach(email => {
+        if(!removedEmails.includes(email)) {
+          const stop = pending.stops.find(s=>(s.email||s)===email)
+          if(stop) orderedStops.push(stop)
+        }
+      })
+      addedEmails.forEach(email => {
+        const stop = pending.stops.find(s=>(s.email||s)===email)
+        if(stop) { stop._isNew = true; orderedStops.push(stop) }
+      })
+      pending.stops = orderedStops
+      // Template NOT updated — changes are one-time only
+    }
+  } else {
+    // No template yet — just save as-is
+    if(permanent) saveRouteTemplate(zoneId, day, pending.stops, pending.runner?.id)
+  }
+
+  // Also sync admin_route_order to match approved stop order
+  const _aoKey = 'admin_route_order:' + zoneId + ':' + normDay(day)
+  localStorage.setItem(_aoKey, JSON.stringify({
+    order: pending.stops.map(s=>s.email||s),
+    savedAt: now.toISOString(),
+    runnerId: pending.runner?.id || null
+  }))
+
   localStorage.setItem(key, JSON.stringify(pending))
-  if(permanent) saveRouteTemplate(zoneId, day, pending.stops, pending.runner?.id)
 
   // Write approval to Supabase dispatch_queue — try update first, insert if no row exists
   const _dqDate = pending.date || new Date(now.getTime()+86400000).toISOString().slice(0,10)
@@ -16048,8 +16110,20 @@ function showRouteApprovalModal(zoneId, day){
   const p = JSON.parse(raw)
   const z = ADMIN_ZONES.find(x=>x.id===zoneId)
   const isChange = p.status==='change_detected'
-  const stopList = (p.stops||[]).slice(0,5).map((s,i)=>`<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">${i+1}. ${s.name||s.email||s}</div>`).join('')
-  const moreStops = p.stops.length > 5 ? `<div style="font-size:11px;color:var(--muted);padding-top:4px">+ ${p.stops.length-5} more</div>` : ''
+  const tplForModal = loadRouteTemplate(zoneId, day)
+  const tplEmails = new Set(tplForModal?.stops||[])
+  const stopList = (p.stops||[]).slice(0,6).map((s,i)=>{
+    const email = s.email||s
+    const isAdded = tplEmails.size && !tplEmails.has(email)
+    const color = isAdded ? '#06d6a0' : 'inherit'
+    const badge = isAdded ? ' <span style="font-size:9px;background:rgba(6,214,160,.15);color:#06d6a0;padding:1px 5px;border-radius:3px">⭐ New</span>' : ''
+    return `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border);color:${color}">${i+1}. ${s.name||email}${badge}</div>`
+  }).join('')
+  // Show removed stops separately
+  const currentEmails = (p.stops||[]).map(s=>s.email||s)
+  const removedStops = (tplForModal?.stops||[]).filter(e=>!currentEmails.includes(e))
+  const removedList = removedStops.length ? removedStops.map(e=>`<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border);color:#ef4444;text-decoration:line-through">${e}</div>`).join('') : ''
+  const moreStops = p.stops.length > 6 ? `<div style="font-size:11px;color:var(--muted);padding-top:4px">+ ${p.stops.length-6} more</div>` : ''
   document.getElementById('modal-box').innerHTML = `
   <div class="mh" style="background:rgba(${isChange?'239,68,68':'245,158,11'},.07)">
     <div>
@@ -16061,7 +16135,7 @@ function showRouteApprovalModal(zoneId, day){
   <div class="mb">
     ${isChange ? `<div style="background:rgba(239,68,68,.08);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#ef4444"><strong>Changes from last week:</strong> ${p.changes.join(' · ')}</div>` : `<div style="background:rgba(245,158,11,.08);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#fbbf24">First time this route has been dispatched — once approved it becomes the template for future auto-dispatch.</div>`}
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">Runner: <span style="color:var(--text)">${p.runner?.name||'Unassigned'}</span></div>
-    <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:4px">${stopList}${moreStops}</div>
+    <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:4px">${stopList}${moreStops}${removedList ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><div style="font-size:10px;color:#ef4444;font-weight:700;margin-bottom:4px">REMOVED:</div>'+removedList+'</div>' : ''}</div>
     <div style="font-size:11px;color:var(--muted);margin-top:8px">Route sends at 9am (or immediately if approved after 9am).</div>
   </div>
   <div class="mf" style="gap:8px;flex-wrap:wrap">
@@ -16713,8 +16787,22 @@ async function _adGenerateBatchesAsync(silent=false){
                          : '⚠️ Unassigned'
 
         // Detect if this is first-time or a changed route
-        const { isNew, changes } = detectRouteChanges(zId, day, chunk, offer.runner?.id)
+        const { isNew, changes, addedEmails, removedEmails, templateOrder } = detectRouteChanges(zId, day, chunk, offer.runner?.id)
         const lifecycleStatus = isNew ? 'draft' : changes.length ? 'change_detected' : 'queued'
+
+        // Sort chunk by template order if one exists — new stops go to end
+        if(templateOrder && templateOrder.length && !isNew) {
+          chunk.sort((a, b) => {
+            const ai = templateOrder.indexOf(a.email||a)
+            const bi = templateOrder.indexOf(b.email||b)
+            if(ai === -1 && bi === -1) return 0
+            if(ai === -1) return 1  // new stop goes to end
+            if(bi === -1) return -1
+            return ai - bi
+          })
+          // Mark new stops so they can be highlighted in runner view
+          chunk.forEach(s => { s._isNew = addedEmails.includes(s.email||s) })
+        }
 
         // Pill day = the physical Bin Out night date
         // Collection day = the next day (Friday for Thursday pill)
@@ -17114,6 +17202,7 @@ function renderDispatchPipeline(){
         +'<div style="flex:1;min-width:0">'
         +'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
         +'<span style="font-size:12px;font-weight:700">'+h.name+'</span>'
+        +(h._isNew?'<span style="font-size:9px;padding:1px 6px;border-radius:4px;background:rgba(6,214,160,.2);color:#06d6a0;font-weight:700">⭐ New</span>':'')
         +'<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(99,102,241,.12);color:#a5b4fc">'+svcLabel+'</span>'
         +(h.assignedRunner?'<span style="font-size:9px;color:var(--cyan)">★ assigned</span>':'')
         +'</div>'
