@@ -4634,7 +4634,7 @@ async function populateHWDashboard(){
       // -- WAITLISTED: check if a zone now exists for their ZIP --
       const zip = row.zip_code || ''
       const zone = findZoneForZip(zip)
-      if(zone && (zone.status === 'live' || zone.pilot)){
+      if(zone && zone.status === 'live'){
         populateConfirmScreen(row, zone)
         go('S-hw-confirm')
       } else {
@@ -5243,7 +5243,7 @@ function _renderRNHomeDashZones(runnerRow){
   el.innerHTML = uniqueZones.map(z => {
     const isLive     = z.status === 'live'
     const isWaitlist = z.status === 'waitlist'
-    const isPilot    = z.pilot || z.status === 'pilot'
+    const isPilot    = false  // pilot status removed
     const hwCount    = z.homeowners || 0
     const needed     = z.threshold  || 3
     const capacity   = z.capacity   || 10
@@ -5259,8 +5259,8 @@ function _renderRNHomeDashZones(runnerRow){
       ? `<span style="background:rgba(165,180,252,.15);color:#a5b4fc;border-radius:99px;font-size:9px;font-weight:700;padding:2px 8px">🔬 Pilot</span>`
       : `<span style="background:rgba(251,191,36,.15);color:#fbbf24;border-radius:99px;font-size:9px;font-weight:700;padding:2px 8px">⏳ Building</span>`
 
-    const borderCol = isLive ? 'rgba(34,197,94,.3)' : isPilot ? 'rgba(165,180,252,.3)' : 'rgba(251,191,36,.3)'
-    const bgCol     = isLive ? 'rgba(34,197,94,.04)' : isPilot ? 'rgba(165,180,252,.04)' : 'rgba(251,191,36,.04)'
+    const borderCol = isLive ? 'rgba(34,197,94,.3)' : 'rgba(251,191,36,.3)'
+    const bgCol     = isLive ? 'rgba(34,197,94,.04)' : 'rgba(251,191,36,.04)'
 
     return `
     <div style="background:${bgCol};border:1.5px solid ${borderCol};border-radius:12px;padding:14px;margin-bottom:10px">
@@ -14872,7 +14872,7 @@ async function checkZipCoverage(zip){
 
   el.style.display = 'block'
 
-  if(zone && (zone.status === 'live' || zone.pilot)){
+  if(zone && zone.status === 'live'){
     el.style.cssText = 'display:block;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
     el.innerHTML = `<span style="color:#22c55e;font-weight:700">✅ BinDash services your area!</span><br>
       <span style="font-size:12px;color:var(--sub)">${zone.name} is active${zone.collection?.length?' · Collection: '+zone.collection.join(', '):''}.</span>`
@@ -15252,7 +15252,7 @@ async function confirmCreateZoneFromWaitlist(zip){
   const days=['Mon','Tue','Wed','Thu','Fri'].filter(d=>document.getElementById('wlz-day-'+d)?.checked)
   const newZone = {id: crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),name,city:zip+' area',
     zip:zip, zips:[zip],
-    status:'pilot',pilot:true,overridden:true,runners:0,capacity:cap,homeowners:0,
+    status:'live',pilot:false,overridden:true,runners:0,capacity:cap,homeowners:0,
     threshold:cap,collection:days,assignedRunner:null,stopOrder:[],notes:'Created from waitlist ZIP '+zip}
   ADMIN_ZONES.push(newZone)
   syncZoneData(); renderAdminZones()
@@ -15335,7 +15335,7 @@ function createZoneAndApproveHW(appId){
   const newZoneId='z-new-'+Date.now()
   const newZone={id:newZoneId,name,city:app.city||app.zip+' area',
     zip:app.zip, zips:[app.zip],
-    status:'pilot',pilot:true,overridden:true,runners:0,capacity:cap,
+    status:'live',pilot:false,overridden:true,runners:0,capacity:cap,
     homeowners:0,threshold:cap,collection:days,assignedRunner:null,stopOrder:[],
     notes:'Auto-created on approval . ZIP '+app.zip}
   ADMIN_ZONES.push(newZone)
@@ -18781,7 +18781,7 @@ const AZ_STATUS = {
   inactive: { dot:'#94a3b8', bg:'rgba(148,163,184,.04)', border:'rgba(148,163,184,.2)', label:'Inactive', badgeBg:'rgba(148,163,184,.15)', badgeColor:'#94a3b8' },
 }
 
-function getZoneDisplayStatus(z){ return z.status==='inactive' ? 'inactive' : z.pilot ? 'pilot' : z.status }
+function getZoneDisplayStatus(z){ return z.status==='inactive' ? 'inactive' : z.status }
 
 // -- ZONE HELPERS ---------------------------------
 
@@ -18946,8 +18946,8 @@ function renderAdminZones(){
   }
 
   el.innerHTML = ADMIN_ZONES.map((z,idx) => {
-    const sc   = z.status==='live'&&!z.pilot?'#22c55e':z.pilot?'#a5b4fc':z.status==='waitlist'?'#f59e0b':'#6b7280'
-    const sl   = z.status==='live'&&!z.pilot?'Live':z.pilot?'Pilot':z.status==='waitlist'?'Waitlist':'Inactive'
+    const sc   = z.status==='live'?'#22c55e':z.status==='waitlist'?'#f59e0b':'#6b7280'
+    const sl   = z.status==='live'?'Live':z.status==='waitlist'?'Waitlist':'Inactive'
     const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
     const hwCount  = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))).length
     const rnList   = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id)||zips.includes(r.zip))
@@ -19072,7 +19072,7 @@ function renderAdminZones(){
           <!-- Action buttons -->
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${z.status==='waitlist'?`<button class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3)" onclick="activateZone('${z.id}')">⚡ Activate</button>`:''}
-            ${z.pilot?`<button class="btn btn-sm" style="background:#22c55e22;color:#22c55e;border:1px solid rgba(34,197,94,.3)" onclick="promoteToLive('${z.id}')">↑ Go Live</button>`:''}
+
             <button class="btn btn-outline btn-sm" onclick="showAdminSetPriority('${z.id}')">👥 Runner Hierarchy</button>
             <button class="btn btn-outline btn-sm" onclick="showZoneDetail('${z.id}')">📋 Route Order</button>
             <button class="btn btn-outline btn-sm" onclick="showEditZone('${z.id}')">✏️ Edit</button>
@@ -19097,7 +19097,7 @@ function zoneCardToggle(cardId){
 
 function activateZone(zId){
   const z = ADMIN_ZONES.find(x=>x.id===zId); if(!z) return
-  z.status = 'pilot'; z.pilot = true; z.overridden = true
+  z.status = 'live'; z.pilot = false; z.overridden = true
   dbSaveZone(z); renderAdminZones(); syncZoneData()
   // Notify waitlisted HWs and clear runner zone requests
   ;(z.zips||[z.zip]).forEach(zip => notifyWaitlistForZip(zip, z))
@@ -19125,7 +19125,7 @@ function showZoneDetail(zoneId){
     <div>
       <div style="font-size:15px;font-weight:700">📍 ${z.name}</div>
       <div style="font-size:11px;color:var(--sub);margin-top:2px">
-        <span style="background:${z.status==='live'?'#22c55e22':z.status==='pilot'?'rgba(99,102,241,.15)':'rgba(245,158,11,.15)'};color:${z.status==='live'?'#22c55e':z.status==='pilot'?'#a5b4fc':'#fbbf24'};padding:1px 8px;border-radius:99px;font-size:10px;font-weight:700">${z.status==='live'?'● Live':z.status==='pilot'?'⚡ Pilot':'⏳ Waitlist'}</span>
+        <span style="background:${z.status==='live'?'#22c55e22':'rgba(245,158,11,.15)'};color:${z.status==='live'?'#22c55e':'#fbbf24'};padding:1px 8px;border-radius:99px;font-size:10px;font-weight:700">${z.status==='live'?'● Live':'⏳ Waitlist'}</span>
         ZIPs: ${zipList}
       </div>
     </div>
@@ -19199,7 +19199,7 @@ function showZoneDetail(zoneId){
   </div>
   <div class="mf" style="flex-wrap:wrap;gap:6px">
     ${z.status==='waitlist' ? `<button class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3)" onclick="activateZone('${z.id}');closeM()">⚡ Activate</button>` : ''}
-    ${z.pilot ? `<button class="btn btn-sm" style="background:#22c55e22;color:#22c55e;border:1px solid rgba(34,197,94,.3)" onclick="promoteToLive('${z.id}');closeM()">↑ Go Live</button>` : ''}
+
     <button class="btn btn-outline btn-sm" onclick="closeM();showZoneCoverageEdit('${z.id}')">+ Runner</button>
     <button class="btn btn-outline btn-sm" onclick="closeM();showEditZone('${z.id}')">✏️ Edit</button>
     ${activeHWs.length > 1 ? `<button class="btn btn-outline btn-sm" onclick="autoOrderStops('${zoneId}')">🔀 Auto-order</button>` : ''}
@@ -19718,15 +19718,9 @@ function showActivateZone(zId){
   </div>
   <div class="mb">
     <div style="font-size:13px;color:var(--sub);line-height:1.7;margin-bottom:16px">This zone has <strong style="color:var(--text)">${z.homeowners} homeowners</strong> -- below the normal threshold of ${z.threshold}. Choose how to activate it.</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
-      <div id="act-opt-pilot" onclick="selectActivateMode('pilot')" style="border:2px solid var(--cyan);background:rgba(99,102,241,.08);border-radius:10px;padding:14px;cursor:pointer">
-        <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:6px">🔒 Pilot Mode</div>
-        <div style="font-size:11px;color:var(--sub);line-height:1.6">Unlisted -- only accessible via direct link or admin assignment.</div>
-      </div>
-      <div id="act-opt-live" onclick="selectActivateMode('live')" style="border:1.5px solid var(--border2);border-radius:10px;padding:14px;cursor:pointer">
-        <div style="font-size:13px;font-weight:700;color:#22c55e;margin-bottom:6px">🌍 Go Live</div>
-        <div style="font-size:11px;color:var(--sub);line-height:1.6">Publicly listed on the runner info page and zone lookups.</div>
-      </div>
+    <div style="background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:12px 14px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:700;color:#22c55e;margin-bottom:4px">🌍 Activating as Live</div>
+      <div style="font-size:12px;color:var(--sub);line-height:1.6">Zone will be publicly listed and homeowners will be notified that service is active.</div>
     </div>
     <div class="field"><label>Assign runner (optional)</label>
       <select id="act-runner">
@@ -19741,38 +19735,29 @@ function showActivateZone(zId){
     <button class="btn btn-cyan" onclick="confirmActivateZone('${zId}')">Activate -></button>
   </div>`
   openM()
-  selectActivateMode('pilot')
 }
 
-let _activateMode = 'pilot'
-function selectActivateMode(mode){
-  _activateMode = mode
-  const p = document.getElementById('act-opt-pilot')
-  const l = document.getElementById('act-opt-live')
-  if(!p||!l) return
-  p.style.border = mode==='pilot' ? '2px solid var(--cyan)' : '1.5px solid var(--border2)'
-  p.style.background = mode==='pilot' ? 'rgba(99,102,241,.08)' : 'transparent'
-  l.style.border = mode==='live' ? '2px solid #22c55e' : '1.5px solid var(--border2)'
-  l.style.background = mode==='live' ? 'rgba(34,197,94,.06)' : 'transparent'
-}
+let _activateMode = 'live'
+function selectActivateMode(mode){ _activateMode = mode }
 
 function confirmActivateZone(zId){
   const z = ADMIN_ZONES.find(x=>x.id===zId)
   if(!z) return
-  z.pilot = (_activateMode==='pilot')
+  z.pilot = false
   z.status = 'live'
   z.overridden = true
-  z.assignedRunner = document.getElementById('az-runner-assign')?.value || null
-  z.notes = document.getElementById('az-notes')?.value || ''
+  z.assignedRunner = document.getElementById('act-runner')?.value || null
+  z.notes = document.getElementById('act-notes')?.value || ''
   closeM(); renderAdminZones(); syncZoneData()
   dbSaveZone(z)
-  showToast(`${z.name} activated as ${z.pilot?'Pilot (unlisted)':'Live'} ✅${z.assignedRunner?' . '+z.assignedRunner+' assigned':''}`, 'ok')
+  showToast(`${z.name} is now Live ✅${z.assignedRunner?' · runner assigned':''}`, 'ok', 5000)
 }
 
 function promoteToLive(zId){
   const z = ADMIN_ZONES.find(x=>x.id===zId); if(!z) return
-  z.pilot = false; renderAdminZones(); syncZoneData()
+  z.pilot = false; z.status = 'live'; renderAdminZones(); syncZoneData()
   dbSaveZone(z)
+  showToast(z.name + ' is now Live ✅', 'ok')
   showToast(`${z.name} is now publicly Live 🌍`, 'ok')
 }
 
@@ -19802,7 +19787,7 @@ function showEditZoneForce(zId){
         <label>Status</label>
         <select id="ez-status">
           <option value="live" ${z.status==='live'&&!z.pilot?'selected':''}>Live (public)</option>
-          <option value="pilot" ${z.pilot?'selected':''}>Pilot (active, unlisted)</option>
+
           <option value="waitlist" ${z.status==='waitlist'?'selected':''}>Waitlist</option>
           <option value="inactive" ${z.status==='inactive'?'selected':''}>Inactive</option>
         </select>
@@ -19829,13 +19814,13 @@ function saveEditZone(zId){
   }
   z.capacity = parseInt(document.getElementById('ez-cap')?.value) || z.capacity
   const statusRaw = document.getElementById('ez-status')?.value || z.status
-  z.pilot  = statusRaw === 'pilot'
-  z.status = z.pilot ? 'live' : statusRaw
+  z.pilot  = false
+  z.status = statusRaw === 'pilot' ? 'live' : statusRaw
   z.notes  = document.getElementById('ez-notes')?.value || ''
   closeM(); renderAdminZones(); syncZoneData()
   dbSaveZone(z)
   // If zone is now active, notify any waitlisted HWs for its ZIPs
-  if(z.status==='live' || z.pilot){
+  if(z.status==='live'){
     (z.zips||[z.zip]).forEach(zip => notifyWaitlistForZip(zip, z))
   }
   showToast(z.name+' updated ✅','ok')
@@ -19864,7 +19849,7 @@ function showCreateZone(){
       <div class="field">
         <label>Status</label>
         <select id="cz-status">
-          <option value="pilot">Pilot (active, unlisted)</option>
+
           <option value="live">Live (public)</option>
           <option value="waitlist">Waitlist (building interest)</option>
           <option value="inactive">Inactive</option>
