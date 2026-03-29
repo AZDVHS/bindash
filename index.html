@@ -9645,7 +9645,7 @@ function renderRunnerCard(r){
         <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" onclick="showRnEdit('${r.id}')">✏️ Edit runner</button>
           <button class="btn btn-outline btn-sm" onclick="showEditLoyalty('${r.id}')">⭐ Edit loyalty</button>
-          <button class="btn btn-outline btn-sm" onclick="showZoneCoverageEdit('${r.id}')">📍 Edit zones</button>
+          <button class="btn btn-outline btn-sm" onclick="showRunnerZoneEdit('${r.id}')">📍 Edit zones</button>
           ${inactive
             ?'<button class="btn btn-outline btn-sm" style="color:#22c55e;border-color:#22c55e" onclick="reactivateRunner(\''+r.id+'\')" >▶ Reactivate</button>'
             :'<button class="btn btn-ghost btn-sm" style="color:#f59e0b" onclick="deactivateRunner(\''+r.id+'\')" >⏸ Deactivate</button>'}
@@ -19211,6 +19211,123 @@ function autoOrderStops(zoneId){
 }
 
 // -- ZONE COVERAGE (RUNNER ASSIGNMENT) ------------
+
+// Runner-centric zone editor — opened from the runner card
+// Lets admin pick which zones this runner covers and set their role
+function showRunnerZoneEdit(runnerId){
+  const r = RUNNERS.find(x=>x.id===runnerId)
+  if(!r){ showToast('Runner not found','err'); return }
+
+  const allZones = ADMIN_ZONES.filter(z=>z.status!=='inactive')
+
+  document.getElementById('modal-box').innerHTML=`
+  <div class="mh">
+    <div>
+      <div style="font-size:15px;font-weight:700">📍 Zone Assignment — ${r.name}</div>
+      <div style="font-size:11px;color:var(--sub);margin-top:2px">Select zones this runner covers and their role in each</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    ${allZones.length ? allZones.map(z=>{
+      const covers = r.coverageZones?.includes(z.id) || r.zoneId===z.id
+      const zRole = (r.zoneRoles&&r.zoneRoles[z.id]) ? r.zoneRoles[z.id].role : (covers&&r.zoneId===z.id ? r.zoneRole||'runner' : 'runner')
+      const zips = (z.zips?.length?z.zips:[z.zip]).filter(Boolean)
+      return `<div style="border:1px solid ${covers?'rgba(6,214,160,.3)':'var(--border)'};border-radius:9px;padding:10px 12px;margin-bottom:8px;background:${covers?'rgba(6,214,160,.04)':'transparent'}">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:${covers?'10px':'0'}">
+          <input type="checkbox" id="rze-${z.id}" ${covers?'checked':''} onchange="toggleRunnerZoneRow('${z.id}','${r.id}')" style="width:auto;flex-shrink:0">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600">${z.name}</div>
+            <div style="font-size:11px;color:var(--muted)">ZIP ${zips.join(', ')} · ${z.status}</div>
+          </div>
+        </div>
+        <div id="rze-role-${z.id}" style="display:${covers?'flex':'none'};gap:6px;padding-left:26px">
+          ${['lead','runner','standby'].map((role,i)=>{
+            const active = zRole===role
+            const lbl = role==='lead'?'🌟 Lead':role==='runner'?'👥 Runner':'⏳ Standby'
+            return `<button onclick="setRunnerZoneRole('${runnerId}','${z.id}','${role}',${i+1},this)"
+              style="flex:1;padding:4px;border-radius:5px;font-size:11px;cursor:pointer;
+                border:1px solid ${active?'rgba(6,214,160,.5)':'var(--border)'};
+                background:${active?'rgba(6,214,160,.15)':'transparent'};
+                color:${active?'#06d6a0':'var(--muted)'}">
+              ${lbl}</button>`
+          }).join('')}
+        </div>
+      </div>`
+    }).join('') : '<div style="color:var(--muted);font-size:13px">No active zones yet</div>'}
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan" onclick="saveRunnerZones('${runnerId}')">Save</button>
+  </div>`
+  openM()
+}
+
+function toggleRunnerZoneRow(zoneId, runnerId){
+  const cb = document.getElementById('rze-'+zoneId)
+  const roleRow = document.getElementById('rze-role-'+zoneId)
+  if(roleRow) roleRow.style.display = cb?.checked ? 'flex' : 'none'
+}
+
+function setRunnerZoneRole(runnerId, zoneId, role, order, btn){
+  // Update button styles in this zone's role row
+  const row = document.getElementById('rze-role-'+zoneId)
+  if(row) row.querySelectorAll('button').forEach(b=>{
+    b.style.border = '1px solid var(--border)'
+    b.style.background = 'transparent'
+    b.style.color = 'var(--muted)'
+    b.style.fontWeight = '400'
+  })
+  btn.style.border = '1px solid rgba(6,214,160,.5)'
+  btn.style.background = 'rgba(6,214,160,.15)'
+  btn.style.color = '#06d6a0'
+  btn.style.fontWeight = '700'
+  btn.dataset.role = role
+  btn.dataset.order = order
+}
+
+async function saveRunnerZones(runnerId){
+  const r = RUNNERS.find(x=>x.id===runnerId)
+  if(!r) return
+
+  const allZones = ADMIN_ZONES.filter(z=>z.status!=='inactive')
+  const newCoverage = []
+  let primaryZoneId = null
+
+  for(const z of allZones){
+    const cb = document.getElementById('rze-'+z.id)
+    if(!cb?.checked) continue
+    newCoverage.push(z.id)
+    if(!primaryZoneId) primaryZoneId = z.id
+
+    // Find selected role button
+    const row = document.getElementById('rze-role-'+z.id)
+    const activeBtn = row?.querySelector('button[style*="rgba(6,214,160,.15)"]')
+    const role  = activeBtn?.dataset.role  || 'runner'
+    const order = parseInt(activeBtn?.dataset.order||'2')
+
+    // Save role to Supabase
+    await adminUpdateZoneRole(z.id, runnerId, role, order)
+  }
+
+  // Update in-memory runner
+  r.coverageZones = newCoverage
+  if(primaryZoneId) r.zoneId = primaryZoneId
+
+  // Persist coverage zones to DB
+  try {
+    await _supa.from('runners').update({
+      zone_id:        primaryZoneId || null,
+      coverage_zones: JSON.stringify(newCoverage),
+      updated_at:     new Date().toISOString(),
+    }).eq('id', runnerId)
+  } catch(e){ console.warn('[BinDash] saveRunnerZones:', e.message) }
+
+  closeM()
+  renderRunnerList()
+  renderAdminZones()
+  showToast(r.name + ' zone assignment saved ✅', 'ok', 3000)
+}
 
 function showZoneCoverageEdit(zoneId){
   const z = ADMIN_ZONES.find(x=>x.id===zoneId); if(!z) return
