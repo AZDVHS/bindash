@@ -5357,7 +5357,7 @@ async function loadRNInterestList(runnerRow){
       // Filter by ZIP prefix (homeowner's ZIP starts with same 3 digits)
       rows = (data||[]).filter(r => {
         const rz = r.zip_code||''
-        return allZips.includes(rz) || rz.slice(0,4)===runnerZip.slice(0,4)
+        return allZips.includes(rz) || rz===runnerZip
       })
     } catch(e){ console.warn('[BinDash] interest list:', e) }
 
@@ -9433,6 +9433,11 @@ async function ruleCheckAlerts(){
       alerts.push({ type:'zone-cap', msg:'Zone '+z.name+' at '+Math.round(hw/cap*100)+'% capacity', level:'warn' })
     if(!ruleGetPriorityRunner(z.id) && hw > 0)
       alerts.push({ type:'no-priority', msg:'Zone '+z.name+' has '+hw+' HOs but no priority runner', level:'err' })
+    // Alert: zone has pending signups but zero runners enrolled
+    const pendingInZone = (PENDING_HOMEOWNERS||[]).filter(a=>a.zoneId===z.id||(z.zips||[z.zip]).includes(a.zip)).length
+    const runnersInZone = RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===z.id||r.coverageZones?.includes(z.id))).length
+    if(pendingInZone > 0 && runnersInZone === 0)
+      alerts.push({ type:'no-runner-pending', msg:z.name+' has '+pendingInZone+' pending signup'+( pendingInZone!==1?'s':'')+' but NO runners enrolled — recruit before approving', level:'err' })
   })
   // Post alerts to notification system
   alerts.forEach(a=>{
@@ -14806,80 +14811,105 @@ const DENSITY_THRESHOLD = 10
 
 // Returns the best matching zone for a given ZIP, or null
 function findZoneForZip(zip){
-  if(!zip || zip.length < 3) return null
+  if(!zip || zip.length < 5) return null
   const fullZip = zip.trim()
-  const prefix3 = fullZip.slice(0,3)
-  const prefix4 = fullZip.slice(0,4)
 
-  // 1. Exact full-ZIP match in zips array (most precise)
+  // 1. Exact match in zips array — primary lookup
   let zone = ADMIN_ZONES.find(z =>
     z.status !== 'inactive' &&
     z.zips?.some(zz => zz === fullZip)
   )
 
-  // 2. Exact full-ZIP match on zip field
+  // 2. Exact match on zip field
   if(!zone) zone = ADMIN_ZONES.find(z =>
-    z.status !== 'inactive' &&
-    z.zip === fullZip
+    z.status !== 'inactive' && z.zip === fullZip
   )
 
-  // 3. First-4-digit prefix (e.g. 8530 matches 85301-85309) — only if zip is 5 digits
-  if(!zone && fullZip.length === 5) zone = ADMIN_ZONES.find(z =>
-    z.status !== 'inactive' &&
-    (z.zip?.startsWith(prefix4) || z.zips?.some(zz => zz.startsWith(prefix4)))
-  )
-
-  // 4. Runner zip exact match — runner in area implies live zone coverage
-  if(zone){
-    if(RUNNERS.length > 0){
-      const hasRunner = RUNNERS.some(r =>
-        r.status !== 'INACTIVE' && r.status !== 'OFF_DUTY' &&
-        (r.coverageZones?.includes(zone.id) || r.zoneId === zone.id ||
-         r.zip === fullZip || r.zip?.slice(0,4) === prefix4)
-      )
-      if(!hasRunner && zone.status !== 'live') zone = null
-    }
-  }
-
-  // 5. Last resort — 3-digit prefix (broad match, only if no better match found)
-  // This is intentionally kept as a fallback but logs a warning
-  if(!zone){
-    zone = ADMIN_ZONES.find(z =>
-      z.status !== 'inactive' &&
-      (z.zip === prefix3 || z.zip?.startsWith(prefix3) ||
-       z.zips?.some(zz => zz === prefix3 || zz.startsWith(prefix3)))
-    )
-    if(zone) console.log('[BinDash] findZoneForZip: prefix3 match for', fullZip, '→', zone.name, '(imprecise)')
-  }
+  // NO prefix matching — 85301 must NEVER match 85383 or 85307
+  // Zones must explicitly list ZIP codes in their zip_codes array
 
   return zone || null
+}
+
+function findRunnerForZip(zip){
+  if(!zip) return null
+  return RUNNERS.find(r =>
+    r.status !== 'INACTIVE' && r.status !== 'OFF_DUTY' &&
+    (r.zip === zip || r.coverageZones?.some(zId => {
+      const z = ADMIN_ZONES.find(x=>x.id===zId)
+      return z?.zips?.includes(zip) || z?.zip === zip
+    }))
+  ) || null
 }
 
 async function checkZipCoverage(zip){
   const el = document.getElementById('zip-coverage-result')
   if(!el) return
-  if(zip.length < 5){ el.style.display='none'; window._hwMatchedZone=null; window._hwZipHasCoverage=null; return }
-
-  // Load zones from Supabase if not loaded yet
-  if(ADMIN_ZONES.length === 0){
-    await loadZonesFromSupabase()
+  if(!zip || zip.length < 5){
+    el.style.display='none'
+    window._hwMatchedZone = null
+    window._hwZipHasCoverage = null
+    return
   }
 
+  // Load zones if needed
+  if(ADMIN_ZONES.length === 0) await loadZonesFromSupabase()
+
+  // Exact ZIP match only — no prefix guessing
   const zone = findZoneForZip(zip)
   window._hwMatchedZone = zone || null
 
-  if(zone && (zone.status==='live' || zone.pilot)){
-    el.style.cssText='display:block;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
-    el.innerHTML=`<span style="color:#22c55e;font-weight:700">✅ Great news -- BinDash services your area!</span><br><span style="font-size:12px;color:var(--sub)">${zone.name} . choose your preferred collection day below</span>`
+  // Also check micro_zones table for H3-based zone data
+  let microZone = null
+  try {
+    const { data } = await _supa.from('micro_zones')
+      .select('status, member_count, waitlist_count, activation_threshold, zone_label, trash_day')
+      .eq('zip_code', zip)
+      .order('member_count', { ascending: false })
+      .limit(1)
+    microZone = data?.[0] || null
+  } catch(e){ /* micro_zones table may not exist yet */ }
+
+  el.style.display = 'block'
+
+  if(zone && (zone.status === 'live' || zone.pilot)){
+    el.style.cssText = 'display:block;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
+    el.innerHTML = `<span style="color:#22c55e;font-weight:700">✅ BinDash services your area!</span><br>
+      <span style="font-size:12px;color:var(--sub)">${zone.name} is active${zone.collection?.length?' · Collection: '+zone.collection.join(', '):''}.</span>`
     window._hwZipHasCoverage = true
-  } else if(zone && zone.status==='waitlist'){
-    el.style.cssText='display:block;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
-    el.innerHTML=`<span style="color:#fbbf24;font-weight:700">⏳ Your area is coming soon</span><br><span style="font-size:12px;color:var(--sub)">We're building capacity in ${zone.name}. Complete signup and we'll notify you when service launches.</span>`
+
+  } else if(zone && zone.status === 'waitlist'){
+    const total = (microZone?.member_count||0) + (microZone?.waitlist_count||zone.homeowners||0)
+    const needed = Math.max(0, (microZone?.activation_threshold||5) - total)
+    el.style.cssText = 'display:block;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
+    el.innerHTML = `<span style="color:#fbbf24;font-weight:700">⏳ ${zone.name} is building — ${needed} more neighbor${needed!==1?'s':''} needed to launch</span><br>
+      <span style="font-size:12px;color:var(--sub)">${total} of ${microZone?.activation_threshold||5} households signed up. Complete your signup and we'll notify you when service activates.</span>
+      <div style="margin-top:6px;background:rgba(245,158,11,.2);border-radius:3px;height:4px;overflow:hidden">
+        <div style="width:${Math.min(100,Math.round(total/(microZone?.activation_threshold||5)*100))}%;height:100%;background:#f59e0b;border-radius:3px"></div>
+      </div>`
     window._hwZipHasCoverage = false
+
+  } else if(microZone && microZone.status !== 'inactive'){
+    // H3 zone exists but no classic zone — still show meaningful info
+    const total = (microZone.member_count||0) + (microZone.waitlist_count||0)
+    const needed = Math.max(0, (microZone.activation_threshold||5) - total)
+    el.style.cssText = 'display:block;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
+    el.innerHTML = `<span style="color:#fbbf24;font-weight:700">📍 ${needed} more neighbor${needed!==1?'s':''} needed to activate ZIP ${zip}</span><br>
+      <span style="font-size:12px;color:var(--sub)">${total} household${total!==1?'s':''} signed up in your area. Sign up now and help unlock service for your block.</span>`
+    window._hwZipHasCoverage = false
+
   } else {
-    el.style.cssText='display:block;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
-    el.innerHTML=`<span style="color:#a5b4fc;font-weight:700">📍 New area detected</span><br><span style="font-size:12px;color:var(--sub)">We don't service ZIP ${zip} yet -- complete signup and you'll be first to know when we expand here.</span>`
+    el.style.cssText = 'display:block;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
+    el.innerHTML = `<span style="color:#a5b4fc;font-weight:700">📍 New area — you could be the first!</span><br>
+      <span style="font-size:12px;color:var(--sub)">BinDash doesn't cover ZIP ${zip} yet. Sign up and invite 4 neighbors to unlock service for your street.</span>`
     window._hwZipHasCoverage = false
+  }
+
+  // Also trigger H3 geocode FOMO banner once address is filled
+  const addr = document.getElementById('h-addr')?.value?.trim()
+  if(addr && zip.length === 5){
+    clearTimeout(window._h3Timer)
+    window._h3Timer = setTimeout(_h3CheckAddress, 800)
   }
 }
 
@@ -15915,17 +15945,28 @@ function renderPendingHWList(){
             app.zoneId===z.id || z.zips?.includes(app.zip)
           )
           const noMatch = !exactMatch && app.zip
+          const matchedZoneObj = exactMatch || ADMIN_ZONES.find(z=>z.id===app.zoneId)
+          const zoneZips = (matchedZoneObj?.zips?.length ? matchedZoneObj.zips : [matchedZoneObj?.zip]).filter(Boolean)
+          const zoneRunners = matchedZoneObj ? RUNNERS.filter(r=>
+            r.status!=='INACTIVE' &&
+            (r.zoneId===matchedZoneObj.id || r.coverageZones?.includes(matchedZoneObj.id) || zoneZips.includes(r.zip))
+          ) : []
+          const noRunner = matchedZoneObj && zoneRunners.length === 0
           return `
           ${noMatch ? `<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:7px;padding:7px 10px;margin-bottom:6px;font-size:11px;color:#fbbf24">
-            ⚠️ No zone covers ZIP ${app.zip} exactly — assign manually or create a new zone below.
+            ⚠️ No zone covers ZIP ${app.zip} exactly — assign manually or create a new zone.
+          </div>` : ''}
+          ${noRunner ? `<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.25);border-radius:7px;padding:7px 10px;margin-bottom:6px;font-size:11px;color:#ef4444">
+            🚫 No runner in ${matchedZoneObj?.name||'this zone'} — HO will be unassigned after approval. Recruit a runner for ZIP ${app.zip} first, or approve and assign manually.
           </div>` : ''}
           <select id="hwpc-zone-${app.id}" style="font-size:12px">
             <option value="">-- Select zone --</option>
             ${ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>{
               const isAssigned = app.zoneId===z.id
               const isExact    = !app.zoneId && z.zips?.includes(app.zip)
+              const zRnCount   = RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===z.id||r.coverageZones?.includes(z.id))).length
               return `<option value="${z.id}" ${(isAssigned||isExact)?'selected':''}>
-                ${z.name} (ZIP ${z.zips?.join(', ')||z.zip})${isExact?' ← ZIP match':''}
+                ${z.name} (ZIP ${z.zips?.join(', ')||z.zip}) · ${zRnCount} runner${zRnCount!==1?'s':''}${isExact?' ← ZIP match':''}
               </option>`
             }).join('')}
             <option value="_new">+ Create new zone for ZIP ${app.zip}</option>
@@ -17418,7 +17459,7 @@ async function _adGenerateBatchesAsync(silent=false){
       if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
       if(r.id===hw.assignedRunner) return false
       return r.zoneId===hwZone || r.coverageZones?.includes(hwZone) ||
-             r.zip===hwZip || r.zip?.slice(0,4)===hwZip?.slice(0,4)
+             r.zip===hwZip
     })
 
     if(zoneRunners.length){
@@ -20126,7 +20167,7 @@ function zoneToRow(z){
     id:              z.id,
     name:            z.name,
     label:           zoneLabel(z),          // GLD-85301 style abbreviation
-    zip_prefix:      (z.zip||'').slice(0,3),
+    zip_prefix:      (z.zip||'').slice(0,5), // store full ZIP, not 3-digit prefix
     zip_codes:       z.zips?.length ? z.zips : (z.zip ? [z.zip] : []),
     status:          z.status || 'waitlist',
     pilot:           z.pilot || false,
@@ -20599,9 +20640,16 @@ function syncZoneData(){
   Object.keys(ZONE_DATA).forEach(k=>delete ZONE_DATA[k])
   ADMIN_ZONES.forEach(z=>{
     if(z.status==='inactive') return
-    const key = z.zip.slice(0,3)  // always use 3-digit prefix as key for runner lookup
-    if(!ZONE_DATA[key]) ZONE_DATA[key]=[]
-    ZONE_DATA[key].push({id:z.id, name:z.name, status:z.status, runners:z.runners, capacity:z.capacity, homeowners:z.homeowners, needed:Math.max(0,z.threshold-z.homeowners), collection:z.collection.join('/')})
+    // Index by each full ZIP code the zone serves
+    const allZips = z.zips?.length ? z.zips : (z.zip ? [z.zip] : [])
+    allZips.forEach(zip => {
+      if(!zip || zip.length < 3) return
+      if(!ZONE_DATA[zip]) ZONE_DATA[zip] = []
+      ZONE_DATA[zip].push({ id:z.id, name:z.name, status:z.status, runners:z.runners,
+        capacity:z.capacity, homeowners:z.homeowners,
+        needed:Math.max(0,z.threshold-z.homeowners),
+        collection:z.collection?.join('/') || '' })
+    })
   })
 }
 
@@ -20624,7 +20672,7 @@ function checkRunnerZipCoverage(zip){
   const zone = ADMIN_ZONES.find(z=>
     z.status!=='inactive' &&
     (z.zips?.includes(zip) || z.zip===zip || z.zip===prefix ||
-     z.zips?.some(zz=>zz===prefix || zz.startsWith(prefix.slice(0,4))))
+     z.zips?.some(zz=>zz===prefix))
   )
   if(zone){
     el.style.cssText='display:block;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:8px;padding:8px 12px;font-size:12px;margin-top:6px'
@@ -21680,7 +21728,7 @@ async function renderZoneWaitlist(){
         z.zip===zip ||
         z.zip===zip || z.zips?.includes(zip)
       )
-      const runnerInterest = RUNNERS.filter(r=>r.zip===zip||r.zip?.slice(0,4)===zip?.slice(0,4)).length
+      const runnerInterest = RUNNERS.filter(r=>r.zip===zip).length
       const waitingList = group.filter(r=>r.status==='waitlisted')
       const notifiedList = group.filter(r=>r.status==='zone_assigned')
       const statusLabel = existingZone
@@ -22244,7 +22292,7 @@ async function _submitApproveNewZone(zip, reqIds, runners){
     for(let i=0;i<zoneNames.length;i++){
       const zoneName  = zoneNames[i]
       const newZoneId = crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+i
-      const newZone = { id:newZoneId, name:zoneName, zip:zip.slice(0,3), zips:[zip],
+      const newZone = { id:newZoneId, name:zoneName, zip:zip, zips:[zip],
         status:'waitlist', runners:0, capacity:10, homeowners:0, threshold:3,
         collection:days.length?days:[], notes:`Created from runner request ZIP ${zip}.${adminNotes?' '+adminNotes:''}` }
       ADMIN_ZONES.push(newZone)
