@@ -6501,6 +6501,15 @@ async function resumeBatch(batchId){
       const savedOrder = getRunnerRouteOrder(runnerId, zoneId, day)
       if(savedOrder) window.NAV_STOPS = applyRunnerOrder(window.NAV_STOPS, savedOrder)
     }
+    // Load runner note counts for all stops so badges show
+    const _emails = window.NAV_STOPS.map(s=>s.email||s.hwEmail).filter(Boolean)
+    _loadRunnerNoteCounts(_emails).then(counts => {
+      window.NAV_STOPS.forEach(s => {
+        const e = s.email||s.hwEmail
+        if(e && counts[e]) s._noteCount = counts[e]
+      })
+      _renderNavModal()
+    })
     // If already in progress, resume at travelling phase
     if(navPhase === 'idle') navPhase = 'travelling'
   }
@@ -10943,7 +10952,9 @@ function _renderNavModal(){
         <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:${isCur?'8px':'0'}">
           ${hasGate  ? `<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;border-radius:5px;padding:2px 6px;font-weight:600">&#x1F511; ${st.details.match(/Gate:?\s*[\w\d]+/i)?.[0] || 'Gated'}</span>` : ''}
           ${hasPet   ? `<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;border-radius:5px;padding:2px 6px;font-weight:600">&#x1F43E; Pet</span>` : ''}
+          ${st._isNew ? `<span style="font-size:10px;background:rgba(6,214,160,.15);color:#06d6a0;border-radius:5px;padding:2px 6px;font-weight:600">&#x2B50; New</span>` : ''}
           <span style="font-size:10px;background:var(--surface3);color:var(--muted);border-radius:5px;padding:2px 6px">${st.bins}</span>
+          ${st._noteCount ? `<span style="font-size:10px;background:rgba(251,191,36,.12);color:#fbbf24;border-radius:5px;padding:2px 6px;font-weight:600" title="Runner notes on this stop">&#x1F4CB; ${st._noteCount} note${st._noteCount>1?'s':''}</span>` : ''}
         </div>
         ${isCur ? `
         <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -11118,9 +11129,23 @@ function _renderNavModal(){
 }
 
 
-function showStopDetail(stopIdx){
+async function showStopDetail(stopIdx){
   const s = NAV_STOPS[stopIdx]
   if(!s) return
+
+  // Load runner notes for this homeowner from Supabase
+  let runnerNotes = []
+  const hwEmail = s.email || s.hwEmail
+  if(hwEmail && _supa){
+    try {
+      const { data: notes } = await _supa
+        .from('runner_notes')
+        .select('id, note, runner_name, created_at')
+        .eq('homeowner_email', hwEmail)
+        .order('created_at', { ascending: false })
+      runnerNotes = notes || []
+    } catch(e){ console.warn('[BinDash] runner notes load:', e.message) }
+  }
 
   // Gather bin photos -- from stop data or from HOMEOWNERS array
   const hw = HOMEOWNERS.find(h => h.address === s.address || h.name === s.name)
@@ -11155,6 +11180,29 @@ function showStopDetail(stopIdx){
       <div class="dl"><div class="dl-l">Bins</div><div>${s.bins}</div></div>
       ${s.notes ? `<div class="dl"><div class="dl-l">Notes</div><div>${s.notes}</div></div>` : ''}
     </div>
+    <div id="runner-notes-section-${stopIdx}" style="background:rgba(251,191,36,.05);border:1px solid rgba(251,191,36,.2);border-radius:10px;padding:14px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:#fbbf24">🔒 Runner Notes <span style="font-size:10px;font-weight:400;color:var(--muted)">(private — runners only)</span></div>
+        <button onclick="showAddRunnerNote(${stopIdx})" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.1);color:#fbbf24;cursor:pointer;font-weight:600">+ Add Note</button>
+      </div>
+      ${runnerNotes.length ? runnerNotes.map(n=>`
+        <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:7px;position:relative">
+          <div style="font-size:12px;color:var(--text);line-height:1.5;margin-bottom:4px">${n.note}</div>
+          <div style="font-size:10px;color:var(--muted);display:flex;align-items:center;justify-content:space-between">
+            <span>— ${n.runner_name||'Runner'} · ${new Date(n.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>
+            ${window._currentRunnerRow ? `<button onclick="deleteRunnerNote('${n.id}',${stopIdx})" style="background:none;border:none;color:#ef4444;font-size:10px;cursor:pointer;padding:0">✕ Delete</button>` : ''}
+          </div>
+        </div>
+      `).join('') : `<div style="font-size:12px;color:var(--muted);text-align:center;padding:12px 0">No runner notes yet — be the first to add one</div>`}
+      <div id="add-note-form-${stopIdx}" style="display:none;margin-top:10px">
+        <textarea id="runner-note-input-${stopIdx}" placeholder="e.g. Black dog in backyard, lady talks a lot, gate code changed..." style="width:100%;background:var(--surface2);border:1px solid rgba(251,191,36,.3);border-radius:8px;padding:10px;font-size:12px;color:var(--text);resize:vertical;min-height:70px;box-sizing:border-box;outline:none"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button onclick="submitRunnerNote(${stopIdx},'${hwEmail}')" style="flex:1;padding:7px;border-radius:7px;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.15);color:#fbbf24;font-size:12px;font-weight:600;cursor:pointer">Save Note</button>
+          <button onclick="document.getElementById('add-note-form-${stopIdx}').style.display='none'" style="padding:7px 14px;border-radius:7px;border:1px solid var(--border);background:none;color:var(--muted);font-size:12px;cursor:pointer">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <div style="background:rgba(6,214,160,.05);border:1px solid rgba(6,214,160,.2);border-radius:10px;padding:14px">
       <div style="font-size:12px;font-weight:700;margin-bottom:4px">📩 Contact Homeowner</div>
       <div style="font-size:11px;color:var(--sub);line-height:1.5;margin-bottom:12px">
@@ -11193,6 +11241,64 @@ function sendHOMessage(stopIdx, msg){
   // In real app: POST to /api/messages with { fromRunner, toHomeowner, batchId, message }
 }
 
+
+// =============================================================
+// RUNNER NOTES — private stop intel between runners
+// =============================================================
+
+function showAddRunnerNote(stopIdx){
+  const form = document.getElementById('add-note-form-'+stopIdx)
+  if(form){ form.style.display = 'block'; document.getElementById('runner-note-input-'+stopIdx)?.focus() }
+}
+
+async function submitRunnerNote(stopIdx, hwEmail){
+  const input = document.getElementById('runner-note-input-'+stopIdx)
+  const note = input?.value?.trim()
+  if(!note){ showToast('Please write a note first','warn'); return }
+  if(!hwEmail){ showToast('Cannot identify homeowner','err'); return }
+
+  const runner = window._currentRunnerRow
+  try {
+    const { error } = await _supa.from('runner_notes').insert({
+      homeowner_email: hwEmail,
+      note,
+      runner_id:   runner?.id   || null,
+      runner_name: runner ? ((runner.first_name||'') + ' ' + (runner.last_name||'')).trim() : 'Runner',
+      created_at:  new Date().toISOString(),
+    })
+    if(error) throw error
+    showToast('Note saved ✅ — visible to all runners on this stop', 'ok', 4000)
+    // Reload stop detail to show the new note
+    showStopDetail(stopIdx)
+  } catch(e){
+    showToast('Error saving note: ' + (e.message||'unknown'), 'err')
+  }
+}
+
+async function deleteRunnerNote(noteId, stopIdx){
+  try {
+    const { error } = await _supa.from('runner_notes').delete().eq('id', noteId)
+    if(error) throw error
+    showToast('Note deleted', 'info')
+    showStopDetail(stopIdx)
+  } catch(e){
+    showToast('Error deleting note: ' + (e.message||'unknown'), 'err')
+  }
+}
+
+// Load runner notes count for a homeowner email — used to show badge on stop card
+async function _loadRunnerNoteCounts(emails){
+  if(!emails || !emails.length || !_supa) return {}
+  try {
+    const { data } = await _supa
+      .from('runner_notes')
+      .select('homeowner_email')
+      .in('homeowner_email', emails)
+    const counts = {}
+    ;(data||[]).forEach(n => { counts[n.homeowner_email] = (counts[n.homeowner_email]||0) + 1 })
+    return counts
+  } catch(e){ return {} }
+}
 
 function navPhotoTaken(input){
   if(!input.files || !input.files[0]) return
