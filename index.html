@@ -2212,6 +2212,62 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 </div>
 
 <!-- ========== RUNNER ONBOARDING ========== -->
+<!-- ========== RUNNER INVITE GATE ========== -->
+<div id="S-rn-gate" class="screen">
+  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px 20px;background:var(--bg)">
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:20px;padding:38px;width:100%;max-width:440px">
+      <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:853;text-align:center;margin-bottom:6px">🗑️ BIN<em style="color:var(--cyan);font-style:normal">DASH</em></div>
+      <div style="text-align:center;font-size:16px;font-weight:700;margin-bottom:6px">Runner Access</div>
+      <div style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:28px">BinDash runners are invite-only. Enter your invite code to get started, or request one below.</div>
+
+      <!-- TAB TOGGLE -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;background:var(--surface2);border-radius:10px;padding:3px;margin-bottom:24px">
+        <button id="rg-tab-code" onclick="rnGateTab('code')" style="padding:8px;border-radius:8px;border:none;font-size:13px;font-weight:600;cursor:pointer;background:var(--cyan);color:#07090f;transition:all .2s">I Have a Code</button>
+        <button id="rg-tab-req" onclick="rnGateTab('req')" style="padding:8px;border-radius:8px;border:none;font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:var(--muted);transition:all .2s">Request a Code</button>
+      </div>
+
+      <!-- PANEL: Enter Code -->
+      <div id="rg-panel-code">
+        <div class="field" style="margin-bottom:8px">
+          <label style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Invite Code</label>
+          <input id="rg-code-input" placeholder="e.g. BD-LK-A3F2" maxlength="12"
+            style="font-family:'DM Mono',monospace;font-size:16px;text-transform:uppercase;letter-spacing:.08em;text-align:center"
+            oninput="this.value=this.value.toUpperCase();rnGateCodeResult('')">
+        </div>
+        <div id="rg-code-result" style="font-size:12px;min-height:18px;margin-bottom:14px;text-align:center"></div>
+        <button class="btn btn-cyan btn-full" onclick="rnGateVerifyCode()" style="margin-bottom:12px">Verify Code & Continue →</button>
+        <div style="text-align:center;font-size:12px;color:var(--muted)">Don't have a code? <a onclick="rnGateTab('req')" style="color:var(--cyan);cursor:pointer">Request one →</a></div>
+      </div>
+
+      <!-- PANEL: Request a Code -->
+      <div id="rg-panel-req" style="display:none">
+        <div id="rg-req-form">
+          <div class="g2">
+            <div class="field"><label>First Name</label><input id="rg-fn" placeholder="Marcus"></div>
+            <div class="field"><label>Last Name</label><input id="rg-ln" placeholder="Reid"></div>
+          </div>
+          <div class="field"><label>Email</label><input type="email" id="rg-em" placeholder="marcus@example.com"></div>
+          <div class="field"><label>ZIP Code</label><input id="rg-zip" placeholder="85301" maxlength="5"></div>
+          <div class="field">
+            <label>Why do you want to be a BinDash runner? <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+            <textarea id="rg-why" placeholder="e.g. Looking for flexible side income, familiar with the area..." style="min-height:70px;resize:vertical"></textarea>
+          </div>
+          <div id="rg-req-error" style="display:none;color:#ef4444;font-size:12px;margin-bottom:10px"></div>
+          <button class="btn btn-cyan btn-full" onclick="rnGateSubmitRequest()" style="margin-bottom:12px">Submit Request →</button>
+          <div style="text-align:center;font-size:12px;color:var(--muted)">Already have a code? <a onclick="rnGateTab('code')" style="color:var(--cyan);cursor:pointer">Enter it →</a></div>
+        </div>
+        <div id="rg-req-success" style="display:none;text-align:center;padding:20px 0">
+          <div style="font-size:40px;margin-bottom:12px">📬</div>
+          <div style="font-size:16px;font-weight:700;margin-bottom:8px">Request submitted!</div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.6">We'll review your request and email you an invite code within 24-48 hours. Keep an eye on your inbox.</div>
+        </div>
+      </div>
+
+      <button class="btn btn-ghost btn-full btn-sm" style="margin-top:16px" onclick="go('S-signup')">← Back</button>
+    </div>
+  </div>
+</div>
+
 <div id="S-rn-ob" class="screen">
   <div style="min-height:100vh;background:var(--bg);padding:36px 20px">
     <div style="max-width:600px;margin:0 auto">
@@ -7167,8 +7223,120 @@ async function doLogin(){
 
 // Signup
 let signupRole='hw'
+// =============================================================
+// RUNNER INVITE GATE
+// =============================================================
+
+function rnGateTab(tab){
+  const isCode = tab === 'code'
+  document.getElementById('rg-tab-code').style.background = isCode ? 'var(--cyan)' : 'transparent'
+  document.getElementById('rg-tab-code').style.color = isCode ? '#07090f' : 'var(--muted)'
+  document.getElementById('rg-tab-req').style.background = isCode ? 'transparent' : 'var(--cyan)'
+  document.getElementById('rg-tab-req').style.color = isCode ? 'var(--muted)' : '#07090f'
+  document.getElementById('rg-panel-code').style.display = isCode ? 'block' : 'none'
+  document.getElementById('rg-panel-req').style.display  = isCode ? 'none'  : 'block'
+}
+
+function rnGateCodeResult(msg, color){
+  const el = document.getElementById('rg-code-result')
+  if(el){ el.textContent = msg; el.style.color = color || 'var(--muted)' }
+}
+
+async function rnGateVerifyCode(){
+  const code = document.getElementById('rg-code-input')?.value?.trim().toUpperCase()
+  if(!code){ rnGateCodeResult('Please enter your invite code', '#ef4444'); return }
+
+  rnGateCodeResult('Checking code...', 'var(--muted)')
+
+  try {
+    // Check runner_applications table for matching invite code
+    const { data, error } = await _supa
+      .from('runner_applications')
+      .select('first_name, last_name, email, invite_code, status')
+      .ilike('invite_code', code)
+      .maybeSingle()
+
+    if(error) throw error
+
+    if(!data){
+      rnGateCodeResult('❌ Code not found — check spelling or request a new one', '#ef4444')
+      return
+    }
+
+    if(data.status === 'used'){
+      rnGateCodeResult('❌ This code has already been used', '#ef4444')
+      return
+    }
+
+    // Valid code — pre-fill runner onboarding and proceed
+    rnGateCodeResult('✅ Code verified — welcome, ' + (data.first_name||'Runner') + '!', '#06d6a0')
+    window._runnerInviteCode = code
+    window._runnerInviteName = data.first_name || ''
+    window._runnerInviteEmail = data.email || ''
+
+    // Pre-fill runner onboarding fields
+    setTimeout(() => {
+      const fn = document.getElementById('r-fn')
+      const ln = document.getElementById('r-ln')
+      const em = document.getElementById('r-em')
+      if(fn && data.first_name) fn.value = data.first_name
+      if(ln && data.last_name)  ln.value = data.last_name
+      if(em && data.email)      em.value = data.email
+      go('S-rn-ob')
+    }, 1200)
+
+  } catch(e) {
+    rnGateCodeResult('Error checking code — please try again', '#ef4444')
+    console.warn('[BinDash] invite code check:', e.message)
+  }
+}
+
+async function rnGateSubmitRequest(){
+  const fn  = document.getElementById('rg-fn')?.value?.trim()
+  const ln  = document.getElementById('rg-ln')?.value?.trim()
+  const em  = document.getElementById('rg-em')?.value?.trim()
+  const zip = document.getElementById('rg-zip')?.value?.trim()
+  const why = document.getElementById('rg-why')?.value?.trim()
+  const errEl = document.getElementById('rg-req-error')
+
+  if(!fn || !em){
+    errEl.textContent = 'Please enter your name and email'
+    errEl.style.display = 'block'
+    return
+  }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){
+    errEl.textContent = 'Please enter a valid email address'
+    errEl.style.display = 'block'
+    return
+  }
+  errEl.style.display = 'none'
+
+  try {
+    // Submit to runner_interest table (same as the "Request a code" flow admins see)
+    const { error } = await _supa.from('runner_interest').insert({
+      first_name: fn,
+      last_name:  ln || '',
+      email:      em,
+      zip_code:   zip || null,
+      notes:      why || null,
+      status:     'pending',
+      created_at: new Date().toISOString(),
+    })
+    if(error) throw error
+
+    // Show success
+    document.getElementById('rg-req-form').style.display = 'none'
+    document.getElementById('rg-req-success').style.display = 'block'
+
+  } catch(e) {
+    errEl.textContent = 'Error submitting — please try again'
+    errEl.style.display = 'block'
+    console.warn('[BinDash] runner code request:', e.message)
+  }
+}
+
 function setSR(r){signupRole=r;document.getElementById('sr-hw').classList.toggle('on',r==='hw');document.getElementById('sr-rn').classList.toggle('on',r==='rn')}
-function startSignup(){go(signupRole==='rn'?'S-rn-ob':'S-hw-ob')}
+function startSignup(){go(signupRole==='rn'?'S-rn-gate':'S-hw-ob')}
 
 // -- LANDING PAGE PLAN CLICK -> jump to onboarding + pre-select plan --
 function startOnboarding(planLetter){
