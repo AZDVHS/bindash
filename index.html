@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BinDash -- Smart Bin Collection</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;853&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/h3-js@4.1.0/dist/browser/h3-js.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script data-cfasync="false">
 // ================================================================
@@ -1722,13 +1723,14 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div id="h-s1">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Let's check your area 📍</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Enter your address to see if BinDash is available near you.</div>
-        <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street" oninput="obSave()"></div>
+        <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street" oninput="obSave();clearTimeout(window._h3Timer);window._h3Timer=setTimeout(_h3CheckAddress,1200)"></div>
         <div class="g3">
           <div class="field"><label>City</label><input id="h-city" placeholder="Glendale" oninput="obSave()"></div>
           <div class="field"><label>State</label><input id="h-state" placeholder="AZ" oninput="obSave()"></div>
           <div class="field"><label>ZIP *</label><input id="h-zip" placeholder="85301" maxlength="5" oninput="checkZipCoverage(this.value);obSave()"></div>
         </div>
         <div id="zip-coverage-result" style="display:none;border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:8px"></div>
+        <div id="h3-fomo-banner"></div>
         <div style="display:flex;justify-content:flex-end;margin-top:6px">
           <button class="btn btn-cyan" onclick="hNext(1)">Continue -></button>
         </div>
@@ -7223,6 +7225,124 @@ async function doLogin(){
 
 // Signup
 let signupRole='hw'
+
+// ── H3 SPATIAL ENGINE ────────────────────────────────────────
+const H3_RESOLUTION = 8
+const H3_ACTIVATION_THRESHOLD = 5
+const RUNNER_COVERAGE_RADIUS_KM = 8
+
+function latLngToHex(lat, lng, res = H3_RESOLUTION){
+  if(typeof h3 === 'undefined'){ console.warn('[H3] h3-js not loaded'); return null }
+  return h3.latLngToCell(lat, lng, res)
+}
+function hexToLatLng(hexId){
+  if(typeof h3 === 'undefined') return null
+  const [lat, lng] = h3.cellToLatLng(hexId)
+  return { lat, lng }
+}
+function getHexBoundary(hexId){
+  if(typeof h3 === 'undefined') return []
+  return h3.cellToBoundary(hexId) // [[lat,lng],...]
+}
+function getHexesInRadius(lat, lng, radiusKm){
+  if(typeof h3 === 'undefined') return []
+  const center = latLngToHex(lat, lng)
+  if(!center) return []
+  const rings = Math.ceil(radiusKm / 1.2)
+  return h3.gridDisk(center, rings)
+}
+
+async function geocodeAddress(address, city, state, zip){
+  const q = encodeURIComponent(`${address}, ${city}, ${state} ${zip}, USA`)
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`,
+      { headers: { 'Accept-Language': 'en-US' } })
+    const data = await res.json()
+    if(!data || !data.length) return null
+    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
+  } catch(e){ console.warn('[H3] geocode error:', e.message); return null }
+}
+
+async function getOrCreateMicroZone(hexId, { lat, lng, city, state, zip, trashDay } = {}){
+  if(!_supa || !hexId) return null
+  try {
+    const { data: ex } = await _supa.from('micro_zones').select('*').eq('hex_id', hexId).maybeSingle()
+    if(ex) return ex
+    const center = hexToLatLng(hexId)
+    const { data } = await _supa.from('micro_zones').insert({
+      hex_id: hexId, resolution: H3_RESOLUTION,
+      lat: center?.lat||lat, lng: center?.lng||lng,
+      city, state, zip_code: zip, trash_day: trashDay||null,
+      status: 'inactive', member_count: 0, waitlist_count: 0,
+      activation_threshold: H3_ACTIVATION_THRESHOLD,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }).select().single()
+    return data
+  } catch(e){ console.warn('[H3] getOrCreateMicroZone:', e.message); return null }
+}
+
+async function addressToHex(address, city, state, zip, trashDay = null){
+  const coords = await geocodeAddress(address, city, state, zip)
+  if(!coords) return null
+  const hexId = latLngToHex(coords.lat, coords.lng)
+  if(!hexId) return null
+  const zone = await getOrCreateMicroZone(hexId, { ...coords, city, state, zip, trashDay })
+  return { hexId, lat: coords.lat, lng: coords.lng, zone }
+}
+
+function getHexFomoMessage(zone){
+  if(!zone) return null
+  const { status, member_count, waitlist_count, activation_threshold, trash_day } = zone
+  const total = (member_count||0) + (waitlist_count||0)
+  const needed = Math.max(0, (activation_threshold||5) - total)
+  if(status === 'active') return { type:'active', color:'#22c55e', icon:'✅',
+    headline:'BinDash is live in your area!',
+    sub: trash_day ? `Collection day: ${trash_day}. A runner will be in touch.` : 'Service is active — a runner will be in touch.' }
+  if(needed <= 0) return { type:'launching', color:'#06d6a0', icon:'🚀',
+    headline:'Your block is launching!', sub:'Threshold reached — activation underway. You\'re in!' }
+  if(total >= (activation_threshold||5) * 0.6) return { type:'almost', color:'#f59e0b', icon:'🔥',
+    headline:`${needed} more neighbor${needed!==1?'s':''} needed to go live!`,
+    sub:`${total} of ${activation_threshold} households signed up nearby. Share with your neighbors!` }
+  if(total > 0) return { type:'growing', color:'#fbbf24', icon:'📍',
+    headline:`${total} neighbor${total!==1?'s':''} signed up near you`,
+    sub:`Need ${needed} more to activate. You\'re building momentum!` }
+  return { type:'first', color:'#a5b4fc', icon:'⭐',
+    headline:'You\'re the first on your block!',
+    sub:`Invite ${(activation_threshold||5)-1} neighbors and unlock BinDash for your street.` }
+}
+
+// Show FOMO banner on HO onboarding address step
+async function _h3CheckAddress(){
+  const addr  = document.getElementById('h-addr')?.value.trim()
+  const city  = document.getElementById('h-city')?.value.trim()
+  const state = document.getElementById('h-state')?.value.trim()
+  const zip   = document.getElementById('h-zip')?.value.trim()
+  if(!addr || !zip || zip.length < 5) return
+
+  const el = document.getElementById('h3-fomo-banner')
+  if(el) el.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px">📍 Checking your area...</div>'
+
+  const result = await addressToHex(addr, city||'', state||'AZ', zip)
+  if(!result){ if(el) el.innerHTML = ''; return }
+
+  // Store for later use at approval time
+  window._hwHexResult = result
+
+  const msg = getHexFomoMessage(result.zone)
+  if(!msg || !el) return
+
+  el.innerHTML = `<div style="background:rgba(${msg.color==='#22c55e'?'34,197,94':msg.color==='#f59e0b'?'245,158,11':msg.color==='#fbbf24'?'251,191,36':msg.color==='#06d6a0'?'6,214,160':'165,180,252'},.08);border:1px solid ${msg.color}44;border-radius:10px;padding:12px 14px;margin:12px 0">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <span style="font-size:18px">${msg.icon}</span>
+      <span style="font-size:13px;font-weight:700;color:${msg.color}">${msg.headline}</span>
+    </div>
+    <div style="font-size:12px;color:var(--sub);line-height:1.5">${msg.sub}</div>
+    ${msg.type!=='active'&&msg.type!=='launching'?`<div style="margin-top:8px;background:var(--surface2);border-radius:5px;height:5px;overflow:hidden">
+      <div style="width:${Math.min(100,Math.round(((result.zone?.waitlist_count||0)+(result.zone?.member_count||0))/(result.zone?.activation_threshold||5)*100))}%;height:100%;background:${msg.color};border-radius:5px;transition:width .6s"></div>
+    </div>`:''}
+  </div>`
+}
+// ── END H3 SPATIAL ENGINE ────────────────────────────────────
 // =============================================================
 // RUNNER INVITE GATE
 // =============================================================
@@ -15995,11 +16115,31 @@ async function approveHW(appId, directZoneId){
         collection_day:   app.day || '',
         plan_id:          app.plan || '',
         assigned_runner:  autoRunner?.id || null,
+        hex_id:           app.hexId || null,
+        lat:              app.lat   || null,
+        lng:              app.lng   || null,
         status:           'active',
         created_at:       new Date().toISOString(),
       })
       if(res?.error?.message) console.warn('[BinDash] homeowners insert:', res.error.message)
-      else console.log('[BinDash] Homeowner approved + saved to homeowners table ✅')
+      else {
+        console.log('[BinDash] Homeowner approved + saved to homeowners table ✅')
+        // Register in micro zone (increment member_count, check activation threshold)
+        if(app.hexId) {
+          getOrCreateMicroZone(app.hexId, { city: app.city, state: 'AZ', zip: app.zip })
+            .then(zone => {
+              if(zone) {
+                const newCount = (zone.member_count||0) + 1
+                const newStatus = newCount >= (zone.activation_threshold||5) ? 'active' : zone.status
+                return _supa.from('micro_zones').update({
+                  member_count: newCount, status: newStatus,
+                  activated_at: newStatus==='active' ? new Date().toISOString() : zone.activated_at,
+                  updated_at:   new Date().toISOString(),
+                }).eq('hex_id', app.hexId)
+              }
+            }).catch(e => console.warn('[H3] micro_zone update on approval:', e.message))
+        }
+      }
 
       // ── REFERRAL CREDIT ──────────────────────────────────────────────────
       // If this homeowner was referred by a runner, increment their referral count
