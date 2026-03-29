@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BinDash -- Smart Bin Collection</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;853&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/h3-js@4.1.0/dist/browser/h3-js.umd.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script data-cfasync="false">
 // ================================================================
@@ -1731,6 +1733,17 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         </div>
         <div id="zip-coverage-result" style="display:none;border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:8px"></div>
         <div id="h3-fomo-banner"></div>
+        <div id="h3-signup-map-wrap" style="display:none;margin:12px 0;border-radius:12px;overflow:hidden;border:1px solid var(--border2)">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface2);border-bottom:1px solid var(--border)">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Your Neighborhood</div>
+            <div style="display:flex;gap:10px;font-size:10px;color:var(--muted)">
+              <span><span style="display:inline-block;width:8px;height:8px;background:#22c55e;border-radius:2px;margin-right:3px"></span>Active</span>
+              <span><span style="display:inline-block;width:8px;height:8px;background:#f59e0b;border-radius:2px;margin-right:3px"></span>Waitlist</span>
+              <span><span style="display:inline-block;width:8px;height:8px;background:#3b82f6;border-radius:2px;opacity:.5;margin-right:3px"></span>Runner nearby</span>
+            </div>
+          </div>
+          <div id="h3-signup-map" style="height:220px;width:100%"></div>
+        </div>
         <div style="display:flex;justify-content:flex-end;margin-top:6px">
           <button class="btn btn-cyan" onclick="hNext(1)">Continue -></button>
         </div>
@@ -4093,8 +4106,17 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             </div>
             <!-- Stats bar -->
             <div id="mz-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px"></div>
+            <!-- Map toggle -->
+            <div style="display:flex;gap:8px;margin-bottom:12px">
+              <button id="mz-view-map" onclick="mzSetView('map')" style="flex:1;padding:6px;border-radius:7px;border:1px solid rgba(6,214,160,.4);background:rgba(6,214,160,.15);color:#06d6a0;font-size:12px;font-weight:600;cursor:pointer">🗺 Map View</button>
+              <button id="mz-view-list" onclick="mzSetView('list')" style="flex:1;padding:6px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer">📋 List View</button>
+            </div>
+            <!-- Map -->
+            <div id="mz-map-wrap" style="border-radius:10px;overflow:hidden;border:1px solid var(--border2);margin-bottom:14px">
+              <div id="mz-admin-map" style="height:420px;width:100%"></div>
+            </div>
             <!-- Zone list -->
-            <div id="mz-list" style="display:flex;flex-direction:column;gap:8px">
+            <div id="mz-list" style="display:none;flex-direction:column;gap:8px">
               <div style="font-size:12px;color:var(--muted);text-align:center;padding:20px">Click Refresh to load micro zones</div>
             </div>
           </div>
@@ -7345,6 +7367,19 @@ async function _h3CheckAddress(){
   // Store for later use at approval time
   window._hwHexResult = result
 
+  // Load nearby zones for map display
+  try {
+    const { data: nearbyZones } = await _supa
+      .from('micro_zones')
+      .select('hex_id, status, member_count, waitlist_count, activation_threshold, zip_code, city, zone_label, trash_day, lat, lng')
+      .neq('status', 'inactive')
+      .limit(50)
+    _initSignupMap(result.lat, result.lng, nearbyZones || [])
+  } catch(e){
+    // micro_zones may not exist yet — still show pin
+    _initSignupMap(result.lat, result.lng, [])
+  }
+
   const msg = getHexFomoMessage(result.zone)
   if(!msg || !el) return
 
@@ -7360,6 +7395,269 @@ async function _h3CheckAddress(){
   </div>`
 }
 // ── END H3 SPATIAL ENGINE ────────────────────────────────────
+
+// ── HEATMAP ENGINE ───────────────────────────────────────────
+let _signupMap = null      // Leaflet map instance for signup flow
+let _adminMap  = null      // Leaflet map instance for admin panel
+let _adminHexLayers = []   // hex polygon layers on admin map
+
+// Color scheme for hex status
+function hexColor(status, count, threshold){
+  if(status === 'active') return { fill:'#22c55e', opacity: 0.45 }
+  if(status === 'shadow') return { fill:'#3b82f6', opacity: 0.25 }
+  const pct = threshold > 0 ? count / threshold : 0
+  if(pct >= 0.8) return { fill:'#f97316', opacity: 0.55 }   // almost there — deep orange
+  if(pct >= 0.4) return { fill:'#f59e0b', opacity: 0.40 }   // building — amber
+  return { fill:'#fbbf24', opacity: 0.25 }                   // just started — pale yellow
+}
+
+// Draw hexagons on a Leaflet map from micro_zone rows
+function drawHexLayers(map, zones, opts = {}){
+  const layers = []
+  zones.forEach(z => {
+    if(!z.hex_id || z.hex_id.startsWith('zip-')) return  // skip temp zip zones
+    try {
+      const boundary = getHexBoundary(z.hex_id)
+      if(!boundary || !boundary.length) return
+      // H3 boundary returns [lat,lng] pairs — Leaflet wants same format ✓
+      const latLngs = boundary.map(([lat,lng]) => [lat, lng])
+      const total   = (z.member_count||0) + (z.waitlist_count||0)
+      const col     = hexColor(z.status, total, z.activation_threshold||5)
+
+      const poly = L.polygon(latLngs, {
+        color:       col.fill,
+        fillColor:   col.fill,
+        fillOpacity: col.opacity,
+        weight:      1.5,
+        opacity:     0.8,
+      })
+
+      // Popup on click
+      const needed = Math.max(0, (z.activation_threshold||5) - total)
+      const label  = z.zone_label || z.hex_id.slice(0,8)+'...'
+      poly.bindPopup(`
+        <div style="font-family:system-ui;min-width:160px">
+          <div style="font-weight:700;margin-bottom:4px">${label}</div>
+          <div style="font-size:12px;color:#666;margin-bottom:6px">${z.city||''} · ZIP ${z.zip_code||'--'}</div>
+          <div style="font-size:12px"><b>${z.member_count||0}</b> active · <b>${z.waitlist_count||0}</b> waitlist</div>
+          ${z.status === 'active'
+            ? '<div style="color:#22c55e;font-size:12px;margin-top:4px;font-weight:600">✅ Service active</div>'
+            : `<div style="color:#f59e0b;font-size:12px;margin-top:4px">${needed} more neighbor${needed!==1?'s':''} to launch</div>`
+          }
+          ${z.trash_day ? `<div style="font-size:11px;color:#999;margin-top:2px">📅 ${z.trash_day}</div>` : ''}
+        </div>`, { maxWidth: 220 })
+
+      if(opts.onClick) poly.on('click', () => opts.onClick(z))
+      poly.addTo(map)
+      layers.push(poly)
+    } catch(e){ /* skip bad hex */ }
+  })
+  return layers
+}
+
+// Draw translucent runner coverage halos
+function drawRunnerHalos(map, runners){
+  const halos = []
+  runners.forEach(r => {
+    if(!r.lat || !r.lng) return
+    const circle = L.circle([r.lat, r.lng], {
+      radius:      RUNNER_COVERAGE_RADIUS_KM * 1000,
+      color:       '#3b82f6',
+      fillColor:   '#3b82f6',
+      fillOpacity: 0.07,
+      weight:      1,
+      dashArray:   '6 4',
+      opacity:     0.5,
+    })
+    circle.bindPopup(`<div style="font-size:12px"><b>${r.name}</b><br>Coverage radius: ${RUNNER_COVERAGE_RADIUS_KM}km</div>`)
+    circle.addTo(map)
+    halos.push(circle)
+  })
+  return halos
+}
+
+// Initialize or update the SIGNUP map
+async function _initSignupMap(lat, lng, zones){
+  const wrap = document.getElementById('h3-signup-map-wrap')
+  const el   = document.getElementById('h3-signup-map')
+  if(!wrap || !el) return
+
+  wrap.style.display = 'block'
+
+  if(_signupMap){
+    _signupMap.setView([lat, lng], 14)
+    // Clear old layers
+    _signupMap.eachLayer(l => { if(!(l instanceof L.TileLayer)) _signupMap.removeLayer(l) })
+  } else {
+    _signupMap = L.map('h3-signup-map', {
+      center:         [lat, lng],
+      zoom:           14,
+      zoomControl:    true,
+      scrollWheelZoom: false,
+      attributionControl: false,
+    })
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      subdomains: 'abcd',
+    }).addTo(_signupMap)
+  }
+
+  // Draw hex zones
+  if(zones && zones.length) drawHexLayers(_signupMap, zones)
+
+  // Pin for user's address
+  const pin = L.circleMarker([lat, lng], {
+    radius: 7, color: '#06d6a0', fillColor: '#06d6a0',
+    fillOpacity: 1, weight: 2,
+  }).bindPopup('<div style="font-size:12px;font-weight:700">Your address</div>')
+  pin.addTo(_signupMap)
+
+  // Draw runner halos if available
+  const nearbyRunners = RUNNERS.filter(r => r.lat && r.lng)
+  if(nearbyRunners.length) drawRunnerHalos(_signupMap, nearbyRunners)
+
+  // Force resize after display
+  setTimeout(() => _signupMap.invalidateSize(), 100)
+}
+
+// Load zones from Supabase and render admin map
+async function _initAdminMap(){
+  const el = document.getElementById('mz-admin-map')
+  if(!el) return
+
+  try {
+    // Load micro_zones
+    const { data: zones } = await _supa
+      .from('micro_zones')
+      .select('*')
+      .neq('status','inactive')
+      .limit(200)
+
+    if(!zones || !zones.length){
+      el.style.display = 'flex'
+      el.style.alignItems = 'center'
+      el.style.justifyContent = 'center'
+      el.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:40px">No micro zones yet — run h3_migration.sql<br>or sign up a homeowner with an address to create the first hex</div>'
+      return
+    }
+
+    // Find center from first zone with real coords
+    const anchor = zones.find(z => z.lat && z.lng) || { lat: 33.5387, lng: -112.1860 }
+
+    if(!_adminMap){
+      _adminMap = L.map('mz-admin-map', {
+        center:      [anchor.lat, anchor.lng],
+        zoom:        12,
+        zoomControl: true,
+        attributionControl: false,
+      })
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19, subdomains: 'abcd',
+      }).addTo(_adminMap)
+
+      // Attribution in corner
+      L.control.attribution({ prefix: '© CartoDB' }).addTo(_adminMap)
+    } else {
+      // Clear existing hex layers
+      _adminHexLayers.forEach(l => _adminMap.removeLayer(l))
+      _adminHexLayers = []
+    }
+
+    // Draw hexes
+    _adminHexLayers = drawHexLayers(_adminMap, zones, {
+      onClick: (z) => { showMicroZoneDetail(z) }
+    })
+
+    // Draw runner halos for runners with coordinates
+    const runnersWithCoords = RUNNERS.filter(r => r.lat && r.lng && r.status !== 'INACTIVE')
+    drawRunnerHalos(_adminMap, runnersWithCoords)
+
+    // ZIP-based zones (temp) — show as circle markers at centroid
+    zones.filter(z => z.hex_id?.startsWith('zip-') && z.lat && z.lng).forEach(z => {
+      const total = (z.member_count||0) + (z.waitlist_count||0)
+      const col   = hexColor(z.status, total, z.activation_threshold||5)
+      L.circleMarker([z.lat, z.lng], {
+        radius: 14, color: col.fill, fillColor: col.fill,
+        fillOpacity: col.opacity, weight: 2,
+      }).bindPopup(`
+        <div style="font-family:system-ui;min-width:140px">
+          <div style="font-weight:700">ZIP ${z.zip_code}</div>
+          <div style="font-size:11px;color:#999;margin-bottom:4px">Temp zone (needs geocoding)</div>
+          <div style="font-size:12px">${total} signups · ${z.status}</div>
+        </div>`).addTo(_adminMap)
+    })
+
+    setTimeout(() => _adminMap.invalidateSize(), 100)
+
+  } catch(e){
+    console.warn('[H3 Map] admin map error:', e.message)
+    document.getElementById('mz-admin-map').innerHTML =
+      '<div style="padding:20px;color:#ef4444;font-size:12px">Map error: ' + e.message + ' — micro_zones table may not exist yet</div>'
+  }
+}
+
+function showMicroZoneDetail(z){
+  const total  = (z.member_count||0) + (z.waitlist_count||0)
+  const needed = Math.max(0, (z.activation_threshold||5) - total)
+  const pct    = Math.min(100, Math.round(total / (z.activation_threshold||5) * 100))
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh">
+    <div>
+      <div style="font-size:15px;font-weight:700">${z.zone_label||z.hex_id?.slice(0,12)}</div>
+      <div style="font-size:11px;color:var(--muted)">${z.city||''} · ZIP ${z.zip_code||'--'} · ${z.status}</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:20px;font-weight:700;color:#22c55e">${z.member_count||0}</div>
+        <div style="font-size:10px;color:var(--muted)">Active HOs</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:20px;font-weight:700;color:#f59e0b">${z.waitlist_count||0}</div>
+        <div style="font-size:10px;color:var(--muted)">Waitlist</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:20px;font-weight:700;color:var(--cyan)">${pct}%</div>
+        <div style="font-size:10px;color:var(--muted)">Fill rate</div>
+      </div>
+    </div>
+    <div style="background:var(--surface2);border-radius:6px;height:6px;overflow:hidden;margin-bottom:12px">
+      <div style="width:${pct}%;height:100%;background:${z.status==='active'?'#22c55e':'#f59e0b'};border-radius:6px;transition:width .5s"></div>
+    </div>
+    <div style="font-size:12px;display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Status</span><span style="font-weight:600;color:${z.status==='active'?'#22c55e':'#f59e0b'}">${z.status}</span></div>
+      <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Trash day</span><span>${z.trash_day||'Not set'}</span></div>
+      <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Hex ID</span><span style="font-family:monospace;font-size:11px">${z.hex_id}</span></div>
+      <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Threshold</span><span>${z.activation_threshold||5} HOs</span></div>
+      ${z.anchor_user_email?`<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Anchor</span><span>⭐ ${z.anchor_user_email.split('@')[0]}</span></div>`:''}
+      ${needed > 0 ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">To activate</span><span style="color:#f59e0b;font-weight:600">${needed} more HOs needed</span></div>` : ''}
+    </div>
+  </div>
+  <div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Close</button></div>`
+  openM()
+}
+
+function mzSetView(view){
+  const mapWrap  = document.getElementById('mz-map-wrap')
+  const listWrap = document.getElementById('mz-list')
+  const btnMap   = document.getElementById('mz-view-map')
+  const btnList  = document.getElementById('mz-view-list')
+  if(view === 'map'){
+    if(mapWrap)  mapWrap.style.display  = 'block'
+    if(listWrap) listWrap.style.display = 'none'
+    if(btnMap){  btnMap.style.background='rgba(6,214,160,.15)';  btnMap.style.color='#06d6a0';  btnMap.style.borderColor='rgba(6,214,160,.4)' }
+    if(btnList){ btnList.style.background='transparent'; btnList.style.color='var(--muted)'; btnList.style.borderColor='var(--border)' }
+    setTimeout(() => _adminMap?.invalidateSize(), 50)
+  } else {
+    if(mapWrap)  mapWrap.style.display  = 'none'
+    if(listWrap) listWrap.style.display = 'flex'
+    if(btnList){ btnList.style.background='rgba(6,214,160,.15)'; btnList.style.color='#06d6a0'; btnList.style.borderColor='rgba(6,214,160,.4)' }
+    if(btnMap){  btnMap.style.background='transparent'; btnMap.style.color='var(--muted)'; btnMap.style.borderColor='var(--border)' }
+  }
+}
+// ── END HEATMAP ENGINE ────────────────────────────────────────
 // =============================================================
 // RUNNER INVITE GATE
 // =============================================================
@@ -18835,6 +19133,9 @@ async function loadMicroZones(){
   const listEl  = document.getElementById('mz-list')
   const statsEl = document.getElementById('mz-stats')
   if(listEl) listEl.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:20px">Loading...</div>'
+
+  // Init map in parallel
+  _initAdminMap()
 
   try {
     const { data: zones, error } = await _supa
