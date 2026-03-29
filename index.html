@@ -16895,9 +16895,9 @@ async function _adGenerateBatchesAsync(silent=false){
     })
   })
 
-  // Apply any saved admin edits before rendering
-  _applyAdminStopOrders()
+  // Apply merge first (combines batches), then admin order on top (sorts the combined stops)
   _applyMergeInstructions()
+  _applyAdminStopOrders()
 
   renderDispatchPipeline()
   loadPendingApprovalsIntoDispatch()
@@ -17591,10 +17591,34 @@ function _applyMergeInstructions(){
 
       // Apply merge in-memory
       const primary = toMerge.find(b => b.zoneId === m.primaryZoneId) || toMerge[0]
-      primary.stops = m.stops || primary.stops
+      // Merge the stops from all batches (not just saved m.stops which may be stale)
+      const allMergedStops = []
+      toMerge.forEach(b => { allMergedStops.push(...b.stops) })
+      primary.stops = allMergedStops.length ? allMergedStops : (m.stops || primary.stops)
       primary.runner = m.runner || primary.runner
       primary.status = m.status || primary.status
       primary._merged = true
+
+      // Re-apply admin stop order AFTER merge (merge must not overwrite custom order)
+      const _aoRaw2 = localStorage.getItem('admin_route_order:' + primary.zoneId + ':' + normDay(primary.day))
+      if(_aoRaw2) {
+        try {
+          const _ao2 = JSON.parse(_aoRaw2)
+          if(_ao2.order && _ao2.order.length) {
+            const _oMap2 = {}
+            _ao2.order.forEach((email, i) => { _oMap2[email] = i })
+            primary.stops = [...primary.stops].sort((x, y) => {
+              const xi = _oMap2[x.email||x.id||x.name]
+              const yi = _oMap2[y.email||y.id||y.name]
+              if(xi === undefined && yi === undefined) return 0
+              if(xi === undefined) return 1
+              if(yi === undefined) return -1
+              return xi - yi
+            })
+          }
+        } catch(e) {}
+      }
+
       primary.earnOut   = (primary.stops.length * 3.25).toFixed(2)
       primary.earnTotal = primary.earnOut
       primary.earnPotential = (primary.stops.length * 6.50).toFixed(2)
