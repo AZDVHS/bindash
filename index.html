@@ -8354,9 +8354,12 @@ async function loadRNZones(){
     let zonesByRequest = []
     try {
       const { data: reqs } = await _supa.from('runner_zone_requests')
-        .select('zone_id').ilike('runner_email', runnerEmail)
+        .select('zone_id, zone_role, zone_order, hw_referral_count').ilike('runner_email', runnerEmail)
         .in('status', ['approved', 'approved_via_runner'])
       zonesByRequest = (reqs||[]).map(r=>r.zone_id).filter(Boolean)
+      // Store zone roles for this runner
+      window._runnerZoneRoles = window._runnerZoneRoles || {}
+      ;(reqs||[]).forEach(r=>{ if(r.zone_id) window._runnerZoneRoles[r.zone_id] = { role: r.zone_role||'runner', order: r.zone_order||99, referrals: r.hw_referral_count||0 } })
       console.log('[BinDash] loadRNZones — zone_requests found:', reqs?.length, 'zones:', zonesByRequest)
     } catch(e){ console.warn('[BinDash] zone requests query:', e) }
 
@@ -9151,13 +9154,85 @@ function ruleGetPriorityRunner(zoneId){
   const zips = (z.zips?.length?z.zips:[z.zip]).filter(Boolean)
   const candidates = RUNNERS.filter(r=>r.zoneId===zoneId||r.coverageZones?.includes(zoneId)||zips.includes(r.zip))
   if(!candidates.length) return null
-  // Priority = explicitly flagged, OR matched to zone's assigned_runner field (by id, name, or email)
+  // Explicit priority: admin-flagged or zone-assigned runner wins first
   const zoneAssigned = z.assignedRunner || z.priorityRunnerId
-  const byFlag   = candidates.find(r=>r.isPriority)
+  const byFlag = candidates.find(r=>r.isPriority)
   const byZoneAssign = zoneAssigned
     ? candidates.find(r=>r.id===zoneAssigned||r.name===zoneAssigned||r.email===zoneAssigned)
     : null
-  return byFlag || byZoneAssign || candidates[0] || null
+  if(byFlag || byZoneAssign) return byFlag || byZoneAssign
+  // No explicit priority — return runner with fewest total stops (load balanced)
+  return [...candidates].sort((a,b)=>(a.totalStops||0)-(b.totalStops||0))[0]
+}
+
+// Get zone runner counts by role
+function getZoneRunnerRoles(zoneId){
+  const runners = RUNNERS.filter(r =>
+    r.status !== 'INACTIVE' &&
+    (r.zoneId === zoneId || r.coverageZones?.includes(zoneId))
+  )
+  return {
+    lead:    runners.filter(r => (r.zoneRoles?.[zoneId]?.role || r.zoneRole) === 'lead'),
+    runner:  runners.filter(r => (r.zoneRoles?.[zoneId]?.role || r.zoneRole) === 'runner'),
+    standby: runners.filter(r => (r.zoneRoles?.[zoneId]?.role || r.zoneRole) === 'standby'),
+    all:     runners,
+  }
+}
+
+// Determine what role a NEW runner would get in a zone
+function getZoneRoleForNewRunner(zoneId){
+  const roles = getZoneRunnerRoles(zoneId)
+  if(roles.lead.length === 0)    return 'lead'
+  if(roles.runner.length === 0)  return 'runner'
+  return 'standby'
+}
+
+// Check and auto-promote standby runners who hit the referral threshold (3)
+async function checkZoneAutoPromotions(zoneId){
+  try {
+    const { data: entries } = await _supa.from('runner_zone_requests')
+      .select('id, runner_email, zone_role, zone_order, hw_referral_count')
+      .eq('zone_id', zoneId)
+      .in('status', ['approved','approved_via_runner'])
+      .order('zone_order', { ascending: true })
+    if(!entries || !entries.length) return
+
+    // Find standby runners with 3+ referrals
+    const toPromote = entries.filter(e => e.zone_role === 'standby' && (e.hw_referral_count||0) >= 3)
+    if(!toPromote.length) return
+
+    // Check if runner slot is open (zone runner slot empty)
+    const hasRunner = entries.some(e => e.zone_role === 'runner')
+
+    for(const e of toPromote){
+      const newRole  = hasRunner ? 'standby' : 'runner' // only promote if slot open
+      if(newRole === 'runner'){
+        const newOrder = (entries.filter(x=>x.zone_role!=='standby').length) + 1
+        await _supa.from('runner_zone_requests')
+          .update({ zone_role: 'runner', zone_order: newOrder, promoted_at: new Date().toISOString(), promotion_reason: '3 referrals reached' })
+          .eq('id', e.id)
+        console.log('[BinDash] auto-promoted', e.runner_email, 'to Zone Runner in zone', zoneId)
+        // Notify admin
+        addNotif({ title:'🌟 Runner auto-promoted', body:e.runner_email+' reached 3 referrals — promoted to Zone Runner', type:'ok', action:"adNav(null,'ad-runners')" })
+      }
+    }
+    // Reload runners to reflect new roles
+    await loadRunnersFromSupabase()
+  } catch(e){ console.warn('[BinDash] auto-promote check:', e.message) }
+}
+
+// Admin: reorder runners within a zone
+async function adminSetZoneRunnerOrder(zoneId, runnerId, newRole, newOrder){
+  try {
+    const { error } = await _supa.from('runner_zone_requests')
+      .update({ zone_role: newRole, zone_order: newOrder, promoted_at: new Date().toISOString(), promotion_reason: 'Admin reorder' })
+      .eq('zone_id', zoneId)
+      .in('status', ['approved','approved_via_runner'])
+    if(!error){
+      showToast('Zone runner order updated ✅', 'ok')
+      await loadRunnersFromSupabase()
+    }
+  } catch(e){ showToast('Error updating runner order', 'err') }
 }
 
 function ruleGetSecondaryRunners(zoneId){
@@ -9284,21 +9359,63 @@ function showAdminSetPriority(zoneId){
   if(!z) return
   const zips = (z.zips?.length?z.zips:[z.zip]).filter(Boolean)
   const eligible = RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===zoneId||r.coverageZones?.includes(zoneId)||zips.includes(r.zip)))
+
+  function roleBadge(r){
+    const role = (r.zoneRoles&&r.zoneRoles[zoneId]) ? r.zoneRoles[zoneId].role : (r.zoneRole||'runner')
+    const order = (r.zoneRoles&&r.zoneRoles[zoneId]) ? r.zoneRoles[zoneId].order : (r.zoneOrder||99)
+    const referrals = (r.zoneRoles&&r.zoneRoles[zoneId]) ? r.zoneRoles[zoneId].referrals : (r.zoneReferrals||0)
+    const bg = role==='lead'?'rgba(34,197,94,.15);color:#22c55e':role==='runner'?'rgba(99,102,241,.15);color:#a5b4fc':'rgba(245,158,11,.12);color:#fbbf24'
+    const lbl = role==='lead'?'🌟 Zone Lead':role==='runner'?'👥 Zone Runner':'⏳ Standby'
+    return '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'      +'<span style="background:'+bg+';font-size:10px;padding:2px 8px;border-radius:99px">'+lbl+'</span>'      +'<span style="font-size:10px;color:var(--muted)">#'+order+' · '+referrals+' referrals</span>'      +'</div>'
+  }
+
+  function roleButtons(r){
+    const currentRole = (r.zoneRoles&&r.zoneRoles[zoneId]) ? r.zoneRoles[zoneId].role : (r.zoneRole||'runner')
+    const btns = ['lead','runner','standby'].map(function(role,idx){
+      const active = currentRole===role
+      const lbl = role==='lead'?'🌟 Lead':role==='runner'?'👥 Runner':'⏳ Standby'
+      const onclick = 'adminUpdateZoneRole("'+zoneId+'","'+r.id+'","'+role+'",'+(idx+1)+')'
+      return '<button onclick="'+onclick+'" style="flex:1;padding:5px;border-radius:6px;font-size:11px;cursor:pointer;font-weight:'+(active?'700':'400')+';border:1px solid '+(active?'rgba(6,214,160,.5)':'var(--border)')+';background:'+(active?'rgba(6,214,160,.15)':'transparent')+';color:'+(active?'#06d6a0':'var(--muted)')+'">'+lbl+'</button>'
+    })
+    return '<div style="display:flex;gap:6px;margin-top:8px">'+btns.join('')+'</div>'
+  }
+
   document.getElementById('modal-box').innerHTML = `
-  <div class="mh"><div style="font-size:15px;font-weight:700">Set Priority Runner — ${z.name}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+  <div class="mh">
+    <div>
+      <div style="font-size:15px;font-weight:700">Zone Runner Hierarchy — ${z.name}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">Lead gets first dispatch on all unassigned stops.</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
   <div class="mb">
-    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">The priority runner receives all new customer dispatches for this zone (unless a referred customer directs to another runner). Bin In always chains to whoever completed the Bin Out.</div>
+    <div style="background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.15);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--sub);margin-bottom:14px;line-height:1.6">
+      <strong style="color:var(--text)">Dispatch order:</strong> Lead → Zone Runner → Standby → Broadcast. Standby auto-promotes after 3 referrals.
+    </div>
     ${eligible.length
-      ? eligible.map(r=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;background:${r.isPriority?'rgba(34,197,94,.06)':'transparent'}" onclick="setZonePriorityRunner('${zoneId}','${r.id}');closeM()">
-        <div style="width:30px;height:30px;border-radius:50%;background:${r.color||'var(--cyan)'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#07090f">${r.initials}</div>
-        <div style="flex:1"><div style="font-size:13px;font-weight:700">${r.name}</div><div style="font-size:11px;color:var(--muted)">${r.loyaltyTier||'standard'} tier · ${r.weeklyStops||0} stops/wk · ${r.rating||0}★</div></div>
-        ${r.isPriority?'<span style="background:rgba(34,197,94,.15);color:#22c55e;font-size:10px;padding:2px 8px;border-radius:99px">Current priority</span>':''}
-      </div>`)
-      .join('')
+      ? eligible.map(r=>'<div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px">'          +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">'          +'<div style="width:32px;height:32px;border-radius:50%;background:'+(r.color||'var(--cyan)')+';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#07090f;flex-shrink:0">'+r.initials+'</div>'          +'<div style="flex:1"><div style="font-size:13px;font-weight:700">'+r.name+'</div><div style="font-size:11px;color:var(--muted)">'+(r.totalStops||0)+' total stops · '+(r.rating||0)+'★ · '+(r.zoneReferrals||0)+' referrals</div></div>'          +roleBadge(r)          +'</div>'          +roleButtons(r)          +'</div>').join('')
       : '<div style="font-size:12px;color:var(--muted);padding:12px 0">No eligible runners in this zone yet.</div>'}
   </div>
-  <div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button></div>`
+  <div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Done</button></div>`
   openM()
+}
+
+async function adminUpdateZoneRole(zoneId, runnerId, newRole, newOrder){
+  const r = RUNNERS.find(x=>x.id===runnerId)
+  if(!r) return
+  try {
+    const { error } = await _supa.from('runner_zone_requests')
+      .update({ zone_role: newRole, zone_order: newOrder, promoted_at: new Date().toISOString(), promotion_reason: 'Admin set' })
+      .eq('zone_id', zoneId)
+      .ilike('runner_email', r.email)
+      .in('status', ['approved','approved_via_runner'])
+    if(error) throw error
+    showToast(r.name + ' set as ' + newRole + ' ✅', 'ok')
+    await loadRunnersFromSupabase()
+    showAdminSetPriority(zoneId)
+  } catch(e){
+    showToast('Error: ' + e.message, 'err')
+  }
 }
 
 // Admin actions
@@ -16987,41 +17104,90 @@ async function _adGenerateBatchesAsync(silent=false){
   }
 
   // Offer chain — assigned runner always gets first offer
+  // Track weekly stop assignments per runner during this batch generation
+  // so load balancing accounts for stops assigned THIS run, not just historical counts
+  const _sessionStops = {}
+  function _getRunnerLoad(r){
+    return (r.totalStops || 0) + (_sessionStops[r.id] || 0)
+  }
+  function _recordAssignment(r){
+    if(r) _sessionStops[r.id] = (_sessionStops[r.id] || 0) + 1
+  }
+
   function findOfferChain(hw, visitType){
     const hwZone = hw.zoneId || ''
     const hwZip  = hw.zip    || ''
 
-    // Step 1: Assigned runner (by ID or email match)
+    // ── TIER 1: Admin-assigned runner ─────────────────────────────
+    // Homeowner has a specific runner locked to them — always respected
     if(hw.assignedRunner){
       const primary = RUNNERS.find(r=>{
         if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
-        const vtOk = r.visitType==='BOTH'||r.visitType===visitType
-        // Match by id OR by email (handles cross-table ID mismatch)
-        return (r.id===hw.assignedRunner || r.email===hw.assignedRunner) && vtOk
+        return r.id===hw.assignedRunner || r.email===hw.assignedRunner || r.name===hw.assignedRunner
       })
-      if(primary) return { runner: primary, offerType: 'loyalty', windowMins: 25 }
-
-      // Assigned runner exists but wrong visit type — still note them
-      const anyPrimary = RUNNERS.find(r=>r.id===hw.assignedRunner||r.name===hw.assignedRunner||r.email===hw.assignedRunner)
-      if(anyPrimary && anyPrimary.status!=='INACTIVE') {
-        // Use them anyway — admin assigned them
-        return { runner: anyPrimary, offerType: 'loyalty', windowMins: 25 }
-      }
+      if(primary){ _recordAssignment(primary); return { runner: primary, offerType: 'loyalty', windowMins: 25 } }
     }
 
-    // Step 2: Zone runners
+    // ── TIER 2: Referring runner ──────────────────────────────────
+    // HO was referred by a specific runner — they get this stop if available
+    if(hw.referredBy && DISPATCH_RULES.splitMode !== 'never'){
+      const referrer = RUNNERS.find(r=>{
+        if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
+        return r.name===hw.referredBy || r.ownRefCode===hw.referredByCode ||
+               r.email===hw.referredByEmail || r.id===hw.referredBy
+      })
+      if(referrer){ _recordAssignment(referrer); return { runner: referrer, offerType: 'loyalty', windowMins: 25 } }
+    }
+
+    // ── TIER 3: Zone role hierarchy + load balancing ──────────────
+    // Lead → Zone Runner → Standby, load balanced within each tier
     const zoneRunners = RUNNERS.filter(r=>{
       if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
       if(r.id===hw.assignedRunner) return false
-      return r.zoneId===hwZone || r.coverageZones?.includes(hwZone) || r.zip===hwZip || r.zip?.slice(0,4)===hwZip?.slice(0,4)
+      return r.zoneId===hwZone || r.coverageZones?.includes(hwZone) ||
+             r.zip===hwZip || r.zip?.slice(0,4)===hwZip?.slice(0,4)
     })
+
     if(zoneRunners.length){
-      return { runner: zoneRunners.find(r=>r.status==='AVAILABLE')||zoneRunners[0], offerType: 'zone', windowMins: 45 }
+      // Get zone role for each runner in this zone
+      const withRole = zoneRunners.map(r => ({
+        runner: r,
+        role:  (r.zoneRoles && r.zoneRoles[hwZone]) ? r.zoneRoles[hwZone].role  : (r.zoneRole||'runner'),
+        order: (r.zoneRoles && r.zoneRoles[hwZone]) ? r.zoneRoles[hwZone].order : (r.zoneOrder||99),
+      }))
+
+      // Separate by role tier
+      const leads    = withRole.filter(x=>x.role==='lead')
+      const runners  = withRole.filter(x=>x.role==='runner')
+      const standby  = withRole.filter(x=>x.role==='standby')
+
+      // Role priority: lead first, then zone runner, then standby
+      // Within each tier: prefer available, then load balance by stop count
+      function pickFromTier(tier){
+        if(!tier.length) return null
+        const avail = tier.filter(x=>x.runner.status==='AVAILABLE')
+        const pool  = avail.length ? avail : tier
+        // Sort by load (fewest stops first), then by zone_order as tiebreaker
+        pool.sort((a,b)=>_getRunnerLoad(a.runner)-_getRunnerLoad(b.runner)||a.order-b.order)
+        return pool[0].runner
+      }
+
+      const winner = pickFromTier(leads) || pickFromTier(runners) || pickFromTier(standby)
+      if(winner){
+        _recordAssignment(winner)
+        const role = withRole.find(x=>x.runner.id===winner.id)?.role || 'runner'
+        const mins = role==='lead'?25:role==='runner'?35:45
+        return { runner: winner, offerType: 'zone', windowMins: mins, zoneRole: role }
+      }
     }
 
-    // Step 3: Broadcast all
+    // ── TIER 4: Broadcast ─────────────────────────────────────────
     const allAvail = RUNNERS.filter(r=>r.status==='AVAILABLE'&&r.id!==hw.assignedRunner)
-    if(allAvail.length) return { runner: allAvail[0], offerType: 'broadcast', windowMins: 30 }
+    if(allAvail.length){
+      const sorted = [...allAvail].sort((a,b)=>_getRunnerLoad(a)-_getRunnerLoad(b))
+      _recordAssignment(sorted[0])
+      return { runner: sorted[0], offerType: 'broadcast', windowMins: 30 }
+    }
 
     return { runner: null, offerType: 'unassigned', windowMins: 0 }
   }
@@ -19760,6 +19926,8 @@ async function loadRunnersFromSupabase(){
         ownRefCode:      row.own_ref_code     || null,
         hwReferralCount: row.hw_referral_count|| 0,
         priorityDispatch:!!row.priority_dispatch,
+        totalStops:      row.total_stops      || 0,
+        weeklyStops:     row.completed_today  || 0, // reuse completed_today as running weekly count proxy
       }
     }
 
@@ -19775,6 +19943,33 @@ async function loadRunnersFromSupabase(){
       const r = RUNNERS.find(x=>x.id===assigned||x.name===assigned||x.email===assigned)
       if(r) r.isPriority = true
     })
+
+    // Load zone roles for all runners from runner_zone_requests
+    try {
+      const { data: roleData } = await _supa.from('runner_zone_requests')
+        .select('runner_email, zone_id, zone_role, zone_order, hw_referral_count')
+        .in('status', ['approved','approved_via_runner'])
+      if(roleData) {
+        // Build a lookup: runnerId -> { zoneId -> role }
+        const roleMap = {}
+        roleData.forEach(r => {
+          const runner = RUNNERS.find(x=>x.email?.toLowerCase()===r.runner_email?.toLowerCase())
+          if(!runner) return
+          if(!roleMap[runner.id]) roleMap[runner.id] = {}
+          roleMap[runner.id][r.zone_id] = { role: r.zone_role||'runner', order: r.zone_order||99, referrals: r.hw_referral_count||0 }
+        })
+        // Apply to runner objects
+        RUNNERS.forEach(r => {
+          r.zoneRoles = roleMap[r.id] || {}
+          // Primary zone role
+          const primaryRole = r.zoneId ? (r.zoneRoles[r.zoneId] || {}) : {}
+          r.zoneRole  = primaryRole.role  || 'runner'
+          r.zoneOrder = primaryRole.order || 99
+          r.zoneReferrals = primaryRole.referrals || 0
+          if(r.zoneRole === 'lead') r.isPriority = true
+        })
+      }
+    } catch(e){ console.warn('[BinDash] zone roles load:', e.message) }
 
     console.log('[BinDash] Runners loaded:', RUNNERS.length, '-- source:', useAppFallback ? 'applications fallback' : 'runners table')
     updateOverviewCounts()
@@ -19949,6 +20144,14 @@ function lookupRunnerZones(zip){
         </div>
       </div>
       <div style="font-size:12px">${runnersLine}</div>
+      ${(()=>{
+        // Zone role disclosure for runner enrollment
+        const zRoles = getZoneRunnerRoles(z.id)
+        const newRole = getZoneRoleForNewRunner(z.id)
+        if(newRole === 'lead') return '<div style="margin-top:8px;background:rgba(6,214,160,.08);border:1px solid rgba(6,214,160,.2);border-radius:7px;padding:7px 10px;font-size:11px;color:#06d6a0">🌟 <strong>Zone Lead slot open</strong> — you\'d be the first runner and primary dispatcher for this zone.</div>'
+        if(newRole === 'runner') return '<div style="margin-top:8px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:7px;padding:7px 10px;font-size:11px;color:#a5b4fc">👥 <strong>Zone Runner slot open</strong> — you\'d work alongside the Zone Lead, covering overflow and your referral customers.</div>'
+        return '<div style="margin-top:8px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:7px;padding:8px 10px;font-size:11px"><div style="font-weight:700;color:#fbbf24;margin-bottom:3px">⚠️ Zone at capacity — Standby status</div><div style="color:var(--sub);line-height:1.5">This zone already has a Lead and Zone Runner. You\'d join as <strong style="color:var(--text)">Standby</strong> — earning from your own referral customers and overflow when active runners are unavailable. Refer 3+ homeowners to be eligible for Zone Runner promotion.</div></div>'
+      })()}
       ${isLive ? `<div style="margin-top:8px;background:var(--surface2);border-radius:5px;height:4px;overflow:hidden">
         <div style="width:${pct}%;height:100%;background:${pct>80?'#ef4444':pct>50?'#f59e0b':'var(--green)'};border-radius:5px;transition:width .4s"></div>
       </div>` : ''}
