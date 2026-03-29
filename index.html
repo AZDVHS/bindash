@@ -9401,66 +9401,105 @@ function showAdminSetPriority(zoneId){
 }
 
 async function adminUpdateZoneRole(zoneId, runnerId, newRole, newOrder){
+  console.log('[BinDash] adminUpdateZoneRole called:', zoneId, runnerId, newRole, newOrder)
   const r = RUNNERS.find(x=>x.id===runnerId)
-  if(!r){ showToast('Runner not found','err'); return }
+  if(!r){ showToast('Runner not found — id: '+runnerId,'err'); return }
+
+  const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+  const roleLabel = newRole==='lead'?'🌟 Zone Lead':newRole==='runner'?'👥 Zone Runner':'⏳ Standby'
+
   try {
-    // Try update first
-    const { data: existing, error: findErr } = await _supa.from('runner_zone_requests')
-      .select('id, status')
+    // Find existing row for this runner+zone
+    const { data: rows, error: findErr } = await _supa
+      .from('runner_zone_requests')
+      .select('id, status, zone_role')
       .eq('zone_id', zoneId)
       .ilike('runner_email', r.email)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
 
+    console.log('[BinDash] found rows:', rows, 'findErr:', findErr)
     if(findErr) throw findErr
 
-    if(existing) {
-      // Update existing row
-      const { error } = await _supa.from('runner_zone_requests')
-        .update({
-          zone_role:        newRole,
-          zone_order:       newOrder,
-          status:           existing.status === 'pending' ? 'approved' : existing.status,
-          promoted_at:      new Date().toISOString(),
-          promotion_reason: 'Admin set'
-        })
-        .eq('id', existing.id)
-      if(error) throw error
-    } else {
-      // No row exists — insert one
-      const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
-      const { error } = await _supa.from('runner_zone_requests')
-        .insert({
-          runner_name:      r.name,
-          runner_email:     r.email,
-          zone_id:          zoneId,
-          zone_name:        zone?.name || '',
-          zip_code:         r.zip || '',
-          status:           'approved',
-          zone_role:        newRole,
-          zone_order:       newOrder,
-          promoted_at:      new Date().toISOString(),
-          promotion_reason: 'Admin set',
-          created_at:       new Date().toISOString(),
-        })
-      if(error) throw error
-    }
+    const existing = rows && rows.length > 0 ? rows[0] : null
 
-    // Also update ADMIN_ZONES so Lead is reflected in dispatch
-    const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
-    if(zone && newRole === 'lead') {
+    if(existing) {
+      // Build update payload — only include zone_role if column exists
+      // (gracefully skip if zone_roles.sql hasn't been run yet)
+      const payload = {
+        status:      existing.status === 'pending' ? 'approved' : existing.status,
+        updated_at:  new Date().toISOString(),
+      }
+      // Try with zone_role first
+      const { error: e1 } = await _supa.from('runner_zone_requests')
+        .update({ ...payload, zone_role: newRole, zone_order: newOrder, promotion_reason: 'Admin set' })
+        .eq('id', existing.id)
+
+      if(e1) {
+        console.warn('[BinDash] zone_role update failed (column may not exist yet):', e1.message)
+        // Fallback: update without zone_role columns — just status
+        const { error: e2 } = await _supa.from('runner_zone_requests')
+          .update(payload).eq('id', existing.id)
+        if(e2) throw e2
+        showToast('⚠️ Role saved in-memory only — run zone_roles.sql in Supabase to persist', 'warn', 6000)
+      } else {
+        showToast(r.name + ' → ' + roleLabel + ' ✅', 'ok', 3000)
+      }
+    } else {
+      // No row exists — insert
+      const { error: e1 } = await _supa.from('runner_zone_requests').insert({
+        runner_name:      r.name,
+        runner_email:     r.email,
+        zone_id:          zoneId,
+        zone_name:        zone?.name || '',
+        zip_code:         r.zip || '',
+        status:           'approved',
+        zone_role:        newRole,
+        zone_order:       newOrder,
+        promotion_reason: 'Admin set',
+        created_at:       new Date().toISOString(),
+        updated_at:       new Date().toISOString(),
+      })
+      if(e1) {
+        console.warn('[BinDash] insert with zone_role failed:', e1.message)
+        // Try without zone_role columns
+        const { error: e2 } = await _supa.from('runner_zone_requests').insert({
+          runner_name: r.name, runner_email: r.email,
+          zone_id: zoneId, zone_name: zone?.name||'', zip_code: r.zip||'',
+          status: 'approved', created_at: new Date().toISOString(),
+        })
+        if(e2) throw e2
+        showToast('⚠️ Role saved in-memory only — run zone_roles.sql in Supabase to persist', 'warn', 6000)
+      } else {
+        showToast(r.name + ' → ' + roleLabel + ' ✅', 'ok', 3000)
+      }
+    }
+  } catch(e){
+    console.error('[BinDash] adminUpdateZoneRole DB error:', e)
+    showToast('DB error: ' + (e.message||JSON.stringify(e)), 'err', 8000)
+  }
+
+  // Always apply in-memory regardless of DB success
+  // Update runner object
+  if(!r.zoneRoles) r.zoneRoles = {}
+  r.zoneRoles[zoneId] = { role: newRole, order: newOrder, referrals: r.zoneRoles[zoneId]?.referrals||0 }
+  r.zoneRole  = newRole
+  r.zoneOrder = newOrder
+  if(newRole === 'lead') { r.isPriority = true }
+  else { r.isPriority = false }
+
+  // Update ADMIN_ZONES so dispatch picks up the Lead immediately
+  if(zone) {
+    if(newRole === 'lead') {
       zone.assignedRunner   = r.id
       zone.priorityRunnerId = r.id
+    } else if(zone.assignedRunner === r.id || zone.priorityRunnerId === r.id) {
+      // If this runner was the lead and got demoted, find new lead
+      zone.assignedRunner   = null
+      zone.priorityRunnerId = null
     }
-
-    showToast(r.name + ' → ' + (newRole==='lead'?'🌟 Zone Lead':newRole==='runner'?'👥 Zone Runner':'⏳ Standby') + ' ✅', 'ok', 3000)
-    await loadRunnersFromSupabase()
-    showAdminSetPriority(zoneId)
-  } catch(e){
-    console.error('[BinDash] adminUpdateZoneRole:', e)
-    showToast('Error updating role: ' + (e.message||'check console'), 'err')
   }
+
+  // Refresh the modal to show updated state
+  showAdminSetPriority(zoneId)
 }
 
 // Admin actions
