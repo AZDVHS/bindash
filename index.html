@@ -9402,19 +9402,64 @@ function showAdminSetPriority(zoneId){
 
 async function adminUpdateZoneRole(zoneId, runnerId, newRole, newOrder){
   const r = RUNNERS.find(x=>x.id===runnerId)
-  if(!r) return
+  if(!r){ showToast('Runner not found','err'); return }
   try {
-    const { error } = await _supa.from('runner_zone_requests')
-      .update({ zone_role: newRole, zone_order: newOrder, promoted_at: new Date().toISOString(), promotion_reason: 'Admin set' })
+    // Try update first
+    const { data: existing, error: findErr } = await _supa.from('runner_zone_requests')
+      .select('id, status')
       .eq('zone_id', zoneId)
       .ilike('runner_email', r.email)
-      .in('status', ['approved','approved_via_runner'])
-    if(error) throw error
-    showToast(r.name + ' set as ' + newRole + ' ✅', 'ok')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if(findErr) throw findErr
+
+    if(existing) {
+      // Update existing row
+      const { error } = await _supa.from('runner_zone_requests')
+        .update({
+          zone_role:        newRole,
+          zone_order:       newOrder,
+          status:           existing.status === 'pending' ? 'approved' : existing.status,
+          promoted_at:      new Date().toISOString(),
+          promotion_reason: 'Admin set'
+        })
+        .eq('id', existing.id)
+      if(error) throw error
+    } else {
+      // No row exists — insert one
+      const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+      const { error } = await _supa.from('runner_zone_requests')
+        .insert({
+          runner_name:      r.name,
+          runner_email:     r.email,
+          zone_id:          zoneId,
+          zone_name:        zone?.name || '',
+          zip_code:         r.zip || '',
+          status:           'approved',
+          zone_role:        newRole,
+          zone_order:       newOrder,
+          promoted_at:      new Date().toISOString(),
+          promotion_reason: 'Admin set',
+          created_at:       new Date().toISOString(),
+        })
+      if(error) throw error
+    }
+
+    // Also update ADMIN_ZONES so Lead is reflected in dispatch
+    const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+    if(zone && newRole === 'lead') {
+      zone.assignedRunner   = r.id
+      zone.priorityRunnerId = r.id
+    }
+
+    showToast(r.name + ' → ' + (newRole==='lead'?'🌟 Zone Lead':newRole==='runner'?'👥 Zone Runner':'⏳ Standby') + ' ✅', 'ok', 3000)
     await loadRunnersFromSupabase()
     showAdminSetPriority(zoneId)
   } catch(e){
-    showToast('Error: ' + e.message, 'err')
+    console.error('[BinDash] adminUpdateZoneRole:', e)
+    showToast('Error updating role: ' + (e.message||'check console'), 'err')
   }
 }
 
@@ -13508,21 +13553,51 @@ function assignHWZone(hwId, zoneId){
 function showReassignRunner(hwId){
   const hw = HOMEOWNERS.find(x=>x.id===hwId); if(!hw) return
   const available = RUNNERS.filter(r=>r.status!=='INACTIVE')
+  const currentRunner = RUNNERS.find(r=>r.id===hw.assignedRunner||r.name===hw.assignedRunner||r.email===hw.assignedRunner)
+  const hwZone = hw.zoneId
+
+  // Get zone lead for this HO's zone — shown as the default fallback
+  const zoneLead = RUNNERS.find(r=>
+    (r.zoneRoles?.[hwZone]?.role||r.zoneRole)==='lead' &&
+    (r.zoneId===hwZone||r.coverageZones?.includes(hwZone))
+  )
+
+  // Check if this is a referral lock
+  const isReferralLocked = !!(hw.referredBy || hw.referredByCode || hw.referredByEmail)
+
   document.getElementById('modal-box').innerHTML=`
-  <div class="mh"><div style="font-size:15px;font-weight:700">↔ Reassign Runner -- ${hw.name}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
-  <div class="mb">
-    <div style="font-size:13px;color:var(--sub);margin-bottom:12px">Current runner: <strong style="color:var(--text)">${RUNNERS.find(r=>r.id===hw.assignedRunner||r.name===hw.assignedRunner||r.email===hw.assignedRunner)?.name||'Unassigned'}</strong></div>
-    <div style="display:flex;flex-direction:column;gap:7px">
-      ${available.map(r=>`
-        <div style="display:flex;align-items:center;justify-content:space-between;background:${hw.assignedRunner===r.id?'rgba(6,214,160,.08)':'var(--surface2)'};border:1px solid ${hw.assignedRunner===r.id?'rgba(6,214,160,.3)':'var(--border)'};border-radius:8px;padding:9px 12px;font-size:13px">
-          <div>
-            <span style="font-weight:600">${r.name}</span>
-            <span style="color:var(--muted);font-size:11px"> . ${r.visitType} . ${r.area} . ${r.rating}★</span>
-            <span class="badge" style="background:${r.status==='AVAILABLE'?'#22c55e22':'rgba(59,130,246,.15)'};color:${r.status==='AVAILABLE'?'#22c55e':'#3b82f6'};font-size:9px;margin-left:4px">${r.status}</span>
-          </div>
-          ${hw.assignedRunner===r.id ? '<span style="color:var(--cyan);font-size:11px">Current</span>' : `<button class="btn btn-cyan btn-sm" style="font-size:11px;padding:5px 14px" onclick="assignHWRunner('${hwId}','${r.id}').then(()=>closeM())">Assign</button>`}
-        </div>`).join('')}
+  <div class="mh">
+    <div>
+      <div style="font-size:15px;font-weight:700">Assign Runner — ${hw.name}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">If unassigned, defaults to Zone Lead at dispatch</div>
     </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+    ${isReferralLocked ? `<div style="background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.2);border-radius:8px;padding:8px 12px;font-size:12px;color:#fbbf24;margin-bottom:12px">🔒 Referral lock — referred by ${hw.referredBy||'a runner'}. Reassigning overrides the referral.</div>` : ''}
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+      Current: <strong style="color:${currentRunner?'var(--cyan)':'#ef4444'}">${currentRunner?.name||'Unassigned'}</strong>
+      ${!currentRunner&&zoneLead?`<span style="color:var(--muted)"> → will default to <strong style="color:var(--text)">${zoneLead.name}</strong> (Zone Lead) at dispatch</span>`:''}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${available.map(r=>{
+        const isCurrent = hw.assignedRunner===r.id
+        const zRole = r.zoneRoles?.[hwZone]?.role || r.zoneRole || 'runner'
+        const roleTag = zRole==='lead'?'🌟 Lead':zRole==='runner'?'👥 Runner':zRole==='standby'?'⏳ Standby':''
+        const roleColor = zRole==='lead'?'#22c55e':zRole==='runner'?'#a5b4fc':'#fbbf24'
+        return `<div style="display:flex;align-items:center;justify-content:space-between;background:${isCurrent?'rgba(6,214,160,.08)':'var(--surface2)'};border:1px solid ${isCurrent?'rgba(6,214,160,.3)':'var(--border)'};border-radius:8px;padding:9px 12px">
+          <div>
+            <span style="font-size:13px;font-weight:600">${r.name}</span>
+            ${roleTag?`<span style="font-size:10px;color:${roleColor};margin-left:6px">${roleTag}</span>`:''}
+            <span style="color:var(--muted);font-size:11px;margin-left:6px">${r.area||r.zip||''} · ${r.rating||0}★</span>
+          </div>
+          ${isCurrent
+            ? '<span style="color:var(--cyan);font-size:11px;font-weight:600">✓ Current</span>'
+            : `<button class="btn btn-cyan btn-sm" style="font-size:11px;padding:5px 14px" onclick="assignHWRunner('${hwId}','${r.id}').then(()=>closeM())">Assign</button>`}
+        </div>`
+      }).join('')}
+    </div>
+    ${currentRunner ? `<button onclick="assignHWRunner('${hwId}',null).then(()=>closeM())" style="margin-top:10px;width:100%;padding:7px;background:none;border:1px solid rgba(239,68,68,.3);border-radius:7px;color:#ef4444;font-size:12px;cursor:pointer">Remove assignment — default to Zone Lead at dispatch</button>` : ''}
   </div>
   <div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Close</button></div>`
   openM()
@@ -13530,16 +13605,15 @@ function showReassignRunner(hwId){
 
 async function assignHWRunner(hwId, runnerId){
   const hw=HOMEOWNERS.find(x=>x.id===hwId); if(!hw) return
-  hw.assignedRunner=runnerId
+  hw.assignedRunner = runnerId || null
   renderHomeownerList()
   const rn=RUNNERS.find(r=>r.id===runnerId)
-  showToast(hw.name+' assigned to '+(rn?.name||'runner')+' ✅','ok')
-  // Persist to Supabase — update all matching rows by email (most reliable key)
+  showToast(rn ? hw.name+' → '+rn.name+' ✅' : hw.name+' unassigned — Zone Lead gets them at dispatch', rn?'ok':'info', 4000)
   try {
-    const upd = { assigned_runner: runnerId, updated_at: new Date().toISOString() }
+    const upd = { assigned_runner: runnerId||null, updated_at: new Date().toISOString() }
     await _supa.from('homeowners').update(upd).eq('email', hw.email)
     await _supa.from('homeowner_signups').update(upd).eq('email', hw.email)
-    console.log('[BinDash] Runner assignment saved ✅', hw.name, '→', rn?.name||runnerId)
+    console.log('[BinDash] Runner assignment saved:', hw.name, '->', rn?.name||'unassigned')
     await loadHomeownersFromSupabase()
   } catch(e){ console.warn('[BinDash] assignHWRunner save:', String(e?.message||e)) }
 }
@@ -17126,6 +17200,7 @@ async function _adGenerateBatchesAsync(silent=false){
         return r.id===hw.assignedRunner || r.email===hw.assignedRunner || r.name===hw.assignedRunner
       })
       if(primary){ _recordAssignment(primary); return { runner: primary, offerType: 'loyalty', windowMins: 25 } }
+      // Assigned runner exists but inactive/off-duty — fall through to zone hierarchy
     }
 
     // ── TIER 2: Referring runner ──────────────────────────────────
@@ -17139,8 +17214,9 @@ async function _adGenerateBatchesAsync(silent=false){
       if(referrer){ _recordAssignment(referrer); return { runner: referrer, offerType: 'loyalty', windowMins: 25 } }
     }
 
-    // ── TIER 3: Zone role hierarchy + load balancing ──────────────
-    // Lead → Zone Runner → Standby, load balanced within each tier
+    // ── TIER 3: Zone role hierarchy ───────────────────────────────
+    // Unassigned HOs and fallbacks always go to Zone Lead first.
+    // Lead → Zone Runner → Standby, load balanced within each tier.
     const zoneRunners = RUNNERS.filter(r=>{
       if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
       if(r.id===hw.assignedRunner) return false
