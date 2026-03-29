@@ -7877,16 +7877,13 @@ async function _initAdminMap(){
       _adminHexLayers = []
     }
 
+    // Check if H3 is loaded before entering the loop
+    const h3Ready = typeof h3 !== 'undefined'
+
     // Draw a circle cluster for each zone (H3 hex needs lat/lng which we have)
     mapZones.forEach(z => {
       if(!z.lat || !z.lng) return
       const col = hexColor(z.status, z.member_count, z.activation_threshold)
-
-      // Draw 3-ring H3 hex cluster — wait up to 3s for h3-js to load
-      const h3Ready = typeof h3 !== 'undefined' || await new Promise(resolve => {
-        let tries = 0
-        const t = setInterval(() => { if(typeof h3 !== 'undefined' || ++tries > 30){ clearInterval(t); resolve(typeof h3 !== 'undefined') } }, 100)
-      })
 
       if(h3Ready){
         const centerHex = latLngToHex(z.lat, z.lng)
@@ -7997,7 +7994,6 @@ async function _initAdminMap(){
 
     setTimeout(() => {
       _adminMap.invalidateSize()
-      // Fit map to show all drawn hexes
       if(_adminHexLayers.length > 0){
         try {
           const group = L.featureGroup(_adminHexLayers)
@@ -8005,6 +8001,17 @@ async function _initAdminMap(){
         } catch(e){}
       }
     }, 150)
+
+    // If H3 wasn't loaded yet, retry in 2 seconds to get hex polygons
+    if(!h3Ready){
+      setTimeout(() => {
+        if(typeof h3 !== 'undefined'){
+          _adminHexLayers.forEach(l => _adminMap.removeLayer(l))
+          _adminHexLayers = []
+          _initAdminMap()
+        }
+      }, 2000)
+    }
 
   } catch(e){
     console.warn('[H3 Map] admin map error:', e.message)
