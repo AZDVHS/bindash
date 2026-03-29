@@ -7720,42 +7720,88 @@ async function _initAdminMap(){
   if(!el) return
 
   try {
-    // Load micro_zones
-    const { data: zones } = await _supa
-      .from('micro_zones')
-      .select('*')
-      .neq('status','inactive')
-      .limit(200)
+    // Build map zones directly from ADMIN_ZONES — no micro_zones table needed
+    const mapZones = ADMIN_ZONES.filter(z => z.status !== 'inactive').map(z => {
+      const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
+      const zip = zips[0] || ''
+      const coords = ZIP_CENTROIDS[zip] || [33.5387, -112.1860]
+      const hwCount = HOMEOWNERS.filter(h => h.status==='active' && (h.zoneId===z.id || zips.includes(h.zip))).length
+      return {
+        hex_id: null,
+        status: z.status === 'live' ? 'active' : 'pending',
+        member_count: hwCount,
+        waitlist_count: 0,
+        activation_threshold: z.threshold || 5,
+        zip_code: zip, city: z.name, zone_label: z.name,
+        trash_day: (z.collection||[]).join(', '),
+        lat: coords[0], lng: coords[1],
+      }
+    })
 
-    // Fall back to classic zones if no micro zones yet
-    const mapZones = (zones && zones.length) ? zones : []
     const anchor = mapZones.find(z => z.lat && z.lng) || { lat: 33.5387, lng: -112.1860 }
 
     if(!_adminMap){
       _adminMap = L.map('mz-admin-map', {
         center:      [anchor.lat, anchor.lng],
-        zoom:        12,
+        zoom:        11,
         zoomControl: true,
         attributionControl: false,
       })
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         maxZoom: 19, subdomains: 'abcd',
       }).addTo(_adminMap)
-
-      // Attribution in corner
       L.control.attribution({ prefix: '© CartoDB' }).addTo(_adminMap)
     } else {
-      // Clear existing hex layers
       _adminHexLayers.forEach(l => _adminMap.removeLayer(l))
       _adminHexLayers = []
     }
 
-    // Draw hexes
-    _adminHexLayers = drawHexLayers(_adminMap, mapZones, {
-      onClick: (z) => { showMicroZoneDetail(z) }
+    // Draw a circle cluster for each zone (H3 hex needs lat/lng which we have)
+    mapZones.forEach(z => {
+      if(!z.lat || !z.lng) return
+      const col = hexColor(z.status, z.member_count, z.activation_threshold)
+
+      // Draw 3-ring H3 hex cluster if h3 is loaded, else circle
+      if(typeof h3 !== 'undefined'){
+        const centerHex = latLngToHex(z.lat, z.lng)
+        if(centerHex){
+          const hexes = h3.gridDisk(centerHex, 3)
+          hexes.forEach(hex => {
+            try {
+              const boundary = h3.cellToBoundary(hex)
+              const poly = L.polygon(boundary, {
+                color: col.fill, fillColor: col.fill,
+                fillOpacity: col.opacity * 0.8,
+                weight: 1, opacity: 0.7,
+              })
+              const needed = Math.max(0, z.activation_threshold - z.member_count)
+              poly.bindPopup(`<div style="font-family:system-ui;min-width:180px">
+                <b style="font-size:13px">${z.zone_label}</b>
+                <div style="font-size:12px;color:#666;margin:4px 0">ZIP ${z.zip_code}</div>
+                <div style="font-size:12px"><b>${z.member_count}</b> active homeowners</div>
+                ${z.status==='active'
+                  ? '<div style="color:#22c55e;font-size:12px;margin-top:4px">✅ Service active</div>'
+                  : `<div style="color:#f59e0b;font-size:12px;margin-top:4px">${needed} more to launch</div>`}
+                ${z.trash_day ? `<div style="font-size:11px;color:#999">📅 ${z.trash_day}</div>` : ''}
+                ${z.status!=='active'
+                  ? `<button onclick="activateFromMicroZone('${z.zip_code}','${z.city}',${z.member_count})" style="margin-top:8px;width:100%;padding:5px;background:#06d6a033;border:1px solid #06d6a0;border-radius:5px;color:#06d6a0;font-size:11px;font-weight:700;cursor:pointer">⚡ Activate Zone →</button>`
+                  : ''}
+              </div>`, {maxWidth:220})
+              poly.addTo(_adminMap)
+              _adminHexLayers.push(poly)
+            } catch(e){}
+          })
+        }
+      } else {
+        // Fallback: simple circle
+        const circle = L.circle([z.lat, z.lng], {
+          radius: 2000, color: col.fill, fillColor: col.fill, fillOpacity: col.opacity, weight: 2,
+        }).bindPopup(`<b>${z.zone_label}</b><br>${z.member_count} HOs`).addTo(_adminMap)
+        _adminHexLayers.push(circle)
+      }
     })
 
-    // Draw runner halos for runners with coordinates
+    // Runner halos
     const runnersWithCoords = RUNNERS.filter(r => r.lat && r.lng && r.status !== 'INACTIVE')
     drawRunnerHalos(_adminMap, runnersWithCoords)
 
@@ -19451,31 +19497,24 @@ async function loadMicroZones(){
   const statsEl = document.getElementById('mz-stats')
   if(listEl) listEl.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:20px">Loading...</div>'
 
-  // Init map in parallel
+  // Init map from ADMIN_ZONES (always accurate)
   _initAdminMap()
 
+  // Build zone stats from ADMIN_ZONES — the single source of truth
+  const zones = ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>{
+    const zips = (z.zips?.length?z.zips:[z.zip]).filter(Boolean)
+    const hwCount = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))).length
+    const rnCount = RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===z.id||r.coverageZones?.includes(z.id))).length
+    const wlCount = (WAITLIST_SIGNUPS||[]).filter(s=>zips.includes(s.zip)).length
+    return { ...z, hwCount, rnCount, wlCount, zips }
+  }).sort((a,b)=>b.hwCount-a.hwCount)
+
   try {
-    const { data: zones, error } = await _supa
-      .from('micro_zones')
-      .select('*')
-      .order('member_count', { ascending: false })
-
-    if(error) throw error
-    if(!zones || !zones.length){
-      if(listEl) listEl.innerHTML = `<div style="text-align:center;padding:32px;color:var(--muted)">
-        <div style="font-size:32px;margin-bottom:10px">🔷</div>
-        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No micro zones yet</div>
-        <div style="font-size:13px;margin-bottom:14px">Run h3_migration.sql in Supabase to convert your existing data,<br>or new zones will appear automatically as homeowners sign up.</div>
-      </div>`
-      return
-    }
-
-    // Stats
-    const active  = zones.filter(z=>z.status==='active').length
-    const pending = zones.filter(z=>z.status==='pending').length
-    const shadow  = zones.filter(z=>z.status==='shadow').length
-    const totalHO = zones.reduce((t,z)=>t+(z.member_count||0),0)
-    const totalWL = zones.reduce((t,z)=>t+(z.waitlist_count||0),0)
+    const active  = zones.filter(z=>z.status==='live').length
+    const pending = zones.filter(z=>z.status==='waitlist').length
+    const shadow  = 0
+    const totalHO = zones.reduce((t,z)=>t+z.hwCount,0)
+    const totalWL = zones.reduce((t,z)=>t+z.wlCount,0)
 
     if(statsEl) statsEl.innerHTML = [
       ['🟢 Active',  active,  '#22c55e'],
@@ -19488,65 +19527,81 @@ async function loadMicroZones(){
         <div style="font-size:10px;color:var(--muted);margin-top:2px">${label}</div>
       </div>`).join('')
 
-    // Zone cards
-    if(listEl) listEl.innerHTML = zones.map(z => {
-      const pct = Math.min(100, Math.round(((z.member_count||0)+(z.waitlist_count||0))/(z.activation_threshold||5)*100))
-      const statusColor = z.status==='active'?'#22c55e':z.status==='pending'?'#f59e0b':z.status==='shadow'?'#3b82f6':'#6b7280'
-      const statusLabel = z.status==='active'?'✅ Active':z.status==='pending'?'🟠 Pending':z.status==='shadow'?'🔵 Shadow':'⬜ Inactive'
-      const isRealHex   = !z.hex_id.startsWith('zip-')
-      const hexDisplay  = isRealHex ? z.hex_id.slice(0,8)+'...' : z.hex_id
-
-      return `<div style="border:1px solid ${statusColor}44;border-left:4px solid ${statusColor};border-radius:9px;padding:12px 14px;background:var(--surface)">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">
-          <div>
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:13px;font-weight:700">${z.zone_label||z.hex_id}</span>
-              <span style="background:${statusColor}22;color:${statusColor};font-size:10px;padding:1px 8px;border-radius:99px;font-weight:700">${statusLabel}</span>
-              ${isRealHex?'<span style="background:rgba(6,214,160,.1);color:var(--cyan);font-size:9px;padding:1px 6px;border-radius:4px">H3 ✓</span>':'<span style="background:rgba(245,158,11,.1);color:#fbbf24;font-size:9px;padding:1px 6px;border-radius:4px">ZIP (temp)</span>'}
-            </div>
-            <div style="font-size:11px;color:var(--muted);margin-top:3px">
-              ${z.city||''}${z.state?' · '+z.state:''} · ZIP ${z.zip_code||'--'} · <span style="font-family:monospace;font-size:10px">${hexDisplay}</span>
-            </div>
-          </div>
-          <div style="text-align:right;flex-shrink:0">
-            <div style="font-size:16px;font-weight:700;color:var(--cyan)">${z.member_count||0}</div>
-            <div style="font-size:9px;color:var(--muted)">active HOs</div>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
-          <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
-            <div style="font-size:13px;font-weight:700">${z.member_count||0}</div>
-            <div style="font-size:9px;color:var(--muted)">Active</div>
-          </div>
-          <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
-            <div style="font-size:13px;font-weight:700;color:#f59e0b">${z.waitlist_count||0}</div>
-            <div style="font-size:9px;color:var(--muted)">Waitlist</div>
-          </div>
-          <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
-            <div style="font-size:13px;font-weight:700">${z.activation_threshold||5}</div>
-            <div style="font-size:9px;color:var(--muted)">Threshold</div>
-          </div>
-          <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
-            <div style="font-size:13px;font-weight:700;color:var(--green)">${pct}%</div>
-            <div style="font-size:9px;color:var(--muted)">Fill</div>
-          </div>
-        </div>
-        ${z.status!=='active'?`<div style="background:var(--surface2);border-radius:4px;height:5px;overflow:hidden;margin-bottom:8px">
-          <div style="width:${pct}%;height:100%;background:${statusColor};border-radius:4px;transition:width .5s"></div>
-        </div>`:''}
-        <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted)">
-          <span>${z.trash_day?'📅 '+z.trash_day:'📅 Trash day TBD'}</span>
-          ${z.anchor_user_email?`<span>⭐ Anchor: ${z.anchor_user_email.split('@')[0]}</span>`:''}
-          ${z.lead_runner_id?`<span>🌟 Lead assigned</span>`:''}
-          ${!isRealHex?`<span style="color:#fbbf24">⚠️ Needs real geocode</span>`:''}
-        </div>
-      </div>`
-    }).join('')
+    // Zone cards — built from ADMIN_ZONES (single source of truth)
+    if(listEl) listEl.innerHTML = zones.map(z => _renderMicroZoneCard(z)).join('')
 
   } catch(e) {
     console.error('[H3] loadMicroZones:', e)
-    if(listEl) listEl.innerHTML = `<div style="color:#ef4444;font-size:12px;padding:12px">Error: ${e.message} — check that h3_schema.sql has been run in Supabase</div>`
+    if(listEl) listEl.innerHTML = `<div style="color:#ef4444;font-size:12px;padding:12px">Error: ${e.message}</div>`
   }
+}
+
+function _renderMicroZoneCard(z){
+  const isLive = z.status === 'live'
+  const sc     = isLive ? '#22c55e' : z.status==='waitlist' ? '#f59e0b' : '#6b7280'
+  const sl     = isLive ? '✅ Live'  : z.status==='waitlist' ? '⏳ Waitlist' : '⬜ Inactive'
+  const pct    = z.threshold > 0 ? Math.min(100, Math.round(z.hwCount / z.threshold * 100)) : 100
+  const lead   = RUNNERS.find(r =>
+    (r.zoneRoles && r.zoneRoles[z.id] && r.zoneRoles[z.id].role === 'lead') ||
+    (r.isPriority && r.zoneId === z.id)
+  )
+  const zip    = (z.zips && z.zips[0]) || z.zip || ''
+  const days   = (z.collection || []).join(', ') || 'No days set'
+
+  return `
+  <div style="border:1px solid ${sc}44;border-left:4px solid ${sc};border-radius:9px;padding:12px 14px;background:var(--surface)"
+       onclick="adNav(null,'ad-zones');setTimeout(()=>zonesTab('classic'),100)" style="cursor:pointer">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:700">${z.name}</span>
+          <span style="background:${sc}22;color:${sc};font-size:10px;padding:1px 8px;border-radius:99px;font-weight:700">${sl}</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">
+          ZIP ${(z.zips||[z.zip]).filter(Boolean).join(', ')} · ${days}
+        </div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:20px;font-weight:700;color:var(--cyan)">${z.hwCount}</div>
+        <div style="font-size:9px;color:var(--muted)">active HOs</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+      <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
+        <div style="font-size:14px;font-weight:700;color:#22c55e">${z.hwCount}</div>
+        <div style="font-size:9px;color:var(--muted)">HOs</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
+        <div style="font-size:14px;font-weight:700;color:#a5b4fc">${z.rnCount}</div>
+        <div style="font-size:9px;color:var(--muted)">Runners</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
+        <div style="font-size:14px;font-weight:700;color:#f59e0b">${z.wlCount}</div>
+        <div style="font-size:9px;color:var(--muted)">Waitlist</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
+        <div style="font-size:14px;font-weight:700;color:var(--green)">${pct}%</div>
+        <div style="font-size:9px;color:var(--muted)">Fill</div>
+      </div>
+    </div>
+    ${!isLive ? `<div style="background:var(--surface2);border-radius:4px;height:4px;overflow:hidden;margin-bottom:8px">
+      <div style="width:${pct}%;height:100%;background:${sc};border-radius:4px"></div>
+    </div>` : ''}
+    <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px">
+      ${lead
+        ? `<span style="color:var(--muted)">🌟 ${lead.name.split(' ')[0]}</span>`
+        : '<span style="color:#ef4444">⚠️ No lead runner</span>'}
+      ${isLive
+        ? `<button onclick="event.stopPropagation();showAdminSetPriority('${z.id}')"
+             style="background:rgba(6,214,160,.1);border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer">
+             ⚙ Manage
+           </button>`
+        : `<button onclick="event.stopPropagation();activateFromMicroZone('${zip}','${z.name}',${z.hwCount})"
+             style="background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.5);color:#06d6a0;border-radius:5px;padding:2px 10px;font-size:10px;cursor:pointer;font-weight:700">
+             ⚡ Activate →
+           </button>`}
+    </div>
+  </div>`
 }
 
 function renderAdminZones(){
@@ -20441,6 +20496,169 @@ function saveEditZone(zId){
     (z.zips||[z.zip]).forEach(zip => notifyWaitlistForZip(zip, z))
   }
   showToast(z.name+' updated ✅','ok')
+}
+
+// ── MICRO ZONE → DISPATCH ZONE ACTIVATION ──────────────────
+// The bridge between the marketing heatmap and the dispatch system
+
+function activateFromMicroZone(zip, city, hwCount){
+  // Pre-fill zone creation with micro zone data
+  // Auto-detect runners in this ZIP
+  const availRunners = RUNNERS.filter(r =>
+    r.status !== 'INACTIVE' &&
+    (r.zip === zip || r.coverageZones?.some(zId => {
+      const z = ADMIN_ZONES.find(x=>x.id===zId)
+      return z?.zips?.includes(zip) || z?.zip === zip
+    }))
+  )
+
+  // Check if zone already exists for this ZIP
+  const existingZone = ADMIN_ZONES.find(z =>
+    z.status !== 'inactive' && (z.zips?.includes(zip) || z.zip === zip)
+  )
+
+  if(existingZone){
+    showToast(`${existingZone.name} already covers ZIP ${zip} — edit it instead`, 'info', 4000)
+    adNav(null,'ad-zones')
+    return
+  }
+
+  const checklist = [
+    { key:'name',    label:'Zone name',       done: false },
+    { key:'runner',  label:'Runner assigned',  done: availRunners.length > 0 },
+    { key:'day',     label:'Collection day',   done: false },
+    { key:'cap',     label:'Capacity set',     done: true  },
+  ]
+
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh" style="background:rgba(6,214,160,.06)">
+    <div>
+      <div style="font-size:15px;font-weight:700;color:var(--cyan)">⚡ Activate Zone — ZIP ${zip}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">${hwCount} homeowners waiting · ${availRunners.length} runner${availRunners.length!==1?'s':''} available</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb">
+
+    <!-- Progress checklist -->
+    <div style="background:var(--surface2);border-radius:9px;padding:12px;margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Setup Checklist</div>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:12px">
+        <div style="display:flex;align-items:center;gap:8px"><span id="chk-name" style="font-size:14px">⬜</span><span>Zone name</span></div>
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px">${availRunners.length>0?'✅':'⬜'}</span><span>Runner available in area ${availRunners.length>0?'<span style="color:#22c55e">('+availRunners[0].name+')</span>':'— <span style="color:#ef4444">none enrolled yet</span>'}</span></div>
+        <div style="display:flex;align-items:center;gap:8px"><span id="chk-day" style="font-size:14px">⬜</span><span>Collection day set</span></div>
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px">✅</span><span>Homeowners ready (${hwCount} waiting)</span></div>
+      </div>
+    </div>
+
+    <!-- Zone setup form -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="field">
+        <label>Zone Name *</label>
+        <input id="az-name" placeholder="e.g. Glendale Old Town" value="${city} ${zip}" oninput="document.getElementById('chk-name').textContent=this.value.length>2?'✅':'⬜'">
+      </div>
+      <div class="g2">
+        <div class="field">
+          <label>ZIP Code</label>
+          <input id="az-zip" value="${zip}" readonly style="opacity:.7">
+        </div>
+        <div class="field">
+          <label>Capacity</label>
+          <input id="az-cap" type="number" value="20" min="1" max="200">
+        </div>
+      </div>
+      <div class="field">
+        <label>Collection Day *</label>
+        <select id="az-day" onchange="document.getElementById('chk-day').textContent=this.value?'✅':'⬜'">
+          <option value="">-- Select day --</option>
+          <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+          <option>Thursday</option><option>Friday</option><option>Saturday</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Assign Lead Runner</label>
+        <select id="az-runner">
+          <option value="">-- Assign later --</option>
+          ${availRunners.map(r=>`<option value="${r.id}">${r.name} · ${r.area||r.zip} · ${r.rating||0}★</option>`).join('')}
+          ${RUNNERS.filter(r=>r.status!=='INACTIVE'&&!availRunners.includes(r)).map(r=>`<option value="${r.id}">${r.name} · ${r.area||r.zip} (other area)</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    ${availRunners.length===0?`<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:#fca5a5;margin-top:8px">
+      ⚠️ No runners enrolled in ZIP ${zip}. You can activate the zone but dispatch won't work until a runner joins. Consider recruiting first.
+    </div>`:''}
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan" onclick="confirmActivateMicroZone('${zip}','${city}')">
+      ⚡ Activate &amp; Go Live →
+    </button>
+  </div>`
+  openM()
+}
+
+function confirmActivateMicroZone(zip, city){
+  const name    = document.getElementById('az-name')?.value.trim()
+  const day     = document.getElementById('az-day')?.value
+  const cap     = parseInt(document.getElementById('az-cap')?.value) || 20
+  const runner  = document.getElementById('az-runner')?.value || null
+
+  if(!name){ showToast('Zone name required','err'); return }
+  if(!day){  showToast('Collection day required','err'); return }
+
+  // Create the classic dispatch zone
+  const newZone = {
+    id:          crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now(),
+    name,
+    label:       name,
+    city:        city || zip,
+    zip,
+    zips:        [zip],
+    area:        'A1',
+    status:      'live',
+    pilot:       false,
+    overridden:  true,
+    runners:     runner ? 1 : 0,
+    capacity:    cap,
+    homeowners:  0,
+    threshold:   5,
+    collection:  [day],
+    assignedRunner: runner || null,
+    priorityRunnerId: runner || null,
+    stopOrder:   [],
+    notes:       `Activated from micro zone · ${new Date().toLocaleDateString()}`,
+    leadCap:     15,
+  }
+
+  ADMIN_ZONES.push(newZone)
+  closeM()
+  dbSaveZone(newZone)
+
+  // Assign lead runner role if selected
+  if(runner) {
+    adminUpdateZoneRole(newZone.id, runner, 'lead', 1)
+  }
+
+  // Auto-assign waiting homeowners in this ZIP to new zone
+  let assigned = 0
+  HOMEOWNERS.filter(h=>h.status==='active'&&h.zip===zip&&!h.zoneId).forEach(h=>{
+    h.zoneId = newZone.id
+    assigned++
+    _supa.from('homeowners').update({zone_id:newZone.id,updated_at:new Date().toISOString()}).eq('email',h.email).then(()=>{})
+  })
+
+  // Update micro_zones status for this ZIP
+  _supa.from('micro_zones').update({status:'active',updated_at:new Date().toISOString()}).eq('zip_code',zip).then(()=>{})
+
+  renderAdminZones()
+  syncZoneData()
+  updateOverviewCounts()
+
+  showToast(`${name} is live ✅${assigned?' · '+assigned+' homeowners linked':''}${runner?' · runner assigned':''}`, 'ok', 6000)
+
+  // Navigate to zones page to show the new zone
+  setTimeout(()=>{ adNav(null,'ad-zones') }, 1000)
 }
 
 function showCreateZone(){
