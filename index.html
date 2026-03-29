@@ -7362,7 +7362,7 @@ const ZIP_CENTROIDS = {
   '85374':[33.6671,-112.3194],'85375':[33.7020,-112.3194],'85378':[33.6454,-112.3694],
   '85379':[33.6454,-112.3694],'85387':[33.7654,-112.3194],'85388':[33.6454,-112.3027],
   // Vistancia / NW Peoria (Lake Pleasant area)
-  '85383':[33.7285,-112.2566],
+  '85383':[33.7150,-112.2750],  // Vistancia — Happy Valley Rd & Lake Pleasant Pkwy
   // Verrado / Buckeye
   '85395':[33.5070,-112.4027],'85396':[33.4700,-112.5200],
   // Goodyear / Avondale / Litchfield
@@ -17904,28 +17904,88 @@ const FULL_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','
 async function sendRouteNow(zoneId, day){
   const key = 'pending_route:'+zoneId+':'+normDay(day)
   const raw = localStorage.getItem(key)
-  if(!raw){ showToast('Route not found','err'); return }
-  const pending = JSON.parse(raw)
 
-  // Must be approved (queued) before manual send
-  if(pending.status === 'draft' || pending.status === 'change_detected'){
+  // Try to find batch in memory first (preview/generated routes)
+  const memBatch = generatedBatches.find(b =>
+    b.zoneId===zoneId && normDay(b.day)===normDay(day)
+  ) || (window._livePipelineBatches||[]).find(b =>
+    b.zoneId===zoneId && normDay(b.day)===normDay(day)
+  )
+
+  if(!raw && !memBatch){
+    // Route is in DB but not in memory — re-send via edge function or direct email
+    showToast('Re-sending via edge function...', 'info', 3000)
+    try {
+      // Mark route as queued in dispatch_queue so edge function picks it up
+      const today = new Date().toISOString().slice(0,10)
+      const { data: dq } = await _supa.from('dispatch_queue')
+        .select('*').eq('zone_id', zoneId).gte('scheduled_date', today).maybeSingle()
+
+      if(dq){
+        await _supa.from('dispatch_queue').update({
+          status: 'queued', sent_at: null, updated_at: new Date().toISOString()
+        }).eq('id', dq.id)
+        // Trigger edge function
+        await triggerDispatchEdgeFunction()
+      } else {
+        // No dispatch_queue row — send email directly from jobs table
+        const { data: jobs } = await _supa.from('jobs')
+          .select('*').eq('zone_id', zoneId).gte('scheduled_date', today)
+          .not('status', 'in', '("cancelled","complete")').limit(20)
+
+        if(!jobs?.length){ showToast('No jobs found for this route','err'); return }
+
+        const runner = RUNNERS.find(r => r.id === jobs[0].runner_id || r.name === jobs[0].runner_name)
+        if(!runner?.email){ showToast('No runner email — assign a runner first','err'); return }
+
+        const zone = ADMIN_ZONES.find(z => z.id === zoneId)
+        const stops = jobs.map(j => {
+          const hw = HOMEOWNERS.find(h => h.email === j.homeowner_email)
+          return { name: hw?.name || j.homeowner_email?.split('@')[0] || '--', email: j.homeowner_email, address: hw?.address || '--', service: j.service_type || 'Bin Out' }
+        })
+        const earnOut = (stops.length * 3.25).toFixed(2)
+
+        await sendEmail(runner.email,
+          `🎯 Route re-sent — ${stops.length} stops · $${earnOut}`,
+          EMAIL.batchOffer(runner.name.split(' ')[0], stops.length, earnOut, day, zone?.name || 'your zone', stops),
+          'batch_offer_resend')
+
+        // Update jobs status
+        await _supa.from('jobs').update({ status: 'offered', offered_at: new Date().toISOString() })
+          .eq('zone_id', zoneId).gte('scheduled_date', today).not('status','in','("cancelled","complete")')
+
+        showToast(`✅ Route re-sent to ${runner.name} — ${stops.length} stops · $${earnOut}`, 'ok', 5000)
+        await loadLiveJobsIntoPipeline()
+        renderDispatchPipeline()
+      }
+    } catch(e){
+      showToast('Error re-sending: ' + e.message, 'err')
+      console.error('[sendRouteNow]', e)
+    }
+    return
+  }
+
+  // localStorage route exists — standard flow
+  const pending = raw ? JSON.parse(raw) : null
+
+  if(pending && (pending.status === 'draft' || pending.status === 'change_detected')){
     showToast('Approve the route first before sending','warn'); return
   }
 
-  pending.status = 'sent'
-  pending.sentAt = new Date().toISOString()
-  pending.manualSend = true
-  localStorage.setItem(key, JSON.stringify(pending))
+  if(pending){
+    pending.status = 'sent'
+    pending.sentAt = new Date().toISOString()
+    pending.manualSend = true
+    localStorage.setItem(key, JSON.stringify(pending))
+  }
 
-  // Find the in-memory batch and launch it
-  const batch = generatedBatches.find(b=>
-    b.zoneId===zoneId && normDay(b.day)===normDay(day)
-  )
-  if(batch){
-    batch.status = 'sent'
-    await _launchSingleBatch(batch)
+  if(memBatch){
+    memBatch.status = 'sent'
+    memBatch.sentAt = new Date().toISOString()
+    memBatch.offerExpiresAt = new Date(Date.now() + (memBatch.windowMins||45)*60*1000).toISOString()
+    await _launchSingleBatch(memBatch)
   } else {
-    showToast('Route sent ✅ — runner will receive the offer', 'ok')
+    showToast('Route sent ✅', 'ok')
   }
 
   renderDispatchPipeline()
@@ -23306,11 +23366,11 @@ async function renderRunnerZoneRequests(){
   const el       = document.getElementById('rzr-list')
   const overview = document.getElementById('rzr-overview')
   if(!el) return
-  el.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px">Loading scout reports...</div>'
+  el.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px">Loading...</div>'
 
-  // Overview: zone health summary
+  // Zone health overview
   if(overview){
-    const live    = ADMIN_ZONES.filter(z=>z.status==='live')
+    const live     = ADMIN_ZONES.filter(z=>z.status==='live')
     const waitlist = ADMIN_ZONES.filter(z=>z.status==='waitlist')
     const noRunner = live.filter(z=>{
       const zips = z.zips||[z.zip]
@@ -23318,30 +23378,28 @@ async function renderRunnerZoneRequests(){
     })
     overview.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
-      <div style="background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.2);border-radius:9px;padding:12px;text-align:center">
-        <div style="font-size:22px;font-weight:700;color:#22c55e">${live.length}</div>
+      <div onclick="adNav(null,'ad-zones');zonesTab('classic')" style="background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.2);border-radius:9px;padding:12px;text-align:center;cursor:pointer">
+        <div style="font-size:24px;font-weight:700;color:#22c55e">${live.length}</div>
         <div style="font-size:11px;color:var(--muted)">Live Zones</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">click to manage →</div>
       </div>
-      <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:9px;padding:12px;text-align:center">
-        <div style="font-size:22px;font-weight:700;color:#f59e0b">${waitlist.length}</div>
+      <div onclick="adNav(null,'ad-zones');zonesTab('classic')" style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:9px;padding:12px;text-align:center;cursor:pointer">
+        <div style="font-size:24px;font-weight:700;color:#f59e0b">${waitlist.length}</div>
         <div style="font-size:11px;color:var(--muted)">Waitlist Zones</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">building demand</div>
       </div>
       <div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:9px;padding:12px;text-align:center">
-        <div style="font-size:22px;font-weight:700;color:#ef4444">${noRunner.length}</div>
+        <div style="font-size:24px;font-weight:700;color:#ef4444">${noRunner.length}</div>
         <div style="font-size:11px;color:var(--muted)">Need Runner</div>
+        <div style="font-size:10px;color:${noRunner.length>0?'#ef4444':'var(--muted)'};margin-top:2px">${noRunner.length>0?noRunner.map(z=>z.name.split(' ')[0]).join(', '):'all covered ✓'}</div>
       </div>
     </div>`
   }
 
   try {
-    // Load scout flags from runner_zone_requests
-    const { data: requests, error } = await _supa
-      .from('runner_zone_requests')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(50)
-
-    if(error) throw error
+    const { data: requests } = await _supa
+      .from('runner_zone_requests').select('*')
+      .order('created_at', { ascending: false }).limit(100)
 
     const pending  = (requests||[]).filter(r=>r.status==='pending')
     const reviewed = (requests||[]).filter(r=>r.status!=='pending')
@@ -23349,97 +23407,113 @@ async function renderRunnerZoneRequests(){
     const badge = document.getElementById('rzr-badge')
     if(badge){ badge.textContent=pending.length; badge.style.display=pending.length?'inline':'none' }
 
-    if(!pending.length && !reviewed.length){
-      el.innerHTML = `
-      <div style="text-align:center;padding:40px;color:var(--muted);background:var(--surface2);border-radius:10px;border:1px dashed var(--border)">
-        <div style="font-size:32px;margin-bottom:10px">🗺️</div>
-        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No scout reports yet</div>
-        <div style="font-size:12px;line-height:1.6">Runners will flag high-demand areas from their dashboard.<br>Flags appear here for you to review and act on.</div>
-      </div>`
-      return
-    }
-
-    // Group pending flags by ZIP
-    const byZip = {}
-    pending.forEach(r => {
-      const zip = r.zip_code || 'unknown'
-      if(!byZip[zip]) byZip[zip] = []
-      byZip[zip].push(r)
-    })
-
     let html = ''
 
-    if(Object.keys(byZip).length){
-      html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">🚩 Pending Scout Reports (${pending.length})</div>`
-
-      html += Object.entries(byZip)
-        .sort((a,b) => b[1].length - a[1].length)
-        .map(([zip, group]) => {
-          const existingZone = ADMIN_ZONES.find(z=>(z.zips||[z.zip]).includes(zip))
-          const hwWaiting    = WAITLIST_SIGNUPS.filter(s=>s.zip===zip).length
-          const hwActive     = HOMEOWNERS.filter(h=>h.zip===zip&&h.status==='active').length
-          const urgency      = group.length >= 3 ? 'high' : group.length >= 2 ? 'medium' : 'low'
-          const urgencyColor = urgency==='high'?'#ef4444':urgency==='medium'?'#f59e0b':'#6b7280'
-          const notes        = group.filter(r=>r.notes).map(r=>r.notes).join(' · ')
-
-          return `<div style="border:1px solid ${urgencyColor}44;border-left:4px solid ${urgencyColor};border-radius:9px;padding:14px;background:var(--surface);margin-bottom:10px">
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
-              <div>
-                <div style="display:flex;align-items:center;gap:8px">
-                  <span style="font-size:14px;font-weight:700">ZIP ${zip}</span>
-                  <span style="background:${urgencyColor}22;color:${urgencyColor};font-size:10px;padding:1px 8px;border-radius:99px;font-weight:700">
-                    ${urgency === 'high' ? '🔥 High demand' : urgency==='medium' ? '📈 Building' : '👀 Early signal'}
-                  </span>
-                  ${existingZone ? `<span style="background:rgba(34,197,94,.1);color:#22c55e;font-size:10px;padding:1px 8px;border-radius:99px">Zone exists: ${existingZone.name}</span>` : ''}
-                </div>
-                <div style="font-size:11px;color:var(--muted);margin-top:3px">
-                  ${group.length} runner flag${group.length!==1?'s':''} · ${hwActive} active HOs · ${hwWaiting} waiting
-                </div>
-                ${notes ? `<div style="font-size:11px;color:var(--sub);margin-top:6px;font-style:italic">💬 "${notes}"</div>` : ''}
-              </div>
-              <div style="text-align:right;flex-shrink:0">
-                <div style="font-size:24px;font-weight:700;color:${urgencyColor}">${group.length}</div>
-                <div style="font-size:9px;color:var(--muted)">flags</div>
-              </div>
-            </div>
-            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">
-              ${group.map(r=>`<span style="background:var(--surface2);border-radius:6px;padding:3px 8px;font-size:11px">🚐 ${r.runner_name||r.runner_email||'Runner'}</span>`).join('')}
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              ${!existingZone ? `<button class="btn btn-cyan btn-sm"
-                onclick="showCreateZone({zip:'${zip}',city:'${zip} Area',status:'waitlist',hwCount:${hwWaiting+hwActive}});dismissScoutFlags('${zip}')"
-                >⚡ Create Waitlist Zone</button>` : ''}
-              ${!existingZone ? `<button class="btn btn-sm" style="background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.3)"
-                onclick="showCreateZone({zip:'${zip}',city:'${zip} Area',status:'live',hwCount:${hwWaiting+hwActive}});dismissScoutFlags('${zip}')"
-                >🚀 Create Live Zone</button>` : ''}
-              ${existingZone ? `<button class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3)"
-                onclick="showZoneEditModal('${existingZone.id}')"
-                >⚙ View Zone</button>` : ''}
-              <button class="btn btn-ghost btn-sm" onclick="dismissScoutFlags('${zip}')">Dismiss</button>
-            </div>
-          </div>`
-        }).join('')
+    if(!pending.length && !reviewed.length){
+      html = `<div style="text-align:center;padding:40px;color:var(--muted);background:var(--surface2);border-radius:10px;border:1px dashed var(--border)">
+        <div style="font-size:32px;margin-bottom:10px">🗺️</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No scout reports yet</div>
+        <div style="font-size:12px;line-height:1.6">Runners flag high-demand areas from their dashboard.<br>Each flag appears here for you to review.</div>
+      </div>`
+      el.innerHTML = html; return
     }
 
-    // Reviewed flags (compact)
+    // Pending flags — grouped by ZIP
+    if(pending.length){
+      const byZip = {}
+      pending.forEach(r => { const z=r.zip_code||'?'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(r) })
+
+      html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">
+        🚩 Pending Flags (${pending.length})
+        <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px">— runners spotted demand here</span>
+      </div>`
+
+      html += Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
+        const existingZone = ADMIN_ZONES.find(z=>(z.zips||[z.zip]).includes(zip))
+        const hwWaiting    = HOMEOWNERS.filter(h=>h.zip===zip&&h.status==='active').length
+        const urgency      = group.length>=3?'🔥 High':group.length>=2?'📈 Building':'👀 Early'
+        const urgencyCol   = group.length>=3?'#ef4444':group.length>=2?'#f59e0b':'#6b7280'
+        const typeLabel = {bins_out:'🗑 Bins out on multiple homes',neighbor_inquiry:'💬 Neighbor asked about service',high_density:'🏘 High density area',referral_cluster:'👥 Referred multiple people',other:'📝 Other'}
+        const notes = group.map(r=>r.notes).filter(Boolean)
+        const types = [...new Set(group.map(r=>typeLabel[r.type]||r.type).filter(Boolean))]
+
+        return `<div style="border:1px solid ${urgencyCol}33;border-left:4px solid ${urgencyCol};border-radius:9px;padding:14px;background:var(--surface);margin-bottom:10px">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px">
+            <div>
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                <span style="font-size:15px;font-weight:700">ZIP ${zip}</span>
+                <span style="background:${urgencyCol}22;color:${urgencyCol};font-size:10px;padding:2px 8px;border-radius:99px;font-weight:700">${urgency}</span>
+                ${existingZone?`<span style="background:rgba(34,197,94,.1);color:#22c55e;font-size:10px;padding:2px 8px;border-radius:99px">Zone exists: ${existingZone.name}</span>`:'<span style="background:rgba(245,158,11,.1);color:#f59e0b;font-size:10px;padding:2px 8px;border-radius:99px">No zone yet</span>'}
+              </div>
+              <div style="font-size:11px;color:var(--muted)">${group.length} runner flag${group.length!==1?'s':''} · ${hwWaiting} active HO${hwWaiting!==1?'s':''} in area</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-size:28px;font-weight:800;color:${urgencyCol}">${group.length}</div>
+              <div style="font-size:9px;color:var(--muted)">flags</div>
+            </div>
+          </div>
+
+          ${types.length?`<div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:4px">${types.map(t=>`<span style="background:var(--surface2);border-radius:5px;padding:2px 8px;font-size:11px;color:var(--sub)">${t}</span>`).join('')}</div>`:''}
+
+          <div style="margin-bottom:10px;display:flex;flex-wrap:wrap;gap:4px">
+            ${group.map(r=>`<div style="background:var(--surface2);border-radius:6px;padding:4px 10px;font-size:11px;display:flex;align-items:center;gap:6px">
+              <span>🚐 <strong>${r.runner_name||r.runner_email||'Runner'}</strong></span>
+              <span style="color:var(--muted)">${new Date(r.created_at).toLocaleDateString()}</span>
+            </div>`).join('')}
+          </div>
+
+          ${notes.length?`<div style="background:rgba(165,180,252,.06);border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:var(--sub);font-style:italic">
+            💬 "${notes.join(' · ')}"
+          </div>`:''}
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${!existingZone?`<button onclick="showCreateZone({zip:'${zip}',city:'${zip} Area',status:'waitlist',hwCount:${hwWaiting}});dismissScoutFlags('${zip}')"
+              class="btn btn-sm" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:#f59e0b">
+              ⏳ Create Waitlist Zone
+            </button>
+            <button onclick="showCreateZone({zip:'${zip}',city:'${zip} Area',status:'live',hwCount:${hwWaiting}});dismissScoutFlags('${zip}')"
+              class="btn btn-cyan btn-sm">
+              ⚡ Create Live Zone
+            </button>`:`<button onclick="showZoneEditModal('${existingZone.id}')" class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3)">
+              ⚙ View Existing Zone
+            </button>`}
+            <button onclick="dismissScoutFlags('${zip}')" class="btn btn-ghost btn-sm" style="color:var(--muted)">Dismiss</button>
+          </div>
+        </div>`
+      }).join('')
+    }
+
+    // Reviewed — compact with clear explanation
     if(reviewed.length){
-      html += `<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;margin-top:16px">✅ Reviewed (${reviewed.length})</div>`
-      html += reviewed.slice(0,5).map(r=>`
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface2);border-radius:7px;margin-bottom:6px;font-size:12px">
-          <span style="color:var(--muted)">ZIP ${r.zip_code}</span>
-          <span style="color:var(--muted)">·</span>
-          <span>${r.runner_name||r.runner_email||'Runner'}</span>
-          <span style="color:var(--muted)">·</span>
-          <span style="color:${r.status==='approved'?'#22c55e':'#6b7280'}">${r.status}</span>
-          <span style="color:var(--muted);margin-left:auto">${new Date(r.created_at).toLocaleDateString()}</span>
-        </div>`).join('')
+      html += `<div style="margin-top:20px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">
+          ✅ Reviewed (${reviewed.length})
+          <span style="font-size:10px;font-weight:400;margin-left:6px">— these flags were processed</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">
+          These are runner zone requests that were reviewed. "Approved" means a zone was created or the runner was added to the zone.
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          ${reviewed.slice(0,10).map(r=>`
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface2);border-radius:7px;font-size:12px">
+            <span style="font-size:14px">${r.status==='approved'?'✅':r.status==='reviewed'?'👁':'🚩'}</span>
+            <span style="font-weight:600">ZIP ${r.zip_code||'--'}</span>
+            <span style="color:var(--muted)">·</span>
+            <span>🚐 ${r.runner_name||r.runner_email||'Runner'}</span>
+            ${r.notes?`<span style="color:var(--muted);font-style:italic">"${r.notes.slice(0,30)}${r.notes.length>30?'...':''}"</span>`:''}
+            <span style="color:${r.status==='approved'?'#22c55e':'#6b7280'};font-size:10px;font-weight:700;margin-left:auto">${r.status}</span>
+            <span style="color:var(--muted);font-size:10px">${new Date(r.created_at).toLocaleDateString()}</span>
+          </div>`).join('')}
+          ${reviewed.length>10?`<div style="text-align:center;font-size:11px;color:var(--muted);padding:6px">+${reviewed.length-10} more</div>`:''}
+        </div>
+      </div>`
     }
 
     el.innerHTML = html
 
   } catch(e){
     console.error('[BinDash] renderRunnerZoneRequests:', e)
-    el.innerHTML = `<div style="color:#ef4444;font-size:12px;padding:12px">Error loading scout reports: ${e.message}</div>`
+    el.innerHTML = `<div style="color:#ef4444;font-size:12px;padding:12px">Error: ${e.message}</div>`
   }
 }
 
