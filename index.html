@@ -18592,12 +18592,25 @@ function renderAdminZones(){
             </div>
             <!-- Runners -->
             <div>
-              <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Runners</div>
-              ${rnList.length ? rnList.map(r=>`
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
-                  <span style="color:var(--cyan);cursor:pointer" onclick="_adminNavToRunner('${r.name}')">${r.name.split(' ')[0]}</span>
-                  <span style="background:${r.status==='AVAILABLE'?'#22c55e22':'rgba(245,158,11,.15)'};color:${r.status==='AVAILABLE'?'#22c55e':'#fbbf24'};font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px">${r.status}</span>
-                </div>`).join('') : '<div style="font-size:12px;color:var(--muted)">No runners assigned</div>'}
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Runners</div>
+                <button onclick="showAdminSetPriority('${z.id}')" style="font-size:10px;padding:1px 8px;border-radius:4px;border:1px solid rgba(6,214,160,.3);background:transparent;color:var(--cyan);cursor:pointer">⚙ Manage</button>
+              </div>
+              ${rnList.length ? (()=>{
+                // Sort by zone role order: lead first, then runner, then standby
+                const roleOrder = {lead:1, runner:2, standby:3}
+                const sorted = [...rnList].sort((a,b)=>{
+                  const ar = (a.zoneRoles&&a.zoneRoles[z.id]) ? a.zoneRoles[z.id] : {role:a.zoneRole||'runner',order:a.zoneOrder||99}
+                  const br2 = (b.zoneRoles&&b.zoneRoles[z.id]) ? b.zoneRoles[z.id] : {role:b.zoneRole||'runner',order:b.zoneOrder||99}
+                  return (roleOrder[ar.role]||2)*100 + (ar.order||99) - ((roleOrder[br2.role]||2)*100 + (br2.order||99))
+                })
+                return sorted.map((r,ri)=>{
+                  const zr = (r.zoneRoles&&r.zoneRoles[z.id]) ? r.zoneRoles[z.id] : {role:r.zoneRole||'runner',order:r.zoneOrder||99,referrals:r.zoneReferrals||0}
+                  const roleLabel = zr.role==='lead'?'🌟 Lead':zr.role==='standby'?'⏳ Standby':'👥 Runner'
+                  const roleColor = zr.role==='lead'?'#22c55e':zr.role==='standby'?'#fbbf24':'#a5b4fc'
+                  return '<div style="padding:6px 0;border-bottom:1px solid var(--border)">'                    +'<div style="display:flex;align-items:center;gap:6px">'                    +'<span style="font-size:10px;color:var(--muted);font-weight:700;width:14px">#'+(ri+1)+'</span>'                    +'<span style="font-size:12px;font-weight:600;flex:1;color:var(--cyan);cursor:pointer" onclick="_adminNavToRunner(this.dataset.name)" data-name="'+r.name+'">'+r.name.split(' ')[0]+'</span>'                    +'<span style="font-size:9px;font-weight:700;color:'+roleColor+'">'+roleLabel+'</span>'                    +'</div>'                    +'<div style="font-size:10px;color:var(--muted);padding-left:20px">'+(r.totalStops||0)+' stops · '+(zr.referrals||0)+' referrals</div>'                    +'</div>'
+                }).join('')
+              })() : '<div style="font-size:12px;color:var(--muted)">No runners assigned</div>'}
               <button onclick="showZoneCoverageEdit('${z.id}')" style="margin-top:6px;background:none;border:1px dashed var(--border2);border-radius:6px;padding:2px 8px;font-size:10px;color:var(--muted);cursor:pointer">+ Assign runner</button>
             </div>
             <!-- Stats -->
@@ -18625,6 +18638,7 @@ function renderAdminZones(){
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${z.status==='waitlist'?`<button class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3)" onclick="activateZone('${z.id}')">⚡ Activate</button>`:''}
             ${z.pilot?`<button class="btn btn-sm" style="background:#22c55e22;color:#22c55e;border:1px solid rgba(34,197,94,.3)" onclick="promoteToLive('${z.id}')">↑ Go Live</button>`:''}
+            <button class="btn btn-outline btn-sm" onclick="showAdminSetPriority('${z.id}')">👥 Runner Hierarchy</button>
             <button class="btn btn-outline btn-sm" onclick="showZoneDetail('${z.id}')">📋 Route Order</button>
             <button class="btn btn-outline btn-sm" onclick="showEditZone('${z.id}')">✏️ Edit</button>
             <button class="btn btn-outline btn-sm" onclick="showSplitZone('${z.id}')">✂️ Split</button>
@@ -19336,30 +19350,99 @@ async function notifyZipFromWaitlist(zip, zoneId){
 
 async function notifyWaitlistForZip(zip, zone){
   try {
-    // 1. Update homeowner_signups: waitlisted -> zone_assigned
+    // Build sorted runner list for this zone (Lead first, then Runner, then Standby)
+    const zips = (zone.zips?.length ? zone.zips : [zone.zip]).filter(Boolean)
+    const zoneRunners = RUNNERS.filter(r =>
+      r.status !== 'INACTIVE' &&
+      (r.zoneId === zone.id || r.coverageZones?.includes(zone.id) || zips.includes(r.zip))
+    )
+    const roleOrder = {lead:1, runner:2, standby:3}
+    zoneRunners.sort((a,b) => {
+      const ar = a.zoneRoles?.[zone.id] || {role:a.zoneRole||'runner', order:a.zoneOrder||99}
+      const br = b.zoneRoles?.[zone.id] || {role:b.zoneRole||'runner', order:b.zoneOrder||99}
+      return (roleOrder[ar.role]||2)*100+(ar.order||99) - ((roleOrder[br.role]||2)*100+(br.order||99))
+    })
+    const leadCap = zone.leadCap || 15
+    // Track assignments made this session so cap is respected across the batch
+    const sessionCounts = {}
+
+    // Load waitlisted signups for this ZIP
     const res = await _supa.from('homeowner_signups').select('*')
       .in('status',['waitlisted']).eq('zip_code', zip)
     const rows = res?.data || []
+
     for(const row of rows){
+      // Assignment logic: referral lock first, then zone hierarchy with cap
+      let assignedRunner = null
+      const refCode  = row.referred_by_code || row.referral_code || null
+      const refEmail = row.referred_by_email || null
+      if(refCode || refEmail){
+        assignedRunner = zoneRunners.find(r =>
+          r.ownRefCode === refCode || r.referralCode === refCode || r.email === refEmail
+        ) || null
+      }
+      if(!assignedRunner){
+        for(const r of zoneRunners){
+          const role = r.zoneRoles?.[zone.id]?.role || r.zoneRole || 'runner'
+          const cap  = role === 'standby' ? 999 : leadCap
+          const dbCount = HOMEOWNERS.filter(h=>h.status==='active'&&h.assignedRunner===r.id).length
+          if(dbCount + (sessionCounts[r.id]||0) < cap){
+            assignedRunner = r
+            sessionCounts[r.id] = (sessionCounts[r.id]||0) + 1
+            break
+          }
+        }
+      }
+
+      // Update signup record with zone + assigned runner
       await _supa.from('homeowner_signups').update({
-        status:'zone_assigned', zone_id:zone.id, updated_at:new Date().toISOString()
+        status:          'zone_assigned',
+        zone_id:         zone.id,
+        assigned_runner: assignedRunner?.id || null,
+        updated_at:      new Date().toISOString()
       }).eq('id', row.id)
+
+      // Insert into homeowners table so they appear in dispatch immediately
+      const fn = row.first_name || row.full_name?.split(' ')[0] || ''
+      const ln = row.last_name  || row.full_name?.split(' ').slice(1).join(' ') || ''
+      await _supa.from('homeowners').upsert({
+        signup_id:       row.id,
+        first_name:      fn, last_name: ln,
+        email:           row.email,
+        phone:           row.phone || '',
+        street_address:  row.street_address || '',
+        city:            row.city || '',
+        zip_code:        zip,
+        zone_id:         zone.id,
+        service_type:    row.service_type || 'Recycling',
+        frequency:       row.frequency || 'weekly',
+        collection_day:  row.collection_day || '',
+        plan_id:         row.plan_id || '',
+        assigned_runner: assignedRunner?.id || null,
+        referred_by:     row.referred_by || null,
+        status:          'active',
+        created_at:      row.created_at || new Date().toISOString(),
+      }, { onConflict: 'email' })
+
+      // Email homeowner
       const email = row.email && !row.email.includes('@lead.'+'bindash') ? row.email : null
-      if(email) sendEmail(email,
-        'BinDash is now in your area! \uD83D\uDE80',
-        EMAIL.zoneActivated(row.first_name||'there', zip, zone.name),
-        'zone_activated'
-      )
+      if(email) sendEmail(email, 'BinDash is now in your area!',
+        EMAIL.zoneActivated(row.first_name||'there', zip, zone.name), 'zone_activated')
+
+      console.log('[BinDash] Waitlist HO', row.email, '->', assignedRunner?.name||'unassigned')
     }
-    // 2. Dismiss runner zone requests for this ZIP
+
+    // Approve pending runner zone requests for this ZIP
     await _supa.from('runner_zone_requests')
       .update({status:'approved', updated_at:new Date().toISOString()})
-      .eq('zip_code', zip)
-    // 3. Refresh UI
+      .eq('zip_code', zip).eq('status','pending')
+
+    // Reload and refresh UI
+    await loadHomeownersFromSupabase()
     loadZoneWaitlistBadge()
     loadRunnerZoneRequestsBadge()
     updateWaitlistBadge()
-    console.log('[BinDash] Notified', rows.length, 'waitlisted HWs for ZIP', zip)
+    console.log('[BinDash] Zone activation:', rows.length, 'HOs assigned for ZIP', zip)
     return rows.length
   } catch(e){
     console.warn('[BinDash] notifyWaitlistForZip error:', String(e?.message||e))
