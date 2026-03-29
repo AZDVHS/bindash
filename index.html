@@ -4078,7 +4078,25 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             <div>
               <div style="font-size:13px;color:var(--sub);margin-top:2px">Create, activate, and manage service zones. Override thresholds to pilot with trusted runners.</div>
             </div>
-            <button class="btn btn-cyan btn-sm" style="margin-left:auto" onclick="showCreateZone()">+ Create Zone</button>
+            <div style="display:flex;gap:6px;margin-left:auto">
+              <button class="btn btn-outline btn-sm" id="zones-tab-classic" onclick="zonesTab('classic')" style="background:rgba(6,214,160,.15);border-color:var(--cyan);color:var(--cyan)">📋 Zones</button>
+              <button class="btn btn-outline btn-sm" id="zones-tab-hex" onclick="zonesTab('hex')">🔷 Micro Zones</button>
+              <button class="btn btn-cyan btn-sm" onclick="showCreateZone()">+ Create Zone</button>
+            </div>
+          </div>
+
+          <!-- MICRO ZONES PANEL -->
+          <div id="micro-zones-panel" style="display:none;margin-bottom:20px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div style="font-size:13px;font-weight:700">H3 Micro Zones <span style="font-size:11px;font-weight:400;color:var(--muted)">(Resolution 8 · ~0.74km² per hex)</span></div>
+              <button class="btn btn-outline btn-sm" onclick="loadMicroZones()">⟳ Refresh</button>
+            </div>
+            <!-- Stats bar -->
+            <div id="mz-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px"></div>
+            <!-- Zone list -->
+            <div id="mz-list" style="display:flex;flex-direction:column;gap:8px">
+              <div style="font-size:12px;color:var(--muted);text-align:center;padding:20px">Click Refresh to load micro zones</div>
+            </div>
           </div>
 
           <!-- STATUS LEGEND -->
@@ -18750,6 +18768,127 @@ function getZoneDerivedDays(zoneId){
 
 function getZoneCoverageRunners(zoneId){
   return RUNNERS.filter(r => r.coverageZones?.includes(zoneId) && r.status!=='INACTIVE')
+}
+
+function zonesTab(tab){
+  const classicPanel = document.getElementById('admin-zone-list')
+  const hexPanel     = document.getElementById('micro-zones-panel')
+  const legend       = document.querySelector('#ad-zones .status-legend, #ad-zones [style*="STATUS LEGEND"]')
+  const btnClassic   = document.getElementById('zones-tab-classic')
+  const btnHex       = document.getElementById('zones-tab-hex')
+
+  if(tab === 'hex'){
+    if(classicPanel) classicPanel.style.display = 'none'
+    if(hexPanel)     hexPanel.style.display = 'block'
+    if(btnClassic){ btnClassic.style.background='transparent'; btnClassic.style.color='var(--muted)'; btnClassic.style.borderColor='var(--border)' }
+    if(btnHex){ btnHex.style.background='rgba(6,214,160,.15)'; btnHex.style.borderColor='var(--cyan)'; btnHex.style.color='var(--cyan)' }
+    loadMicroZones()
+  } else {
+    if(classicPanel) classicPanel.style.display = ''
+    if(hexPanel)     hexPanel.style.display = 'none'
+    if(btnHex){ btnHex.style.background='transparent'; btnHex.style.color='var(--muted)'; btnHex.style.borderColor='var(--border)' }
+    if(btnClassic){ btnClassic.style.background='rgba(6,214,160,.15)'; btnClassic.style.borderColor='var(--cyan)'; btnClassic.style.color='var(--cyan)' }
+  }
+}
+
+async function loadMicroZones(){
+  const listEl  = document.getElementById('mz-list')
+  const statsEl = document.getElementById('mz-stats')
+  if(listEl) listEl.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:20px">Loading...</div>'
+
+  try {
+    const { data: zones, error } = await _supa
+      .from('micro_zones')
+      .select('*')
+      .order('member_count', { ascending: false })
+
+    if(error) throw error
+    if(!zones || !zones.length){
+      if(listEl) listEl.innerHTML = `<div style="text-align:center;padding:32px;color:var(--muted)">
+        <div style="font-size:32px;margin-bottom:10px">🔷</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No micro zones yet</div>
+        <div style="font-size:13px;margin-bottom:14px">Run h3_migration.sql in Supabase to convert your existing data,<br>or new zones will appear automatically as homeowners sign up.</div>
+      </div>`
+      return
+    }
+
+    // Stats
+    const active  = zones.filter(z=>z.status==='active').length
+    const pending = zones.filter(z=>z.status==='pending').length
+    const shadow  = zones.filter(z=>z.status==='shadow').length
+    const totalHO = zones.reduce((t,z)=>t+(z.member_count||0),0)
+    const totalWL = zones.reduce((t,z)=>t+(z.waitlist_count||0),0)
+
+    if(statsEl) statsEl.innerHTML = [
+      ['🟢 Active',  active,  '#22c55e'],
+      ['🟠 Pending', pending, '#f59e0b'],
+      ['🔵 Shadow',  shadow,  '#3b82f6'],
+      ['🏠 Total HOs', totalHO+' ('+totalWL+' waitlist)', 'var(--cyan)'],
+    ].map(([label,val,color])=>`
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:18px;font-weight:700;color:${color}">${val}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">${label}</div>
+      </div>`).join('')
+
+    // Zone cards
+    if(listEl) listEl.innerHTML = zones.map(z => {
+      const pct = Math.min(100, Math.round(((z.member_count||0)+(z.waitlist_count||0))/(z.activation_threshold||5)*100))
+      const statusColor = z.status==='active'?'#22c55e':z.status==='pending'?'#f59e0b':z.status==='shadow'?'#3b82f6':'#6b7280'
+      const statusLabel = z.status==='active'?'✅ Active':z.status==='pending'?'🟠 Pending':z.status==='shadow'?'🔵 Shadow':'⬜ Inactive'
+      const isRealHex   = !z.hex_id.startsWith('zip-')
+      const hexDisplay  = isRealHex ? z.hex_id.slice(0,8)+'...' : z.hex_id
+
+      return `<div style="border:1px solid ${statusColor}44;border-left:4px solid ${statusColor};border-radius:9px;padding:12px 14px;background:var(--surface)">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:13px;font-weight:700">${z.zone_label||z.hex_id}</span>
+              <span style="background:${statusColor}22;color:${statusColor};font-size:10px;padding:1px 8px;border-radius:99px;font-weight:700">${statusLabel}</span>
+              ${isRealHex?'<span style="background:rgba(6,214,160,.1);color:var(--cyan);font-size:9px;padding:1px 6px;border-radius:4px">H3 ✓</span>':'<span style="background:rgba(245,158,11,.1);color:#fbbf24;font-size:9px;padding:1px 6px;border-radius:4px">ZIP (temp)</span>'}
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">
+              ${z.city||''}${z.state?' · '+z.state:''} · ZIP ${z.zip_code||'--'} · <span style="font-family:monospace;font-size:10px">${hexDisplay}</span>
+            </div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:16px;font-weight:700;color:var(--cyan)">${z.member_count||0}</div>
+            <div style="font-size:9px;color:var(--muted)">active HOs</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+          <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
+            <div style="font-size:13px;font-weight:700">${z.member_count||0}</div>
+            <div style="font-size:9px;color:var(--muted)">Active</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
+            <div style="font-size:13px;font-weight:700;color:#f59e0b">${z.waitlist_count||0}</div>
+            <div style="font-size:9px;color:var(--muted)">Waitlist</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
+            <div style="font-size:13px;font-weight:700">${z.activation_threshold||5}</div>
+            <div style="font-size:9px;color:var(--muted)">Threshold</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:6px;padding:6px;text-align:center">
+            <div style="font-size:13px;font-weight:700;color:var(--green)">${pct}%</div>
+            <div style="font-size:9px;color:var(--muted)">Fill</div>
+          </div>
+        </div>
+        ${z.status!=='active'?`<div style="background:var(--surface2);border-radius:4px;height:5px;overflow:hidden;margin-bottom:8px">
+          <div style="width:${pct}%;height:100%;background:${statusColor};border-radius:4px;transition:width .5s"></div>
+        </div>`:''}
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted)">
+          <span>${z.trash_day?'📅 '+z.trash_day:'📅 Trash day TBD'}</span>
+          ${z.anchor_user_email?`<span>⭐ Anchor: ${z.anchor_user_email.split('@')[0]}</span>`:''}
+          ${z.lead_runner_id?`<span>🌟 Lead assigned</span>`:''}
+          ${!isRealHex?`<span style="color:#fbbf24">⚠️ Needs real geocode</span>`:''}
+        </div>
+      </div>`
+    }).join('')
+
+  } catch(e) {
+    console.error('[H3] loadMicroZones:', e)
+    if(listEl) listEl.innerHTML = `<div style="color:#ef4444;font-size:12px;padding:12px">Error: ${e.message} — check that h3_schema.sql has been run in Supabase</div>`
+  }
 }
 
 function renderAdminZones(){
