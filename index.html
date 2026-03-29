@@ -7326,7 +7326,7 @@ async function geocodeAddress(address, city, state, zip){
         const encoded = encodeURIComponent(`${address}, ${city||''}, ${state||'AZ'} ${zip}`)
         const res = await fetch(
           `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encoded}&benchmark=Public_AR_Current&format=json`,
-          { signal: AbortSignal.timeout(3000) }
+          { signal: AbortSignal.timeout(5000) }
         )
         const data = await res.json()
         const match = data?.result?.addressMatches?.[0]
@@ -7343,7 +7343,7 @@ async function geocodeAddress(address, city, state, zip){
       const encoded = encodeURIComponent(`${address}, ${city||''}, ${state||'AZ'} ${zip}`)
       const res = await fetch(
         `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encoded}&benchmark=Public_AR_Current&format=json`,
-        { signal: AbortSignal.timeout(4000) }
+        { signal: AbortSignal.timeout(5000) }
       )
       const data = await res.json()
       const match = data?.result?.addressMatches?.[0]
@@ -7424,26 +7424,39 @@ async function _h3CheckAddress(){
     if(el) el.innerHTML = '<div style="font-size:11px;color:var(--muted);text-align:center;padding:6px">📍 Loading your area...</div>'
   }
 
-  // ── STEP 2: Try to get precise coords + micro zone data ──
+  // ── STEP 2: Try to get precise coords from full address ──
   let result = null
   try {
     if(addr && addr.length > 5){
-      result = await addressToHex(addr, city||'', state, zip)
-    }
-    if(!result && lat){
-      // Use ZIP centroid directly — skip the Supabase write for speed
-      const hexId = latLngToHex(lat, lng)
-      result = { hexId, lat, lng, zone: null }
-      // Try to read existing micro zone without creating
-      try {
-        const { data: mz } = await _supa.from('micro_zones').select('*').eq('hex_id', hexId).maybeSingle()
-        if(mz) result.zone = mz
-        else {
-          // Try ZIP-based zone
-          const { data: mz2 } = await _supa.from('micro_zones').select('*').eq('zip_code', zip).order('member_count',{ascending:false}).limit(1).maybeSingle()
-          if(mz2) result.zone = mz2
+      // Geocode the full address for precise pin placement
+      const precise = await geocodeAddress(addr, city||'', state, zip)
+      if(precise){
+        // Move pin to exact address — smooth animation
+        _moveSignupPin(precise.lat, precise.lng, addr)
+        const hexId = latLngToHex(precise.lat, precise.lng)
+        if(hexId){
+          let zone = null
+          try {
+            const { data: mz } = await _supa.from('micro_zones').select('*').eq('hex_id', hexId).maybeSingle()
+            zone = mz || null
+            if(!zone){
+              const { data: mz2 } = await _supa.from('micro_zones').select('*').eq('zip_code', zip).order('member_count',{ascending:false}).limit(1).maybeSingle()
+              zone = mz2 || null
+            }
+          } catch(e){}
+          result = { hexId, lat: precise.lat, lng: precise.lng, zone }
         }
-      } catch(e){ /* micro_zones may not exist */ }
+      }
+    }
+    // If no precise geocode, try to read zone from ZIP
+    if(!result && lat){
+      const hexId = latLngToHex(lat, lng)
+      let zone = null
+      try {
+        const { data: mz } = await _supa.from('micro_zones').select('*').eq('zip_code', zip).order('member_count',{ascending:false}).limit(1).maybeSingle()
+        zone = mz || null
+      } catch(e){}
+      result = { hexId, lat, lng, zone }
     }
   } catch(e){ console.warn('[H3] geocode/zone lookup:', e.message) }
 
@@ -7493,6 +7506,7 @@ async function _h3CheckAddress(){
 let _signupMap = null      // Leaflet map instance for signup flow
 let _adminMap  = null      // Leaflet map instance for admin panel
 let _adminHexLayers = []   // hex polygon layers on admin map
+let _signupPin = null      // the address pin marker — updated separately
 
 // Color scheme for hex status
 function hexColor(status, count, threshold){
@@ -7607,8 +7621,8 @@ async function _initSignupMap(lat, lng, zones){
     // Draw hex zones
     if(zones && zones.length) drawHexLayers(_signupMap, zones)
 
-    // Cyan pin for user address
-    L.circleMarker([lat, lng], {
+    // Cyan pin for user address — stored so we can move it later
+    _signupPin = L.circleMarker([lat, lng], {
       radius: 8, color: '#06d6a0', fillColor: '#06d6a0',
       fillOpacity: 1, weight: 2,
     }).bindPopup('<b style="font-size:12px">Your address</b>').addTo(_signupMap)
@@ -7627,6 +7641,14 @@ async function _initSignupMap(lat, lng, zones){
     setTimeout(() => _signupMap.invalidateSize(), 300)
 
   } catch(e){ console.error('[H3 Map] signup map error:', e) }
+}
+
+// Move the address pin to precise coords without re-initialising the map
+function _moveSignupPin(lat, lng, label){
+  if(!_signupMap || !_signupPin) return
+  _signupPin.setLatLng([lat, lng])
+  _signupPin.setPopupContent('<b style="font-size:12px">' + (label||'Your address') + '</b>')
+  _signupMap.panTo([lat, lng], { animate: true, duration: 0.5 })
 }
 
 // Load zones from Supabase and render admin map
