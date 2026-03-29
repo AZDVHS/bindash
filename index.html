@@ -7533,9 +7533,17 @@ function hexColor(status, count, threshold){
 function drawHexLayers(map, zones, opts = {}){
   const layers = []
   zones.forEach(z => {
-    if(!z.hex_id || z.hex_id.startsWith('zip-')) return  // skip temp zip zones
+    if(!z.hex_id) return
+
+    let hexId = z.hex_id
+
+    // For zip-based temp zones, generate a real hex from their centroid coords
+    if(hexId.startsWith('zip-') && z.lat && z.lng){
+      hexId = latLngToHex(z.lat, z.lng)
+      if(!hexId) return
+    }
     try {
-      const boundary = getHexBoundary(z.hex_id)
+      const boundary = getHexBoundary(hexId)  // use derived hexId, not z.hex_id
       if(!boundary || !boundary.length) return
       // H3 boundary returns [lat,lng] pairs — Leaflet wants same format ✓
       const latLngs = boundary.map(([lat,lng]) => [lat, lng])
@@ -7568,6 +7576,21 @@ function drawHexLayers(map, zones, opts = {}){
       if(opts.onClick) poly.on('click', () => opts.onClick(z))
       poly.addTo(map)
       layers.push(poly)
+
+      // For active zones draw ring-1 neighbors at 40% opacity to show coverage area
+      if(z.status === 'active' && typeof h3 !== 'undefined'){
+        try {
+          const ring = h3.gridRing(hexId, 1)
+          ring.forEach(nHex => {
+            const nb = h3.cellToBoundary(nHex).map(([la,ln])=>[la,ln])
+            L.polygon(nb, {
+              color: col.fill, fillColor: col.fill,
+              fillOpacity: col.opacity * 0.4,
+              weight: 0.5, opacity: 0.4,
+            }).addTo(map)
+          })
+        } catch(e){}
+      }
     } catch(e){ /* skip bad hex */ }
   })
   return layers
