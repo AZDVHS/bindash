@@ -4092,6 +4092,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <option>Thursday</option><option>Friday</option><option>Saturday</option>
               </select>
               <button onclick="loadLiveJobsIntoPipeline()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--muted);cursor:pointer">⟳ Refresh</button>
+              <button onclick="sendDirectTestEmail()" title="Send Lee's Glendale route email directly — bypasses queue" style="background:none;border:1px solid rgba(245,158,11,.4);border-radius:6px;padding:4px 10px;font-size:11px;color:#f59e0b;cursor:pointer">✉ Test Email</button>
               <button onclick="triggerDispatchEdgeFunction()" title="Force-send any queued route emails now via edge function" style="background:none;border:1px solid rgba(99,102,241,.4);border-radius:6px;padding:4px 10px;font-size:11px;color:#a5b4fc;cursor:pointer">📡 Send Queued</button>
               <button id="dispatch-launch-btn" class="btn btn-sm" onclick="launchDispatchRoutes()" style="display:none;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-weight:700;border:none;padding:6px 14px">🚀 Launch Routes</button>
             </div>
@@ -17951,7 +17952,7 @@ async function sendRouteNow(zoneId, day){
           'batch_offer_resend')
 
         // Update jobs status
-        await _supa.from('jobs').update({ status: 'offered', offered_at: new Date().toISOString() })
+        await _supa.from('jobs').update({ status: 'offered', updated_at: new Date().toISOString() })
           .eq('zone_id', zoneId).gte('scheduled_date', today).not('status','in','("cancelled","complete")')
 
         showToast(`✅ Route re-sent to ${runner.name} — ${stops.length} stops · $${earnOut}`, 'ok', 5000)
@@ -17983,7 +17984,32 @@ async function sendRouteNow(zoneId, day){
     memBatch.status = 'sent'
     memBatch.sentAt = new Date().toISOString()
     memBatch.offerExpiresAt = new Date(Date.now() + (memBatch.windowMins||45)*60*1000).toISOString()
-    await _launchSingleBatch(memBatch)
+    if(memBatch._fromDB){
+      // Live DB batch — only send the email, DON'T insert new jobs
+      if(memBatch.runner?.email){
+        const earnOut = (memBatch.stops.length * 3.25).toFixed(2)
+        const expiresAt = memBatch.offerExpiresAt
+        await sendEmail(memBatch.runner.email,
+          `🎯 Route re-sent — ${memBatch.stops.length} stops · $${earnOut}`,
+          EMAIL.batchOffer(memBatch.runner.name.split(' ')[0], memBatch.stops.length, earnOut, memBatch.day, memBatch.zoneName?.replace(/ · [☀️🌙].*$/,'') || 'your zone', memBatch.stops),
+          'batch_offer_resend')
+        // Update existing jobs — reset offer window, don't create new rows
+        const todayStr = memBatch.date || new Date().toISOString().slice(0,10)
+        await _supa.from('jobs').update({
+          status: 'offered',
+          updated_at: new Date().toISOString(),
+          offer_expires_at: expiresAt,
+          updated_at: new Date().toISOString(),
+        }).eq('zone_id', memBatch.zoneId).eq('scheduled_date', todayStr)
+          .not('status','in','("cancelled","complete")')
+        showToast(`✅ Re-sent to ${memBatch.runner.name} — new 45min window`, 'ok', 5000)
+      } else {
+        showToast('No runner email on file — assign a runner first','err')
+      }
+    } else {
+      // Preview/generated batch — full launch (creates jobs)
+      await _launchSingleBatch(memBatch)
+    }
   } else {
     showToast('Route sent ✅', 'ok')
   }
@@ -18745,6 +18771,38 @@ async function _adGenerateBatchesAsync(silent=false){
 // Phase 2: Admin reviews, then clicks Launch — sends offers + saves to DB
 // This is the ONLY place (along with sendRouteNow) that calls _launchSingleBatch.
 // Routes stamped with sentAt are skipped by the 9am scheduler.
+// Direct test: send Lee's route email right now bypassing all the queue complexity
+async function sendDirectTestEmail(){
+  const lee = RUNNERS.find(r => r.email && r.email.includes('brentmiller0302'))
+  if(!lee){ showToast('Lee Keybum not found in RUNNERS — check runner data','err'); return }
+
+  // Find Glendale Old Town batch
+  const glendaleZone = ADMIN_ZONES.find(z => z.name?.toLowerCase().includes('glendale'))
+  if(!glendaleZone){ showToast('Glendale zone not found','err'); return }
+
+  const zips = glendaleZone.zips || [glendaleZone.zip]
+  const stops = HOMEOWNERS.filter(h => h.status==='active' && (h.zoneId===glendaleZone.id || zips.includes(h.zip)))
+  if(!stops.length){ showToast('No homeowners in Glendale zone','err'); return }
+
+  const earnOut = (stops.length * 3.25).toFixed(2)
+  const day = (glendaleZone.collection || ['Monday'])[0]
+
+  showToast(`Sending test email to ${lee.email}...`, 'info', 3000)
+
+  await sendEmail(
+    lee.email,
+    `🎯 Test Route Offer — ${stops.length} stops · $${earnOut} · ${day}`,
+    EMAIL.batchOffer(
+      lee.name?.split(' ')[0] || 'Lee',
+      stops.length, earnOut, day,
+      glendaleZone.name,
+      stops.map(h => ({ name: h.name, address: h.address || h.zip, service: h.service === 'GENERAL' ? '🗑️ Waste' : '♻️ Recycling' }))
+    ),
+    'batch_offer_test'
+  )
+  showToast(`✅ Test email sent to ${lee.email} — check inbox`, 'ok', 7000)
+}
+
 // Manually trigger the dispatch-scheduler edge function to send any queued routes
 async function triggerDispatchEdgeFunction(){
   const btn = document.querySelector('[onclick="triggerDispatchEdgeFunction()"]')
@@ -19721,7 +19779,7 @@ async function loadLiveJobsIntoPipeline(){
           status:    j.status,
           offerType: j.offer_type || 'loyalty',
           offerBadge:j.offer_type==='broadcast' ? '📡 Broadcast' : '🔒 Assigned runner (25 min)',
-          sentAt:    j.offered_at || j.created_at || null,
+          sentAt:    j.updated_at || j.created_at || null,
           offerExpiresAt: j.offer_expires_at || null,
           earnTotal: '0.00',
           hasSplit:  false,
