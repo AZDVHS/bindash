@@ -16020,12 +16020,11 @@ async function _launchSingleBatch(batch){
           .eq('zone_id', batch.zoneId)
           .eq('scheduled_date', scheduledDate)
           .then(({ error: dqErr }) => { if(dqErr) console.warn('[BinDash] dispatch_queue sent update:', dqErr.message) })
-        // Clear merge instructions for this runner/day — route is dispatched
+        // Clear all admin edit state for this route — it's dispatched
         const _rId = batch.runner?.id || '__unassigned__'
-        const _mk = 'merge_instruction:'+_rId+':'+normDay(batch.day)
-        localStorage.removeItem(_mk)
-        // Clear pending_route
+        localStorage.removeItem('merge_instruction:'+_rId+':'+normDay(batch.day))
         localStorage.removeItem('pending_route:'+batch.zoneId+':'+normDay(batch.day))
+        localStorage.removeItem('admin_route_order:'+batch.zoneId+':'+normDay(batch.day))
         window._livePipelineBatches = null
         await loadLiveJobsIntoPipeline()
         console.log('[BinDash] batch launched ✅ — ' + jobRows.length + ' jobs inserted')
@@ -16786,7 +16785,8 @@ async function _adGenerateBatchesAsync(silent=false){
     })
   })
 
-  // Apply any saved merge instructions before rendering
+  // Apply any saved admin edits before rendering
+  _applyAdminStopOrders()
   _applyMergeInstructions()
 
   renderDispatchPipeline()
@@ -17142,7 +17142,7 @@ function renderDispatchPipeline(){
           ? '<select style="font-size:11px;padding:3px 6px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);color:var(--text)" data-batch-id="'+b.id+'" onchange="swapBatchRunnerKeepOpen(this)"><option value="">↔ Change runner</option>'+runnerOpts+'</select>'
           : '<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="showRunnerUnavailable(\''+b.runner.id+'\')">⚠️ Mark unavailable</button>'
             +'<button class="btn btn-outline btn-sm" style="font-size:10px" onclick="adForceReassign(\''+b.id+'\')">Reassign</button>')
-        +(b._adminOrderModified?'<button onclick="event.stopPropagation();saveAdminRouteOrder(\''+b.id+'\')" style="font-size:10px;padding:3px 9px;border-radius:6px;border:1px solid rgba(6,214,160,.4);background:rgba(6,214,160,.15);color:#06d6a0;cursor:pointer;font-weight:700;white-space:nowrap">💾 Save order</button>':'')
+        +(b._adminOrderModified?'<button onclick="event.stopPropagation();saveAdminRouteOrder(\''+b.id+'\')" style="font-size:10px;padding:3px 9px;border-radius:6px;border:1px solid rgba(6,214,160,.4);background:rgba(6,214,160,.15);color:#06d6a0;cursor:pointer;font-weight:700;white-space:nowrap">💾 Save order</button>':(localStorage.getItem('admin_route_order:'+b.zoneId+':'+normDay(b.day))?'<button onclick="event.stopPropagation();saveAdminRouteOrder(\''+b.id+'\')" style="font-size:10px;padding:3px 9px;border-radius:6px;border:1px solid rgba(6,214,160,.2);background:rgba(6,214,160,.06);color:var(--muted);cursor:pointer;white-space:nowrap">✓ Custom order</button>':''))
         +'<button onclick="event.stopPropagation();openRouteInMaps(\''+b.id+'\')" style="font-size:10px;padding:3px 9px;border-radius:6px;border:1px solid rgba(99,102,241,.4);background:rgba(99,102,241,.1);color:#a5b4fc;cursor:pointer;white-space:nowrap">🗺️ Maps</button>'
         +'</div></div>'
       : '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid var(--border);font-size:12px;background:var(--surface2)">'
@@ -17419,6 +17419,34 @@ function mergeBatches(idsStr){
   renderDispatchPipeline()
   openCards.add(primary.id)
   updateLaunchButton()
+}
+
+// Apply any saved admin stop orders after batch generation
+function _applyAdminStopOrders(){
+  if(!generatedBatches.length) return
+  generatedBatches.forEach(b => {
+    const key = 'admin_route_order:' + b.zoneId + ':' + normDay(b.day)
+    const raw = localStorage.getItem(key)
+    if(!raw) return
+    try {
+      const saved = JSON.parse(raw)
+      if(!saved.order || !saved.order.length) return
+      // Build a lookup of saved order position by email/id/name
+      const orderMap = {}
+      saved.order.forEach((id, i) => { orderMap[id] = i })
+      // Sort the batch stops to match saved order
+      const sorted = [...b.stops].sort((a, b) => {
+        const ai = orderMap[a.email||a.id||a.name]
+        const bi = orderMap[b.email||b.id||b.name]
+        if(ai === undefined && bi === undefined) return 0
+        if(ai === undefined) return 1
+        if(bi === undefined) return -1
+        return ai - bi
+      })
+      b.stops = sorted
+      console.log('[BinDash] admin stop order restored for', b.zoneName, b.day)
+    } catch(e) { console.warn('[BinDash] _applyAdminStopOrders:', e.message) }
+  })
 }
 
 // Apply any saved merge instructions after batch generation
