@@ -1729,7 +1729,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <div class="g3">
           <div class="field"><label>City</label><input id="h-city" placeholder="Glendale" oninput="obSave()"></div>
           <div class="field"><label>State</label><input id="h-state" placeholder="AZ" oninput="obSave()"></div>
-          <div class="field"><label>ZIP *</label><input id="h-zip" placeholder="85301" maxlength="5" oninput="checkZipCoverage(this.value);obSave()"></div>
+          <div class="field"><label>ZIP *</label><input id="h-zip" placeholder="85301" maxlength="5" oninput="checkZipCoverage(this.value);obSave();if(this.value.length===5){clearTimeout(window._h3Timer);window._h3Timer=setTimeout(_h3CheckAddress,600)}"></div>
         </div>
         <div id="zip-coverage-result" style="display:none;border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:8px"></div>
         <div id="h3-fomo-banner"></div>
@@ -7354,43 +7354,79 @@ function getHexFomoMessage(zone){
 async function _h3CheckAddress(){
   const addr  = document.getElementById('h-addr')?.value.trim()
   const city  = document.getElementById('h-city')?.value.trim()
-  const state = document.getElementById('h-state')?.value.trim()
+  const state = document.getElementById('h-state')?.value.trim() || 'AZ'
   const zip   = document.getElementById('h-zip')?.value.trim()
-  if(!addr || !zip || zip.length < 5) return
+  if(!zip || zip.length < 5) return
 
   const el = document.getElementById('h3-fomo-banner')
   if(el) el.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px">📍 Checking your area...</div>'
 
-  const result = await addressToHex(addr, city||'', state||'AZ', zip)
-  if(!result){ if(el) el.innerHTML = ''; return }
+  let result = null
+
+  // Try full geocode if address is filled
+  if(addr && addr.length > 5){
+    result = await addressToHex(addr, city||'', state, zip)
+  }
+
+  // Fallback: use ZIP centroid coords if geocode fails or no address yet
+  if(!result){
+    // Try geocoding just the ZIP
+    const zipCoords = await geocodeAddress('', city||'', state, zip)
+    if(zipCoords){
+      const hexId = latLngToHex(zipCoords.lat, zipCoords.lng)
+      if(hexId){
+        const zone = await getOrCreateMicroZone(hexId, {
+          lat: zipCoords.lat, lng: zipCoords.lng,
+          city: city||'', state, zip,
+        })
+        result = { hexId, lat: zipCoords.lat, lng: zipCoords.lng, zone }
+      }
+    }
+  }
+
+  // If still no result, skip map but show basic FOMO
+  if(!result){
+    if(el) el.innerHTML = `<div style="background:rgba(165,180,252,.07);border:1px solid #a5b4fc44;border-radius:10px;padding:12px 14px;margin:12px 0">
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">⭐</span>
+      <span style="font-size:13px;font-weight:700;color:#a5b4fc">You could be the first on your block!</span></div>
+      <div style="font-size:12px;color:var(--sub);margin-top:4px">Invite 4 neighbors and unlock BinDash for ZIP ${zip}.</div>
+    </div>`
+    return
+  }
 
   // Store for later use at approval time
   window._hwHexResult = result
 
-  // Load nearby zones for map display
+  // Show map immediately with pin, load zones in background
+  _initSignupMap(result.lat, result.lng, [])
   try {
     const { data: nearbyZones } = await _supa
       .from('micro_zones')
       .select('hex_id, status, member_count, waitlist_count, activation_threshold, zip_code, city, zone_label, trash_day, lat, lng')
       .neq('status', 'inactive')
-      .limit(50)
-    _initSignupMap(result.lat, result.lng, nearbyZones || [])
-  } catch(e){
-    // micro_zones may not exist yet — still show pin
-    _initSignupMap(result.lat, result.lng, [])
-  }
+      .limit(80)
+    if(nearbyZones && nearbyZones.length && _signupMap){
+      drawHexLayers(_signupMap, nearbyZones)
+    }
+  } catch(e){ console.log('[H3 Map] micro_zones not available:', e.message) }
 
+  // FOMO message
   const msg = getHexFomoMessage(result.zone)
   if(!msg || !el) return
 
-  el.innerHTML = `<div style="background:rgba(${msg.color==='#22c55e'?'34,197,94':msg.color==='#f59e0b'?'245,158,11':msg.color==='#fbbf24'?'251,191,36':msg.color==='#06d6a0'?'6,214,160':'165,180,252'},.08);border:1px solid ${msg.color}44;border-radius:10px;padding:12px 14px;margin:12px 0">
+  const rgb = msg.color==='#22c55e'?'34,197,94':msg.color==='#f59e0b'?'245,158,11':
+              msg.color==='#fbbf24'?'251,191,36':msg.color==='#06d6a0'?'6,214,160':'165,180,252'
+  const total = (result.zone?.waitlist_count||0) + (result.zone?.member_count||0)
+  const pct   = Math.min(100, Math.round(total / (result.zone?.activation_threshold||5) * 100))
+
+  el.innerHTML = `<div style="background:rgba(${rgb},.08);border:1px solid ${msg.color}44;border-radius:10px;padding:12px 14px;margin:12px 0">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
       <span style="font-size:18px">${msg.icon}</span>
       <span style="font-size:13px;font-weight:700;color:${msg.color}">${msg.headline}</span>
     </div>
     <div style="font-size:12px;color:var(--sub);line-height:1.5">${msg.sub}</div>
     ${msg.type!=='active'&&msg.type!=='launching'?`<div style="margin-top:8px;background:var(--surface2);border-radius:5px;height:5px;overflow:hidden">
-      <div style="width:${Math.min(100,Math.round(((result.zone?.waitlist_count||0)+(result.zone?.member_count||0))/(result.zone?.activation_threshold||5)*100))}%;height:100%;background:${msg.color};border-radius:5px;transition:width .6s"></div>
+      <div style="width:${pct}%;height:100%;background:${msg.color};border-radius:5px;transition:width .6s"></div>
     </div>`:''}
   </div>`
 }
@@ -7478,46 +7514,62 @@ function drawRunnerHalos(map, runners){
 
 // Initialize or update the SIGNUP map
 async function _initSignupMap(lat, lng, zones){
+  // Guard: Leaflet must be loaded
+  if(typeof L === 'undefined'){
+    console.warn('[H3 Map] Leaflet not loaded yet')
+    return
+  }
   const wrap = document.getElementById('h3-signup-map-wrap')
   const el   = document.getElementById('h3-signup-map')
-  if(!wrap || !el) return
+  if(!wrap || !el){ console.warn('[H3 Map] map container not found'); return }
 
   wrap.style.display = 'block'
 
-  if(_signupMap){
-    _signupMap.setView([lat, lng], 14)
-    // Clear old layers
-    _signupMap.eachLayer(l => { if(!(l instanceof L.TileLayer)) _signupMap.removeLayer(l) })
-  } else {
-    _signupMap = L.map('h3-signup-map', {
-      center:         [lat, lng],
-      zoom:           14,
-      zoomControl:    true,
-      scrollWheelZoom: false,
-      attributionControl: false,
+  try {
+    if(_signupMap){
+      _signupMap.setView([lat, lng], 14)
+      // Clear old hex/marker layers but keep tile layer
+      _signupMap.eachLayer(l => {
+        if(!(l instanceof L.TileLayer)) _signupMap.removeLayer(l)
+      })
+    } else {
+      // Make sure element has dimensions
+      el.style.height = '220px'
+      _signupMap = L.map('h3-signup-map', {
+        center:          [lat, lng],
+        zoom:            14,
+        zoomControl:     true,
+        scrollWheelZoom: false,
+        attributionControl: false,
+      })
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19, subdomains: 'abcd',
+      }).addTo(_signupMap)
+    }
+
+    // Draw hex zones
+    if(zones && zones.length) drawHexLayers(_signupMap, zones)
+
+    // Cyan pin for user address
+    L.circleMarker([lat, lng], {
+      radius: 8, color: '#06d6a0', fillColor: '#06d6a0',
+      fillOpacity: 1, weight: 2,
+    }).bindPopup('<b style="font-size:12px">Your address</b>').addTo(_signupMap)
+
+    // Runner halos
+    RUNNERS.filter(r => r.lat && r.lng).forEach(r => {
+      L.circle([r.lat, r.lng], {
+        radius: RUNNER_COVERAGE_RADIUS_KM * 1000,
+        color:'#3b82f6', fillColor:'#3b82f6',
+        fillOpacity:0.06, weight:1, dashArray:'6 4',
+      }).addTo(_signupMap)
     })
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
-      subdomains: 'abcd',
-    }).addTo(_signupMap)
-  }
 
-  // Draw hex zones
-  if(zones && zones.length) drawHexLayers(_signupMap, zones)
+    // Force resize twice — once now, once after transition
+    _signupMap.invalidateSize()
+    setTimeout(() => _signupMap.invalidateSize(), 300)
 
-  // Pin for user's address
-  const pin = L.circleMarker([lat, lng], {
-    radius: 7, color: '#06d6a0', fillColor: '#06d6a0',
-    fillOpacity: 1, weight: 2,
-  }).bindPopup('<div style="font-size:12px;font-weight:700">Your address</div>')
-  pin.addTo(_signupMap)
-
-  // Draw runner halos if available
-  const nearbyRunners = RUNNERS.filter(r => r.lat && r.lng)
-  if(nearbyRunners.length) drawRunnerHalos(_signupMap, nearbyRunners)
-
-  // Force resize after display
-  setTimeout(() => _signupMap.invalidateSize(), 100)
+  } catch(e){ console.error('[H3 Map] signup map error:', e) }
 }
 
 // Load zones from Supabase and render admin map
@@ -7533,16 +7585,9 @@ async function _initAdminMap(){
       .neq('status','inactive')
       .limit(200)
 
-    if(!zones || !zones.length){
-      el.style.display = 'flex'
-      el.style.alignItems = 'center'
-      el.style.justifyContent = 'center'
-      el.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:40px">No micro zones yet — run h3_migration.sql<br>or sign up a homeowner with an address to create the first hex</div>'
-      return
-    }
-
-    // Find center from first zone with real coords
-    const anchor = zones.find(z => z.lat && z.lng) || { lat: 33.5387, lng: -112.1860 }
+    // Fall back to classic zones if no micro zones yet
+    const mapZones = (zones && zones.length) ? zones : []
+    const anchor = mapZones.find(z => z.lat && z.lng) || { lat: 33.5387, lng: -112.1860 }
 
     if(!_adminMap){
       _adminMap = L.map('mz-admin-map', {
@@ -7564,7 +7609,7 @@ async function _initAdminMap(){
     }
 
     // Draw hexes
-    _adminHexLayers = drawHexLayers(_adminMap, zones, {
+    _adminHexLayers = drawHexLayers(_adminMap, mapZones, {
       onClick: (z) => { showMicroZoneDetail(z) }
     })
 
@@ -7572,8 +7617,20 @@ async function _initAdminMap(){
     const runnersWithCoords = RUNNERS.filter(r => r.lat && r.lng && r.status !== 'INACTIVE')
     drawRunnerHalos(_adminMap, runnersWithCoords)
 
+    // If no micro zones, show classic ADMIN_ZONES as circle markers
+    if(!mapZones.length && ADMIN_ZONES.length){
+      ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
+        const lat = z.lat || 33.5387; const lng = z.lng || -112.1860
+        L.circleMarker([lat, lng], {
+          radius:14, color: z.status==='live'?'#22c55e':'#f59e0b',
+          fillColor: z.status==='live'?'#22c55e':'#f59e0b',
+          fillOpacity:0.4, weight:2,
+        }).bindPopup(`<b>${z.name}</b><br>ZIP ${z.zip}<br>${z.homeowners||0} HOs · ${z.status}`).addTo(_adminMap)
+      })
+    }
+
     // ZIP-based zones (temp) — show as circle markers at centroid
-    zones.filter(z => z.hex_id?.startsWith('zip-') && z.lat && z.lng).forEach(z => {
+    mapZones.filter(z => z.hex_id?.startsWith('zip-') && z.lat && z.lng).forEach(z => {
       const total = (z.member_count||0) + (z.waitlist_count||0)
       const col   = hexColor(z.status, total, z.activation_threshold||5)
       L.circleMarker([z.lat, z.lng], {
