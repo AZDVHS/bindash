@@ -1735,14 +1735,17 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
         <div id="h3-fomo-banner"></div>
         <div id="h3-signup-map-wrap" style="display:none;margin:12px 0;border-radius:12px;overflow:hidden;border:1px solid var(--border2)">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface2);border-bottom:1px solid var(--border)">
-            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Your Neighborhood</div>
-            <div style="display:flex;gap:10px;font-size:10px;color:var(--muted)">
-              <span><span style="display:inline-block;width:8px;height:8px;background:#22c55e;border-radius:2px;margin-right:3px"></span>Active</span>
-              <span><span style="display:inline-block;width:8px;height:8px;background:#f59e0b;border-radius:2px;margin-right:3px"></span>Waitlist</span>
-              <span><span style="display:inline-block;width:8px;height:8px;background:#3b82f6;border-radius:2px;opacity:.5;margin-right:3px"></span>Runner nearby</span>
+            <div>
+              <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Your Neighborhood</div>
+              <div id="h3-map-status" style="font-size:10px;color:var(--muted);margin-top:1px">Finding your area...</div>
+            </div>
+            <div style="display:flex;gap:8px;font-size:10px;color:var(--muted)">
+              <span><span style="display:inline-block;width:8px;height:8px;background:#22c55e;border-radius:2px;margin-right:3px;opacity:.8"></span>Active</span>
+              <span><span style="display:inline-block;width:8px;height:8px;background:#f59e0b;border-radius:2px;margin-right:3px;opacity:.8"></span>Building</span>
+              <span><span style="display:inline-block;width:8px;height:8px;background:#06d6a0;border-radius:50%;margin-right:3px"></span>You</span>
             </div>
           </div>
-          <div id="h3-signup-map" style="height:220px;width:100%"></div>
+          <div id="h3-signup-map" style="height:240px;width:100%"></div>
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:6px">
           <button class="btn btn-cyan" onclick="hNext(1)">Continue -></button>
@@ -4089,6 +4092,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
                 <option>Thursday</option><option>Friday</option><option>Saturday</option>
               </select>
               <button onclick="loadLiveJobsIntoPipeline()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--muted);cursor:pointer">⟳ Refresh</button>
+              <button onclick="triggerDispatchEdgeFunction()" title="Force-send any queued route emails now via edge function" style="background:none;border:1px solid rgba(99,102,241,.4);border-radius:6px;padding:4px 10px;font-size:11px;color:#a5b4fc;cursor:pointer">📡 Send Queued</button>
               <button id="dispatch-launch-btn" class="btn btn-sm" onclick="launchDispatchRoutes()" style="display:none;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-weight:700;border:none;padding:6px 14px">🚀 Launch Routes</button>
             </div>
           </div>
@@ -7346,26 +7350,38 @@ function getHexesInRadius(lat, lng, radiusKm){
 
 // ZIP centroid lookup — instant, no API needed
 const ZIP_CENTROIDS = {
-  '85301':[33.5387,-112.1860],'85302':[33.5470,-112.1860],'85303':[33.5303,-112.1860],
-  '85304':[33.5638,-112.2027],'85305':[33.5303,-112.2194],'85306':[33.6137,-112.1527],
-  '85307':[33.5303,-112.2361],'85308':[33.6387,-112.1694],'85309':[33.5303,-112.2527],
-  '85310':[33.6638,-112.2027],'85340':[33.5303,-112.3694],'85374':[33.6387,-112.3194],
-  '85375':[33.6720,-112.3194],'85379':[33.6387,-112.3694],'85383':[33.7120,-112.3694],
-  '85385':[33.7387,-112.3194],'85387':[33.7654,-112.3194],'85388':[33.6387,-112.3027],
-  '85395':[33.5303,-112.4194],'85396':[33.5303,-112.4861],
+  // Glendale
+  '85301':[33.5387,-112.1827],'85302':[33.5738,-112.1827],'85303':[33.5303,-112.2194],
+  '85304':[33.5971,-112.2027],'85305':[33.5303,-112.2527],'85306':[33.6304,-112.1527],
+  '85307':[33.5270,-112.3027],'85308':[33.6638,-112.1694],'85309':[33.5638,-112.2694],
+  '85310':[33.6971,-112.2027],
+  // Peoria / Sun City
+  '85345':[33.5638,-112.2361],'85351':[33.6138,-112.2861],'85373':[33.6671,-112.2527],
+  '85381':[33.6138,-112.2361],'85382':[33.6454,-112.2194],
+  // Surprise / El Mirage
+  '85374':[33.6671,-112.3194],'85375':[33.7020,-112.3194],'85378':[33.6454,-112.3694],
+  '85379':[33.6454,-112.3694],'85387':[33.7654,-112.3194],'85388':[33.6454,-112.3027],
+  // Vistancia / NW Peoria (Lake Pleasant area)
+  '85383':[33.7285,-112.2566],
+  // Verrado / Buckeye
+  '85395':[33.5070,-112.4027],'85396':[33.4700,-112.5200],
+  // Goodyear / Avondale / Litchfield
+  '85338':[33.4318,-112.3694],'85339':[33.3485,-112.1027],
+  '85340':[33.5303,-112.4361],'85353':[33.4485,-112.2527],
+  '85354':[33.4318,-112.4027],'85355':[33.5303,-112.2861],
+  '85361':[33.6387,-112.4361],'85363':[33.5303,-112.3194],'85390':[33.7387,-112.5027],
+  // Mesa
   '85201':[33.4152,-111.8315],'85202':[33.3985,-111.8482],'85203':[33.4318,-111.8149],
   '85204':[33.4151,-111.7982],'85205':[33.4318,-111.7649],'85206':[33.4152,-111.7482],
   '85207':[33.4485,-111.7316],'85208':[33.4152,-111.7149],'85209':[33.3818,-111.7149],
   '85210':[33.3985,-111.8315],'85212':[33.3485,-111.7149],'85213':[33.4652,-111.8149],
-  '85215':[33.4818,-111.7982],'85224':[33.3485,-111.9149],'85225':[33.3652,-111.8815],
-  '85226':[33.3318,-111.9149],'85233':[33.3652,-111.8482],'85234':[33.3818,-111.8149],
-  '85248':[33.2818,-111.8815],'85249':[33.2652,-111.8482],'85284':[33.3152,-111.9315],
-  '85286':[33.3318,-111.8482],'85295':[33.3485,-111.8149],'85296':[33.3318,-111.7982],
-  '85297':[33.3152,-111.7649],'85298':[33.3152,-111.7482],'85338':[33.4318,-112.3694],
-  '85339':[33.3485,-112.1027],'85345':[33.5638,-112.2361],'85351':[33.5638,-112.2694],
-  '85353':[33.4485,-112.2527],'85354':[33.4318,-112.4027],'85355':[33.5303,-112.2861],
-  '85361':[33.6387,-112.4361],'85363':[33.5303,-112.3194],'85373':[33.6387,-112.2527],
-  '85381':[33.6137,-112.2361],'85382':[33.6387,-112.2194],'85390':[33.7387,-112.5027],
+  '85215':[33.4818,-111.7982],
+  // Chandler / Gilbert / Queen Creek
+  '85224':[33.3485,-111.9149],'85225':[33.3652,-111.8815],'85226':[33.3318,-111.9149],
+  '85233':[33.3652,-111.8482],'85234':[33.3818,-111.8149],'85248':[33.2818,-111.8815],
+  '85249':[33.2652,-111.8482],'85284':[33.3152,-111.9315],'85286':[33.3318,-111.8482],
+  '85295':[33.3485,-111.8149],'85296':[33.3318,-111.7982],'85297':[33.3152,-111.7649],
+  '85298':[33.3152,-111.7482],
 }
 
 async function geocodeAddress(address, city, state, zip){
@@ -7528,18 +7544,32 @@ async function _h3CheckAddress(){
   } catch(e){ console.warn('[H3] geocode/zone lookup:', e.message) }
 
   // ── STEP 3: Update map with precise pin if coords improved ──
+  const finalLat = result?.lat || lat
+  const finalLng = result?.lng || lng
   if(result?.lat && result.lat !== lat){
-    _initSignupMap(result.lat, result.lng, [])
-  } else if(lat && _signupMap){
-    // Already showing — just load zones onto existing map
+    _moveSignupPin(result.lat, result.lng, document.getElementById('h-addr')?.value?.trim() || 'Your address')
+    _signupMap?.setView([result.lat, result.lng], 14, { animate: true })
   }
 
-  // Load zones onto map
+  // Load zones + highlight user's own hex
   try {
     const { data: nearbyZones } = await _supa
       .from('micro_zones').select('hex_id,status,member_count,waitlist_count,activation_threshold,zip_code,city,zone_label,trash_day,lat,lng')
       .in('status', ['active','pending','shadow']).limit(200)
     if(nearbyZones?.length && _signupMap) drawHexLayers(_signupMap, nearbyZones)
+
+    // Highlight user's specific hex with a bright outline
+    if(_signupMap && finalLat && typeof h3 !== 'undefined'){
+      try {
+        const userHex = h3.latLngToCell(finalLat, finalLng, 8)
+        const boundary = h3.cellToBoundary(userHex)
+        L.polygon(boundary, {
+          color: '#06d6a0', fillColor: '#06d6a0',
+          fillOpacity: 0.15, weight: 2.5, opacity: 1,
+          dashArray: '4 3',
+        }).bindPopup('<b style="font-size:12px">📍 Your hex</b>').addTo(_signupMap)
+      } catch(e){}
+    }
   } catch(e){ /* ok */ }
 
   // ── STEP 4: Show FOMO message ──
@@ -7740,18 +7770,31 @@ async function _initSignupMap(lat, lng, zones){
     // Draw hex zones
     if(zones && zones.length) drawHexLayers(_signupMap, zones)
 
-    // Cyan pin for user address — stored so we can move it later
+    // Cyan pulsing pin for user address — stored so we can move it later
     _signupPin = L.circleMarker([lat, lng], {
-      radius: 8, color: '#06d6a0', fillColor: '#06d6a0',
-      fillOpacity: 1, weight: 2,
-    }).bindPopup('<b style="font-size:12px">Your address</b>').addTo(_signupMap)
+      radius: 9, color: '#06d6a0', fillColor: '#06d6a0',
+      fillOpacity: 1, weight: 3,
+    }).bindPopup('<b style="font-size:12px">📍 Your address</b>').addTo(_signupMap)
 
-    // Runner halos
-    RUNNERS.filter(r => r.lat && r.lng).forEach(r => {
+    // Outer pulse ring
+    L.circleMarker([lat, lng], {
+      radius: 16, color: '#06d6a0', fillColor: 'transparent',
+      weight: 1.5, opacity: 0.4,
+    }).addTo(_signupMap)
+
+    // Update map status text
+    const statusEl = document.getElementById('h3-map-status')
+    if(statusEl){
+      const zone = ADMIN_ZONES.find(z => (z.zips||[z.zip]).includes(String(lat).slice(0,3)) || true) // will update below
+      statusEl.textContent = 'Your pin · zoom in to explore · green = active service'
+    }
+
+    // Runner halos — only for runners with geocoded addresses
+    RUNNERS.filter(r => r.lat && r.lng && r.status !== 'INACTIVE').forEach(r => {
       L.circle([r.lat, r.lng], {
-        radius: RUNNER_COVERAGE_RADIUS_KM * 1000,
+        radius: (typeof RUNNER_COVERAGE_RADIUS_KM !== 'undefined' ? RUNNER_COVERAGE_RADIUS_KM : 3) * 1000,
         color:'#3b82f6', fillColor:'#3b82f6',
-        fillOpacity:0.06, weight:1, dashArray:'6 4',
+        fillOpacity:0.05, weight:1, dashArray:'6 4',
       }).addTo(_signupMap)
     })
 
@@ -7766,8 +7809,23 @@ async function _initSignupMap(lat, lng, zones){
 function _moveSignupPin(lat, lng, label){
   if(!_signupMap || !_signupPin) return
   _signupPin.setLatLng([lat, lng])
-  _signupPin.setPopupContent('<b style="font-size:12px">' + (label||'Your address') + '</b>')
+  _signupPin.setPopupContent('<b style="font-size:12px">📍 ' + (label||'Your address') + '</b>')
   _signupMap.panTo([lat, lng], { animate: true, duration: 0.5 })
+
+  // Update status line with zone info
+  const statusEl = document.getElementById('h3-map-status')
+  if(statusEl){
+    const zip = document.getElementById('h-zip')?.value?.trim()
+    const zone = zip ? ADMIN_ZONES.find(z=>(z.zips||[z.zip]).includes(zip)) : null
+    if(zone && zone.status === 'live'){
+      statusEl.innerHTML = `<span style="color:#22c55e">✅ Active service zone · ${zone.name}</span>`
+    } else if(zone && zone.status === 'waitlist'){
+      const hws = HOMEOWNERS.filter(h=>(h.zoneId===zone.id||(zone.zips||[zone.zip]).includes(h.zip))&&h.status==='active').length
+      statusEl.innerHTML = `<span style="color:#f59e0b">⏳ ${hws} of ${zone.threshold||5} neighbors signed up</span>`
+    } else {
+      statusEl.innerHTML = `<span style="color:#a5b4fc">📍 Pinned to your address · be the first in your area!</span>`
+    }
+  }
 }
 
 // Load zones from Supabase and render admin map
@@ -7776,21 +7834,28 @@ async function _initAdminMap(){
   if(!el) return
 
   try {
-    // Build map zones directly from ADMIN_ZONES — no micro_zones table needed
+    // Build map zones from ADMIN_ZONES, using real homeowner coords as anchor when available
     const mapZones = ADMIN_ZONES.filter(z => z.status !== 'inactive').map(z => {
       const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
-      const zip = zips[0] || ''
-      const coords = ZIP_CENTROIDS[zip] || [33.5387, -112.1860]
-      const hwCount = HOMEOWNERS.filter(h => h.status==='active' && (h.zoneId===z.id || zips.includes(h.zip))).length
+      const zip  = zips[0] || ''
+
+      // Priority: 1) geocoded homeowner address, 2) ZIP_CENTROIDS, 3) Phoenix fallback
+      const zoneHOs = HOMEOWNERS.filter(h => h.status==='active' && (h.zoneId===z.id || zips.includes(h.zip)))
+      const anchorHO = zoneHOs.find(h => h.lat && h.lng) || null
+      const zipCoords = ZIP_CENTROIDS[zip] || ZIP_CENTROIDS[zips.find(zp => ZIP_CENTROIDS[zp])] || [33.5387, -112.1860]
+      const lat = anchorHO?.lat || zipCoords[0]
+      const lng = anchorHO?.lng || zipCoords[1]
+
       return {
         hex_id: null,
         status: z.status === 'live' ? 'active' : 'pending',
-        member_count: hwCount,
+        member_count: zoneHOs.length,
         waitlist_count: 0,
         activation_threshold: z.threshold || 5,
         zip_code: zip, city: z.name, zone_label: z.name,
         trash_day: (z.collection||[]).join(', '),
-        lat: coords[0], lng: coords[1],
+        lat, lng,
+        _zoneId: z.id,
       }
     })
 
@@ -7817,11 +7882,27 @@ async function _initAdminMap(){
       if(!z.lat || !z.lng) return
       const col = hexColor(z.status, z.member_count, z.activation_threshold)
 
-      // Draw 3-ring H3 hex cluster if h3 is loaded, else circle
-      if(typeof h3 !== 'undefined'){
+      // Draw 3-ring H3 hex cluster — wait up to 3s for h3-js to load
+      const h3Ready = typeof h3 !== 'undefined' || await new Promise(resolve => {
+        let tries = 0
+        const t = setInterval(() => { if(typeof h3 !== 'undefined' || ++tries > 30){ clearInterval(t); resolve(typeof h3 !== 'undefined') } }, 100)
+      })
+
+      if(h3Ready){
         const centerHex = latLngToHex(z.lat, z.lng)
         if(centerHex){
-          const hexes = h3.gridDisk(centerHex, 3)
+          // Draw coverage circle (always visible at any zoom)
+          const coverageCircle = L.circle([z.lat, z.lng], {
+            radius: 2200, // ~2.2km ≈ 3 hex rings
+            color: col.fill, fillColor: col.fill,
+            fillOpacity: col.opacity * 0.35,
+            weight: 1.5, opacity: 0.6,
+            dashArray: z.status === 'pending' ? '6 4' : null,
+          }).addTo(_adminMap)
+          _adminHexLayers.push(coverageCircle)
+
+          // Draw individual hex cells (visible when zoomed in)
+          const hexes = h3.gridDisk(centerHex, 2)
           hexes.forEach(hex => {
             try {
               const boundary = h3.cellToBoundary(hex)
@@ -7831,22 +7912,48 @@ async function _initAdminMap(){
                 weight: 1, opacity: 0.7,
               })
               const needed = Math.max(0, z.activation_threshold - z.member_count)
-              poly.bindPopup(`<div style="font-family:system-ui;min-width:180px">
-                <b style="font-size:13px">${z.zone_label}</b>
-                <div style="font-size:12px;color:#666;margin:4px 0">ZIP ${z.zip_code}</div>
-                <div style="font-size:12px"><b>${z.member_count}</b> active homeowners</div>
+              const statusDot = z.status==='active' ? '🟢' : '🟡'
+              const rnCount = RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===z._zoneId||[z.zip_code].includes(r.zip))).length
+              poly.bindPopup(`<div style="font-family:system-ui;min-width:200px;max-width:240px">
+                <div style="font-weight:700;font-size:14px;margin-bottom:6px">${statusDot} ${z.zone_label}</div>
+                <div style="font-size:11px;color:#888;margin-bottom:8px">ZIP ${z.zip_code} · ${z.trash_day||'No collection day'}</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:10px">
+                  <div style="background:#f8fafc;border-radius:6px;padding:6px;text-align:center">
+                    <div style="font-weight:700;font-size:16px;color:#06d6a0">${z.member_count}</div>
+                    <div style="font-size:9px;color:#999">HOs</div>
+                  </div>
+                  <div style="background:#f8fafc;border-radius:6px;padding:6px;text-align:center">
+                    <div style="font-weight:700;font-size:16px;color:#a5b4fc">${rnCount}</div>
+                    <div style="font-size:9px;color:#999">Runners</div>
+                  </div>
+                  <div style="background:#f8fafc;border-radius:6px;padding:6px;text-align:center">
+                    <div style="font-weight:700;font-size:16px;color:${needed>0?'#f59e0b':'#22c55e'}">${needed>0?needed+'⬆':'✓'}</div>
+                    <div style="font-size:9px;color:#999">${needed>0?'to go':'Ready'}</div>
+                  </div>
+                </div>
                 ${z.status==='active'
-                  ? '<div style="color:#22c55e;font-size:12px;margin-top:4px">✅ Service active</div>'
-                  : `<div style="color:#f59e0b;font-size:12px;margin-top:4px">${needed} more to launch</div>`}
-                ${z.trash_day ? `<div style="font-size:11px;color:#999">📅 ${z.trash_day}</div>` : ''}
+                  ? '<div style="color:#22c55e;font-size:11px;font-weight:600;margin-bottom:8px">✅ Service active — dispatch running</div>'
+                  : '<div style="color:#f59e0b;font-size:11px;margin-bottom:8px">⏳ Building to threshold</div>'}
+                <button onclick="adNav(null,'ad-zones')" style="width:100%;padding:5px 0;background:#0f172a;border:1px solid #334155;border-radius:5px;color:#94a3b8;font-size:11px;cursor:pointer;margin-bottom:4px">📋 View in Zones tab</button>
                 ${z.status!=='active'
-                  ? `<button onclick="activateFromMicroZone('${z.zip_code}','${z.city}',${z.member_count})" style="margin-top:8px;width:100%;padding:5px;background:#06d6a033;border:1px solid #06d6a0;border-radius:5px;color:#06d6a0;font-size:11px;font-weight:700;cursor:pointer">⚡ Activate Zone →</button>`
+                  ? `<button onclick="showCreateZone({zip:'${z.zip_code}',city:'${z.city}',status:'live',hwCount:${z.member_count}})" style="width:100%;padding:5px 0;background:#06d6a0;border:none;border-radius:5px;color:#0f172a;font-size:11px;font-weight:700;cursor:pointer">⚡ Activate Zone →</button>`
                   : ''}
-              </div>`, {maxWidth:220})
+              </div>`, {maxWidth:260})
               poly.addTo(_adminMap)
               _adminHexLayers.push(poly)
             } catch(e){}
           })
+
+          // Zone label at center (always visible)
+          try {
+            const labelIcon = L.divIcon({
+              html: '<div style="background:'+col.fill+';color:#0f172a;font-size:10px;font-weight:800;padding:2px 8px;border-radius:99px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.5);cursor:pointer">'+z.zone_label.replace('AZ-','').replace(/-\d+$/,'')+'</div>',
+              className: '', iconAnchor: [40, 10],
+            })
+            const lm = L.marker([z.lat, z.lng], { icon: labelIcon })
+            lm.addTo(_adminMap)
+            _adminHexLayers.push(lm)
+          } catch(e){}
         }
       } else {
         // Fallback: simple circle
@@ -7888,7 +7995,16 @@ async function _initAdminMap(){
         </div>`).addTo(_adminMap)
     })
 
-    setTimeout(() => _adminMap.invalidateSize(), 100)
+    setTimeout(() => {
+      _adminMap.invalidateSize()
+      // Fit map to show all drawn hexes
+      if(_adminHexLayers.length > 0){
+        try {
+          const group = L.featureGroup(_adminHexLayers)
+          _adminMap.fitBounds(group.getBounds().pad(0.15))
+        } catch(e){}
+      }
+    }, 150)
 
   } catch(e){
     console.warn('[H3 Map] admin map error:', e.message)
@@ -7948,8 +8064,14 @@ async function geocodeExistingHomeowners(){
   if(btn) btn.disabled = true
   if(progress) progress.style.display = 'block'
 
-  const updateProgress = (msg, color='var(--cyan)') => {
-    if(progress) progress.innerHTML = `<span style="color:${color}">${msg}</span>`
+  let _total = 0
+  const updateProgress = (msg, color='var(--cyan)', pct=null) => {
+    if(!progress) return
+    const bar = pct !== null
+      ? `<div style="background:var(--surface3);border-radius:3px;height:4px;overflow:hidden;margin-top:6px"><div style="width:${pct}%;height:100%;background:${color};border-radius:3px;transition:width .3s"></div></div>`
+      : ''
+    progress.style.display = 'block'
+    progress.innerHTML = `<span style="color:${color}">${msg}</span>${bar}`
   }
 
   try {
@@ -7970,12 +8092,13 @@ async function geocodeExistingHomeowners(){
       return
     }
 
-    updateProgress(`Found ${hws.length} homeowners to geocode. Starting...`)
+    _total = hws.length
+    updateProgress(`Found ${hws.length} homeowners to geocode. Starting...`, 'var(--cyan)', 0)
 
     let done = 0, failed = 0
 
     for(const hw of hws){
-      updateProgress(`Geocoding ${done + 1}/${hws.length}: ${hw.street_address}...`)
+      updateProgress(`📍 Geocoding ${done + 1}/${hws.length}: ${hw.street_address||hw.zip_code}...`, 'var(--cyan)', Math.round((done/hws.length)*100))
 
       try {
         // Use ZIP centroid as fallback if we can't geocode
@@ -17324,6 +17447,50 @@ function startRouteScheduler(){
   if(window._routeSchedulerRunning) return
   window._routeSchedulerRunning = true
   window._lastSchedulerCheck = {}
+
+  // 60-second ticker to update offer countdown badges in real time
+  setInterval(()=>{
+    const dispatchVisible = document.querySelector('#ad-dispatch')?.style.display !== 'none'
+    if(!dispatchVisible) return
+    // Update any visible countdown badges without full re-render
+    document.querySelectorAll('[data-batch-id]').forEach(card => {
+      const batchId = card.dataset.batchId
+      const b = [...(generatedBatches||[]), ...(window._livePipelineBatches||[])].find(x=>x.id===batchId)
+      if(!b) return
+      const badgeEl = card.querySelector('.dispatch-badge')
+      if(!badgeEl) return
+      const expiresAt = b.offerExpiresAt || b._offerExpiresAt
+      if(!expiresAt) return
+      const minsLeft = Math.max(0, Math.round((new Date(expiresAt).getTime() - Date.now()) / 60000))
+      const isExpired = new Date(expiresAt).getTime() < Date.now()
+      if(isExpired){
+        badgeEl.textContent = '⏰ Offer expired'
+        badgeEl.style.color = '#ef4444'
+        badgeEl.style.background = 'rgba(239,68,68,.22)'
+        // Show re-send button if not already there
+        const resendBtn = card.querySelector('.resend-btn')
+        if(!resendBtn && (b.status==='offered'||b.status==='sent')){
+          const chevron = card.querySelector(`#dbc-chev-${batchId}`)
+          if(chevron){
+            const btn = document.createElement('button')
+            btn.className = 'resend-btn'
+            btn.textContent = '↻ Re-send'
+            btn.style.cssText = 'background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;white-space:nowrap'
+            btn.onclick = (e) => { e.stopPropagation(); sendRouteNow(b.zoneId, b.day) }
+            chevron.parentNode.insertBefore(btn, chevron)
+          }
+        }
+
+      } else {
+        const col = minsLeft <= 5 ? '#ef4444' : '#f59e0b'
+        const icon = minsLeft <= 5 ? '🔴' : minsLeft <= 15 ? '🟡' : '⏳'
+        badgeEl.textContent = `${icon} ${minsLeft}m left`
+        badgeEl.style.color = col
+        badgeEl.style.background = col + '22'
+      }
+    })
+  }, 60000)
+
   setInterval(async ()=>{
     const now  = new Date()
     const hhmm = now.getHours() * 100 + now.getMinutes()
@@ -18511,6 +18678,38 @@ async function _adGenerateBatchesAsync(silent=false){
 // Phase 2: Admin reviews, then clicks Launch — sends offers + saves to DB
 // This is the ONLY place (along with sendRouteNow) that calls _launchSingleBatch.
 // Routes stamped with sentAt are skipped by the 9am scheduler.
+// Manually trigger the dispatch-scheduler edge function to send any queued routes
+async function triggerDispatchEdgeFunction(){
+  const btn = document.querySelector('[onclick="triggerDispatchEdgeFunction()"]')
+  if(btn){ btn.textContent = '📡 Triggering...'; btn.disabled = true }
+  try {
+    const supaUrl = (typeof SUPABASE_URL !== 'undefined' && SUPABASE_URL) || 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
+    const supaKey = (typeof SUPABASE_ANON_KEY !== 'undefined' && SUPABASE_ANON_KEY) || ''
+    const res = await fetch(`${supaUrl}/functions/v1/dispatch-scheduler`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + supaKey, 'Content-Type': 'application/json', 'x-trigger': 'manual-admin' },
+      body: JSON.stringify({ trigger: 'manual', timestamp: new Date().toISOString() }),
+    })
+    const data = await res.json()
+    if(data.emails_sent > 0){
+      showToast(`✅ Edge function ran — ${data.emails_sent} email${data.emails_sent!==1?'s':''} sent`, 'ok', 6000)
+    } else if(data.queued_found === 0){
+      showToast('📡 Edge function ran — no queued routes found. Approve a route first.', 'info', 5000)
+    } else {
+      showToast(`📡 Ran — ${data.queued_found} queued, ${data.emails_sent} sent. Check runner emails.`, 'info', 6000)
+    }
+    console.log('[BinDash] Edge function result:', data)
+    // Refresh pipeline
+    await loadLiveJobsIntoPipeline()
+    renderDispatchPipeline()
+  } catch(e){
+    showToast('Edge function error: ' + e.message, 'err', 6000)
+    console.error('[BinDash] triggerDispatchEdgeFunction:', e)
+  } finally {
+    if(btn){ btn.textContent = '📡 Send Queued'; btn.disabled = false }
+  }
+}
+
 async function launchDispatchRoutes(){
   const toSend = generatedBatches.filter(b=>b.status==='queued'||b.status==='preview')
   if(!toSend.length){ showToast('No approved routes to launch — approve drafts first','err'); return }
@@ -18524,6 +18723,8 @@ async function launchDispatchRoutes(){
   toSend.forEach(b=>{
     if(b.status==='queued') saveRouteTemplate(b.zoneId, b.day, b.stops, b.runner?.id)
     b.status = b.runner ? 'sent' : 'unassigned'
+    b.sentAt = new Date().toISOString()
+    b.offerExpiresAt = new Date(Date.now() + (b.windowMins||45)*60*1000).toISOString()
     // Stamp in localStorage so scheduler skips this batch at 9am
     const pKey = 'pending_route:'+b.zoneId+':'+normDay(b.day)
     try {
@@ -18772,6 +18973,56 @@ function renderDispatchPipeline(){
     </div>`
   }
 
+  // Offer lifecycle timeline — shown inside expanded batch card
+  function _renderOfferTimeline(b){
+    const statusKey = b.status || 'unassigned'
+    // Only show for active/sent/offered/accepted states
+    const showStates = ['sent','offered','broadcast','accepted','in_progress','complete','expired']
+    if(!showStates.includes(statusKey) && !b.sentAt) return ''
+
+    const now      = Date.now()
+    const sentAt   = b.sentAt || b._sentAt
+    const expiresAt= b.offerExpiresAt || b._offerExpiresAt
+    const isExpired= expiresAt && new Date(expiresAt).getTime() < now
+    const minsLeft = expiresAt ? Math.max(0, Math.round((new Date(expiresAt).getTime() - now) / 60000)) : null
+    const sentAgo  = sentAt ? Math.round((now - new Date(sentAt).getTime()) / 60000) : null
+    const windowMins = b.windowMins || 45
+
+    // Build stage list
+    const stages = [
+      { key:'sent',     label:'Offer Sent',   done: !!sentAt,                        time: sentAt ? new Date(sentAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : null },
+      { key:'pending',  label:'Awaiting Accept', done: ['accepted','in_progress','complete'].includes(statusKey), time: minsLeft !== null && !isExpired ? minsLeft+'m remaining' : isExpired ? 'Expired' : null, warn: isExpired },
+      { key:'accepted', label:'Accepted',     done: ['accepted','in_progress','complete'].includes(statusKey), time: null },
+      { key:'active',   label:'Route Active', done: ['in_progress','complete'].includes(statusKey), time: null },
+      { key:'complete', label:'Complete',      done: statusKey === 'complete', time: null },
+    ]
+
+    const dotsHtml = stages.map((s,i) => {
+      const col = s.warn ? '#ef4444' : s.done ? '#22c55e' : 'var(--border)'
+      const textCol = s.warn ? '#ef4444' : s.done ? '#22c55e' : 'var(--muted)'
+      const connector = i < stages.length-1
+        ? `<div style="flex:1;height:2px;background:${stages[i+1].done||stages[i+1].warn?'#22c55e':'var(--border)'};margin:0 2px;margin-bottom:14px"></div>`
+        : ''
+      return `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0">
+        <div style="width:10px;height:10px;border-radius:50%;background:${col};flex-shrink:0${s.warn?';box-shadow:0 0 6px rgba(239,68,68,.5)':''}"></div>
+        <div style="font-size:9px;color:${textCol};text-align:center;line-height:1.2;white-space:nowrap">${s.label}</div>
+        ${s.time ? `<div style="font-size:9px;color:${s.warn?'#ef4444':'var(--cyan)'};font-weight:600;text-align:center">${s.time}</div>` : ''}
+      </div>${connector}`
+    }).join('')
+
+    // Summary line
+    let summary = ''
+    if(statusKey==='accepted') summary = `<span style="color:#22c55e;font-weight:600">${b.runner?.name?.split(' ')[0]||'Runner'} accepted ✓</span>`
+    else if(isExpired) summary = `<span style="color:#ef4444">Offer expired ${sentAgo ? sentAgo+'m after sending' : ''} — use ↻ Re-send to retry</span>`
+    else if(minsLeft !== null) summary = `<span style="color:${minsLeft<=10?'#ef4444':'#f59e0b'}">${minsLeft <= 0 ? 'Expiring now' : minsLeft+'m left for '+( b.runner?.name?.split(' ')[0]||'runner')+' to accept'}</span>`
+    else if(sentAt) summary = `<span style="color:var(--muted)">Sent ${sentAgo}m ago</span>`
+
+    return `<div style="padding:10px 14px;background:rgba(0,0,0,.15);border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:0;margin-bottom:6px">${dotsHtml}</div>
+      <div style="font-size:11px;margin-top:2px">${summary}</div>
+    </div>`
+  }
+
   function renderBatchCard(b){
     const isMissed  = b._missed === true
     const isPreview = b.status==='preview'||b.status==='draft'||b.status==='queued'
@@ -18779,8 +19030,26 @@ function renderDispatchPipeline(){
     const statusKey = b.status||'unassigned'
     // Missed overrides normal color
     const borderCol = isMissed ? '#ef4444' : isBinIn ? '#06d6a0' : (sc[statusKey]||'#64748b')
-    const badgeTxt  = isMissed ? '🚨 MISSED' : (si[statusKey]||b.status)
-    const badgeCol  = isMissed ? '#ef4444' : (sc[statusKey]||'#64748b')
+    // --- Rich offer status ---
+    const now_ms = Date.now()
+    const expiresAt  = b.offerExpiresAt || b._offerExpiresAt || null
+    const sentAt     = b.sentAt || b._sentAt || null
+    const minsLeft   = expiresAt ? Math.max(0, Math.round((new Date(expiresAt).getTime() - now_ms) / 60000)) : null
+    const isExpired  = expiresAt && new Date(expiresAt).getTime() < now_ms
+    const sentAgo    = sentAt ? Math.round((now_ms - new Date(sentAt).getTime()) / 60000) : null
+
+    let badgeTxt, badgeCol
+    if(isMissed){
+      badgeTxt = '🚨 MISSED'; badgeCol = '#ef4444'
+    } else if((statusKey==='offered'||statusKey==='sent') && isExpired){
+      badgeTxt = '⏰ Offer expired'; badgeCol = '#ef4444'
+    } else if((statusKey==='offered'||statusKey==='sent') && minsLeft !== null){
+      badgeTxt = minsLeft <= 5 ? '🔴 '+minsLeft+'m left' : minsLeft <= 15 ? '🟡 '+minsLeft+'m left' : '⏳ '+minsLeft+'m left'
+      badgeCol = minsLeft <= 5 ? '#ef4444' : minsLeft <= 15 ? '#f59e0b' : '#f59e0b'
+    } else {
+      badgeTxt = (si[statusKey]||b.status)
+      badgeCol = isMissed ? '#ef4444' : (sc[statusKey]||'#64748b')
+    }
     const isOpen    = openCards.has(b.id)
     const ri        = b.runner ? (b.runner.initials||b.runner.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)) : null
     const batchName = (b.zoneName||'Route').replace(/ · ☀️ BIN IN| · 🌙 BIN OUT/,'')
@@ -18871,12 +19140,15 @@ function renderDispatchPipeline(){
       +'</div>'
       +'</div>'
       +(isLiveView?'<div style="width:60px;flex-shrink:0"><div style="height:4px;background:var(--surface3);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+borderCol+';border-radius:99px"></div></div><div style="font-size:9px;color:var(--muted);text-align:center;margin-top:2px">'+pct+'%</div></div>':'')
-      +'<span style="background:'+badgeCol+'22;color:'+badgeCol+';font-size:10px;font-weight:700;padding:2px 9px;border-radius:99px;flex-shrink:0;white-space:nowrap">'+badgeTxt+'</span>'
+      +'<span class="dispatch-badge" style="background:'+badgeCol+'22;color:'+badgeCol+';font-size:10px;font-weight:700;padding:2px 9px;border-radius:99px;flex-shrink:0;white-space:nowrap">'+badgeTxt+'</span>'
+      +((statusKey==='offered'||statusKey==='sent')&&sentAt&&!isMissed?'<span style="font-size:10px;color:var(--muted);flex-shrink:0;white-space:nowrap">sent '+sentAgo+'m ago</span>':'')
+      +((statusKey==='offered'||statusKey==='sent')&&isExpired?'<button onclick="event.stopPropagation();sendRouteNow(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0;white-space:nowrap">↻ Re-send</button>':'')
       +((b.status==='change_detected'||b.status==='draft')?'<button onclick="event.stopPropagation();showRouteApprovalModal(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.4);color:#06d6a0;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0">✓ Approve</button>':'')
       +(isPreview?'<button onclick="event.stopPropagation();deleteBatchFromPreview(\''+b.id+'\')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;flex-shrink:0">🗑</button>':'')
       +'<span id="dbc-chev-'+b.id+'" style="font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0;'+(isOpen?'transform:rotate(180deg)':'')+'">▼</span>'
       +'</div>'
       +'<div id="dbc-body-'+b.id+'" style="display:'+(isOpen?'block':'none')+';border-top:1px solid var(--border)">'
+      +_renderOfferTimeline(b)
       +'<div style="padding:6px 14px 4px;background:var(--surface2);max-height:320px;overflow-y:auto">'+stopRows+'</div>'
       +runnerFooter
       +'</div>'
@@ -19382,6 +19654,8 @@ async function loadLiveJobsIntoPipeline(){
           status:    j.status,
           offerType: j.offer_type || 'loyalty',
           offerBadge:j.offer_type==='broadcast' ? '📡 Broadcast' : '🔒 Assigned runner (25 min)',
+          sentAt:    j.offered_at || j.created_at || null,
+          offerExpiresAt: j.offer_expires_at || null,
           earnTotal: '0.00',
           hasSplit:  false,
           stops:     [],
@@ -21457,6 +21731,8 @@ async function loadHomeownersFromSupabase(){
         notes:          row.service_notes || '',
         binPhotos:      (() => { try { return row.bin_photos ? JSON.parse(row.bin_photos) : [] } catch(e){ return [] } })(),
         color:          'linear-gradient(135deg,var(--cyan),var(--blue))',
+        lat:            parseFloat(row.lat)||null,
+        lng:            parseFloat(row.lng)||null,
         _source:        fromSignup ? 'signup' : 'homeowners',
       }
     }
@@ -21501,6 +21777,24 @@ async function loadHomeownersFromSupabase(){
       HOMEOWNERS.length, 'total after dedup)')
     updateOverviewCounts()
     renderHomeownerList()
+
+    // Background: geocode any HO that has an address but no lat/lng
+    // This enriches the admin map with real anchor points over time
+    const needsGeocode = HOMEOWNERS.filter(h =>
+      h.status === 'active' && h.address && h.address !== '--' && (!h.lat || !h.lng) && h.zip
+    ).slice(0, 5) // limit to 5 per load to avoid hammering the geocoder
+
+    for(const h of needsGeocode){
+      try {
+        const coords = await geocodeAddress(h.address, h.city||'', h.state||'AZ', h.zip)
+        if(coords?.lat && coords?.lng){
+          h.lat = coords.lat; h.lng = coords.lng
+          // Persist to Supabase in background
+          _supa.from('homeowners').update({ lat: coords.lat, lng: coords.lng, updated_at: new Date().toISOString() })
+            .eq('email', h.email).then(()=>{})
+        }
+      } catch(e){ /* skip */ }
+    }
   } catch(e){ console.warn('[BinDash] loadHomeowners exception:', String(e?.message||e)) }
 }
 
