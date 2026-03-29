@@ -7316,41 +7316,46 @@ const ZIP_CENTROIDS = {
 }
 
 async function geocodeAddress(address, city, state, zip){
-  // 1. Try ZIP centroid first (instant, always works)
-  if(zip && ZIP_CENTROIDS[zip]){
-    const [lat, lng] = ZIP_CENTROIDS[zip]
-    // If we have a full address, try to refine with a free API
-    if(address && address.length > 5){
-      try {
-        // Use Census Geocoder — free, CORS-friendly, no API key
-        const parts = [address, city, state||'AZ', zip].filter(Boolean).join(', ')
-        const encoded = encodeURIComponent(parts)
-        const res = await fetch(
-          `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encoded}&benchmark=Public_AR_Current&format=json`,
-          { signal: AbortSignal.timeout(6000) }
-        )
-        const data = await res.json()
-        const match = data?.result?.addressMatches?.[0]
-        if(match){
-          console.log('[H3] Census match:', match.matchedAddress)
-          return { lat: parseFloat(match.coordinates.y), lng: parseFloat(match.coordinates.x) }
-        }
-      } catch(e){ console.warn('[H3] Census geocode failed:', e.message) }
-    }
-    return { lat, lng }
-  }
-  // 2. Unknown ZIP — try Census geocoder with full address
-  if(address && zip){
+  // 1. Try full address geocode if address provided
+  if(address && address.length > 5 && zip){
+    // Try Photon geocoder (Komoot) — CORS-friendly, no API key, very accurate for US
     try {
-      const encoded = encodeURIComponent(`${address}, ${city||''}, ${state||'AZ'} ${zip}`)
+      const q = encodeURIComponent([address, city, state||'AZ', zip, 'USA'].filter(Boolean).join(' '))
       const res = await fetch(
-        `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encoded}&benchmark=Public_AR_Current&format=json`,
+        `https://photon.komoot.io/api/?q=${q}&limit=1&lang=en`,
         { signal: AbortSignal.timeout(5000) }
       )
       const data = await res.json()
+      const feat = data?.features?.[0]
+      if(feat){
+        const [lng, lat] = feat.geometry.coordinates
+        console.log('[H3] Photon match:', feat.properties?.name, feat.properties?.street, lat, lng)
+        return { lat, lng }
+      }
+    } catch(e){ console.warn('[H3] Photon geocode failed:', e.message) }
+
+    // Fallback: Census geocoder
+    try {
+      const parts = [address, city, state||'AZ', zip].filter(Boolean).join(', ')
+      const encoded = encodeURIComponent(parts)
+      const res = await fetch(
+        `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encoded}&benchmark=Public_AR_Current&format=json`,
+        { signal: AbortSignal.timeout(6000) }
+      )
+      const data = await res.json()
       const match = data?.result?.addressMatches?.[0]
-      if(match) return { lat: parseFloat(match.coordinates.y), lng: parseFloat(match.coordinates.x) }
-    } catch(e){ console.warn('[H3] Census geocode error:', e.message) }
+      if(match){
+        console.log('[H3] Census match:', match.matchedAddress)
+        return { lat: parseFloat(match.coordinates.y), lng: parseFloat(match.coordinates.x) }
+      }
+    } catch(e){ console.warn('[H3] Census geocode failed:', e.message) }
+  }
+
+  // 2. Fall back to ZIP centroid
+  if(zip && ZIP_CENTROIDS[zip]){
+    const [lat, lng] = ZIP_CENTROIDS[zip]
+    console.log('[H3] Using ZIP centroid for', zip)
+    return { lat, lng }
   }
   return null
 }
@@ -7419,7 +7424,7 @@ async function _h3CheckAddress(){
     lat = ZIP_CENTROIDS[zip][0]
     lng = ZIP_CENTROIDS[zip][1]
     // Show map right away — don't wait for anything
-    _initSignupMap(lat, lng, [])
+    await _initSignupMap(lat, lng, [])
     // Hide the plain ZIP banner since we'll show a better one
     const zipCovEl = document.getElementById('zip-coverage-result')
     if(zipCovEl) zipCovEl.style.display = 'none'
@@ -7437,6 +7442,8 @@ async function _h3CheckAddress(){
       if(precise){
         // Move pin to exact address — smooth animation
         _moveSignupPin(precise.lat, precise.lng, addr)
+        // Zoom in closer when we have a precise address
+        if(_signupMap) _signupMap.setView([precise.lat, precise.lng], 16, { animate: true })
         const hexId = latLngToHex(precise.lat, precise.lng)
         if(hexId){
           let zone = null
@@ -7612,7 +7619,7 @@ async function _initSignupMap(lat, lng, zones){
       el.style.height = '220px'
       _signupMap = L.map('h3-signup-map', {
         center:          [lat, lng],
-        zoom:            14,
+        zoom:            15,
         zoomControl:     true,
         scrollWheelZoom: false,
         attributionControl: false,
