@@ -3566,9 +3566,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div class="nav-i" onclick="adNav(this,'ad-pending-hw')"><span class="ic">🏠</span> Pending Homeowners <span id="hw-pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
       <div class="nav-i" onclick="adNav(this,'ad-pending')"><span class="ic">🚐</span> Pending Runners <span id="pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
       <div class="nav-i" onclick="adNav(this,'ad-runner-requests')"><span class="ic">🎟️</span> Runner Requests <span id="rr-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
-      <div class="nav-i" onclick="adNav(this,'ad-zone-waitlist')"><span class="ic">🗺️</span> Zone Waitlist <span id="zone-wl-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;display:none">0</span></div>
-      <div class="nav-i" onclick="adNav(this,'ad-runner-zone-requests')"><span class="ic">📍</span> Runner Zone Requests <span id="rzr-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;display:none">0</span></div>
-      <div class="nav-i" onclick="adNav(this,'ad-waitlist')"><span class="ic">📋</span> Interest List <span id="waitlist-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
+      <div class="nav-i" onclick="adNav(this,'ad-runner-zone-requests')"><span class="ic">🗺️</span> Runner Scout <span id="rzr-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;display:none">0</span></div>
       <div class="s-sect">Management</div>
       <div class="nav-i" onclick="adNav(this,'ad-homeowners')"><span class="ic">🏠</span> Homeowners</div>
       <div class="nav-i" onclick="adNav(this,'ad-runners')"><span class="ic">🚐</span> Runners</div>
@@ -3790,16 +3788,26 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
         <!-- AD RUNNER ZONE REQUESTS -->
         <div class="pg" id="ad-runner-zone-requests">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+            <div>
+              <div style="font-size:18px;font-weight:700">🗺️ Runner Scout</div>
+              <div style="font-size:13px;color:var(--muted);margin-top:2px">Runners flag high-demand areas they've spotted. Review to decide if a micro zone should be created.</div>
+            </div>
+            <button class="btn btn-cyan btn-sm" onclick="renderRunnerZoneRequests()">↺ Refresh</button>
+          </div>
 
-          <!-- ZONE HEALTH OVERVIEW (computed by renderRunnerZoneRequests) -->
+          <!-- HOW IT WORKS -->
+          <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.15);border-radius:9px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:var(--sub);line-height:1.7">
+            <strong style="color:var(--cyan)">How it works:</strong> Runners on the road flag neighborhoods where they see demand — multiple bins out, neighbors asking about service, clusters of interest. Each flag creates or increments a micro zone signal.
+            When enough flags accumulate for a ZIP, it surfaces here for you to review and potentially activate a new zone.
+          </div>
+
+          <!-- ZONE HEALTH OVERVIEW -->
           <div id="rzr-overview" style="margin-bottom:20px"></div>
 
-          <!-- ZONE CARDS GRID (waitlist + live) -->
-          <div id="rzr-zone-grid" style="margin-bottom:24px"></div>
-
-          <!-- INCOMING REQUESTS -->
+          <!-- SCOUT REQUESTS LIST -->
           <div id="rzr-list" style="display:flex;flex-direction:column;gap:10px">
-            <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">Loading...</div>
+            <div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">Loading scout reports...</div>
           </div>
         </div>
 
@@ -7429,10 +7437,13 @@ async function _h3CheckAddress(){
     lng = ZIP_CENTROIDS[zip][1]
     // Show map right away — don't wait for anything
     await _initSignupMap(lat, lng, [])
-    // Hide the plain ZIP banner since we'll show a better one
+    // Only clear zip-coverage banner for unknown areas (new area msg)
+    // If it already shows live/waitlist info, keep it and stay silent
     const zipCovEl = document.getElementById('zip-coverage-result')
-    if(zipCovEl) zipCovEl.style.display = 'none'
-    if(el) el.innerHTML = '<div style="font-size:11px;color:var(--muted);text-align:center;padding:6px">📍 Loading your area...</div>'
+    const hasZoneInfo = window._hwMatchedZone || window._hwZipHasCoverage !== null
+    if(zipCovEl && !hasZoneInfo) zipCovEl.style.display = 'none'
+    // Only show loading text if no zone banner is showing
+    if(el && !hasZoneInfo) el.innerHTML = '<div style="font-size:11px;color:var(--muted);text-align:center;padding:6px">📍 Loading your area...</div>'
   }
 
   // ── STEP 2: Try to get precise coords from full address ──
@@ -7491,9 +7502,13 @@ async function _h3CheckAddress(){
   } catch(e){ /* ok */ }
 
   // ── STEP 4: Show FOMO message ──
+  // Only show H3 FOMO if there's no classic zone banner already showing
+  // (live/waitlist zones already have a better banner from checkZipCoverage)
   if(!el) return
   const zipCovEl = document.getElementById('zip-coverage-result')
-  if(zipCovEl) zipCovEl.style.display = 'none'
+  const hasClassicZone = window._hwMatchedZone
+  if(!hasClassicZone && zipCovEl) zipCovEl.style.display = 'none'
+  if(hasClassicZone){ el.innerHTML = ''; return } // zip banner is already correct
 
   const zone = result?.zone
   const msg  = getHexFomoMessage(zone)
@@ -8000,6 +8015,22 @@ async function geocodeExistingHomeowners(){
   }
 
   if(btn) btn.disabled = false
+}
+
+function mzFilterList(filter){
+  const listEl = document.getElementById('mz-list')
+  if(!listEl || !window._mzAllZones) return
+  const zones = window._mzAllZones
+  let filtered
+  if(filter === 'live')          filtered = zones.filter(z=>z.status==='live')
+  else if(filter === 'waitlist') filtered = zones.filter(z=>z.status==='waitlist')
+  else if(filter === 'no-runner') filtered = zones.filter(z=>z.rnCount===0&&z.status==='live')
+  else                           filtered = zones
+  listEl.innerHTML = filtered.map(z=>_renderMicroZoneCard(z)).join('')
+  // Switch to list view so they can see the filtered results
+  mzSetView('list')
+  if(filtered.length === 0)
+    listEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No zones match this filter</div>'
 }
 
 function mzSetView(view){
@@ -17376,22 +17407,35 @@ function approvePendingRoute(zoneId, day, permanent=true){
 
   localStorage.setItem(key, JSON.stringify(pending))
 
-  // Write approval to Supabase dispatch_queue — try update first, insert if no row exists
+  // Write approval to Supabase dispatch_queue — FULL payload so edge function can send emails
   const _dqDate = pending.date || new Date(now.getTime()+86400000).toISOString().slice(0,10)
   ;(async () => {
+    const payload = {
+      status:         'queued',
+      approved_at:    now.toISOString(),
+      runner_id:      pending.runner?.id || null,
+      runner_email:   pending.runner?.email || null,
+      runner_name:    pending.runner?.name || null,
+      stop_count:     (pending.stops||[]).length,
+      zone_name:      pending.zoneName || '',
+      earn_out:       pending.earnOut || 0,
+      collection_day: pending.day || '',
+      stops_json:     JSON.stringify((pending.stops||[]).map(s=>({
+        name: s.name, email: s.email,
+        address: s.address||s.zip, service: s.service, plan: s.plan,
+      }))),
+    }
     const { data: existing } = await _supa.from('dispatch_queue')
       .select('id').eq('zone_id', zoneId).eq('scheduled_date', _dqDate).maybeSingle()
     if(existing) {
-      const { error } = await _supa.from('dispatch_queue')
-        .update({ status:'queued', approved_at:now.toISOString(), runner_id:pending.runner?.id||null, stop_count:(pending.stops||[]).length })
-        .eq('id', existing.id)
+      const { error } = await _supa.from('dispatch_queue').update(payload).eq('id', existing.id)
       if(error) console.warn('[BinDash] dispatch_queue update:', error.message)
-      else console.log('[BinDash] dispatch_queue updated — queued ✅')
+      else console.log('[BinDash] dispatch_queue updated with full payload ✅')
     } else {
       const { error } = await _supa.from('dispatch_queue')
-        .insert({ zone_id:zoneId, scheduled_date:_dqDate, status:'queued', approved_at:now.toISOString(), runner_id:pending.runner?.id||null, stop_count:(pending.stops||[]).length, created_at:now.toISOString() })
+        .insert({ zone_id:zoneId, scheduled_date:_dqDate, created_at:now.toISOString(), ...payload })
       if(error) console.warn('[BinDash] dispatch_queue insert:', error.message)
-      else console.log('[BinDash] dispatch_queue inserted — queued ✅')
+      else console.log('[BinDash] dispatch_queue inserted with full payload ✅')
     }
   })()
 
@@ -19517,17 +19561,19 @@ async function loadMicroZones(){
     const totalWL = zones.reduce((t,z)=>t+z.wlCount,0)
 
     if(statsEl) statsEl.innerHTML = [
-      ['🟢 Active',  active,  '#22c55e'],
-      ['🟠 Pending', pending, '#f59e0b'],
-      ['🔵 Shadow',  shadow,  '#3b82f6'],
-      ['🏠 Total HOs', totalHO+' ('+totalWL+' waitlist)', 'var(--cyan)'],
-    ].map(([label,val,color])=>`
-      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+      ['Live',     active,  '#22c55e', 'live'],
+      ['Waitlist', pending, '#f59e0b', 'waitlist'],
+      ['All HOs',  totalHO+' ('+totalWL+' wl)', 'var(--cyan)', 'all'],
+      ['No Runner',zones.filter(z=>z.rnCount===0&&z.status==='live').length, '#ef4444', 'no-runner'],
+    ].map(([label,val,color,filter])=>`
+      <div onclick="mzFilterList('${filter}')" style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center;cursor:pointer;transition:all .15s" 
+           onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='var(--surface2)'">
         <div style="font-size:18px;font-weight:700;color:${color}">${val}</div>
         <div style="font-size:10px;color:var(--muted);margin-top:2px">${label}</div>
       </div>`).join('')
 
     // Zone cards — built from ADMIN_ZONES (single source of truth)
+    window._mzAllZones = zones  // store for filter
     if(listEl) listEl.innerHTML = zones.map(z => _renderMicroZoneCard(z)).join('')
 
   } catch(e) {
@@ -19596,7 +19642,7 @@ function _renderMicroZoneCard(z){
              style="background:rgba(6,214,160,.1);border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer">
              ⚙ Manage
            </button>`
-        : `<button onclick="event.stopPropagation();activateFromMicroZone('${zip}','${z.name}',${z.hwCount})"
+        : `<button onclick="event.stopPropagation();showCreateZone({name:'${z.name}',zip:'${zip}',city:'${z.name}',status:'live',hwCount:${z.hwCount}})"
              style="background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.5);color:#06d6a0;border-radius:5px;padding:2px 10px;font-size:10px;cursor:pointer;font-weight:700">
              ⚡ Activate →
            </button>`}
@@ -20661,7 +20707,9 @@ function confirmActivateMicroZone(zip, city){
   setTimeout(()=>{ adNav(null,'ad-zones') }, 1000)
 }
 
-function showCreateZone(){
+function showCreateZone(prefill){
+  prefill = prefill || {}
+  const availRunners = RUNNERS.filter(r => r.status !== 'INACTIVE')
   document.getElementById('modal-box').innerHTML=`
   <div class="mh">
     <div style="font-size:15px;font-weight:700">📍 Create Service Zone</div>
@@ -20670,39 +20718,57 @@ function showCreateZone(){
   <div class="mb" style="display:flex;flex-direction:column;gap:14px">
     <div class="field">
       <label>Zone Name *</label>
-      <input id="cz-name" placeholder="e.g. Glendale West" style="font-size:14px;font-weight:600">
+      <input id="cz-name" placeholder="e.g. Glendale Old Town" value="${prefill.name||''}" style="font-size:14px;font-weight:600">
     </div>
     <div class="g2">
       <div class="field">
         <label>ZIP Code(s) * <span style="color:var(--muted);font-weight:400;font-size:10px">comma-separate multiple</span></label>
-        <input id="cz-zip" placeholder="85301 or 85301, 85302, 85303">
+        <input id="cz-zip" placeholder="85301 or 85301,85302" value="${prefill.zip||''}">
         <div id="cz-zip-preview" style="font-size:11px;color:var(--cyan);margin-top:4px"></div>
       </div>
-      <div class="field"><label>City / Area</label><input id="cz-city" placeholder="Glendale"></div>
+      <div class="field"><label>City / Area</label><input id="cz-city" placeholder="Glendale" value="${prefill.city||''}"></div>
     </div>
     <div class="g2">
       <div class="field">
         <label>Status</label>
         <select id="cz-status">
-
-          <option value="live">Live (public)</option>
-          <option value="waitlist">Waitlist (building interest)</option>
+          <option value="live" ${!prefill.status||prefill.status==='live'?'selected':''}>Live (public)</option>
+          <option value="waitlist" ${prefill.status==='waitlist'?'selected':''}>Waitlist (building interest)</option>
           <option value="inactive">Inactive</option>
         </select>
       </div>
       <div class="field">
-        <label>Capacity <span style="color:var(--muted);font-weight:400;font-size:10px">max homeowners</span></label>
-        <input id="cz-cap" type="number" value="20" min="1" max="200">
+        <label>Capacity</label>
+        <input id="cz-cap" type="number" value="${prefill.capacity||20}" min="1" max="200">
       </div>
     </div>
-    <div class="field"><label>Notes</label><input id="cz-notes" placeholder="Optional"></div>
+    <div class="g2">
+      <div class="field">
+        <label>Collection Day</label>
+        <select id="cz-day">
+          <option value="">-- Not set yet --</option>
+          ${['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d=>
+            '<option '+(prefill.day===d?'selected':'')+'>'+d+'</option>'
+          ).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>Lead Runner <span style="color:var(--muted);font-weight:400;font-size:10px">optional</span></label>
+        <select id="cz-runner">
+          <option value="">-- Assign later --</option>
+          ${availRunners.map(r=>'<option value="'+r.id+'" '+(prefill.runnerId===r.id?'selected':'')+'>'+r.name+' · '+(r.zip||r.area||'--')+'</option>').join('')}
+        </select>
+      </div>
+    </div>
+    <div class="field"><label>Notes</label><input id="cz-notes" placeholder="Optional" value="${prefill.notes||''}"></div>
+    ${prefill.hwCount ? '<div style="background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.15);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--sub)">✅ <strong style="color:#22c55e">'+prefill.hwCount+' homeowners</strong> in ZIP '+prefill.zip+' will be linked to this zone on creation.</div>' : ''}
     <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.15);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--sub)">
-      💡 Homeowners auto-match to this zone by ZIP on signup. Collection days come from their onboarding preferences -- no need to set them here.
+      💡 Homeowners auto-match by ZIP. The collection day drives dispatch scheduling.
     </div>
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
-    <button class="btn btn-cyan" onclick="saveCreateZone()">Create Zone</button>
+    <button class="btn btn-cyan" onclick="saveCreateZone()">Create Zone →</button>
   </div>`
   openM()
 }
@@ -20823,32 +20889,37 @@ async function notifyWaitlistForZip(zip, zone){
 }
 
 function saveCreateZone(){
-  const name   = document.getElementById('cz-name')?.value.trim() || ''
-  const zipRaw = document.getElementById('cz-zip')?.value.trim()  || ''
-  const city   = document.getElementById('cz-city')?.value.trim() || ''
+  const name      = document.getElementById('cz-name')?.value.trim() || ''
+  const zipRaw    = document.getElementById('cz-zip')?.value.trim()  || ''
+  const city      = document.getElementById('cz-city')?.value.trim() || ''
+  const day       = document.getElementById('cz-day')?.value || ''
+  const runnerId  = document.getElementById('cz-runner')?.value || null
   if(!name || !zipRaw){ showToast('Zone name and ZIP code(s) are required','err'); return }
   const zips = zipRaw.split(',').map(z=>z.trim()).filter(z=>z.length>=3)
   const zip  = zips[0]
-  const statusRaw = document.getElementById('cz-status')?.value || 'pilot'
-  const isPilot   = statusRaw === 'pilot'
+  const statusRaw = document.getElementById('cz-status')?.value || 'live'
+  const runner = runnerId ? RUNNERS.find(r=>r.id===runnerId) : null
   const newZone = {
-    id: crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+Math.random().toString(36).slice(2,8), name,
-    city: city || zips[0]+' area',
-    zip, zips,
-    area: 'A1',   // default area suffix -- becomes A2, A3 on splits
-    status: isPilot ? 'live' : statusRaw,
-    pilot: isPilot, overridden: isPilot || statusRaw==='live',
-    runners:0, capacity: parseInt(document.getElementById('cz-cap')?.value)||20,
-    homeowners:0, threshold: parseInt(document.getElementById('cz-thresh')?.value)||10,
-    collection:[], assignedRunner:null, stopOrder:[],
+    id: crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),
+    name, city: city || zip+' area',
+    zip, zips, area:'A1',
+    status: statusRaw,
+    pilot: false, overridden: statusRaw==='live',
+    runners: runner ? 1 : 0,
+    capacity: parseInt(document.getElementById('cz-cap')?.value)||20,
+    homeowners:0, threshold:5,
+    collection: day ? [day] : [],
+    assignedRunner: runnerId || null,
+    priorityRunnerId: runnerId || null,
+    stopOrder:[], leadCap:15,
     notes: document.getElementById('cz-notes')?.value || '',
   }
   ADMIN_ZONES.push(newZone)
   closeM(); renderAdminZones(); syncZoneData()
   dbSaveZone(newZone)
-  // Notify all waitlisted HWs and clear runner zone requests for these ZIPs
-  zips.forEach(zip => notifyWaitlistForZip(zip, newZone))
-  showToast(name+' created ✅','ok')
+  if(runnerId) adminUpdateZoneRole(newZone.id, runnerId, 'lead', 1)
+  zips.forEach(z => notifyWaitlistForZip(z, newZone))
+  showToast(name+' created ✅'+(runner?' · '+runner.name+' assigned':'')+(day?' · '+day+' collection':''), 'ok', 5000)
 }
 
 function confirmDeleteZone(zId, name){
