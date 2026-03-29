@@ -15739,6 +15739,7 @@ function affected_reassign(fromId, toId){
 // -- DISPATCH ENGINE -------------------------------
 
 let generatedBatches = []
+let openCards = new Set()  // tracks which dispatch cards are expanded — module-level so drag/merge functions can access
 
 // ── ROUTE LIFECYCLE STATE MACHINE ────────────────────────────────────────────
 // States: draft | change_detected | queued | sent | accepted | in_progress | complete
@@ -17132,8 +17133,8 @@ function renderDispatchPipeline(){
     return
   }
 
-  // Remember which cards are open so we can re-open them after re-render
-  const openCards = new Set()
+  // Refresh the module-level openCards set from DOM before re-render
+  openCards = new Set()
   pipeline.querySelectorAll('[data-dispatch-card-open="1"]').forEach(el => openCards.add(el.dataset.batchId))
 
   let batches = batchSource
