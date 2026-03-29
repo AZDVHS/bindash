@@ -7291,15 +7291,66 @@ function getHexesInRadius(lat, lng, radiusKm){
   return h3.gridDisk(center, rings)
 }
 
+// ZIP centroid lookup — instant, no API needed
+const ZIP_CENTROIDS = {
+  '85301':[33.5387,-112.1860],'85302':[33.5470,-112.1860],'85303':[33.5303,-112.1860],
+  '85304':[33.5638,-112.2027],'85305':[33.5303,-112.2194],'85306':[33.6137,-112.1527],
+  '85307':[33.5303,-112.2361],'85308':[33.6387,-112.1694],'85309':[33.5303,-112.2527],
+  '85310':[33.6638,-112.2027],'85340':[33.5303,-112.3694],'85374':[33.6387,-112.3194],
+  '85375':[33.6720,-112.3194],'85379':[33.6387,-112.3694],'85383':[33.7120,-112.3694],
+  '85385':[33.7387,-112.3194],'85387':[33.7654,-112.3194],'85388':[33.6387,-112.3027],
+  '85395':[33.5303,-112.4194],'85396':[33.5303,-112.4861],
+  '85201':[33.4152,-111.8315],'85202':[33.3985,-111.8482],'85203':[33.4318,-111.8149],
+  '85204':[33.4151,-111.7982],'85205':[33.4318,-111.7649],'85206':[33.4152,-111.7482],
+  '85207':[33.4485,-111.7316],'85208':[33.4152,-111.7149],'85209':[33.3818,-111.7149],
+  '85210':[33.3985,-111.8315],'85212':[33.3485,-111.7149],'85213':[33.4652,-111.8149],
+  '85215':[33.4818,-111.7982],'85224':[33.3485,-111.9149],'85225':[33.3652,-111.8815],
+  '85226':[33.3318,-111.9149],'85233':[33.3652,-111.8482],'85234':[33.3818,-111.8149],
+  '85248':[33.2818,-111.8815],'85249':[33.2652,-111.8482],'85284':[33.3152,-111.9315],
+  '85286':[33.3318,-111.8482],'85295':[33.3485,-111.8149],'85296':[33.3318,-111.7982],
+  '85297':[33.3152,-111.7649],'85298':[33.3152,-111.7482],'85338':[33.4318,-112.3694],
+  '85339':[33.3485,-112.1027],'85345':[33.5638,-112.2361],'85351':[33.5638,-112.2694],
+  '85353':[33.4485,-112.2527],'85354':[33.4318,-112.4027],'85355':[33.5303,-112.2861],
+  '85361':[33.6387,-112.4361],'85363':[33.5303,-112.3194],'85373':[33.6387,-112.2527],
+  '85381':[33.6137,-112.2361],'85382':[33.6387,-112.2194],'85390':[33.7387,-112.5027],
+}
+
 async function geocodeAddress(address, city, state, zip){
-  const q = encodeURIComponent(`${address}, ${city}, ${state} ${zip}, USA`)
-  try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`,
-      { headers: { 'Accept-Language': 'en-US' } })
-    const data = await res.json()
-    if(!data || !data.length) return null
-    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
-  } catch(e){ console.warn('[H3] geocode error:', e.message); return null }
+  // 1. Try ZIP centroid first (instant, always works)
+  if(zip && ZIP_CENTROIDS[zip]){
+    const [lat, lng] = ZIP_CENTROIDS[zip]
+    // If we have a full address, try to refine with a free API
+    if(address && address.length > 5){
+      try {
+        // Use Census Geocoder — free, CORS-friendly, no API key
+        const encoded = encodeURIComponent(`${address}, ${city||''}, ${state||'AZ'} ${zip}`)
+        const res = await fetch(
+          `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encoded}&benchmark=Public_AR_Current&format=json`,
+          { signal: AbortSignal.timeout(3000) }
+        )
+        const data = await res.json()
+        const match = data?.result?.addressMatches?.[0]
+        if(match){
+          return { lat: parseFloat(match.coordinates.y), lng: parseFloat(match.coordinates.x) }
+        }
+      } catch(e){ /* fall through to ZIP centroid */ }
+    }
+    return { lat, lng }
+  }
+  // 2. Unknown ZIP — try Census geocoder with full address
+  if(address && zip){
+    try {
+      const encoded = encodeURIComponent(`${address}, ${city||''}, ${state||'AZ'} ${zip}`)
+      const res = await fetch(
+        `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encoded}&benchmark=Public_AR_Current&format=json`,
+        { signal: AbortSignal.timeout(4000) }
+      )
+      const data = await res.json()
+      const match = data?.result?.addressMatches?.[0]
+      if(match) return { lat: parseFloat(match.coordinates.y), lng: parseFloat(match.coordinates.x) }
+    } catch(e){ console.warn('[H3] Census geocode error:', e.message) }
+  }
+  return null
 }
 
 async function getOrCreateMicroZone(hexId, { lat, lng, city, state, zip, trashDay } = {}){
@@ -7384,13 +7435,9 @@ async function _h3CheckAddress(){
     }
   }
 
-  // If still no result, skip map but show basic FOMO
+  // If still no result, clear banner (zip-coverage-result already shows the message)
   if(!result){
-    if(el) el.innerHTML = `<div style="background:rgba(165,180,252,.07);border:1px solid #a5b4fc44;border-radius:10px;padding:12px 14px;margin:12px 0">
-      <div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">⭐</span>
-      <span style="font-size:13px;font-weight:700;color:#a5b4fc">You could be the first on your block!</span></div>
-      <div style="font-size:12px;color:var(--sub);margin-top:4px">Invite 4 neighbors and unlock BinDash for ZIP ${zip}.</div>
-    </div>`
+    if(el) el.innerHTML = ''
     return
   }
 
@@ -7419,7 +7466,11 @@ async function _h3CheckAddress(){
   const total = (result.zone?.waitlist_count||0) + (result.zone?.member_count||0)
   const pct   = Math.min(100, Math.round(total / (result.zone?.activation_threshold||5) * 100))
 
-  el.innerHTML = `<div style="background:rgba(${rgb},.08);border:1px solid ${msg.color}44;border-radius:10px;padding:12px 14px;margin:12px 0">
+  // Hide the plain ZIP coverage banner — H3 FOMO banner replaces it
+  const zipCovEl = document.getElementById('zip-coverage-result')
+  if(zipCovEl) zipCovEl.style.display = 'none'
+
+  el.innerHTML = `<div style="background:rgba(${rgb},.08);border:1px solid ${msg.color}44;border-radius:10px;padding:12px 14px;margin:4px 0">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
       <span style="font-size:18px">${msg.icon}</span>
       <span style="font-size:13px;font-weight:700;color:${msg.color}">${msg.headline}</span>
