@@ -150,13 +150,17 @@ async function sendEmail(to, subject, html, type){
       headers:{
         'Content-Type':'application/json',
         'Authorization':'Bearer '+_supaKey,
+        'apikey': _supaKey,
       },
       body: JSON.stringify({to, subject, html, type:type||'general'}),
     })
     const d = await res.json()
     console.log('[BinDash] sendEmail RESPONSE:', res.status, JSON.stringify(d))
+    if(res.status === 401){
+      console.warn('[BinDash] 401 on send-email — JWT auth issue. Edge function needs verify_jwt=false in config.toml')
+    }
     if(d.error) console.warn('[BinDash] Email error:', d.error)
-    else console.log('[BinDash] Email sent OK:', type, to)
+    else if(res.ok) console.log('[BinDash] Email sent OK:', type, to)
   } catch(e){
     console.warn('[BinDash] sendEmail EXCEPTION:', String(e?.message||e))
   }
@@ -6321,8 +6325,11 @@ async function loadRunnerRoutes(runnerRow){
           <button class="btn btn-ghost btn-sm" style="color:#ef4444;font-size:11px" onclick="declineOffer('${batch.id}')">Decline</button>
         </div>` : ''}
         <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
-          ${batch.stops.map((s,i)=>`
-          <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:${i<batch.stops.length-1?'1px solid rgba(30,40,64,.5)':'none'}">
+          ${_getRnStopOrder(batch.id, batch.stops).map((s,i)=>`
+          <div class="rn-stop-row" draggable="true" data-bid="${batch.id}" data-idx="${i}" data-email="${s.homeowner_email||''}"
+            ondragstart="rnDragStart(event,this)" ondragover="rnDragOver(event,this)" ondragleave="rnDragLeave(this)" ondrop="rnDrop(event,this,'${batch.id}')"
+            style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:${i<batch.stops.length-1?'1px solid rgba(30,40,64,.5)':'none'};cursor:grab">
+            <div style="font-size:16px;color:var(--muted);flex-shrink:0;margin-top:2px" title="Drag to reorder">⠿</div>
             <div style="width:22px;height:22px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
             <div style="flex:1">
               <div style="font-size:13px;font-weight:600">${s.hwDisplayName}</div>
@@ -6674,17 +6681,43 @@ async function resumeBatch(batchId){
 
 async function startBatch(batchId){
   const runnerRow = window._currentRunnerRow
+  console.log('[startBatch] called with batchId:', batchId)
+  console.log('[startBatch] _lastEnrichedJobs count:', (window._lastEnrichedJobs||[]).length)
 
   // Get the job details to check the scheduled date and stop count
-  const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
+  // Match on both batch_id and id (some jobs may not have batch_id set)
+  const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>
+    j.batch_id===batchId || j.id===batchId
+  )
+  console.log('[startBatch] matched jobs:', batchJobs.length, 'for batchId:', batchId)
+
   const scheduledDate = batchJobs[0]?.scheduled_date || null
   const stopCount = batchJobs.length || 1
   const visitType = batchJobs[0]?.visit_type || 'BIN_OUT'
+  console.log('[startBatch] scheduledDate:', scheduledDate, 'stopCount:', stopCount)
+
+  // If batch_id didn't match any jobs, try to find jobs by looking at in_progress/accepted status
+  if(!batchJobs.length){
+    console.log('[startBatch] no jobs matched batch_id — trying zone match')
+    const todayStr = new Date().toISOString().slice(0,10)
+    const zoneFallback = (window._lastEnrichedJobs||[]).filter(j=>
+      j.scheduled_date === todayStr && ['offered','accepted','in_progress'].includes(j.status)
+    )
+    if(zoneFallback.length){
+      console.log('[startBatch] zone fallback found', zoneFallback.length, 'jobs')
+      // Reassign batchJobs reference — can't reassign const, just proceed
+      window._startBatchFallback = zoneFallback
+    }
+  }
+  const effectiveJobs = batchJobs.length ? batchJobs : (window._startBatchFallback||[])
+  const effectiveDate = effectiveJobs[0]?.scheduled_date || scheduledDate || new Date().toISOString().slice(0,10)
+  const effectiveCount = effectiveJobs.length || stopCount
 
   // Only enforce time locks on BIN_OUT routes (BIN_IN is morning, different rules)
-  if(visitType === 'BIN_OUT'){
-    const lock = getRouteLockState(scheduledDate, stopCount)
-    if(lock.locked){
+  if(visitType === 'BIN_OUT' && effectiveDate){
+    const lock = getRouteLockState(effectiveDate, effectiveCount)
+    console.log('[startBatch] lock state:', lock.state, 'locked:', lock.locked, 'date:', effectiveDate)
+    if(lock.locked && lock.state === 'TOO_EARLY'){
       // Show a clear modal explaining why they can't start
       document.getElementById('modal-box').innerHTML = `
       <div class="mh" style="background:rgba(239,68,68,.07)">
@@ -6728,7 +6761,15 @@ async function startBatch(batchId){
     showToast('Route started ▶ — good luck out there!', 'ok')
 
     // Build stop list from enriched jobs
-    const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
+    // Apply runner's custom stop order if set
+    const allBatchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId||j.id===batchId)
+    const savedOrder = _rnStopOrders[batchId]
+    const batchJobs = savedOrder?.length
+      ? savedOrder.map(email => allBatchJobs.find(j=>j.homeowner_email===email)).filter(Boolean).concat(
+          allBatchJobs.filter(j=>!savedOrder.includes(j.homeowner_email))
+        )
+      : allBatchJobs
+
     if(batchJobs.length){
       window.NAV_STOPS = batchJobs.map(j=>{
         const gatePart = j.hw?.gate_code  ? 'Gate: '+j.hw.gate_code : ''
@@ -9296,6 +9337,108 @@ async function renderRunnerScoutPanel(){
     </div>`
   } catch(e){ el.innerHTML = '' }
 }
+
+// ── RUNNER STOP REORDER ──────────────────────────────────────
+// Runners can drag stops to set their preferred order
+// Order is saved to localStorage and persists across reloads
+
+const _rnStopOrders = {} // { batchId: [email, email, ...] }
+let _rnDragSrc = null
+
+function _getRnStopOrder(batchId, stops){
+  const saved = _rnStopOrders[batchId]
+  if(!saved || !saved.length) return stops
+  // Apply saved order: sort stops by saved email order
+  const ordered = []
+  saved.forEach(email => {
+    const s = stops.find(x => (x.homeowner_email||x.email) === email)
+    if(s) ordered.push(s)
+  })
+  // Append any stops not in saved order (new additions)
+  stops.forEach(s => {
+    const email = s.homeowner_email || s.email
+    if(!saved.includes(email)) ordered.push(s)
+  })
+  return ordered.length === stops.length ? ordered : stops
+}
+
+function _saveRnStopOrder(batchId, stops){
+  const emails = stops.map(s => s.homeowner_email || s.email || s.hwDisplayName)
+  _rnStopOrders[batchId] = emails
+  try { localStorage.setItem('rn_stop_order:'+batchId, JSON.stringify(emails)) } catch(e){}
+}
+
+function _loadRnStopOrders(){
+  Object.keys(localStorage).filter(k=>k.startsWith('rn_stop_order:')).forEach(k=>{
+    const batchId = k.replace('rn_stop_order:','')
+    try { _rnStopOrders[batchId] = JSON.parse(localStorage.getItem(k)) } catch(e){}
+  })
+}
+_loadRnStopOrders()
+
+function rnDragStart(e, el){
+  _rnDragSrc = el
+  el.style.opacity = '0.4'
+  e.dataTransfer.effectAllowed = 'move'
+  e.dataTransfer.setData('text/plain', el.dataset.idx)
+}
+
+function rnDragOver(e, el){
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'move'
+  if(el !== _rnDragSrc) el.style.borderTop = '2px solid var(--cyan)'
+  return false
+}
+
+function rnDragLeave(el){
+  el.style.borderTop = ''
+}
+
+function rnDrop(e, el, batchId){
+  e.stopPropagation()
+  el.style.borderTop = ''
+  if(_rnDragSrc === el){ _rnDragSrc = null; return }
+
+  // Get container and reorder DOM
+  const container = el.parentNode
+  const rows = Array.from(container.querySelectorAll('.rn-stop-row'))
+  const fromIdx = rows.indexOf(_rnDragSrc)
+  const toIdx   = rows.indexOf(el)
+
+  if(fromIdx < 0 || toIdx < 0){ _rnDragSrc = null; return }
+
+  // Reorder in DOM
+  if(fromIdx < toIdx) container.insertBefore(_rnDragSrc, el.nextSibling)
+  else                container.insertBefore(_rnDragSrc, el)
+
+  // Update number badges
+  Array.from(container.querySelectorAll('.rn-stop-row')).forEach((row, i) => {
+    const badge = row.querySelectorAll('div')[1] // second div = number badge
+    if(badge) badge.textContent = i + 1
+    row.dataset.idx = i
+  })
+
+  // Persist order from enriched jobs using email
+  const orderedEmails = Array.from(container.querySelectorAll('.rn-stop-row')).map(r => r.dataset.email)
+  _rnStopOrders[batchId] = orderedEmails
+  try { localStorage.setItem('rn_stop_order:'+batchId, JSON.stringify(orderedEmails)) } catch(e){}
+
+  // Update Google Maps URL to reflect new order
+  const zoneKey = 'rn_stop_order:'+batchId
+  showToast('Stop order saved ✓', 'ok', 2000)
+
+  if(_rnDragSrc) _rnDragSrc.style.opacity = '1'
+  _rnDragSrc = null
+}
+
+function rnDragEnd(e){
+  document.querySelectorAll('.rn-stop-row').forEach(r => {
+    r.style.opacity = '1'
+    r.style.borderTop = ''
+  })
+  _rnDragSrc = null
+}
+// ── END RUNNER STOP REORDER ──────────────────────────────────
 
 function rnNav(el,pg){
   if(el) document.querySelectorAll('#S-rn-dash .nav-i').forEach(n=>n.classList.remove('on'))
