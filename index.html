@@ -1725,7 +1725,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
       <div id="h-s1">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Let's check your area 📍</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Enter your address to see if BinDash is available near you.</div>
-        <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street" oninput="obSave();clearTimeout(window._h3Timer);window._h3Timer=setTimeout(_h3CheckAddress,1200)"></div>
+        <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street" oninput="obSave();if(document.getElementById('h-zip')?.value?.length===5){clearTimeout(window._h3Timer);window._h3Timer=setTimeout(_h3CheckAddress,1000)}" onblur="if(document.getElementById('h-zip')?.value?.length===5)_h3CheckAddress()"></div>
         <div class="g3">
           <div class="field"><label>City</label><input id="h-city" placeholder="Glendale" oninput="obSave()"></div>
           <div class="field"><label>State</label><input id="h-state" placeholder="AZ" oninput="obSave()"></div>
@@ -7323,17 +7323,19 @@ async function geocodeAddress(address, city, state, zip){
     if(address && address.length > 5){
       try {
         // Use Census Geocoder — free, CORS-friendly, no API key
-        const encoded = encodeURIComponent(`${address}, ${city||''}, ${state||'AZ'} ${zip}`)
+        const parts = [address, city, state||'AZ', zip].filter(Boolean).join(', ')
+        const encoded = encodeURIComponent(parts)
         const res = await fetch(
           `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encoded}&benchmark=Public_AR_Current&format=json`,
-          { signal: AbortSignal.timeout(5000) }
+          { signal: AbortSignal.timeout(6000) }
         )
         const data = await res.json()
         const match = data?.result?.addressMatches?.[0]
         if(match){
+          console.log('[H3] Census match:', match.matchedAddress)
           return { lat: parseFloat(match.coordinates.y), lng: parseFloat(match.coordinates.x) }
         }
-      } catch(e){ /* fall through to ZIP centroid */ }
+      } catch(e){ console.warn('[H3] Census geocode failed:', e.message) }
     }
     return { lat, lng }
   }
@@ -7427,9 +7429,11 @@ async function _h3CheckAddress(){
   // ── STEP 2: Try to get precise coords from full address ──
   let result = null
   try {
-    if(addr && addr.length > 5){
+    if(addr && addr.length > 5 && zip && zip.length === 5){
       // Geocode the full address for precise pin placement
+      console.log('[H3] Geocoding:', addr, city, state, zip)
       const precise = await geocodeAddress(addr, city||'', state, zip)
+      console.log('[H3] Geocode result:', precise)
       if(precise){
         // Move pin to exact address — smooth animation
         _moveSignupPin(precise.lat, precise.lng, addr)
