@@ -9374,7 +9374,7 @@ function showAdminSetPriority(zoneId){
     const btns = ['lead','runner','standby'].map(function(role,idx){
       const active = currentRole===role
       const lbl = role==='lead'?'🌟 Lead':role==='runner'?'👥 Runner':'⏳ Standby'
-      const onclick = 'adminUpdateZoneRole("'+zoneId+'","'+r.id+'","'+role+'",'+(idx+1)+')'
+      const onclick = "adminUpdateZoneRole('" + zoneId + "','" + r.id + "','" + role + "'," + (idx+1) + ")"
       return '<button onclick="'+onclick+'" style="flex:1;padding:5px;border-radius:6px;font-size:11px;cursor:pointer;font-weight:'+(active?'700':'400')+';border:1px solid '+(active?'rgba(6,214,160,.5)':'var(--border)')+';background:'+(active?'rgba(6,214,160,.15)':'transparent')+';color:'+(active?'#06d6a0':'var(--muted)')+'">'+lbl+'</button>'
     })
     return '<div style="display:flex;gap:6px;margin-top:8px">'+btns.join('')+'</div>'
