@@ -6792,9 +6792,10 @@ async function startBatch(batchId){
           jobId:       j.id,
         }
       })
-      navBatchId    = batchId
-      navVisitType  = batchJobs[0]?.visit_type || 'BIN_OUT'
-      navStop       = 0
+      navBatchId     = batchId
+      navBatchZoneId = effectiveJobs[0]?.zone_id || batchJobs[0]?.zone_id || ''
+      navVisitType   = batchJobs[0]?.visit_type || 'BIN_OUT'
+      navStop        = 0
       navPhase      = 'travelling'
       navRouteActive = true
     }
@@ -7030,15 +7031,19 @@ async function _acceptBinIn(inBatchId){
     showToast('Failed to save Bin In: '+error.message, 'err')
   } else {
     showToast(`☀️ Bin In accepted — ${inJobs.length} stop${inJobs.length!==1?'s':''} locked in for tomorrow ✅`, 'ok', 5000)
-    // Email homeowners
-    binOutJobs.forEach(j=>{
-      const hw = (window.NAV_STOPS||[]).find(s=>s.email===j.homeowner_email)
-      const name = hw?.name?.split(' ')[0] || 'there'
-      if(j.homeowner_email) sendEmail(j.homeowner_email,
-        'Your Bin In is confirmed for tomorrow ☀️',
-        `<p>Hi ${name},</p><p>Your runner has confirmed your Bin In for tomorrow. Your bins will be returned to your property after the collection truck passes.</p><p>— BinDash</p>`,
-        'bin_in_confirmed')
-    })
+    // Email homeowners — guard against duplicate sends
+    const _binInKey = 'bin_in_emailed:' + (inJobs[0]?.batch_id || Date.now())
+    if(!sessionStorage.getItem(_binInKey)){
+      sessionStorage.setItem(_binInKey, '1')
+      binOutJobs.slice(0, 10).forEach(j=>{ // max 10 emails per trigger
+        const hw = (window.NAV_STOPS||[]).find(s=>s.email===j.homeowner_email)
+        const name = hw?.name?.split(' ')[0] || 'there'
+        if(j.homeowner_email) sendEmail(j.homeowner_email,
+          'Your Bin In is confirmed for tomorrow ☀️',
+          `<p>Hi ${name},</p><p>Your runner has confirmed your Bin In for tomorrow. Your bins will be returned to your property after the collection truck passes.</p><p>— BinDash</p>`,
+          'bin_in_confirmed')
+      })
+    }
     await loadRunnerRoutes(runnerRow)
     // Refresh admin dispatch pipeline
     window._livePipelineBatches = null
@@ -12467,6 +12472,7 @@ const NAV_STOPS = [] // Populated when a runner starts a route
 let navStop    = 0
 let navPhase   = 'idle'   // idle | travelling | arrived | done
 let navBatchId = ''
+let navBatchZoneId = ''
 let navVisitType = ''
 let navRouteActive = false  // true once Begin is tapped -- survives modal close/reopen
 
@@ -12503,7 +12509,24 @@ function buildGoogleMapsUrl(stops){
 function _renderNavModal(){
   const batchId    = navBatchId
   const visitType  = navVisitType
-  const s          = NAV_STOPS[navStop] || NAV_STOPS[NAV_STOPS.length-1]
+
+  // Guard: if no stops loaded yet, bail gracefully
+  if(!NAV_STOPS || !NAV_STOPS.length){
+    console.warn('[_renderNavModal] NAV_STOPS empty — cannot render')
+    return
+  }
+
+  const s = NAV_STOPS[navStop] || NAV_STOPS[NAV_STOPS.length-1]
+
+  // Guard: normalize stop fields so nothing crashes on undefined
+  if(s){
+    s.details = s.details || [s.gate, s.pets, s.notes].filter(Boolean).join(' · ') || ''
+    s.name    = s.name    || s.hwDisplayName || 'Stop'
+    s.address = s.address || '--'
+    s.bins    = s.bins    || '1 bin'
+    s.gate    = s.gate    || null
+    s.pets    = s.pets    || null
+  }
   const totalEarnings = (NAV_STOPS.length * 3.25).toFixed(2)
   const completedCount = navStop
   const progressPct    = Math.round((completedCount / NAV_STOPS.length) * 100)
@@ -12525,6 +12548,16 @@ function _renderNavModal(){
       Open Full Route in Google Maps
       <span style="font-size:11px;opacity:.75;font-weight:400">${NAV_STOPS.length} stops &#x2192;</span>
     </a>`
+
+  // Normalize all stops so template strings never crash on undefined fields
+  NAV_STOPS.forEach(st => {
+    st.details = st.details || [st.gate, st.pets, st.notes].filter(Boolean).join(' · ') || ''
+    st.name    = st.name    || st.hwDisplayName || 'Stop'
+    st.address = st.address || '--'
+    st.bins    = st.bins    || '1 bin'
+    st.gate    = st.gate    || null
+    st.pets    = st.pets    || null
+  })
 
   // Full stop list -- always shown
   const stopListHTML = NAV_STOPS.map((st, i) => {
@@ -12613,7 +12646,8 @@ function _renderNavModal(){
       <button class="btn btn-purple" onclick="navBegin()">&#x25B6; Start Route</button>`
   }
   else if(navPhase === 'travelling' || navPhase === 'arrived'){
-    const hasPet = s.details.toLowerCase().includes('dog') || s.details.toLowerCase().includes('pet')
+    const _sdet = (s.details || [s.gate, s.pets, s.notes].filter(Boolean).join(' ') || '').toLowerCase()
+    const hasPet = _sdet.includes('dog') || _sdet.includes('pet') || _sdet.includes('🐾')
     const stopMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(s.address + ', Glendale, AZ')}&travelmode=driving`
 
     phaseCard = `
@@ -12633,7 +12667,7 @@ function _renderNavModal(){
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
           <div style="background:var(--surface3);border-radius:8px;padding:8px 11px;font-size:12px">
-            <span style="color:var(--muted)">Access:</span> <strong style="color:var(--text)">${s.details}</strong>
+            <span style="color:var(--muted)">Access:</span> <strong style="color:var(--text)">${s.details||s.gate||"--"}</strong>
           </div>
           <div style="background:var(--surface3);border-radius:8px;padding:8px 11px;font-size:12px">
             <span style="color:var(--muted)">Bins:</span> <strong style="color:var(--text)">${s.bins}</strong>
@@ -12779,7 +12813,7 @@ async function showStopDetail(stopIdx){
 
     <div class="cc-grid" style="margin-bottom:14px">
       <div class="dl"><div class="dl-l">Address</div><div>${s.address}</div></div>
-      <div class="dl"><div class="dl-l">Access</div><div>${s.details}</div></div>
+      <div class="dl"><div class="dl-l">Access</div><div>${s.details||[s.gate,s.pets,s.notes].filter(Boolean).join(" · ")||"--"}</div></div>
       <div class="dl"><div class="dl-l">Bins</div><div>${s.bins}</div></div>
       ${s.notes ? `<div class="dl"><div class="dl-l">Notes</div><div>${s.notes}</div></div>` : ''}
     </div>
@@ -13019,11 +13053,19 @@ function navComplete(){
   if(stop){
     const now = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})
     showToast(`✅ Stop ${navStop+1} complete -- ${stop.name} notified by email`, 'ok')
-    // Email homeowner: bin out complete notification
+    // Email homeowner: bin out complete notification — guard against duplicates
     if(stop.email){
-      const runnerName = currentUser?.first_name || 'Your runner'
-      const day = new Date().toLocaleDateString([],{weekday:'long'})
-      sendEmail(stop.email, 'Your bins are at the curb! 🌙', EMAIL.binOutComplete(stop.name?.split(' ')[0]||'there', runnerName, NAV_STOPS.length, day), 'bin_out_complete')
+      const _stopKey = 'bin_out_emailed:' + (stop.jobId || stop.email + navBatchId)
+      if(!sessionStorage.getItem(_stopKey) && stop.email && !stop.email.includes('.test')){
+        sessionStorage.setItem(_stopKey, '1')
+        const runnerName = currentUser?.first_name || 'Your runner'
+        const day = new Date().toLocaleDateString([],{weekday:'long'})
+        // Stagger emails by stop index to avoid rate limiting (Resend: 5/sec max)
+        const delayMs = (navStop % 5) * 300
+        setTimeout(() => {
+          sendEmail(stop.email, 'Your bins are at the curb! 🌙', EMAIL.binOutComplete(stop.name?.split(' ')[0]||'there', runnerName, NAV_STOPS.length, day), 'bin_out_complete')
+        }, delayMs)
+      }
     }
   }
   navStop++
