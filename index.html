@@ -6702,7 +6702,7 @@ async function resumeBatch(batchId){
     }
 
     console.log('[resumeBatch] building NAV_STOPS from', ordered.length, 'jobs, sample email:', ordered[0]?.homeowner_email)
-    window.NAV_STOPS = ordered.filter(Boolean).map(j => {
+    NAV_STOPS = ordered.filter(Boolean).map(j => {
       const email = j.homeowner_email || j.email || ''
       const hw = hwMap[email] || {}
       console.log('[resumeBatch stop]', email, 'hw:', !!hwMap[email])
@@ -6737,11 +6737,13 @@ async function resumeBatch(batchId){
     // Store enriched for other functions
     window._lastEnrichedJobs = rawJobs.map(j=>({...j, hw:hwMap[j.homeowner_email]||null, hwDisplayName:(hwMap[j.homeowner_email]?.first_name||j.homeowner_email?.split('@')[0]||'Stop')}))
 
+    console.log('[resumeBatch] NAV_STOPS set:', NAV_STOPS.length, 'stops')
     // Open modal immediately
     switchRouteTab('active')
     renderActiveRouteTab()
     openM()
-    _renderNavModal()
+    // Small delay to ensure DOM is ready
+    setTimeout(() => _renderNavModal(), 50)
 
   } catch(e) {
     console.error('[resumeBatch]', e)
@@ -6870,7 +6872,7 @@ async function startBatch(batchId){
     console.log('[startBatch] jobsToUse:', jobsToUse.length)
 
     if(jobsToUse.length){
-      window.NAV_STOPS = jobsToUse.map(j=>{
+      NAV_STOPS = jobsToUse.map(j=>{
         if(!j) return null
         const gatePart = j.hw?.gate_code  ? 'Gate: '+j.hw.gate_code : ''
         const petsPart = j.hw?.pet_info   ? 'Pets: '+j.hw.pet_info  : ''
@@ -6930,7 +6932,7 @@ async function _forceStartBatch(batchId){
     showToast('Route started (override) — complete as quickly as possible ⚠️', 'warn', 5000)
     const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
     if(batchJobs.length){
-      window.NAV_STOPS = batchJobs.map(j=>{
+      NAV_STOPS = batchJobs.map(j=>{
         const gatePart = j.hw?.gate_code  ? 'Gate: '+j.hw.gate_code : ''
         const petsPart = j.hw?.pet_info   ? 'Pets: '+j.hw.pet_info  : ''
         const notePart = j.hw?.service_notes || ''
@@ -7044,7 +7046,7 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
     const loyaltyExpiry = new Date(Date.now() + (DISPATCH_RULES?.binInWindow||25) * 60 * 1000).toISOString()
 
     const stopNames = binOutJobs.slice(0,3).map(j=>{
-      const hw = (window.NAV_STOPS||[]).find(s=>s.email===j.homeowner_email)
+      const hw = (NAV_STOPS||[]).find(s=>s.email===j.homeowner_email)
       return hw?.name || j.homeowner_email?.split('@')[0] || 'Stop'
     }).join(', ')
     const moreStops = binOutJobs.length > 3 ? ` +${binOutJobs.length - 3} more` : ''
@@ -7146,7 +7148,7 @@ async function _acceptBinIn(inBatchId){
     if(!sessionStorage.getItem(_binInKey)){
       sessionStorage.setItem(_binInKey, '1')
       binOutJobs.slice(0, 10).forEach(j=>{ // max 10 emails per trigger
-        const hw = (window.NAV_STOPS||[]).find(s=>s.email===j.homeowner_email)
+        const hw = (NAV_STOPS||[]).find(s=>s.email===j.homeowner_email)
         const name = hw?.name?.split(' ')[0] || 'there'
         if(j.homeowner_email) sendEmail(j.homeowner_email,
           'Your Bin In is confirmed for tomorrow ☀️',
@@ -12576,7 +12578,7 @@ function makePropertyPhoto(label, sublabel){
   } catch(e){ return null }
 }
 
-const NAV_STOPS = [] // Populated when a runner starts a route
+let NAV_STOPS = [] // Populated when a runner starts a route
 
 // -- ROUTE STATE -- persists across modal open/close --
 let navStop    = 0
@@ -15091,7 +15093,7 @@ function renderActiveRouteTab(){
   const container = document.getElementById('active-route-container')
   if(!container) return
 
-  const stops = window.NAV_STOPS || []
+  const stops = NAV_STOPS || []
 
   if(!navRouteActive || !stops.length){
     container.innerHTML = `
@@ -15284,7 +15286,7 @@ function navArrived(){
 
 // Bin Out As Needed: bin was empty — no charge, close stop, no Bin In needed
 function navOanEmpty(){
-  const stop = (window.NAV_STOPS||[])[navStop]
+  const stop = (NAV_STOPS||[])[navStop]
   showToast('✅ Bin empty — no charge · Stop logged', 'ok', 3000)
   if(stop?.email){
     sendEmail(stop.email, 'Weekly check complete — no action needed 🟢',
@@ -15309,7 +15311,7 @@ function navOanEmpty(){
 
 // Bin Out As Needed: bin was full — record Stripe usage, schedule Bin In
 async function navOanMoved(){
-  const stop = (window.NAV_STOPS||[])[navStop]
+  const stop = (NAV_STOPS||[])[navStop]
   if(!stop) return
 
   const btn = document.querySelector('[onclick="navOanMoved()"]')
@@ -15354,7 +15356,7 @@ async function navOanMoved(){
 
 function navAdvanceStop(){
   navStop++
-  const stops = window.NAV_STOPS || []
+  const stops = NAV_STOPS || []
   if(navStop >= stops.length){
     navPhase = 'done'
     navRouteActive = false
@@ -15429,7 +15431,7 @@ function navPhotoSelected(input){
 }
 
 async function navCompleteStop(){
-  const stops      = window.NAV_STOPS || []
+  const stops      = NAV_STOPS || []
   const s          = stops[navStop]
   const runnerRow  = window._rnRow
   const isLastStop = navStop === stops.length - 1
