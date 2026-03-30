@@ -6272,6 +6272,9 @@ async function loadRunnerRoutes(runnerRow){
       if((rank[j.status]||0) > (rank[batches[key].status]||0)) batches[key].status = j.status
     })
 
+    // Store batches globally so startBatch can use stops immediately
+    window._rnBatchMap = batches
+
     const batchCards = Object.values(batches).map(batch => {
       const earn = (batch.stops.length * 3.25).toFixed(2)
       const addrs = batch.stops.map(s=>encodeURIComponent((s.hw?.street_address||'')+', '+(s.hw?.zip_code||''))).filter(Boolean)
@@ -6780,15 +6783,20 @@ async function startBatch(batchId){
       .eq('batch_id', batchId)
     showToast('Route started ▶ — good luck out there!', 'ok')
 
-    // Build stop list from enriched jobs
-    // Apply runner's custom stop order if set
-    const allBatchJobs = (window._lastEnrichedJobs||[]).filter(j=>
-      j.batch_id===batchId || j.id===batchId ||
-      // Also match by stripping -IN/-OUT suffix from batch ID
-      j.batch_id===batchId.replace(/-(?:IN|OUT)$/,'') ||
-      batchId===j.batch_id+'-IN' || batchId===j.batch_id+'-OUT'
-    )
-    console.log('[startBatch] allBatchJobs after extended match:', allBatchJobs.length)
+    // Build stop list — try _rnBatchMap first (instant, already in memory from card render)
+    // Fall back to _lastEnrichedJobs, then today's jobs
+    const batchMapEntry = (window._rnBatchMap||{})[batchId]
+    let allBatchJobs = batchMapEntry?.stops || []
+
+    // If not in _rnBatchMap, search _lastEnrichedJobs with extended matching
+    if(!allBatchJobs.length){
+      allBatchJobs = (window._lastEnrichedJobs||[]).filter(j=>
+        j.batch_id===batchId || j.id===batchId ||
+        j.batch_id===batchId.replace(/-(?:IN|OUT)$/,'') ||
+        batchId===j.batch_id+'-IN' || batchId===j.batch_id+'-OUT'
+      )
+    }
+    console.log('[startBatch] allBatchJobs:', allBatchJobs.length, '(from', batchMapEntry ? '_rnBatchMap' : '_lastEnrichedJobs', ')')
 
     const savedOrder = _rnStopOrders[batchId]
     const batchJobs = savedOrder?.length
@@ -6797,7 +6805,7 @@ async function startBatch(batchId){
         )
       : allBatchJobs
 
-    // If still no jobs found, fall back to all today's jobs for this runner
+    // Last resort: all today's accepted/in_progress jobs
     const jobsToUse = batchJobs.length ? batchJobs : (window._lastEnrichedJobs||[]).filter(j=>
       j.scheduled_date >= new Date().toISOString().slice(0,10) &&
       ['offered','accepted','in_progress'].includes(j.status)
