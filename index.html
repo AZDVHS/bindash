@@ -5101,6 +5101,8 @@ async function populateRNDashboard(){
     }
 
     console.log('[BinDash] populateRNDashboard — runners row:', !!rnRow, '— app row:', !!appRow, '— email:', merged.email)
+    // Set early so startBatch/loadRunnerRoutes can always find it
+    if(rnRow?.id) window._currentRunnerRow = rnRow
 
     const fn = merged.first_name || currentUser.user_metadata?.first_name || currentUser.email?.split('@')[0] || 'Runner'
     const ln = merged.last_name  || currentUser.user_metadata?.last_name  || ''
@@ -6081,6 +6083,14 @@ async function triggerOverdueEscalation(jobs, runnerRow){
 }
 
 async function loadRunnerRoutes(runnerRow){
+  // If runnerRow not passed, try to get from window
+  if(!runnerRow) runnerRow = window._currentRunnerRow
+  if(!runnerRow?.id){
+    console.warn('[loadRunnerRoutes] no runnerRow — skipping')
+    return
+  }
+  // Always keep _currentRunnerRow fresh
+  window._currentRunnerRow = runnerRow
   try {
     const rid        = runnerRow.id
     const runnerName = ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim()
@@ -6681,7 +6691,16 @@ async function resumeBatch(batchId){
 }
 
 async function startBatch(batchId){
-  const runnerRow = window._currentRunnerRow
+  let runnerRow = window._currentRunnerRow
+  // If missing, fetch from Supabase using current user email
+  if(!runnerRow?.id && currentUser?.email){
+    const { data } = await _supa.from('runners').select('*').ilike('email', currentUser.email).maybeSingle()
+    if(data){ runnerRow = data; window._currentRunnerRow = data }
+  }
+  if(!runnerRow?.id){
+    showToast('Runner session not loaded — please refresh the page','err')
+    return
+  }
   console.log('[startBatch] called with batchId:', batchId)
   console.log('[startBatch] _lastEnrichedJobs count:', (window._lastEnrichedJobs||[]).length)
 
@@ -6816,14 +6835,20 @@ async function startBatch(batchId){
       navStop        = 0
       navPhase       = 'travelling'
       navRouteActive = true
+
+      // Open the nav modal immediately — don't wait for DB refresh
+      switchRouteTab('active')
+      renderActiveRouteTab()
+      openM()
+      _renderNavModal()
+
     } else {
       showToast('No stops found for this route — try refreshing', 'err')
       return
     }
 
-    await loadRunnerRoutes(runnerRow)
-    switchRouteTab('active')
-    renderActiveRouteTab()
+    // Refresh jobs in background (don't block the UI)
+    loadRunnerRoutes(runnerRow).catch(e => console.warn('[startBatch] bg refresh:', e))
 
     const badge = document.getElementById('rtab-active-count')
     if(badge){ badge.textContent = ''; badge.style.display = 'inline' }
