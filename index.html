@@ -6762,7 +6762,14 @@ async function startBatch(batchId){
 
     // Build stop list from enriched jobs
     // Apply runner's custom stop order if set
-    const allBatchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId||j.id===batchId)
+    const allBatchJobs = (window._lastEnrichedJobs||[]).filter(j=>
+      j.batch_id===batchId || j.id===batchId ||
+      // Also match by stripping -IN/-OUT suffix from batch ID
+      j.batch_id===batchId.replace(/-(?:IN|OUT)$/,'') ||
+      batchId===j.batch_id+'-IN' || batchId===j.batch_id+'-OUT'
+    )
+    console.log('[startBatch] allBatchJobs after extended match:', allBatchJobs.length)
+
     const savedOrder = _rnStopOrders[batchId]
     const batchJobs = savedOrder?.length
       ? savedOrder.map(email => allBatchJobs.find(j=>j.homeowner_email===email)).filter(Boolean).concat(
@@ -6770,14 +6777,23 @@ async function startBatch(batchId){
         )
       : allBatchJobs
 
-    if(batchJobs.length){
-      window.NAV_STOPS = batchJobs.map(j=>{
+    // If still no jobs found, fall back to all today's jobs for this runner
+    const jobsToUse = batchJobs.length ? batchJobs : (window._lastEnrichedJobs||[]).filter(j=>
+      j.scheduled_date >= new Date().toISOString().slice(0,10) &&
+      ['offered','accepted','in_progress'].includes(j.status)
+    ).slice(0, 20)
+
+    console.log('[startBatch] jobsToUse:', jobsToUse.length)
+
+    if(jobsToUse.length){
+      window.NAV_STOPS = jobsToUse.map(j=>{
+        if(!j) return null
         const gatePart = j.hw?.gate_code  ? 'Gate: '+j.hw.gate_code : ''
         const petsPart = j.hw?.pet_info   ? 'Pets: '+j.hw.pet_info  : ''
         const notePart = j.hw?.service_notes || ''
-        const details  = [gatePart, petsPart, notePart].filter(Boolean).join(' · ') || 'No special notes'
+        const details  = [gatePart, petsPart, notePart].filter(Boolean).join(' · ') || ''
         return {
-          name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.homeowner_email || 'Stop',
+          name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.homeowner_email?.split('@')[0] || 'Stop',
           address:     j.hw?.street_address || '--',
           zip:         j.hw?.zip_code || '',
           gate:        j.hw?.gate_code  || null,
@@ -6789,15 +6805,19 @@ async function startBatch(batchId){
           bins:        j.hw?.bins || (j.service_type === 'Split days' ? '2 bins' : '1 bin'),
           email:       j.homeowner_email || null,
           hwEmail:     j.homeowner_email || null,
-          jobId:       j.id,
+          jobId:       j.id || null,
         }
-      })
+      }).filter(Boolean)
+
       navBatchId     = batchId
-      navBatchZoneId = effectiveJobs[0]?.zone_id || batchJobs[0]?.zone_id || ''
-      navVisitType   = batchJobs[0]?.visit_type || 'BIN_OUT'
+      navBatchZoneId = jobsToUse.find(j=>j?.zone_id)?.zone_id || ''
+      navVisitType   = jobsToUse[0]?.visit_type || 'BIN_OUT'
       navStop        = 0
-      navPhase      = 'travelling'
+      navPhase       = 'travelling'
       navRouteActive = true
+    } else {
+      showToast('No stops found for this route — try refreshing', 'err')
+      return
     }
 
     await loadRunnerRoutes(runnerRow)
