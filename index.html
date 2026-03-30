@@ -6687,32 +6687,43 @@ async function resumeBatch(batchId){
       }
     })
 
-    // Build NAV_STOPS
+    // Build NAV_STOPS — use rawJobs directly, apply saved order if available
     const savedOrder = _rnStopOrders[batchId] || []
-    const ordered = savedOrder.length
-      ? savedOrder.map(email => rawJobs.find(j=>j.homeowner_email===email)).filter(Boolean)
-          .concat(rawJobs.filter(j=>!savedOrder.includes(j.homeowner_email)))
-      : rawJobs
+    let ordered = rawJobs.filter(Boolean) // always start clean
+    if(savedOrder.length){
+      const reordered = []
+      savedOrder.forEach(email => {
+        const match = rawJobs.find(j => j.homeowner_email === email)
+        if(match) reordered.push(match)
+      })
+      // Add any jobs not in saved order
+      rawJobs.forEach(j => { if(!savedOrder.includes(j.homeowner_email)) reordered.push(j) })
+      if(reordered.length === rawJobs.length) ordered = reordered
+    }
 
-    window.NAV_STOPS = ordered.map(j => {
-      if(!j) return null
-      const hw = hwMap[j.homeowner_email] || {}
+    console.log('[resumeBatch] building NAV_STOPS from', ordered.length, 'jobs, sample email:', ordered[0]?.homeowner_email)
+    window.NAV_STOPS = ordered.filter(Boolean).map(j => {
+      const email = j.homeowner_email || j.email || ''
+      const hw = hwMap[email] || {}
+      console.log('[resumeBatch stop]', email, 'hw:', !!hwMap[email])
       const gate = hw.gate_code || hw.gate_type || null
       const pets = hw.pet_info || null
       const notes = hw.service_notes || null
       const details = [gate?'Gate: '+gate:'', pets?'Pets: '+pets:'', notes||''].filter(Boolean).join(' · ')
-      const fn = hw.first_name || ''
-      const ln = hw.last_name || ''
+      // Get name from HW map, fall back to in-memory HOMEOWNERS, then email prefix
+      const memHW = (window.HOMEOWNERS||[]).find(h=>h.email===email)
+      const fn = hw.first_name || memHW?.name?.split(' ')[0] || ''
+      const ln = hw.last_name  || (memHW?.name?.split(' ').slice(1).join(' ')) || ''
       return {
-        name:        (fn+' '+ln).trim() || j.homeowner_email?.split('@')[0] || 'Stop',
-        address:     hw.street_address || '--',
-        zip:         hw.zip_code || '',
+        name:        (fn+' '+ln).trim() || email.split('@')[0] || 'Stop',
+        address:     hw.street_address || j.address || '--',
+        zip:         hw.zip_code || j.zip_code || '',
         gate, pets, notes, details,
         binLocation: hw.bin_location || null,
-        serviceType: j.service_type || 'Recycling',
+        serviceType: j.service_type || j.visit_type || 'Recycling',
         bins:        '1 bin',
-        email:       j.homeowner_email || null,
-        hwEmail:     j.homeowner_email || null,
+        email:       email || null,
+        hwEmail:     email || null,
         jobId:       j.id || null,
       }
     }).filter(Boolean)
