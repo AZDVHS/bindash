@@ -10,10 +10,27 @@
 <meta name="theme-color" content="#0f172a">
 <title>BinDash -- Smart Bin Collection</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;853&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/h3-js@4.1.0/dist/browser/h3-js.umd.js"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="print" onload="this.media='all'"/>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Leaflet and H3 loaded on demand when maps are first opened -->
+<script>
+function _loadMapLibs(){
+  if(window._mapLibsLoaded) return Promise.resolve()
+  if(window._mapLibsLoading) return window._mapLibsLoading
+  window._mapLibsLoading = new Promise(resolve => {
+    const h3s = document.createElement('script')
+    h3s.src = 'https://unpkg.com/h3-js@4.1.0/dist/browser/h3-js.umd.js'
+    h3s.onload = () => {
+      const ls = document.createElement('script')
+      ls.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+      ls.onload = () => { window._mapLibsLoaded = true; resolve() }
+      document.head.appendChild(ls)
+    }
+    document.head.appendChild(h3s)
+  })
+  return window._mapLibsLoading
+}
+</script>
 <script data-cfasync="false">
 // ================================================================
 //  BINDASH CONFIG -- DO NOT MODIFY THIS BLOCK
@@ -3196,6 +3213,13 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px">No active routes</div>
               <div style="font-size:12px" id="rn-batch-empty-sub">Route offers appear here before each collection day.</div>
             </div>
+            <div id="rn-resume-banner" style="display:none;background:rgba(6,214,160,.08);border:1.5px solid rgba(6,214,160,.3);border-radius:12px;padding:14px 16px;margin-top:10px">
+              <div style="font-weight:700;font-size:14px;color:var(--cyan);margin-bottom:4px">▶ Route in progress</div>
+              <div style="font-size:12px;color:var(--sub);margin-bottom:10px">You have an active route. Tap to continue where you left off.</div>
+              <button onclick="rnNav(null,'rn-routes');switchRouteTab('active');renderActiveRouteTab()" class="btn btn-cyan" style="width:100%;padding:12px;font-size:14px;font-weight:700;border-radius:10px">
+                ↺ Resume Route
+              </button>
+            </div>
           </div>
 
           <!-- Zone status -->
@@ -5119,7 +5143,18 @@ async function populateRNDashboard(){
 
     // Restore active route if runner had one in progress (back button / crash recovery)
     if(_restoreNavState()){
-      showToast('Route resumed ▶ — tap Resume Route to continue', 'ok', 5000)
+      showToast('Route resumed ▶', 'ok', 3000)
+      // Show resume banner on home screen
+      const resumeBanner = document.getElementById('rn-resume-banner')
+      if(resumeBanner) resumeBanner.style.display = 'block'
+      // Auto-switch to active tab and open the route
+      setTimeout(() => {
+        switchRouteTab('active')
+        rnNav(null, 'rn-routes')
+        renderActiveRouteTab()
+        openM()
+        _renderNavModal()
+      }, 600)
     }
 
     const fn = merged.first_name || currentUser.user_metadata?.first_name || currentUser.email?.split('@')[0] || 'Runner'
@@ -5152,6 +5187,7 @@ async function populateRNDashboard(){
 
     // Store for later use
     window._rnRow = merged
+    if(rnRow?.id) window._currentRunnerRow = rnRow // keep in sync
 
     // Determine approval: in runners table = approved
     const isApproved = (rnRow !== null) || (merged.status === 'approved')
@@ -7908,6 +7944,7 @@ function drawRunnerHalos(map, runners){
 
 // Initialize or update the SIGNUP map
 async function _initSignupMap(lat, lng, zones){
+  await _loadMapLibs()
   // Guard: Leaflet must be loaded
   if(typeof L === 'undefined'){
     console.warn('[H3 Map] Leaflet not loaded yet')
@@ -8004,6 +8041,7 @@ function _moveSignupPin(lat, lng, label){
 
 // Load zones from Supabase and render admin map
 async function _initAdminMap(){
+  await _loadMapLibs()
   const el = document.getElementById('mz-admin-map')
   if(!el) return
 
@@ -15164,38 +15202,57 @@ function renderActiveRouteTab(){
   if(stickyBar) stickyBar.style.display = isArrived ? 'block' : 'none'
 
   if(isDone){
+    const earned = (totalStops * 3.25).toFixed(2)
+    const friday = (() => { const d=new Date(); const days=(5-d.getDay()+7)%7||7; d.setDate(d.getDate()+days); return d.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}) })()
+    if(stickyBar) stickyBar.style.display = 'none'
     container.innerHTML = `
-      <div style="text-align:center;padding:40px 20px">
-        <div style="font-size:60px;margin-bottom:16px">🎉</div>
-        <div style="font-size:22px;font-weight:800;color:#22c55e;margin-bottom:8px">Route Complete!</div>
-        <div style="font-size:15px;color:var(--sub);margin-bottom:24px">All ${totalStops} stops done · $${(totalStops*3.25).toFixed(2)} earned</div>
-        <button onclick="completeBatch(navBatchId)" class="btn btn-green" style="width:100%;padding:14px;font-size:16px;font-weight:700;border-radius:12px">
-          ✓ Submit & Get Paid
+      <div style="padding:24px 16px;text-align:center">
+        <div style="font-size:64px;margin-bottom:12px">🎉</div>
+        <div style="font-size:24px;font-weight:800;color:#22c55e;margin-bottom:4px">All Done!</div>
+        <div style="font-size:14px;color:var(--sub);margin-bottom:24px">${totalStops} stops completed tonight</div>
+        <div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:14px;padding:20px;margin-bottom:20px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">You earned</div>
+          <div style="font-size:48px;font-weight:800;color:#22c55e;line-height:1">$${earned}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:6px">Paid on ${friday}</div>
+        </div>
+        <button onclick="navFinishRoute()" class="btn btn-green" style="width:100%;padding:16px;font-size:17px;font-weight:800;border-radius:14px;min-height:56px;box-shadow:0 4px 20px rgba(34,197,94,.3)">
+          ✓ Submit Route & Get Paid
         </button>
-        <div style="margin-top:12px;font-size:11px;color:var(--muted)">Payment processed next Friday</div>
+        <div style="margin-top:12px;font-size:11px;color:var(--muted)">Homeowners have been notified · Great work tonight!</div>
       </div>`
     return
   }
 
-  const stopMapsUrl = s?.address && s.address !== '--'
-    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(s.address+(s.zip?', '+s.zip:''))}&travelmode=driving`
+  // Maps URL opens remaining route from current location to all remaining stops
+  const remainingStops = (NAV_STOPS || []).slice(navStop)
+  const stopMapsUrl = remainingStops.length > 0 && remainingStops[0]?.address && remainingStops[0].address !== '--'
+    ? remainingStops.length === 1
+      ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(remainingStops[0].address+(remainingStops[0].zip?', '+remainingStops[0].zip:''))}&travelmode=driving`
+      : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(remainingStops[remainingStops.length-1].address)}&waypoints=${remainingStops.slice(0,-1).map(st=>encodeURIComponent(st.address)).join('|')}&travelmode=driving`
     : '#'
 
-  // Build compact stop list — only show remaining stops to save DOM nodes
-  const stopListHtml = stops.map((st, i) => {
-    const done = i < navStop
-    const cur  = i === navStop
-    if(done && navStop - i > 3) return '' // hide old completed stops (save DOM)
-    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);opacity:${done?'.5':'1'}">
-      <div style="width:24px;height:24px;border-radius:50%;background:${done?'#22c55e':cur?'var(--cyan)':'rgba(99,102,241,.2)'};color:${done||cur?'#07090f':'#a5b4fc'};font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0">${done?'✓':i+1}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:600;${done?'text-decoration:line-through':''}${cur?';color:var(--cyan)':''}">${st.name||'--'}</div>
-        <div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${st.address||'--'}</div>
-      </div>
-      ${cur?'<span style="font-size:9px;font-weight:700;color:var(--cyan);text-transform:uppercase;flex-shrink:0">Now</span>':''}
-      <span style="font-size:11px;color:var(--green);flex-shrink:0">$3.25</span>
-    </div>`
-  }).filter(Boolean).join('')
+  // Stop list — show completed summary + upcoming stops only
+  const completedCount2 = navStop
+  const remainingCount  = totalStops - navStop
+  const stopListHtml = `
+    ${completedCount2 > 0 ? `<div style="background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.15);border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;align-items:center;gap:8px">
+      <span style="font-size:16px">✅</span>
+      <span style="font-size:12px;color:#22c55e;font-weight:700">${completedCount2} stop${completedCount2!==1?'s':''} done</span>
+      <span style="font-size:11px;color:var(--muted);margin-left:auto">$${(completedCount2*3.25).toFixed(2)} earned</span>
+    </div>` : ''}
+    ${stops.slice(navStop).map((st, idx) => {
+      const cur = idx === 0
+      const absIdx = navStop + idx
+      return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:${absIdx<totalStops-1?'1px solid var(--border)':'none'}">
+        <div style="width:24px;height:24px;border-radius:50%;background:${cur?'var(--cyan)':'rgba(99,102,241,.2)'};color:${cur?'#07090f':'#a5b4fc'};font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0">${absIdx+1}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:${cur?'700':'600'};color:${cur?'var(--cyan)':'var(--text)'}">${st.name||'--'}</div>
+          <div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${st.address||'--'}</div>
+        </div>
+        ${cur?'<span style="font-size:9px;font-weight:700;color:var(--cyan);text-transform:uppercase;flex-shrink:0">NOW</span>':''}
+        <span style="font-size:11px;color:var(--green);flex-shrink:0">$3.25</span>
+      </div>`
+    }).join('')}`
 
   // Progress bar
   const progressHtml = `
@@ -15222,11 +15279,15 @@ function renderActiveRouteTab(){
       ${s.binLocation&&s.binLocation!=='--'?`<div style="font-size:11px;color:var(--muted);margin-top:4px">📦 Bins: ${s.binLocation}</div>`:''}
       ${isArrived?'':`
       <a href="${stopMapsUrl}" target="_blank" rel="noopener"
-         style="display:flex;align-items:center;justify-content:center;gap:8px;background:#1a73e8;border-radius:10px;padding:12px;font-size:14px;font-weight:700;color:#fff;text-decoration:none;margin-top:10px">
-        📍 Open in Google Maps
+         style="display:flex;align-items:center;justify-content:center;gap:8px;background:#1a73e8;border-radius:10px;padding:13px;font-size:14px;font-weight:700;color:#fff;text-decoration:none;margin-top:12px;min-height:52px">
+        🗺️ Navigate to Stop ${navStop+1}
+        ${remainingStops.length > 1 ? '<span style="font-size:11px;opacity:.75">+' + (remainingStops.length-1) + ' more</span>' : ''}
       </a>
-      <button onclick="navArrived()" class="btn btn-cyan" style="width:100%;padding:12px;font-size:14px;font-weight:700;margin-top:8px;border-radius:10px">
-        ✓ I've Arrived at this Stop
+      <button onclick="navArrived()" class="btn btn-cyan" style="width:100%;padding:14px;font-size:15px;font-weight:800;margin-top:8px;border-radius:12px;min-height:52px">
+        ✓ I'm Here — Start Work
+      </button>
+      <button onclick="navSkipStop()" style="width:100%;padding:10px;margin-top:6px;background:none;border:1px solid var(--border);border-radius:10px;color:var(--muted);font-size:12px;cursor:pointer">
+        ⚠️ Can't access — skip this stop
       </button>`}
       ${isArrived?`
       <div style="margin-top:10px">
@@ -15431,6 +15492,29 @@ function navPhotoSelected(input){
   }
 }
 
+async function navSkipStop(){
+  const s = (NAV_STOPS||[])[navStop]
+  if(!s) return
+  const confirmed = confirm(`Skip stop at ${s.address}?\n\nThis will log it as inaccessible. Admin will be notified.`)
+  if(!confirmed) return
+  // Log to DB as skipped
+  if(s.jobId){
+    await _supa.from('jobs').update({
+      status: 'missed', notes: 'Skipped — runner could not access property',
+      updated_at: new Date().toISOString()
+    }).eq('id', s.jobId).catch(()=>{})
+  }
+  navStop++
+  navPhase = 'travelling'
+  _saveNavState()
+  if(navStop >= (NAV_STOPS||[]).length){
+    navPhase = 'done'
+    sessionStorage.removeItem('nav_state')
+  }
+  renderActiveRouteTab()
+  showToast('Stop skipped — admin notified', 'warn', 3000)
+}
+
 async function navCompleteStop(){
   const stops      = NAV_STOPS || []
   const s          = stops[navStop]
@@ -15491,13 +15575,20 @@ async function navCompleteStop(){
       // Route done
       navPhase = 'done'
       navStop  = stops.length
+      sessionStorage.removeItem('nav_state') // clear saved state on completion
       renderActiveRouteTab()
+      const stickyBar = document.getElementById('sticky-complete-bar')
+      if(stickyBar) stickyBar.style.display = 'none'
     } else {
       // Advance to next stop
       navStop++
       navPhase = 'travelling'
+      _saveNavState() // persist progress
       renderActiveRouteTab()
-      showToast('Stop ' + navStop + ' complete ✅ — on to the next!', 'ok', 3000)
+      // Reset photo for next stop
+      const preview = document.getElementById('nav-photo-preview')
+      if(preview) preview.innerHTML = '<span style="font-size:12px;color:var(--muted)">📷 Tap to take photo</span>'
+      showToast('✅ Stop ' + navStop + ' of ' + stops.length + ' — keep going!', 'ok', 2500)
     }
 
   } catch(e){
