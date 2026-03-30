@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BinDash">
+<meta name="theme-color" content="#0f172a">
 <title>BinDash -- Smart Bin Collection</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;853&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -811,8 +816,10 @@ html,body{height:100%;font-family:'Outfit',sans-serif;background:var(--bg);color
 .a4{animation:fadeUp .5s .3s both}.a5{animation:fadeUp .5s .4s both}.a6{animation:fadeUp .5s .5s both}
 
 /* Buttons */
-.btn{cursor:pointer;border:none;border-radius:8px;font-family:'Outfit',sans-serif;font-size:14px;font-weight:600;padding:11px 22px;transition:all .2s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;letter-spacing:.01em}
-.btn:hover{transform:translateY(-1px)}.btn:active{transform:none;filter:brightness(.9)}.btn:disabled{opacity:.35;cursor:not-allowed;transform:none}
+.btn{cursor:pointer;border:none;border-radius:8px;font-family:'Outfit',sans-serif;font-size:14px;font-weight:600;padding:11px 22px;transition:all .2s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;letter-spacing:.01em;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.btn:hover{transform:translateY(-1px)}.btn:active{transform:scale(.97);filter:brightness(.9)}.btn:disabled{opacity:.35;cursor:not-allowed;transform:none}
+/* Mobile: larger tap targets */
+@media(max-width:640px){.btn{min-height:44px;padding:12px 18px}.btn-sm{min-height:36px;padding:8px 12px}}
 .btn-cyan{background:var(--cyan);color:#07090f;font-weight:700}.btn-cyan:hover{box-shadow:0 6px 24px rgba(6,214,160,.35)}
 .btn-blue{background:var(--blue);color:#fff}.btn-blue:hover{box-shadow:0 6px 24px rgba(59,130,246,.35)}
 .btn-purple{background:var(--purple);color:#fff}.btn-outline{background:transparent;color:var(--sub);border:1.5px solid var(--border2)}
@@ -3331,14 +3338,20 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
             </div>
           </div>
 
-          <!-- ACTIVE TAB -->
+          <!-- ACTIVE TAB --
           <div id="rn-routes-active" style="display:none">
-            <div id="active-route-container">
+            <div id="active-route-container" style="padding-bottom:80px">
               <div style="text-align:center;padding:40px 20px;color:var(--muted)">
                 <div style="font-size:40px;margin-bottom:12px">🧭</div>
                 <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No active route</div>
                 <div style="font-size:13px">Start a route from the Upcoming tab to see it here.</div>
               </div>
+            </div>
+            <!-- STICKY COMPLETE BUTTON — always visible without scrolling -->
+            <div id="sticky-complete-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;padding:10px 16px 20px;background:linear-gradient(transparent,var(--bg) 30%);z-index:200">
+              <button id="sticky-complete-btn" onclick="navCompleteStop()" class="btn btn-green" style="width:100%;padding:14px;font-size:16px;font-weight:800;border-radius:14px;box-shadow:0 4px 20px rgba(34,197,94,.4)">
+                ✓ Complete Stop
+              </button>
             </div>
           </div>
 
@@ -5104,6 +5117,11 @@ async function populateRNDashboard(){
     // Set early so startBatch/loadRunnerRoutes can always find it
     if(rnRow?.id) window._currentRunnerRow = rnRow
 
+    // Restore active route if runner had one in progress (back button / crash recovery)
+    if(_restoreNavState()){
+      showToast('Route resumed ▶ — tap Resume Route to continue', 'ok', 5000)
+    }
+
     const fn = merged.first_name || currentUser.user_metadata?.first_name || currentUser.email?.split('@')[0] || 'Runner'
     const ln = merged.last_name  || currentUser.user_metadata?.last_name  || ''
     const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'RN'
@@ -6655,7 +6673,6 @@ async function resumeBatch(batchId){
     if(error) throw error
 
     let rawJobs = dbJobs || []
-    console.log('[resumeBatch] DB jobs found:', rawJobs.length, 'for batch:', batchId)
 
     if(!rawJobs.length){
       showToast('No active stops found for this route', 'err')
@@ -6700,12 +6717,9 @@ async function resumeBatch(batchId){
       rawJobs.forEach(j => { if(!savedOrder.includes(j.homeowner_email)) reordered.push(j) })
       if(reordered.length === rawJobs.length) ordered = reordered
     }
-
-    console.log('[resumeBatch] building NAV_STOPS from', ordered.length, 'jobs, sample email:', ordered[0]?.homeowner_email)
     NAV_STOPS = ordered.filter(Boolean).map(j => {
       const email = j.homeowner_email || j.email || ''
       const hw = hwMap[email] || {}
-      console.log('[resumeBatch stop]', email, 'hw:', !!hwMap[email])
       const gate = hw.gate_code || hw.gate_type || null
       const pets = hw.pet_info || null
       const notes = hw.service_notes || null
@@ -6736,8 +6750,6 @@ async function resumeBatch(batchId){
 
     // Store enriched for other functions
     window._lastEnrichedJobs = rawJobs.map(j=>({...j, hw:hwMap[j.homeowner_email]||null, hwDisplayName:(hwMap[j.homeowner_email]?.first_name||j.homeowner_email?.split('@')[0]||'Stop')}))
-
-    console.log('[resumeBatch] NAV_STOPS set:', NAV_STOPS.length, 'stops')
     // Open modal immediately
     switchRouteTab('active')
     renderActiveRouteTab()
@@ -6762,7 +6774,6 @@ async function startBatch(batchId){
     showToast('Runner session not loaded — please refresh the page','err')
     return
   }
-  console.log('[startBatch] called with batchId:', batchId)
   console.log('[startBatch] _lastEnrichedJobs count:', (window._lastEnrichedJobs||[]).length)
 
   // Get the job details to check the scheduled date and stop count
@@ -6770,22 +6781,18 @@ async function startBatch(batchId){
   const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>
     j.batch_id===batchId || j.id===batchId
   )
-  console.log('[startBatch] matched jobs:', batchJobs.length, 'for batchId:', batchId)
 
   const scheduledDate = batchJobs[0]?.scheduled_date || null
   const stopCount = batchJobs.length || 1
   const visitType = batchJobs[0]?.visit_type || 'BIN_OUT'
-  console.log('[startBatch] scheduledDate:', scheduledDate, 'stopCount:', stopCount)
 
   // If batch_id didn't match any jobs, try to find jobs by looking at in_progress/accepted status
   if(!batchJobs.length){
-    console.log('[startBatch] no jobs matched batch_id — trying zone match')
     const todayStr = new Date().toISOString().slice(0,10)
     const zoneFallback = (window._lastEnrichedJobs||[]).filter(j=>
       j.scheduled_date === todayStr && ['offered','accepted','in_progress'].includes(j.status)
     )
     if(zoneFallback.length){
-      console.log('[startBatch] zone fallback found', zoneFallback.length, 'jobs')
       // Reassign batchJobs reference — can't reassign const, just proceed
       window._startBatchFallback = zoneFallback
     }
@@ -6797,7 +6804,6 @@ async function startBatch(batchId){
   // Only enforce time locks on BIN_OUT routes (BIN_IN is morning, different rules)
   if(visitType === 'BIN_OUT' && effectiveDate){
     const lock = getRouteLockState(effectiveDate, effectiveCount)
-    console.log('[startBatch] lock state:', lock.state, 'locked:', lock.locked, 'date:', effectiveDate)
     if(lock.locked && lock.state === 'TOO_EARLY'){
       // Show a clear modal explaining why they can't start
       document.getElementById('modal-box').innerHTML = `
@@ -6868,8 +6874,6 @@ async function startBatch(batchId){
       j.scheduled_date >= new Date().toISOString().slice(0,10) &&
       ['offered','accepted','in_progress'].includes(j.status)
     ).slice(0, 20)
-
-    console.log('[startBatch] jobsToUse:', jobsToUse.length)
 
     if(jobsToUse.length){
       NAV_STOPS = jobsToUse.map(j=>{
@@ -7312,8 +7316,19 @@ async function initApp(){
     } else if(role === 'rn'){
       setCurrentUser(user)
       go('S-rn-dash')
-      await loadZonesFromSupabase()   // must be before populateRNDashboard uses ADMIN_ZONES
-      populateRNDashboard()
+      // Show dashboard immediately with loading state, then fetch in background
+      // This prevents the blank screen while data loads
+      const batchArea = document.getElementById('rn-home-batch-area')
+      if(batchArea) batchArea.innerHTML = `
+        <div style="text-align:center;padding:32px 20px;color:var(--muted)">
+          <div style="font-size:28px;margin-bottom:10px">⏳</div>
+          <div style="font-size:13px">Loading your routes...</div>
+        </div>`
+      // Load zones first (needed for map), then dashboard
+      loadZonesFromSupabase().then(() => populateRNDashboard()).catch(e => {
+        console.warn('[BinDash] runner load:', e)
+        populateRNDashboard() // try anyway
+      })
       if(window._showConnectReturnToast){
         window._showConnectReturnToast = false
         setTimeout(()=>showToast('Stripe payout setup complete ✅ You\'re ready to get paid!','ok',5000),800)
@@ -12588,6 +12603,35 @@ let navBatchZoneId = ''
 let navVisitType = ''
 let navRouteActive = false  // true once Begin is tapped -- survives modal close/reopen
 
+// Persist nav state so back button / app crash doesn't lose route progress
+function _saveNavState(){
+  try {
+    sessionStorage.setItem('nav_state', JSON.stringify({
+      navStop, navPhase, navBatchId, navBatchZoneId, navVisitType, navRouteActive,
+      stops: NAV_STOPS,
+      savedAt: Date.now()
+    }))
+  } catch(e){}
+}
+function _restoreNavState(){
+  try {
+    const raw = sessionStorage.getItem('nav_state')
+    if(!raw) return false
+    const s = JSON.parse(raw)
+    // Only restore if saved within last 4 hours and route was active
+    if(!s.navRouteActive || !s.stops?.length) return false
+    if(Date.now() - s.savedAt > 4 * 60 * 60 * 1000) return false
+    NAV_STOPS = s.stops
+    navStop = s.navStop || 0
+    navPhase = s.navPhase || 'travelling'
+    navBatchId = s.navBatchId || ''
+    navBatchZoneId = s.navBatchZoneId || ''
+    navVisitType = s.navVisitType || 'BIN_OUT'
+    navRouteActive = true
+    return true
+  } catch(e){ return false }
+}
+
 function showStartRoute(batchId, visitType, stops){
   // Only reset if this is a NEW batch or route hasn't started yet
   if(navBatchId !== batchId || !navRouteActive){
@@ -13151,6 +13195,7 @@ function getOanUsageFee(planId){
 function navBegin(){
   navPhase = 'travelling'
   navRouteActive = true
+  _saveNavState()
   _renderNavModal()
 }
 
@@ -13181,9 +13226,11 @@ function navComplete(){
     }
   }
   navStop++
+  _saveNavState()
   if(navStop >= NAV_STOPS.length){
     navPhase = 'done'
     navRouteActive = false
+    sessionStorage.removeItem('nav_state') // clear on completion
     // Email runner: route complete summary
     const _routeEarn = (NAV_STOPS.length * 3.25).toFixed(2)
     const _zoneName  = ADMIN_ZONES.find(z=>z.id===navBatchZoneId)?.name || 'your zone'
@@ -15094,8 +15141,10 @@ function renderActiveRouteTab(){
   if(!container) return
 
   const stops = NAV_STOPS || []
+  const stickyBar = document.getElementById('sticky-complete-bar')
 
   if(!navRouteActive || !stops.length){
+    if(stickyBar) stickyBar.style.display = 'none'
     container.innerHTML = `
       <div style="text-align:center;padding:60px 20px;color:var(--muted)">
         <div style="font-size:48px;margin-bottom:16px">🧭</div>
@@ -15105,156 +15154,105 @@ function renderActiveRouteTab(){
     return
   }
 
-  const s = stops[navStop]
+  const s = stops[navStop] || stops[stops.length-1]
   const totalStops = stops.length
   const pct = Math.round((navStop / totalStops) * 100)
-  const isLastStop = navStop === totalStops - 1
-  const visitLabel = navVisitType === 'BIN_OUT' || navVisitType === 'Bin Out' ? 'Bin Out 🌙' : 'Bin In ☀️'
-  const visitInstr = navVisitType === 'BIN_OUT' || navVisitType === 'Bin Out'
-    ? 'Move bins from property to curb before 6am collection'
-    : 'Return bins from curb back to their storage location'
-  const stopMapsUrl = s ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent((s.address||'')+(s.address?.includes('AZ')?'':', Glendale, AZ'))}&travelmode=driving` : '#'
+  const isArrived = navPhase === 'arrived'
+  const isDone = navPhase === 'done'
 
-  // Progress header
+  // Show/hide sticky complete bar
+  if(stickyBar) stickyBar.style.display = isArrived ? 'block' : 'none'
+
+  if(isDone){
+    container.innerHTML = `
+      <div style="text-align:center;padding:40px 20px">
+        <div style="font-size:60px;margin-bottom:16px">🎉</div>
+        <div style="font-size:22px;font-weight:800;color:#22c55e;margin-bottom:8px">Route Complete!</div>
+        <div style="font-size:15px;color:var(--sub);margin-bottom:24px">All ${totalStops} stops done · $${(totalStops*3.25).toFixed(2)} earned</div>
+        <button onclick="completeBatch(navBatchId)" class="btn btn-green" style="width:100%;padding:14px;font-size:16px;font-weight:700;border-radius:12px">
+          ✓ Submit & Get Paid
+        </button>
+        <div style="margin-top:12px;font-size:11px;color:var(--muted)">Payment processed next Friday</div>
+      </div>`
+    return
+  }
+
+  const stopMapsUrl = s?.address && s.address !== '--'
+    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(s.address+(s.zip?', '+s.zip:''))}&travelmode=driving`
+    : '#'
+
+  // Build compact stop list — only show remaining stops to save DOM nodes
+  const stopListHtml = stops.map((st, i) => {
+    const done = i < navStop
+    const cur  = i === navStop
+    if(done && navStop - i > 3) return '' // hide old completed stops (save DOM)
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);opacity:${done?'.5':'1'}">
+      <div style="width:24px;height:24px;border-radius:50%;background:${done?'#22c55e':cur?'var(--cyan)':'rgba(99,102,241,.2)'};color:${done||cur?'#07090f':'#a5b4fc'};font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0">${done?'✓':i+1}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;${done?'text-decoration:line-through':''}${cur?';color:var(--cyan)':''}">${st.name||'--'}</div>
+        <div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${st.address||'--'}</div>
+      </div>
+      ${cur?'<span style="font-size:9px;font-weight:700;color:var(--cyan);text-transform:uppercase;flex-shrink:0">Now</span>':''}
+      <span style="font-size:11px;color:var(--green);flex-shrink:0">$3.25</span>
+    </div>`
+  }).filter(Boolean).join('')
+
+  // Progress bar
   const progressHtml = `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div>
-          <div style="font-size:12px;font-weight:700;color:var(--cyan);letter-spacing:.08em;text-transform:uppercase">${visitLabel} Route</div>
-          <div style="font-size:13px;color:var(--sub);margin-top:2px">${navBatchId}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:18px;font-weight:800;color:var(--cyan)">${navStop}/${totalStops}</div>
-          <div style="font-size:10px;color:var(--muted)">stops done</div>
-        </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:700;color:var(--cyan)">${navStop}/${totalStops} stops</span>
+        <span style="font-size:14px;font-weight:800;color:var(--green)">$${(totalStops*3.25).toFixed(2)}</span>
       </div>
-      <div style="background:var(--surface2);border-radius:99px;height:7px;overflow:hidden">
+      <div style="background:var(--surface2);border-radius:99px;height:6px">
         <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--cyan),#22c55e);border-radius:99px;transition:width .4s"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:5px">
-        <span>${navStop} complete</span><span>${totalStops - navStop} remaining · $${(totalStops * 3.25).toFixed(2)} total</span>
       </div>
     </div>`
 
-  if(navPhase === 'idle' || navPhase === 'travelling'){
-    // TRAVELLING PHASE -- show current stop with Navigate + Arrive buttons
-    container.innerHTML = progressHtml + `
-      <div style="background:linear-gradient(135deg,rgba(99,102,241,.08),rgba(6,214,160,.04));border:1.5px solid rgba(99,102,241,.3);border-radius:16px;padding:18px;margin-bottom:14px">
-        <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">Stop ${navStop+1} of ${totalStops}</div>
-        <div style="font-size:20px;font-weight:800;margin-bottom:4px">${s?.address || '--'}</div>
-        <div style="font-size:14px;color:var(--sub);margin-bottom:12px">${s?.name || ''}</div>
-        ${s?.gate ? `<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;color:#fbbf24;margin-bottom:8px">🔑 Gate code: ${s.gate}</div>` : ''}
-        ${s?.pets && s.pets !== 'None' ? `<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.15);border-radius:8px;padding:8px 12px;font-size:12px;color:#fbbf24;margin-bottom:8px">🐾 ${s.pets}</div>` : ''}
+  // Current stop card
+  const currentStopHtml = s ? `
+    <div style="background:${isArrived?'rgba(6,214,160,.06)':'rgba(99,102,241,.05)'};border:1.5px solid ${isArrived?'rgba(6,214,160,.3)':'rgba(99,102,241,.2)'};border-radius:14px;padding:16px;margin-bottom:12px">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">
+        ${isArrived?'📍 ARRIVED — Stop '+(navStop+1):'🚗 NEXT STOP — '+(navStop+1)+' of '+totalStops}
+      </div>
+      <div style="font-size:18px;font-weight:800;margin-bottom:2px">${s.address||'--'}</div>
+      <div style="font-size:13px;color:var(--sub);margin-bottom:${s.gate||s.pets?'10px':'0'}">${s.name||''}</div>
+      ${s.gate?`<div style="background:rgba(245,158,11,.1);border-radius:8px;padding:8px 10px;font-size:12px;font-weight:600;color:#fbbf24;margin-bottom:6px">🔑 Gate code: ${s.gate}</div>`:''}
+      ${s.pets&&s.pets!=='None'?`<div style="background:rgba(245,158,11,.08);border-radius:8px;padding:8px 10px;font-size:12px;color:#fbbf24;margin-bottom:6px">🐾 ${s.pets}</div>`:''}
+      ${s.binLocation&&s.binLocation!=='--'?`<div style="font-size:11px;color:var(--muted);margin-top:4px">📦 Bins: ${s.binLocation}</div>`:''}
+      ${isArrived?'':`
+      <a href="${stopMapsUrl}" target="_blank" rel="noopener"
+         style="display:flex;align-items:center;justify-content:center;gap:8px;background:#1a73e8;border-radius:10px;padding:12px;font-size:14px;font-weight:700;color:#fff;text-decoration:none;margin-top:10px">
+        📍 Open in Google Maps
+      </a>
+      <button onclick="navArrived()" class="btn btn-cyan" style="width:100%;padding:12px;font-size:14px;font-weight:700;margin-top:8px;border-radius:10px">
+        ✓ I've Arrived at this Stop
+      </button>`}
+      ${isArrived?`
+      <div style="margin-top:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px">📸 Photo (optional but recommended)</div>
+        <input type="file" accept="image/*" capture="environment" id="stop-photo-input" style="display:none" onchange="navPhotoSelected(this)">
+        <div id="nav-photo-preview" onclick="document.getElementById('stop-photo-input').click()"
+          style="border:2px dashed var(--border2);border-radius:10px;padding:16px;text-align:center;cursor:pointer;min-height:60px;display:flex;align-items:center;justify-content:center;background:var(--surface2)">
+          <span style="font-size:12px;color:var(--muted)">📷 Tap to take photo</span>
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px">
         <a href="${stopMapsUrl}" target="_blank" rel="noopener"
-           style="display:flex;align-items:center;justify-content:center;gap:8px;background:#1a73e8;border-radius:10px;padding:13px;font-size:14px;font-weight:700;color:#fff;text-decoration:none;margin-bottom:10px">
-          📍 Open in Google Maps
+           style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;background:rgba(26,115,232,.15);border:1px solid rgba(26,115,232,.3);border-radius:10px;padding:10px;font-size:12px;font-weight:700;color:#60a5fa;text-decoration:none">
+          📍 Maps
         </a>
-        <button onclick="navArrived()" class="btn btn-cyan btn-full" style="padding:13px;font-size:14px;font-weight:700;width:100%">
-          ✓ I've Arrived
+        <button onclick="navCompleteStop()" id="nav-complete-btn" class="btn btn-green" style="flex:3;padding:10px;font-size:13px;font-weight:700;border-radius:10px">
+          ✓ Mark Stop Done & Continue
         </button>
-      </div>
-      ${_renderStopList(stops, navStop)}`
+      </div>`:''}
+    </div>` : ''
 
-  } else if(navPhase === 'arrived'){
-    // ARRIVED PHASE -- show task details + photo + message homeowner
-    const hwEmail = s?.hwEmail || ''
-    container.innerHTML = progressHtml + `
-      <div style="background:rgba(6,214,160,.06);border:1.5px solid rgba(6,214,160,.3);border-radius:16px;padding:18px;margin-bottom:14px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-          <div style="width:36px;height:36px;border-radius:50%;background:rgba(6,214,160,.2);display:flex;align-items:center;justify-content:center;font-size:18px">📍</div>
-          <div>
-            <div style="font-weight:700;font-size:14px;color:var(--cyan)">Arrived at Stop ${navStop+1}</div>
-            <div style="font-size:12px;color:var(--sub)">${s?.name} · ${s?.address}</div>
-          </div>
-        </div>
-        <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
-          <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Your Task</div>
-          <div style="font-size:14px;font-weight:600;color:var(--text)">${visitInstr}</div>
-          ${s?.binLocation && s.binLocation !== '--' ? `<div style="font-size:12px;color:var(--sub);margin-top:4px">📦 Bin storage: ${s.binLocation}</div>` : ''}
-          ${s?.serviceType ? `<div style="font-size:12px;color:var(--sub);margin-top:2px">🗑️ Service: ${s.serviceType}</div>` : ''}
-        </div>
-
-        ${s?.gate ? `<div style="background:rgba(245,158,11,.1);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:13px;font-weight:600;color:#fbbf24">🔑 Gate code: ${s.gate}</div>` : ''}
-        ${s?.pets && s.pets !== 'None' ? `<div style="background:rgba(245,158,11,.08);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#fbbf24">🐾 Pets: ${s.pets} — use caution when opening gate</div>` : ''}
-        ${s?.notes ? `<div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--sub)">📝 ${s.notes}</div>` : ''}
-        <div style="border:1px solid var(--border);border-radius:10px;margin-bottom:14px;overflow:hidden">
-          <div style="padding:10px 12px;background:var(--surface2);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;display:flex;align-items:center;gap:6px">
-            💬 Message Homeowner
-          </div>
-          <div style="padding:10px 12px">
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
-              <button onclick="navQuickMsg(this,'On my way to your property now')" class="btn btn-ghost btn-sm" style="font-size:10px;padding:4px 8px">On my way</button>
-              <button onclick="navQuickMsg(this,'I have arrived at your property')" class="btn btn-ghost btn-sm" style="font-size:10px;padding:4px 8px">I've arrived</button>
-              <button onclick="navQuickMsg(this,'Bins are at the curb, all done!')" class="btn btn-ghost btn-sm" style="font-size:10px;padding:4px 8px">Bins out ✓</button>
-              <button onclick="navQuickMsg(this,'Bins returned to property, all done!')" class="btn btn-ghost btn-sm" style="font-size:10px;padding:4px 8px">Bins in ✓</button>
-            </div>
-            <div style="display:flex;gap:8px">
-              <input id="nav-msg-input" placeholder="Type a message..." style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--text)">
-              <button onclick="navSendMsg('${hwEmail}')" class="btn btn-cyan btn-sm">Send</button>
-            </div>
-          </div>
-        </div>
-        ${s?.isOAN ? `
-        <div style="background:rgba(139,92,246,.07);border:1.5px solid rgba(139,92,246,.3);border-radius:12px;padding:16px;margin-bottom:14px">
-          <div style="font-size:12px;font-weight:700;color:#a5b4fc;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">
-            ✈️ Bin Out As Needed Check — Tier ${STRIPE_PRICES[s.planId||'oan_b']?.oanTier||'B'}
-          </div>
-          <div style="font-size:13px;color:var(--sub);margin-bottom:14px;line-height:1.5">
-            Check the bin at this property. <strong style="color:var(--text)">Only charge if you move it.</strong>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <button onclick="navOanEmpty()" class="btn"
-                    style="padding:14px;border-radius:10px;font-size:14px;font-weight:700;background:rgba(34,197,94,.12);border:1.5px solid rgba(34,197,94,.3);color:#22c55e">
-              🟢 Empty<br><span style="font-size:10px;font-weight:400;opacity:.8">No action needed<br>No charge</span>
-            </button>
-            <button onclick="navOanMoved()" class="btn"
-                    style="padding:14px;border-radius:10px;font-size:14px;font-weight:700;background:rgba(139,92,246,.12);border:1.5px solid rgba(139,92,246,.4);color:#a5b4fc">
-              🟣 Full — Moved<br><span style="font-size:10px;font-weight:400;opacity:.8">Bin moved · Bill $${STRIPE_PRICES[s.planId||'oan_b']?.usageFee||12.99}<br>Bin-In auto-scheduled</span>
-            </button>
-          </div>
-          <div style="font-size:10px;color:var(--muted);margin-top:10px;text-align:center">
-            Usage fee billed via Stripe metered billing · Homeowner notified by email
-          </div>
-        </div>` : `
-        <div style="margin-bottom:14px">
-          <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px">📸 Photo confirmation required</div>
-          <div style="font-size:11px;color:var(--sub);margin-bottom:10px">Take a photo showing the bins — this confirms the job and notifies the homeowner.</div>
-          <input type="file" accept="image/*" capture="environment" id="stop-photo-input" style="display:none" onchange="navPhotoSelected(this)">
-          <div id="nav-photo-preview" onclick="document.getElementById('stop-photo-input').click()"
-               style="background:var(--surface2);border:2px dashed var(--border2);border-radius:12px;min-height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer">
-            <div style="font-size:36px">📷</div>
-            <div style="font-size:13px;font-weight:600;color:var(--sub)">Tap to take photo</div>
-            <div style="font-size:11px;color:var(--muted)">Camera opens automatically</div>
-          </div>
-        </div>
-
-        <button id="nav-complete-btn" onclick="navCompleteStop()" disabled
-                style="width:100%;padding:14px;border-radius:10px;font-size:15px;font-weight:700;background:rgba(34,197,94,.15);color:rgba(34,197,94,.4);border:1.5px solid rgba(34,197,94,.2);cursor:not-allowed;transition:all .3s">
-          ${isLastStop ? '✅ Complete Route' : '✅ Mark Complete & Next Stop →'}
-        </button>`}
-      </div>
-      ${_renderStopList(stops, navStop)}`
-
-  } else if(navPhase === 'done'){
-    container.innerHTML = `
-      <div style="text-align:center;padding:40px 20px">
-        <div style="font-size:56px;margin-bottom:16px">🎉</div>
-        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:6px">Route Complete!</div>
-        <div style="font-size:14px;color:var(--sub);margin-bottom:24px">All ${totalStops} stops done</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:24px">
-          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px">
-            <div style="font-size:24px;font-weight:800;color:var(--cyan)">$${(totalStops*3.25).toFixed(2)}</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:4px">Earned</div>
-          </div>
-          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px">
-            <div style="font-size:24px;font-weight:800;color:var(--green)">${totalStops}/${totalStops}</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:4px">Stops</div>
-          </div>
-        </div>
-        <div style="font-size:12px;color:var(--sub);margin-bottom:20px">Pay queued for next Friday payout via Stripe.</div>
-        <button class="btn btn-cyan btn-lg" onclick="navFinishRoute()">Submit & Finish ✓</button>
-      </div>`
-  }
+  container.innerHTML = progressHtml + currentStopHtml + `
+    <div style="margin-top:4px">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">All Stops</div>
+      ${stopListHtml}
+    </div>`
 }
 
 function _renderStopList(stops, currentIdx){
@@ -15281,6 +15279,10 @@ function _renderStopList(stops, currentIdx){
 
 function navArrived(){
   navPhase = 'arrived'
+  _saveNavState()
+  // Only update the button area, don't rebuild entire tab
+  const stickyBar = document.getElementById('sticky-complete-bar')
+  if(stickyBar) stickyBar.style.display = 'block'
   renderActiveRouteTab()
 }
 
@@ -15403,31 +15405,30 @@ async function navSendMsg(hwEmail){
 function navPhotoSelected(input){
   if(!input.files || !input.files[0]) return
   const file = input.files[0]
-  const reader = new FileReader()
-  reader.onload = e => {
-    // Show preview
-    const preview = document.getElementById('nav-photo-preview')
-    if(preview){
-      preview.innerHTML = `
-        <img src="${e.target.result}" style="width:100%;max-height:200px;object-fit:cover;border-radius:10px">
-        <div style="padding:8px;font-size:11px;color:var(--cyan);font-weight:600;text-align:center">✓ Photo captured — tap Complete below</div>`
-      preview.style.cursor = 'default'
-    }
-    // Store photo data for upload
-    window._navPhotoData = e.target.result
-    window._navPhotoFile = file
 
-    // Enable complete button
-    const btn = document.getElementById('nav-complete-btn')
-    if(btn){
-      btn.disabled = false
-      btn.style.background = 'rgba(34,197,94,.2)'
-      btn.style.color = '#22c55e'
-      btn.style.borderColor = 'rgba(34,197,94,.4)'
-      btn.style.cursor = 'pointer'
-    }
+  // Use createObjectURL — much faster, no base64 in memory, no crash risk
+  const objectUrl = URL.createObjectURL(file)
+  window._navPhotoFile = file
+  window._navPhotoObjectUrl = objectUrl
+
+  // Show preview immediately — no FileReader delay
+  const preview = document.getElementById('nav-photo-preview')
+  if(preview){
+    preview.innerHTML = `
+      <img src="${objectUrl}" style="width:100%;max-height:160px;object-fit:cover;border-radius:10px" onload="URL.revokeObjectURL(this.src)">
+      <div style="padding:6px;font-size:11px;color:var(--cyan);font-weight:600;text-align:center">✓ Photo ready — tap Complete below</div>`
+    preview.style.cursor = 'default'
   }
-  reader.readAsDataURL(file)
+
+  // Enable complete button
+  const btn = document.getElementById('nav-complete-btn')
+  if(btn){
+    btn.disabled = false
+    btn.style.background = 'rgba(34,197,94,.2)'
+    btn.style.color = '#22c55e'
+    btn.style.borderColor = 'rgba(34,197,94,.4)'
+    btn.style.cursor = 'pointer'
+  }
 }
 
 async function navCompleteStop(){
