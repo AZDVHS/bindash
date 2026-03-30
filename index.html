@@ -6642,55 +6642,86 @@ async function declineOffer(batchId){
 }
 
 async function resumeBatch(batchId){
-  // Reload stops from enriched jobs and resume the active tab flow
-  const batchJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
-  if(batchJobs.length){
-    window.NAV_STOPS = batchJobs.map(j=>{
-      const gatePart  = j.hw?.gate_code   ? 'Gate: '+j.hw.gate_code : ''
-      const petsPart  = j.hw?.pet_info    ? 'Pets: '+j.hw.pet_info  : ''
-      const notePart  = j.hw?.service_notes || ''
-      const details   = [gatePart, petsPart, notePart].filter(Boolean).join(' · ') || 'No special notes'
-      return {
-        name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.homeowner_email || 'Stop',
-        address:     j.hw?.street_address || '--',
-        zip:         j.hw?.zip_code || '',
-        gate:        j.hw?.gate_code   || null,
-        pets:        j.hw?.pet_info    || null,
-        binLocation: j.hw?.bin_location|| null,
-        serviceType: j.service_type    || 'Recycling',
-        notes:       j.hw?.service_notes || null,
-        details,
-        bins:        j.hw?.bins || (j.service_type === 'Split days' ? '2 bins' : '1 bin'),
-        email:       j.homeowner_email  || null,
-        hwEmail:     j.homeowner_email  || null,
-        jobId:       j.id,
+  // Get stops from _rnBatchMap (instant — built when cards rendered)
+  // Fall back to _lastEnrichedJobs, then fetch from DB
+  let rawJobs = (window._rnBatchMap||{})[batchId]?.stops || []
+
+  if(!rawJobs.length){
+    rawJobs = (window._lastEnrichedJobs||[]).filter(j=>j.batch_id===batchId)
+  }
+
+  // Still empty — fetch directly from Supabase
+  if(!rawJobs.length){
+    showToast('Loading route...', 'info', 2000)
+    try {
+      const { data: dbJobs } = await _supa.from('jobs').select('*')
+        .eq('batch_id', batchId).not('status','in','("cancelled","complete")')
+      if(dbJobs?.length){
+        // Enrich with homeowner data
+        const emails = [...new Set(dbJobs.map(j=>j.homeowner_email).filter(Boolean))]
+        const { data: hwRows } = await _supa.from('homeowner_signups')
+          .select('email,first_name,last_name,street_address,zip_code,gate_code,gate_type,pet_info,bin_location,service_notes')
+          .in('email', emails)
+        const hwMap = {}
+        ;(hwRows||[]).forEach(h => { hwMap[h.email] = h })
+        rawJobs = dbJobs.map(j => ({ ...j, hw: hwMap[j.homeowner_email]||null, hwDisplayName: j.homeowner_email?.split('@')[0]||'Stop' }))
       }
-    })
-    navBatchId     = batchId
-    navVisitType   = batchJobs[0]?.visit_type || 'BIN_OUT'
-    navRouteActive = true
-    // Apply runner's saved stop order if they have one for this route
-    if(window._currentRunnerRow){
-      const runnerId = window._currentRunnerRow.id
-      const zoneId = batchJobs[0]?.zone_id || ''
-      const day = batchJobs[0]?.day_of_week || ''
-      const savedOrder = getRunnerRouteOrder(runnerId, zoneId, day)
-      if(savedOrder) window.NAV_STOPS = applyRunnerOrder(window.NAV_STOPS, savedOrder)
+    } catch(e){ console.warn('[resumeBatch] DB fetch failed:', e.message) }
+  }
+
+  const buildStop = j => {
+    if(!j) return null
+    const gatePart  = j.hw?.gate_code   ? 'Gate: '+j.hw.gate_code : ''
+    const petsPart  = j.hw?.pet_info    ? 'Pets: '+j.hw.pet_info  : ''
+    const notePart  = j.hw?.service_notes || ''
+    const details   = [gatePart, petsPart, notePart].filter(Boolean).join(' · ') || ''
+    return {
+      name:        ((j.hw?.first_name||'')+' '+(j.hw?.last_name||'')).trim() || j.hwDisplayName || j.homeowner_email?.split('@')[0] || 'Stop',
+      address:     j.hw?.street_address || '--',
+      zip:         j.hw?.zip_code || '',
+      gate:        j.hw?.gate_code   || null,
+      pets:        j.hw?.pet_info    || null,
+      binLocation: j.hw?.bin_location|| null,
+      serviceType: j.service_type    || 'Recycling',
+      notes:       j.hw?.service_notes || null,
+      details,
+      bins:        j.hw?.bins || '1 bin',
+      email:       j.homeowner_email  || null,
+      hwEmail:     j.homeowner_email  || null,
+      jobId:       j.id || null,
     }
-    // Load runner note counts for all stops so badges show
+  }
+
+  if(rawJobs.length){
+    // Apply saved reorder
+    const savedEmailOrder = _rnStopOrders[batchId]
+    const orderedJobs = savedEmailOrder?.length
+      ? savedEmailOrder.map(email => rawJobs.find(j=>(j.homeowner_email||j.email)===email)).filter(Boolean)
+          .concat(rawJobs.filter(j=>!savedEmailOrder.includes(j.homeowner_email||j.email)))
+      : rawJobs
+
+    window.NAV_STOPS = orderedJobs.map(buildStop).filter(Boolean)
+    navBatchId     = batchId
+    navVisitType   = rawJobs[0]?.visit_type || 'BIN_OUT'
+    navRouteActive = true
+    if(navPhase === 'idle' || !navPhase) navPhase = 'travelling'
+
+    // Open modal immediately with what we have
+    switchRouteTab('active')
+    renderActiveRouteTab()
+    openM()
+    _renderNavModal()
+
+    // Load note counts in background
     const _emails = window.NAV_STOPS.map(s=>s.email||s.hwEmail).filter(Boolean)
     _loadRunnerNoteCounts(_emails).then(counts => {
-      window.NAV_STOPS.forEach(s => {
-        const e = s.email||s.hwEmail
-        if(e && counts[e]) s._noteCount = counts[e]
-      })
+      window.NAV_STOPS.forEach(s => { const e=s.email||s.hwEmail; if(e&&counts[e]) s._noteCount=counts[e] })
       _renderNavModal()
-    })
-    // If already in progress, resume at travelling phase
-    if(navPhase === 'idle') navPhase = 'travelling'
+    }).catch(()=>{})
+
+  } else {
+    showToast('No stops found — try refreshing the page', 'err')
   }
-  switchRouteTab('active')
-  renderActiveRouteTab()
 }
 
 async function startBatch(batchId){
