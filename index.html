@@ -6424,10 +6424,12 @@ function getRouteLockState(scheduledDateStr, stopCount){
 
   // Day of service — check time window
   const stops = Math.max(1, stopCount || 1)
-  // Each stop ~15 min average, plus 20 min buffer, must finish by 9pm
-  const minsNeeded  = stops * 15 + 20
+  // Realistic: ~7 min per stop average (drive + place bins), 15 min buffer
+  // Hard floor: never lock before 8:30pm regardless of stop count
+  const minsNeeded  = stops * 7 + 15
   const deadline    = new Date(workDate); deadline.setHours(21, 0, 0, 0)      // 9:00pm hard deadline
-  const cutoff      = new Date(deadline.getTime() - minsNeeded * 60000)       // latest possible start
+  const latestCutoff = new Date(workDate); latestCutoff.setHours(20, 30, 0, 0) // never lock before 8:30pm
+  const cutoff      = new Date(Math.min(deadline.getTime() - minsNeeded * 60000, latestCutoff.getTime()))
   const windowOpen  = new Date(workDate); windowOpen.setHours(15, 0, 0, 0)   // 3pm recommended open
   const h = now.getHours(), m = now.getMinutes()
 
@@ -6437,12 +6439,11 @@ function getRouteLockState(scheduledDateStr, stopCount){
       reason:'The service window has closed for tonight. This route cannot be started.' }
   }
 
-  if(now >= cutoff){
+  if(now >= cutoff && now < deadline){
     const minsLeft = Math.round((deadline - now) / 60000)
-    const cutoffStr = cutoff.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
-    return { locked:true, state:'LOCKED_LATE', color:'#ef4444',
-      title:`Too late to start — cutoff was ${cutoffStr}`,
-      reason:`With ${stops} stop${stops!==1?'s':''}, you need at least ${minsNeeded} min to finish before the 9pm deadline. You only have ${minsLeft} min left. Contact your admin.` }
+    return { locked:false, state:'LATE_WARNING', color:'#f59e0b',
+      title:`Running late — ${minsLeft} min to 9pm deadline`,
+      reason:`Try to finish as quickly as possible. You can still start.` }
   }
 
   if(now < windowOpen){
