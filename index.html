@@ -12530,8 +12530,9 @@ function _renderNavModal(){
   const stopListHTML = NAV_STOPS.map((st, i) => {
     const isDone = i < navStop
     const isCur  = i === navStop && navPhase !== 'idle' && navPhase !== 'done'
-    const hasPet = st.details.toLowerCase().includes('dog') || st.details.toLowerCase().includes('pet')
-    const hasGate= st.details.toLowerCase().includes('gate')
+    const details = (st.details || [st.gate, st.pets, st.notes].filter(Boolean).join(' · ') || '').toLowerCase()
+    const hasPet = details.includes('dog') || details.includes('pet') || details.includes('🐾')
+    const hasGate= details.includes('gate') || !!st.gate
     const stopMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(st.address + ', Glendale, AZ')}&travelmode=driving`
     const dotBg    = isDone ? '#22c55e' : isCur ? '#06d6a0' : 'rgba(99,102,241,.25)'
     const dotColor = isDone || isCur ? '#07090f' : '#a5b4fc'
@@ -12552,7 +12553,7 @@ function _renderNavModal(){
         </div>
         <div style="font-size:11px;color:var(--sub);margin-bottom:4px">${st.address}</div>
         <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:${isCur?'8px':'0'}">
-          ${hasGate  ? `<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;border-radius:5px;padding:2px 6px;font-weight:600">&#x1F511; ${st.details.match(/Gate:?\s*[\w\d]+/i)?.[0] || 'Gated'}</span>` : ''}
+          ${hasGate  ? `<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;border-radius:5px;padding:2px 6px;font-weight:600">&#x1F511; ${st.gate || 'Gated'}</span>` : ''}
           ${hasPet   ? `<span style="font-size:10px;background:rgba(245,158,11,.1);color:#fbbf24;border-radius:5px;padding:2px 6px;font-weight:600">&#x1F43E; Pet</span>` : ''}
           ${st._isNew ? `<span style="font-size:10px;background:rgba(6,214,160,.15);color:#06d6a0;border-radius:5px;padding:2px 6px;font-weight:600">&#x2B50; New</span>` : ''}
           <span style="font-size:10px;background:var(--surface3);color:var(--muted);border-radius:5px;padding:2px 6px">${st.bins}</span>
