@@ -153,11 +153,26 @@ const _EXPECTED = {
     console.log('[BinDash] Config OK -- all keys verified')
   }
 })()
+// ── TEST MODE: redirect all emails to admin ───────────────────────────────
+// Set to false when going live with real customers
+const EMAIL_TEST_MODE = true
+const EMAIL_TEST_ADMIN = 'alpha1miller@gmail.com'
+
 async function sendEmail(to, subject, html, type){
-  if(!to || to.includes('@lead.'+'bindash')){
+  if(!to || to.includes('@lead.bindash')){
     console.log('[BinDash] sendEmail SKIPPED -- bad address:', to)
     return
   }
+
+  // In test mode, redirect all outbound email to admin with original recipient noted
+  let actualTo = to
+  let actualSubject = subject
+  if(EMAIL_TEST_MODE && to !== EMAIL_TEST_ADMIN){
+    actualTo = EMAIL_TEST_ADMIN
+    actualSubject = `[TEST → ${to}] ${subject}`
+    console.log('[BinDash] TEST MODE: redirecting email from', to, 'to admin')
+  }
+
   const _supaUrl = (SUPABASE_URL && !SUPABASE_URL.includes('your-project'))
     ? SUPABASE_URL
     : 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
@@ -165,7 +180,7 @@ async function sendEmail(to, subject, html, type){
     ? SUPABASE_ANON_KEY
     : ''
   const _url = _supaUrl+'/functions/v1/send-email'
-  console.log('[BinDash] sendEmail CALLING:', _url, 'type:', type, 'to:', to)
+  console.log('[BinDash] sendEmail CALLING:', _url, 'type:', type, 'to:', actualTo)
   try {
     const res = await fetch(_url, {
       method:'POST',
@@ -174,7 +189,7 @@ async function sendEmail(to, subject, html, type){
         'Authorization':'Bearer '+_supaKey,
         'apikey': _supaKey,
       },
-      body: JSON.stringify({to, subject, html, type:type||'general'}),
+      body: JSON.stringify({to: actualTo, subject: actualSubject, html, type:type||'general'}),
     })
     const d = await res.json()
     console.log('[BinDash] sendEmail RESPONSE:', res.status, JSON.stringify(d))
@@ -182,7 +197,7 @@ async function sendEmail(to, subject, html, type){
       console.warn('[BinDash] 401 on send-email — JWT auth issue. Edge function needs verify_jwt=false in config.toml')
     }
     if(d.error) console.warn('[BinDash] Email error:', d.error)
-    else if(res.ok) console.log('[BinDash] Email sent OK:', type, to)
+    else if(res.ok) console.log('[BinDash] Email sent OK:', type, actualTo)
   } catch(e){
     console.warn('[BinDash] sendEmail EXCEPTION:', String(e?.message||e))
   }
@@ -2277,13 +2292,31 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         <div class="field"><label>Email</label><input type="email" id="lead-em" placeholder="jane@example.com"></div>
         <div class="field"><label>Phone</label><input id="lead-ph" placeholder="(555) 000-0000"></div>
         <div class="sec-h" style="margin-top:4px">Service Preference</div>
-        <div class="radio-row" style="margin-bottom:12px">
-          <div class="r-opt on" onclick="rOpt(this)">♻️ Recycling</div>
-          <div class="r-opt" onclick="rOpt(this)">🗑️ General Waste</div>
-          <div class="r-opt" onclick="rOpt(this)">♻️+🗑️ Both</div>
+        <div class="radio-row" style="margin-bottom:8px" id="lead-svc-opts">
+          <div class="r-opt on" onclick="rOpt(this)" data-val="Recycling">♻️ Recycling</div>
+          <div class="r-opt" onclick="rOpt(this)" data-val="General Waste">🗑️ Waste</div>
+          <div class="r-opt" onclick="rOpt(this)" data-val="Both">♻️+🗑️ Both</div>
+          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='grid'" data-val="Split">📅 Split days</div>
+        </div>
+        <!-- Split day sub-fields — hidden until Split selected -->
+        <div id="lead-split-days" style="display:none;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div class="field" style="margin:0">
+            <label style="font-size:11px">♻️ Recycling day</label>
+            <select id="lead-day-recycling" style="font-size:13px">
+              <option>Monday</option><option>Tuesday</option><option selected>Wednesday</option>
+              <option>Thursday</option><option>Friday</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0">
+            <label style="font-size:11px">🗑️ Waste day</label>
+            <select id="lead-day-waste" style="font-size:13px">
+              <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+              <option selected>Thursday</option><option>Friday</option>
+            </select>
+          </div>
         </div>
         <div class="field">
-          <label>Preferred collection day</label>
+          <label>Preferred collection day <span style="color:var(--muted);font-size:10px">(single-bin service)</span></label>
           <select id="lead-day">
             <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
             <option selected>Thursday</option><option>Friday</option>
@@ -4177,6 +4210,12 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
                 <option value="">All Days</option>
                 <option>Sunday</option><option>Monday</option><option>Tuesday</option><option>Wednesday</option>
                 <option>Thursday</option><option>Friday</option><option>Saturday</option>
+              </select>
+              <!-- Visit type toggle — BIN_OUT default when pill selected -->
+              <select id="dispatch-visit-filter" style="font-size:11px;padding:3px 8px" onchange="window._livePipelineBatches=null;loadLiveJobsIntoPipeline()">
+                <option value="">🌙 Bin Out (default)</option>
+                <option value="BIN_IN">☀️ Bin In only</option>
+                <option value="all">All visit types</option>
               </select>
               <button onclick="loadLiveJobsIntoPipeline()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--muted);cursor:pointer">⟳ Refresh</button>
               <button onclick="sendDirectTestEmail()" title="Send Lee's Glendale route email directly — bypasses queue" style="background:none;border:1px solid rgba(245,158,11,.4);border-radius:6px;padding:4px 10px;font-size:11px;color:#f59e0b;cursor:pointer">✉ Test Email</button>
@@ -6464,7 +6503,13 @@ async function loadRunnerRoutes(runnerRow){
             }
             return `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>`
           })() : ''}
-          ${batch.status==='in_progress' ? `<button class="btn btn-cyan btn-sm" onclick="resumeBatch('${batch.id}')" style="min-height:48px;padding:10px 20px">↺ Resume Route</button>` : ''}
+          ${batch.status==='in_progress' ? (() => {
+            const _r = win ? getRouteLockState(batch.date, batch.stops.length) : {locked:false,state:'OPEN'}
+            if(_r.locked && _r.state === 'OVERDUE'){
+              return `<span style="background:rgba(239,68,68,.12);color:#ef4444;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700">⛔ Route Expired</span>`
+            }
+            return `<button class="btn btn-cyan btn-sm" onclick="resumeBatch('${batch.id}')" style="min-height:48px;padding:10px 20px">↺ Resume Route</button>`
+          })() : ''}
           <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600">$${earn}</span>
         </div>
       </div>`
@@ -6823,6 +6868,16 @@ async function resumeBatch(batchId){
       }
     }).filter(Boolean)
 
+    // Check if route is now overdue before allowing resume
+    const _scheduledDate = rawJobs[0]?.scheduled_date
+    if(_scheduledDate){
+      const _lock = getRouteLockState(_scheduledDate, rawJobs.length)
+      if(_lock.locked && _lock.state === 'OVERDUE'){
+        showToast('⛔ This route has expired — the service window has closed.', 'err', 5000)
+        return
+      }
+    }
+
     navBatchId     = batchId
     navVisitType   = rawJobs[0]?.visit_type || 'BIN_OUT'
     navRouteActive = true
@@ -6885,7 +6940,7 @@ async function startBatch(batchId){
   // Only enforce time locks on BIN_OUT routes (BIN_IN is morning, different rules)
   if(visitType === 'BIN_OUT' && effectiveDate){
     const lock = getRouteLockState(effectiveDate, effectiveCount)
-    if(lock.locked && lock.state === 'TOO_EARLY'){
+    if(lock.locked && (lock.state === 'TOO_EARLY' || lock.state === 'OVERDUE')){
       // Show a clear modal explaining why they can't start
       document.getElementById('modal-box').innerHTML = `
       <div class="mh" style="background:rgba(239,68,68,.07)">
@@ -7577,23 +7632,37 @@ async function doLogin(){
 // Signup
 let signupRole='hw'
 
-// ── H3 SPATIAL ENGINE ────────────────────────────────────────
-const H3_RESOLUTION = 8
+// ── H3 SPATIAL ENGINE ────────────────────────────────────────────────────────
+// Architecture:
+//   Res 6  — Service Cell (~36 sq km). One per zone. "Can this address subscribe?"
+//   Res 8  — Neighborhood Cell (~0.7 sq km). Groups houses into dispatch clusters.
+//   Res 9  — Block Cell (~0.1 sq km). Individual street-block precision.
+//
+// Flow:
+//   Signup → geocode address → latLngToCell(res=8) → store h3_index in DB
+//   Zone   → latLngToCell(res=6) → store zone_h3_res6 in zones table
+//   Dispatch → gridDisk(runnerHex, rings) → only offer stops within runner's hex cluster
+//   Runner   → assigned to a Res 6 cell → only gets offers within that parent cell
+// ─────────────────────────────────────────────────────────────────────────────
+
+const H3_RES_ZONE      = 6   // ~36 sq km — one per service zone
+const H3_RES_CLUSTER   = 8   // ~0.74 sq km — dispatch clustering
+const H3_RES_PRECISE   = 9   // ~0.1 sq km — individual address precision
+const H3_RESOLUTION    = H3_RES_CLUSTER  // default for backward compat
 const H3_ACTIVATION_THRESHOLD = 5
 const RUNNER_COVERAGE_RADIUS_KM = 8
 
 function latLngToHex(lat, lng, res = H3_RESOLUTION){
   if(typeof h3 === 'undefined'){ console.warn('[H3] h3-js not loaded'); return null }
-  return h3.latLngToCell(lat, lng, res)
+  try { return h3.latLngToCell(lat, lng, res) } catch(e){ return null }
 }
 function hexToLatLng(hexId){
   if(typeof h3 === 'undefined') return null
-  const [lat, lng] = h3.cellToLatLng(hexId)
-  return { lat, lng }
+  try { const [lat, lng] = h3.cellToLatLng(hexId); return { lat, lng } } catch(e){ return null }
 }
 function getHexBoundary(hexId){
   if(typeof h3 === 'undefined') return []
-  return h3.cellToBoundary(hexId) // [[lat,lng],...]
+  try { return h3.cellToBoundary(hexId) } catch(e){ return [] }
 }
 function getHexesInRadius(lat, lng, radiusKm){
   if(typeof h3 === 'undefined') return []
@@ -7601,6 +7670,94 @@ function getHexesInRadius(lat, lng, radiusKm){
   if(!center) return []
   const rings = Math.ceil(radiusKm / 1.2)
   return h3.gridDisk(center, rings)
+}
+
+// Get parent cell at coarser resolution
+// e.g. getParentHex(res8hex, 6) → the Res 6 zone cell containing that address
+function getParentHex(hexId, parentRes){
+  if(typeof h3 === 'undefined' || !hexId) return null
+  try { return h3.cellToParent(hexId, parentRes) } catch(e){ return null }
+}
+
+// Check if an address (by its Res 8 hex) is within a zone's Res 6 cell
+function isHexInZone(addressHex8, zoneHex6){
+  if(!addressHex8 || !zoneHex6) return false
+  try {
+    const parent = getParentHex(addressHex8, H3_RES_ZONE)
+    return parent === zoneHex6
+  } catch(e){ return false }
+}
+
+// Get all Res 8 hex cells within a Res 6 zone cell
+// Use this to find every address slot within a zone
+function getZoneHexClusters(zoneHex6){
+  if(typeof h3 === 'undefined' || !zoneHex6) return []
+  try {
+    // Each Res 6 cell contains ~343 Res 8 children
+    return h3.cellToChildren(zoneHex6, H3_RES_CLUSTER)
+  } catch(e){ return [] }
+}
+
+// Group homeowners by their Res 8 hex — enables per-cluster trash day assignment
+// Returns: { [hex8]: [ho, ho, ...], ... }
+function groupHOsByHexCluster(homeowners){
+  const clusters = {}
+  homeowners.forEach(ho => {
+    if(!ho.h3_index) return
+    const key = ho.h3_index  // already Res 8 from signup
+    if(!clusters[key]) clusters[key] = []
+    clusters[key].push(ho)
+  })
+  return clusters
+}
+
+// Compute a zone's Res 6 hex from its centroid lat/lng
+function computeZoneHex6(lat, lng){
+  return latLngToHex(lat, lng, H3_RES_ZONE)
+}
+
+// Assign h3_index to a homeowner address on signup
+// Called after geocoding — stores Res 8 index for dispatch clustering
+async function assignH3IndexToHO(email, lat, lng){
+  if(!lat || !lng || typeof h3 === 'undefined') return null
+  const hex8 = latLngToHex(lat, lng, H3_RES_CLUSTER)
+  const hex6 = getParentHex(hex8, H3_RES_ZONE)
+  if(!hex8) return null
+  try {
+    await _supa.from('homeowner_signups').update({
+      h3_index:     hex8,
+      h3_zone_res6: hex6,
+      lat, lng,
+      updated_at: new Date().toISOString(),
+    }).ilike('email', email)
+    console.log('[H3] Assigned', email, '→ Res8:', hex8, '| Res6 zone:', hex6)
+    return { hex8, hex6 }
+  } catch(e){ console.warn('[H3] assignH3IndexToHO:', e.message); return null }
+}
+
+// Runner zone containment check — ensure runner only gets offers within their hex zone
+// Prevents a Phoenix runner from getting Austin offers when we scale nationally
+function runnerCoversHex(runner, addressHex8){
+  if(!addressHex8) return true  // no hex data, fall through to existing logic
+  if(!runner.h3_zone_res6) return true  // runner has no hex zone, allow
+  return isHexInZone(addressHex8, runner.h3_zone_res6)
+}
+
+// Build trash-day hex groups for a zone — shows admin which hexes share a collection day
+// Returns: { Monday: [hex8, ...], Tuesday: [...], ... }
+function buildTrashDayHexMap(zoneId){
+  const result = {}
+  const zoneHOs = HOMEOWNERS.filter(h => h.zoneId === zoneId && h.h3_index)
+  zoneHOs.forEach(ho => {
+    const days = ho.service === 'SPLIT'
+      ? [ho.dayRecycling, ho.dayWaste].filter(Boolean)
+      : [ho.day].filter(Boolean)
+    days.forEach(day => {
+      if(!result[day]) result[day] = new Set()
+      result[day].add(ho.h3_index)
+    })
+  })
+  return Object.fromEntries(Object.entries(result).map(([d, s]) => [d, [...s]]))
 }
 
 // ZIP centroid lookup — instant, no API needed
@@ -7804,6 +7961,14 @@ async function _h3CheckAddress(){
   if(result?.lat && result.lat !== lat){
     _moveSignupPin(result.lat, result.lng, document.getElementById('h-addr')?.value?.trim() || 'Your address')
     _signupMap?.setView([result.lat, result.lng], 14, { animate: true })
+  }
+
+  // Cache geocoded coords for hSubmit to use when creating the DB record
+  if(result?.lat){
+    window._hwGeoLat   = result.lat
+    window._hwGeoLng   = result.lng
+    window._hwGeoHex8  = result.hexId  // Res 8 cluster
+    window._hwGeoHex6  = result.hexId ? getParentHex(result.hexId, H3_RES_ZONE) : null  // Res 6 zone
   }
 
   // Load zones + highlight user's own hex
@@ -8221,6 +8386,28 @@ async function _initAdminMap(){
     // Runner halos
     const runnersWithCoords = RUNNERS.filter(r => r.lat && r.lng && r.status !== 'INACTIVE')
     drawRunnerHalos(_adminMap, runnersWithCoords)
+
+    // Anchor homeowner markers — show the first geocoded HO in each zone as a star pin
+    mapZones.forEach(z => {
+      if(!z._zoneId) return
+      const zips = (ADMIN_ZONES.find(az=>az.id===z._zoneId)?.zips || [z.zip_code]).filter(Boolean)
+      const zoneHOs = HOMEOWNERS.filter(h => h.status==='active' && (h.zoneId===z._zoneId || zips.includes(h.zip)))
+      const anchors = zoneHOs.filter(h => h.lat && h.lng)
+      if(!anchors.length) return
+
+      // Show up to 6 HO markers per zone — star for anchor, dot for rest
+      anchors.slice(0, 6).forEach((ho, idx) => {
+        const isAnchor = idx === 0
+        const hoIcon = L.divIcon({
+          html: `<div style="width:${isAnchor?14:8}px;height:${isAnchor?14:8}px;background:${isAnchor?'#fbbf24':'#06d6a0'};border:2px solid #0f172a;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.5)">${isAnchor?'<span style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);font-size:10px">⭐</span>':''}</div>`,
+          className: '', iconAnchor: [isAnchor?7:4, isAnchor?7:4],
+        })
+        const name = ((ho.first_name||'')+' '+(ho.last_name||'')).trim() || ho.email?.split('@')[0] || 'HO'
+        L.marker([ho.lat, ho.lng], { icon: hoIcon })
+          .bindPopup(`<div style="font-size:12px"><b>${isAnchor?'⭐ Anchor: ':''} ${name}</b><br>${ho.address||ho.zip}<br><span style="color:#06d6a0">${z.zone_label}</span></div>`)
+          .addTo(_adminMap)
+      })
+    })
 
     // If no micro zones, show classic ADMIN_ZONES as circle markers
     if(!mapZones.length && ADMIN_ZONES.length){
@@ -9112,8 +9299,17 @@ async function submitLead(){
   const zip   = document.getElementById('h-zip')?.value.trim()   || ''
   const city  = document.getElementById('h-city')?.value.trim()  || ''
   const addr  = document.getElementById('h-addr')?.value.trim()  || ''
-  const day   = document.getElementById('lead-day')?.value       || ''
-  const svc   = document.querySelector('#h-lead .r-opt.on')?.textContent?.trim() || 'Recycling'
+
+  // Capture service type — check data-val attribute from selected r-opt
+  const svcEl = document.querySelector('#lead-svc-opts .r-opt.on')
+  const svcVal = svcEl?.dataset?.val || svcEl?.textContent?.trim() || 'Recycling'
+  const isSplit = svcVal === 'Split'
+
+  // Day(s) — split or single
+  const dayR  = document.getElementById('lead-day-recycling')?.value || 'Wednesday'
+  const dayW  = document.getElementById('lead-day-waste')?.value || 'Thursday'
+  const day   = isSplit ? null : (document.getElementById('lead-day')?.value || 'Thursday')
+  const serviceLabel = isSplit ? 'Split days — ♻️ '+dayR+' / 🗑️ '+dayW : svcVal
 
   if(!fn){ showToast('Please enter your name','err'); return }
   if(!em && !ph){ showToast('Please enter at least an email or phone number','err'); return }
@@ -9121,20 +9317,24 @@ async function submitLead(){
   const btn = document.querySelector('#h-lead .btn-cyan')
   if(btn){ btn.disabled=true; btn.textContent='Saving...' }
 
+  const email = em || (fn.toLowerCase().replace(/\s/g,'') + '+' + zip + '@lead.bindash')
+
   let saveErr = null
   try {
     const res = await _supa.from('homeowner_signups').insert({
       first_name:     fn,
       last_name:      ln || '',
-      email:          em || (fn.toLowerCase().replace(/\s/g,'') + '+' + zip + '@lead.'+'bindash'),
+      email:          email,
       phone:          ph || null,
       street_address: addr || null,
       city:           city || null,
       zip_code:       zip,
-      service_type:   svc,
+      service_type:   isSplit ? 'SPLIT' : svcVal,
       collection_day: day,
-      status:         'waitlisted',
-      is_lead:        true,         // marks as lean lead, not full signup
+      day_recycling:  isSplit ? dayR : null,
+      day_waste:      isSplit ? dayW : null,
+      status:         'pending_review',   // ← admin must review, not just waitlisted
+      is_lead:        true,
       created_at:     new Date().toISOString(),
     })
     saveErr = res?.error?.message || null
@@ -9145,7 +9345,7 @@ async function submitLead(){
     console.warn('[BinDash] Lead exception:', saveErr)
   }
 
-  if(btn){ btn.disabled=false; btn.textContent='✅ Save My Spot -- Notify Me' }
+  if(btn){ btn.disabled=false; btn.textContent='✅ Save My Spot — Notify Me' }
 
   // Always go to waitlist screen -- success or not
   const zipDisplay = document.getElementById('waitlist-zip-display')
@@ -9153,8 +9353,50 @@ async function submitLead(){
   go('S-hw-waitlist')
 
   if(!saveErr){
-    showToast('You\'re on the list for ZIP '+zip+' \uD83C\uDF89','ok')
-    if(em && !em.includes('@lead.'+'bindash')) sendEmail(em, 'You\'re on the BinDash list for ZIP '+zip, EMAIL.leadConfirm(fn||'there', zip), 'lead_confirm')
+    showToast('You\'re on the list for ZIP '+zip+' 🎉','ok')
+
+    // Email confirmation to homeowner
+    if(em && !em.includes('@lead.bindash')){
+      sendEmail(em, 'You\'re on the BinDash list for ZIP '+zip, EMAIL.leadConfirm(fn||'there', zip), 'lead_confirm')
+    }
+
+    // Alert admin so they can review — critical for expansion
+    const svcDisplay = isSplit ? 'Split: ♻️ '+dayR+' / 🗑️ '+dayW : serviceLabel
+    sendEmail('alpha1miller@gmail.com',
+      '🏠 New Homeowner Waitlist — ZIP '+zip+' ('+fn+' '+ln+')',
+      `<div style="font-family:sans-serif;padding:20px;max-width:520px">
+        <h2 style="color:#06d6a0;margin:0 0 16px">New Homeowner on Waitlist</h2>
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <tr><td style="padding:6px 0;color:#666">Name</td><td style="font-weight:600">${fn} ${ln}</td></tr>
+          <tr><td style="padding:6px 0;color:#666">Email</td><td>${em||'—'}</td></tr>
+          <tr><td style="padding:6px 0;color:#666">Phone</td><td>${ph||'—'}</td></tr>
+          <tr><td style="padding:6px 0;color:#666">Address</td><td>${addr||'—'}</td></tr>
+          <tr><td style="padding:6px 0;color:#666">ZIP</td><td style="font-weight:600">${zip}</td></tr>
+          <tr><td style="padding:6px 0;color:#666">Service</td><td style="color:#06d6a0;font-weight:600">${svcDisplay}</td></tr>
+          <tr><td style="padding:6px 0;color:#666">Status</td><td><strong>pending_review</strong> — needs admin approval</td></tr>
+        </table>
+        <div style="margin-top:16px;padding:12px;background:#f8fafc;border-radius:8px;font-size:12px;color:#666">
+          Review in Admin → Pending Applicants → Homeowners
+        </div>
+      </div>`,
+      'admin_lead_alert'
+    )
+
+    // Create zone request so it appears in admin Scout panel
+    try {
+      await _supa.from('runner_zone_requests').insert({
+        runner_name:  fn+' '+ln+' (Homeowner)',
+        runner_email: em || email,
+        zip_code:     zip,
+        zone_name:    'ZIP '+zip,
+        status:       'pending',
+        type:         'homeowner_waitlist',
+        notes:        `Homeowner waitlist: ${fn} ${ln}, ${svcDisplay}, ${addr||zip}`,
+        created_at:   new Date().toISOString(),
+      })
+      loadZoneWaitlistBadge?.()
+      loadRunnerZoneRequestsBadge?.()
+    } catch(e){ console.warn('[BinDash] Zone request from lead:', e) }
   }
 }
 
@@ -9282,6 +9524,11 @@ async function hSubmit(){
       card_expiry:       cardExp,
       referred_by_code:  document.getElementById('h-ref-code')?.value?.trim().toUpperCase() || null,
       referred_by_runner: window._hwReferralRunner?.id || null,
+      // H3 spatial indexing — enables hex-based dispatch and national scale routing
+      lat:               window._hwGeoLat  || null,
+      lng:               window._hwGeoLng  || null,
+      h3_index:          window._hwGeoHex8 || null,  // Res 8 — cluster-level precision
+      h3_zone_res6:      window._hwGeoHex6 || null,  // Res 6 — zone containment check
       status:            'pending_review',
       created_at:        new Date().toISOString(),
     })
@@ -18122,14 +18369,15 @@ function startRouteScheduler(){
     const hhmm = now.getHours() * 100 + now.getMinutes()
     const key  = now.toDateString()
 
-    // 9:00am — generate route drafts for admin review + refresh UI
-    // Actual sending handled by dispatch-scheduler edge function
+    // 9:00am — generate route drafts for admin review + trigger edge function
     if(hhmm >= 900 && hhmm < 902 && !window._lastSchedulerCheck['9am_'+key]){
       window._lastSchedulerCheck['9am_'+key] = true
-      console.log('[Scheduler] 9am — generating drafts, refreshing dispatch UI')
+      console.log('[Scheduler] 9am — generating drafts, triggering dispatch edge function')
       await autoGenerateDrafts()
       await loadLiveJobsIntoPipeline()
       renderDispatchPipeline()
+      // Auto-trigger edge function to send any approved/queued routes
+      try { await triggerDispatchEdgeFunction() } catch(e){ console.warn('[Scheduler] edge fn:', e.message) }
     }
 
     // 10:00am — in-app notification only if unapproved routes remain
@@ -19162,9 +19410,13 @@ async function _adGenerateBatchesAsync(silent=false){
     // ── TIER 3: Zone role hierarchy ───────────────────────────────
     // Unassigned HOs and fallbacks always go to Zone Lead first.
     // Lead → Zone Runner → Standby, load balanced within each tier.
+    // H3 containment: when runners have h3_zone_res6, only match within same Res 6 cell
+    // This prevents Phoenix runners from getting Austin offers as we scale nationally.
     const zoneRunners = RUNNERS.filter(r=>{
       if(r.status==='INACTIVE'||r.status==='OFF_DUTY') return false
       if(r.id===hw.assignedRunner) return false
+      // H3 geo containment check — only if both runner and HO have hex data
+      if(hw.h3_index && r.h3_zone_res6 && !runnerCoversHex(r, hw.h3_index)) return false
       return r.zoneId===hwZone || r.coverageZones?.includes(hwZone) ||
              r.zip===hwZip
     })
@@ -19898,16 +20150,24 @@ function renderDispatchPipeline(){
       +'</div>'
   }
 
-  // Merge suggestions
+  // Merge suggestions — only same visit type (BIN_OUT with BIN_OUT, BIN_IN with BIN_IN)
   const runnerBatches = {}
-  batches.forEach(b => { if(b.runner?.id){ if(!runnerBatches[b.runner.id]) runnerBatches[b.runner.id]=[]; runnerBatches[b.runner.id].push(b) } })
+  batches.forEach(b => {
+    if(b.runner?.id){
+      const key = b.runner.id + ':' + (b.visitType||b.type||'BIN_OUT')
+      if(!runnerBatches[key]) runnerBatches[key] = []
+      runnerBatches[key].push(b)
+    }
+  })
   const mergeSuggestions = Object.entries(runnerBatches).filter(([,bs])=>bs.length>1)
   const mergeHtml = mergeSuggestions.length ? `
   <div style="background:rgba(6,214,160,.07);border:1px solid rgba(6,214,160,.25);border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px">
     <span style="color:var(--cyan);font-weight:700">💡 Merge opportunity —</span>
-    ${mergeSuggestions.map(([,bs])=>{
+    ${mergeSuggestions.map(([key,bs])=>{
       const ids = bs.map(x=>x.id).join('|')
-      return '<span style="color:var(--sub)">'+bs[0].runner.name+' has '+bs.length+' routes ('+bs.reduce((s,b)=>s+b.stops.length,0)+' stops)</span> <button onclick="mergeBatches(\''+ids+'\')" style="margin-left:4px;background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:5px;padding:1px 8px;font-size:10px;cursor:pointer">Merge</button>'
+      const vt = key.split(':')[1]
+      const vtLabel = vt==='BIN_IN'?'☀️ Bin In':'🌙 Bin Out'
+      return '<span style="color:var(--sub)">'+bs[0].runner.name+' has '+bs.length+' '+vtLabel+' routes ('+bs.reduce((s,b)=>s+b.stops.length,0)+' stops)</span> <button onclick="mergeBatches(\''+ids+'\')" style="margin-left:4px;background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:5px;padding:1px 8px;font-size:10px;cursor:pointer">Merge</button>'
     }).join(' · ')}
   </div>` : ''
 
@@ -20299,6 +20559,9 @@ async function initDispatchPage(){
   if(!window._livePipelineBatches?.length && !generatedBatches.length){
     await _adGenerateBatchesAsync(true)
   }
+
+  // Auto-fire edge function if queued routes exist after 9am (catches overnight approvals)
+  _autoTriggerIfQueued().catch(e => console.warn('[BinDash] autoTrigger:', e.message))
 }
 
 // Load active (non-complete) jobs from Supabase for the selected day
@@ -20308,6 +20571,26 @@ async function initDispatchPage(){
 //   Thursday pill  → BIN_OUT jobs (scheduled_date = Thursday, labeled "BIN OUT for Friday collection")
 //   Friday pill    → BIN_IN jobs  (scheduled_date = Friday,   labeled "BIN IN for Friday collection")
 //   The label on each card says WHICH COLLECTION it serves, not when the job runs.
+// Called whenever admin opens dispatch — if post-9am and queued routes waiting, fire edge fn
+async function _autoTriggerIfQueued(){
+  const now = new Date()
+  const hhmm = now.getHours() * 100 + now.getMinutes()
+  if(hhmm < 900) return  // before 9am, don't trigger
+  const today = now.toISOString().slice(0,10)
+  const todayKey = '_autoTriggered_' + today
+  if(sessionStorage.getItem(todayKey)) return  // already triggered today
+  try {
+    const { data } = await _supa.from('dispatch_queue')
+      .select('id').eq('status','queued').gte('scheduled_date', today).limit(1)
+    if(data?.length){
+      sessionStorage.setItem(todayKey, '1')
+      console.log('[BinDash] Queued routes found post-9am — auto-triggering edge function')
+      showToast('📡 Dispatching queued routes...', 'info', 3000)
+      await triggerDispatchEdgeFunction()
+    }
+  } catch(e){ console.warn('[BinDash] _autoTriggerIfQueued:', e.message) }
+}
+
 async function loadLiveJobsIntoPipeline(){
   const dayFilterVal = document.getElementById('dispatch-day-filter')?.value || ''
   const dayPillVal   = document.getElementById('dispatch-day-val')?.value || ''
@@ -20356,6 +20639,18 @@ async function loadLiveJobsIntoPipeline(){
 
     if(!isPastDay){
       query = query.not('status', 'in', '("complete","cancelled")')
+    }
+
+    // When a specific pill day is selected, it represents the BIN_OUT night.
+    // Only show BIN_IN routes if the admin has explicitly selected BIN_IN view
+    // (indicated by visit_type filter or absence of specific day selection).
+    // This prevents BIN_IN routes from appearing in the Bin Out overnight view.
+    const visitTypeFilter = document.getElementById('dispatch-visit-filter')?.value || ''
+    if(effectiveDay && !visitTypeFilter){
+      // Pill day selected with no explicit visit type — default to BIN_OUT only
+      query = query.neq('visit_type', 'BIN_IN')
+    } else if(visitTypeFilter){
+      query = query.eq('visit_type', visitTypeFilter)
     }
 
     const { data: allJobs } = await query
@@ -24159,28 +24454,33 @@ async function renderRunnerZoneRequests(){
       }).join('')
     }
 
-    // Reviewed — compact with clear explanation
+    // Reviewed — collapsible to prevent infinite growth
     if(reviewed.length){
+      const reviewedId = 'scout-reviewed-list'
       html += `<div style="margin-top:20px">
-        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">
-          ✅ Reviewed (${reviewed.length})
-          <span style="font-size:10px;font-weight:400;margin-left:6px">— these flags were processed</span>
+        <div onclick="const el=document.getElementById('${reviewedId}');const chev=document.getElementById('${reviewedId}-chev');const vis=el.style.display!=='none';el.style.display=vis?'none':'block';chev.style.transform=vis?'':'rotate(180deg)'"
+          style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 12px;background:var(--surface2);border-radius:8px;user-select:none">
+          <span style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;flex:1">
+            ✅ Reviewed (${reviewed.length})
+          </span>
+          <span style="font-size:10px;color:var(--muted)">tap to expand</span>
+          <span id="${reviewedId}-chev" style="color:var(--muted);transition:transform .2s">▼</span>
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.5">
-          These are runner zone requests that were reviewed. "Approved" means a zone was created or the runner was added to the zone.
-        </div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          ${reviewed.slice(0,10).map(r=>`
-          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface2);border-radius:7px;font-size:12px">
-            <span style="font-size:14px">${r.status==='approved'?'✅':r.status==='reviewed'?'👁':'🚩'}</span>
-            <span style="font-weight:600">ZIP ${r.zip_code||'--'}</span>
-            <span style="color:var(--muted)">·</span>
-            <span>🚐 ${r.runner_name||r.runner_email||'Runner'}</span>
-            ${r.notes?`<span style="color:var(--muted);font-style:italic">"${r.notes.slice(0,30)}${r.notes.length>30?'...':''}"</span>`:''}
-            <span style="color:${r.status==='approved'?'#22c55e':'#6b7280'};font-size:10px;font-weight:700;margin-left:auto">${r.status}</span>
-            <span style="color:var(--muted);font-size:10px">${new Date(r.created_at).toLocaleDateString()}</span>
-          </div>`).join('')}
-          ${reviewed.length>10?`<div style="text-align:center;font-size:11px;color:var(--muted);padding:6px">+${reviewed.length-10} more</div>`:''}
+        <div id="${reviewedId}" style="display:none;margin-top:6px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px;padding:0 4px;line-height:1.5">
+            These flags were processed. "Approved" = a zone was created or runner was added.
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            ${reviewed.map(r=>`
+            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--surface2);border-radius:7px;font-size:11px">
+              <span>${r.status==='approved'?'✅':r.status==='reviewed'?'👁':'🚩'}</span>
+              <span style="font-weight:600">ZIP ${r.zip_code||'--'}</span>
+              <span style="color:var(--muted)">·</span>
+              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🚐 ${r.runner_name||r.runner_email||'Runner'}</span>
+              <span style="color:${r.status==='approved'?'#22c55e':'#6b7280'};font-size:10px;font-weight:700">${r.status}</span>
+              <span style="color:var(--muted);font-size:10px;flex-shrink:0">${new Date(r.created_at).toLocaleDateString()}</span>
+            </div>`).join('')}
+          </div>
         </div>
       </div>`
     }
