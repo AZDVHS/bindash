@@ -155,7 +155,7 @@ const _EXPECTED = {
 })()
 // ── TEST MODE: redirect all emails to admin ───────────────────────────────
 // Set to false when going live with real customers
-const EMAIL_TEST_MODE = true
+const EMAIL_TEST_MODE = false
 const EMAIL_TEST_ADMIN = 'alpha1miller@gmail.com'
 
 async function sendEmail(to, subject, html, type){
@@ -8302,215 +8302,293 @@ function _moveSignupPin(lat, lng, label){
 async function _initAdminMap(){
   await _loadMapLibs()
   const el = document.getElementById('mz-admin-map')
-  if(!el) return
+  if(!el){ console.warn('[Map] mz-admin-map element not found'); return }
 
-  try {
-    // Build map zones from ADMIN_ZONES, using real homeowner coords as anchor when available
-    const mapZones = ADMIN_ZONES.filter(z => z.status !== 'inactive').map(z => {
-      const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
-      const zip  = zips[0] || ''
+  console.log('[Map] _initAdminMap start — HOMEOWNERS:', HOMEOWNERS.length, 'RUNNERS:', RUNNERS.length)
 
-      // Priority: 1) geocoded homeowner address, 2) ZIP_CENTROIDS, 3) Phoenix fallback
-      const zoneHOs = HOMEOWNERS.filter(h => h.status==='active' && (h.zoneId===z.id || zips.includes(h.zip)))
-      const anchorHO = zoneHOs.find(h => h.lat && h.lng) || null
-      const zipCoords = ZIP_CENTROIDS[zip] || ZIP_CENTROIDS[zips.find(zp => ZIP_CENTROIDS[zp])] || [33.5387, -112.1860]
-      const lat = anchorHO?.lat || zipCoords[0]
-      const lng = anchorHO?.lng || zipCoords[1]
+  // ── BUILD homeownerData — source of truth for map ──────────────────────────
+  // Indexed by H3 hex (Res 9). Each hex holds one or more HOs.
+  window.homeownerData = {}
+  const activeHOs = HOMEOWNERS.filter(h => h.status === 'active' && h.lat && h.lng)
+  console.log('[Map] Active HOs with coords:', activeHOs.length)
 
-      return {
-        hex_id: null,
-        status: z.status === 'live' ? 'active' : 'pending',
-        member_count: zoneHOs.length,
-        waitlist_count: 0,
-        activation_threshold: z.threshold || 5,
-        zip_code: zip, city: z.name, zone_label: z.name,
-        trash_day: (z.collection||[]).join(', '),
-        lat, lng,
-        _zoneId: z.id,
-      }
-    })
-
-    const anchor = mapZones.find(z => z.lat && z.lng) || { lat: 33.5387, lng: -112.1860 }
-
-    if(!_adminMap){
-      _adminMap = L.map('mz-admin-map', {
-        center:      [anchor.lat, anchor.lng],
-        zoom:        11,
-        zoomControl: true,
-        attributionControl: false,
-      })
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19, subdomains: 'abcd',
-      }).addTo(_adminMap)
-      L.control.attribution({ prefix: '© CartoDB' }).addTo(_adminMap)
-    } else {
-      _adminHexLayers.forEach(l => _adminMap.removeLayer(l))
-      _adminHexLayers = []
-    }
-
-    // Check if H3 is loaded before entering the loop
-    const h3Ready = typeof h3 !== 'undefined'
-
-    // Draw a circle cluster for each zone (H3 hex needs lat/lng which we have)
-    mapZones.forEach(z => {
-      if(!z.lat || !z.lng) return
-      const col = hexColor(z.status, z.member_count, z.activation_threshold)
-
-      if(h3Ready){
-        const centerHex = latLngToHex(z.lat, z.lng)
-        if(centerHex){
-          // Draw coverage circle (always visible at any zoom)
-          const coverageCircle = L.circle([z.lat, z.lng], {
-            radius: 2200, // ~2.2km ≈ 3 hex rings
-            color: col.fill, fillColor: col.fill,
-            fillOpacity: col.opacity * 0.35,
-            weight: 1.5, opacity: 0.6,
-            dashArray: z.status === 'pending' ? '6 4' : null,
-          }).addTo(_adminMap)
-          _adminHexLayers.push(coverageCircle)
-
-          // Draw individual hex cells (visible when zoomed in)
-          const hexes = h3.gridDisk(centerHex, 2)
-          hexes.forEach(hex => {
-            try {
-              const boundary = h3.cellToBoundary(hex)
-              const poly = L.polygon(boundary, {
-                color: col.fill, fillColor: col.fill,
-                fillOpacity: col.opacity * 0.8,
-                weight: 1, opacity: 0.7,
-              })
-              const needed = Math.max(0, z.activation_threshold - z.member_count)
-              const statusDot = z.status==='active' ? '🟢' : '🟡'
-              const rnCount = RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===z._zoneId||[z.zip_code].includes(r.zip))).length
-              poly.bindPopup(`<div style="font-family:system-ui;min-width:200px;max-width:240px">
-                <div style="font-weight:700;font-size:14px;margin-bottom:6px">${statusDot} ${z.zone_label}</div>
-                <div style="font-size:11px;color:#888;margin-bottom:8px">ZIP ${z.zip_code} · ${z.trash_day||'No collection day'}</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:10px">
-                  <div style="background:#f8fafc;border-radius:6px;padding:6px;text-align:center">
-                    <div style="font-weight:700;font-size:16px;color:#06d6a0">${z.member_count}</div>
-                    <div style="font-size:9px;color:#999">HOs</div>
-                  </div>
-                  <div style="background:#f8fafc;border-radius:6px;padding:6px;text-align:center">
-                    <div style="font-weight:700;font-size:16px;color:#a5b4fc">${rnCount}</div>
-                    <div style="font-size:9px;color:#999">Runners</div>
-                  </div>
-                  <div style="background:#f8fafc;border-radius:6px;padding:6px;text-align:center">
-                    <div style="font-weight:700;font-size:16px;color:${needed>0?'#f59e0b':'#22c55e'}">${needed>0?needed+'⬆':'✓'}</div>
-                    <div style="font-size:9px;color:#999">${needed>0?'to go':'Ready'}</div>
-                  </div>
-                </div>
-                ${z.status==='active'
-                  ? '<div style="color:#22c55e;font-size:11px;font-weight:600;margin-bottom:8px">✅ Service active — dispatch running</div>'
-                  : '<div style="color:#f59e0b;font-size:11px;margin-bottom:8px">⏳ Building to threshold</div>'}
-                <button onclick="adNav(null,'ad-zones')" style="width:100%;padding:5px 0;background:#0f172a;border:1px solid #334155;border-radius:5px;color:#94a3b8;font-size:11px;cursor:pointer;margin-bottom:4px">📋 View in Zones tab</button>
-                ${z.status!=='active'
-                  ? `<button onclick="showCreateZone({zip:'${z.zip_code}',city:'${z.city}',status:'live',hwCount:${z.member_count}})" style="width:100%;padding:5px 0;background:#06d6a0;border:none;border-radius:5px;color:#0f172a;font-size:11px;font-weight:700;cursor:pointer">⚡ Activate Zone →</button>`
-                  : ''}
-              </div>`, {maxWidth:260})
-              poly.addTo(_adminMap)
-              _adminHexLayers.push(poly)
-            } catch(e){}
-          })
-
-          // Zone label at center (always visible)
-          try {
-            const labelIcon = L.divIcon({
-              html: '<div style="background:'+col.fill+';color:#0f172a;font-size:10px;font-weight:800;padding:2px 8px;border-radius:99px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.5);cursor:pointer">'+z.zone_label.replace('AZ-','').replace(/-\d+$/,'')+'</div>',
-              className: '', iconAnchor: [40, 10],
-            })
-            const lm = L.marker([z.lat, z.lng], { icon: labelIcon })
-            lm.addTo(_adminMap)
-            _adminHexLayers.push(lm)
-          } catch(e){}
+  activeHOs.forEach(ho => {
+    try {
+      const hex9 = (typeof h3 !== 'undefined' && h3.latLngToCell)
+        ? h3.latLngToCell(ho.lat, ho.lng, 9)
+        : null
+      const zoneObj = ADMIN_ZONES.find(z => z.id === ho.zoneId)
+      const runner  = RUNNERS.find(r => r.id === ho.assignedRunner || r.name === ho.assignedRunner)
+      const key = hex9 || `${ho.lat.toFixed(5)},${ho.lng.toFixed(5)}`
+      if(!window.homeownerData[key]){
+        window.homeownerData[key] = {
+          h3Index:   hex9,
+          lat:       ho.lat,
+          lng:       ho.lng,
+          status:    zoneObj?.status === 'live' ? 'active' : zoneObj?.status === 'waitlist' ? 'waitlist' : 'no activity',
+          zone:      zoneObj || null,
+          runnerId:  runner?.id || ho.assignedRunner || null,
+          runnerName:runner?.name || null,
+          homeowners:[],
+          poly:      null,   // Leaflet polygon ref — set after draw
         }
-      } else {
-        // Fallback: simple circle
-        const circle = L.circle([z.lat, z.lng], {
-          radius: 2000, color: col.fill, fillColor: col.fill, fillOpacity: col.opacity, weight: 2,
-        }).bindPopup(`<b>${z.zone_label}</b><br>${z.member_count} HOs`).addTo(_adminMap)
-        _adminHexLayers.push(circle)
       }
-    })
-
-    // Runner halos
-    const runnersWithCoords = RUNNERS.filter(r => r.lat && r.lng && r.status !== 'INACTIVE')
-    drawRunnerHalos(_adminMap, runnersWithCoords)
-
-    // Anchor homeowner markers — show the first geocoded HO in each zone as a star pin
-    mapZones.forEach(z => {
-      if(!z._zoneId) return
-      const zips = (ADMIN_ZONES.find(az=>az.id===z._zoneId)?.zips || [z.zip_code]).filter(Boolean)
-      const zoneHOs = HOMEOWNERS.filter(h => h.status==='active' && (h.zoneId===z._zoneId || zips.includes(h.zip)))
-      const anchors = zoneHOs.filter(h => h.lat && h.lng)
-      if(!anchors.length) return
-
-      // Show up to 6 HO markers per zone — star for anchor, dot for rest
-      anchors.slice(0, 6).forEach((ho, idx) => {
-        const isAnchor = idx === 0
-        const hoIcon = L.divIcon({
-          html: `<div style="width:${isAnchor?14:8}px;height:${isAnchor?14:8}px;background:${isAnchor?'#fbbf24':'#06d6a0'};border:2px solid #0f172a;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.5)">${isAnchor?'<span style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);font-size:10px">⭐</span>':''}</div>`,
-          className: '', iconAnchor: [isAnchor?7:4, isAnchor?7:4],
-        })
-        const name = ((ho.first_name||'')+' '+(ho.last_name||'')).trim() || ho.email?.split('@')[0] || 'HO'
-        L.marker([ho.lat, ho.lng], { icon: hoIcon })
-          .bindPopup(`<div style="font-size:12px"><b>${isAnchor?'⭐ Anchor: ':''} ${name}</b><br>${ho.address||ho.zip}<br><span style="color:#06d6a0">${z.zone_label}</span></div>`)
-          .addTo(_adminMap)
+      window.homeownerData[key].homeowners.push({
+        name:    ((ho.first_name||'')+' '+(ho.last_name||'')).trim() || ho.email?.split('@')[0] || '--',
+        email:   ho.email,
+        address: ho.street_address || ho.address || '--',
+        zip:     ho.zip || '',
+        service: ho.service || 'Recycling',
+        day:     ho.day || '--',
       })
-    })
+    } catch(e){ console.warn('[Map] homeownerData build error:', e.message) }
+  })
+  console.log('[Map] homeownerData built:', Object.keys(window.homeownerData).length, 'hex cells')
 
-    // If no micro zones, show classic ADMIN_ZONES as circle markers
-    if(!mapZones.length && ADMIN_ZONES.length){
-      ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
-        const lat = z.lat || 33.5387; const lng = z.lng || -112.1860
-        L.circleMarker([lat, lng], {
-          radius:14, color: z.status==='live'?'#22c55e':'#f59e0b',
-          fillColor: z.status==='live'?'#22c55e':'#f59e0b',
-          fillOpacity:0.4, weight:2,
-        }).bindPopup(`<b>${z.name}</b><br>ZIP ${z.zip}<br>${z.homeowners||0} HOs · ${z.status}`).addTo(_adminMap)
-      })
+  // ── ZONE STYLE ─────────────────────────────────────────────────────────────
+  function getZoneStyle(status, assigned){
+    const s = {
+      active:      { color:'#2ecc71', fillColor:'#2ecc71', fillOpacity:.18, weight:1.5, opacity:.9 },
+      waitlist:    { color:'#f1c40f', fillColor:'#f1c40f', fillOpacity:.13, weight:1.5, opacity:.85 },
+      'no activity':{ color:'#95a5a6', fillColor:'#95a5a6', fillOpacity:.09, weight:1,   opacity:.6 },
     }
-
-    // ZIP-based zones (temp) — show as circle markers at centroid
-    mapZones.filter(z => z.hex_id?.startsWith('zip-') && z.lat && z.lng).forEach(z => {
-      const total = (z.member_count||0) + (z.waitlist_count||0)
-      const col   = hexColor(z.status, total, z.activation_threshold||5)
-      L.circleMarker([z.lat, z.lng], {
-        radius: 14, color: col.fill, fillColor: col.fill,
-        fillOpacity: col.opacity, weight: 2,
-      }).bindPopup(`
-        <div style="font-family:system-ui;min-width:140px">
-          <div style="font-weight:700">ZIP ${z.zip_code}</div>
-          <div style="font-size:11px;color:#999;margin-bottom:4px">Temp zone (needs geocoding)</div>
-          <div style="font-size:12px">${total} signups · ${z.status}</div>
-        </div>`).addTo(_adminMap)
-    })
-
-    setTimeout(() => {
-      _adminMap.invalidateSize()
-      if(_adminHexLayers.length > 0){
-        try {
-          const group = L.featureGroup(_adminHexLayers)
-          _adminMap.fitBounds(group.getBounds().pad(0.15))
-        } catch(e){}
-      }
-    }, 150)
-
-    // If H3 wasn't loaded yet, retry in 2 seconds to get hex polygons
-    if(!h3Ready){
-      setTimeout(() => {
-        if(typeof h3 !== 'undefined'){
-          _adminHexLayers.forEach(l => _adminMap.removeLayer(l))
-          _adminHexLayers = []
-          _initAdminMap()
-        }
-      }, 2000)
-    }
-
-  } catch(e){
-    console.warn('[H3 Map] admin map error:', e.message)
-    document.getElementById('mz-admin-map').innerHTML =
-      '<div style="padding:20px;color:#ef4444;font-size:12px">Map error: ' + e.message + ' — micro_zones table may not exist yet</div>'
+    const base = s[status] || s['no activity']
+    // Runner assigned → boost fill slightly
+    if(assigned) base.fillOpacity = Math.min(.32, base.fillOpacity + .08)
+    return base
   }
+
+  // ── MAP INIT ───────────────────────────────────────────────────────────────
+  // Default center: first HO with coords, else Glendale AZ
+  const firstHO = activeHOs[0]
+  const defLat  = firstHO?.lat || 33.5387
+  const defLng  = firstHO?.lng || -112.186
+
+  if(!window._adminMap){
+    console.log('[Map] Creating new Leaflet map instance')
+    window._adminMap = L.map('mz-admin-map', {
+      center: [defLat, defLng],
+      zoom:   12,
+      zoomControl: true,
+      attributionControl: true,
+    })
+    // CartoDB dark tiles — proven to work without black screen
+    L.tileLayer(
+      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      { attribution:'© <a href="https://carto.com/">CARTO</a>', subdomains:'abcd', maxZoom:20 }
+    ).addTo(window._adminMap)
+    console.log('[Map] Leaflet map + CartoDB dark tiles initialised')
+  } else {
+    console.log('[Map] Reusing existing map instance — clearing layers')
+    ;(window._adminHexLayers || []).forEach(l => { try { window._adminMap.removeLayer(l) } catch(e){} })
+  }
+  window._adminHexLayers = []
+
+  // Critical: force size recalc after any display:none → display:block transition
+  setTimeout(() => {
+    window._adminMap.invalidateSize()
+    console.log('[Map] invalidateSize() called')
+  }, 120)
+
+  const h3Ready = typeof h3 !== 'undefined' && typeof h3.latLngToCell === 'function'
+  console.log('[Map] H3 ready:', h3Ready)
+
+  // ── DRAW HOMEOWNER HEX CELLS ───────────────────────────────────────────────
+  const allBounds = []
+
+  Object.entries(window.homeownerData).forEach(([key, cell]) => {
+    try {
+      if(!h3Ready || !cell.h3Index){
+        // Fallback: plain circle marker
+        const circle = L.circleMarker([cell.lat, cell.lng], {
+          radius:10, ...getZoneStyle(cell.status, !!cell.runnerId)
+        })
+        _bindHexPopup(circle, cell, key)
+        circle.addTo(window._adminMap)
+        window._adminHexLayers.push(circle)
+        allBounds.push([cell.lat, cell.lng])
+        return
+      }
+
+      // Draw anchor hex + 1-ring halo at Res 9
+      const hexRing = h3.gridDisk(cell.h3Index, 1)
+      console.log('[Map] Drawing', hexRing.length, 'hexes for cell', key.slice(0,14))
+
+      hexRing.forEach(hex => {
+        const isAnchor = hex === cell.h3Index
+        const boundary = h3.cellToBoundary(hex)  // returns [[lat,lng],...] in h3-js v4
+        const latlngs  = boundary.map(([lt, ln]) => [lt, ln])
+
+        const style = {
+          ...getZoneStyle(cell.status, !!cell.runnerId),
+          fillOpacity: isAnchor
+            ? getZoneStyle(cell.status, !!cell.runnerId).fillOpacity + .15
+            : getZoneStyle(cell.status, !!cell.runnerId).fillOpacity * .5,
+          weight: isAnchor ? 2 : 0.8,
+        }
+
+        const poly = L.polygon(latlngs, style)
+        if(isAnchor){
+          cell.poly = poly  // store anchor poly for assignRunner() updates
+          _bindHexPopup(poly, cell, key)
+          allBounds.push(...latlngs)
+        }
+        poly.addTo(window._adminMap)
+        window._adminHexLayers.push(poly)
+      })
+    } catch(e){ console.warn('[Map] Hex draw error:', e.message) }
+  })
+
+  // ── ANCHOR HOMEOWNER MARKERS ───────────────────────────────────────────────
+  Object.values(window.homeownerData).forEach(cell => {
+    const style = getZoneStyle(cell.status, !!cell.runnerId)
+    const runnerBadge = cell.runnerName
+      ? `<div style="width:20px;height:20px;background:#06d6a0;border:2px solid #0f172a;border-radius:50%;position:absolute;bottom:-4px;right:-4px;font-size:9px;display:flex;align-items:center;justify-content:center">🚐</div>`
+      : ''
+    const icon = L.divIcon({
+      html: `<div style="position:relative;width:22px;height:22px">
+        <div style="width:22px;height:22px;background:${style.color};border:2.5px solid #0f172a;border-radius:50%;box-shadow:0 2px 8px ${style.color}60;display:flex;align-items:center;justify-content:center;font-size:11px">⭐</div>
+        ${runnerBadge}
+      </div>`,
+      className: '', iconAnchor: [11, 11],
+    })
+    const marker = L.marker([cell.lat, cell.lng], { icon })
+    _bindHexPopup(marker, cell, 'marker:'+cell.h3Index)
+    marker.addTo(window._adminMap)
+    window._adminHexLayers.push(marker)
+  })
+
+  // ── ZONE FALLBACK — zones without geocoded HOs ─────────────────────────────
+  ADMIN_ZONES.filter(z => z.status !== 'inactive').forEach(z => {
+    const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
+    const zip  = zips[0] || ''
+    const hasHO = Object.values(window.homeownerData).some(c => c.zone?.id === z.id)
+    if(hasHO) return  // already drawn via HO data
+
+    const zipCoords = ZIP_CENTROIDS?.[zip] || ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])] || null
+    if(!zipCoords) return
+    const [lat, lng] = zipCoords
+    const st = z.status === 'live' ? 'active' : z.status === 'waitlist' ? 'waitlist' : 'no activity'
+    const style = getZoneStyle(st, false)
+    console.log('[Map] Zone fallback circle:', z.name, zip)
+    const circle = L.circle([lat, lng], {
+      radius: 1800,
+      color: style.color, fillColor: style.fillColor, fillOpacity: style.fillOpacity * .8,
+      weight: 1.5, dashArray: '5 4',
+    }).bindPopup(`<div style="font-family:system-ui;color:#0f172a"><b>${z.name}</b><br>ZIP ${zip}<br>${z.homeowners||0} HOs — no geocoded addresses yet</div>`)
+    circle.addTo(window._adminMap)
+    window._adminHexLayers.push(circle)
+    allBounds.push([lat, lng])
+  })
+
+  // ── FIT BOUNDS ─────────────────────────────────────────────────────────────
+  if(allBounds.length){
+    try {
+      window._adminMap.fitBounds(allBounds, { padding:[30,30], maxZoom:15, animate:true })
+      console.log('[Map] fitBounds to', allBounds.length, 'points')
+    } catch(e){ window._adminMap.setView([defLat, defLng], 12) }
+  } else {
+    window._adminMap.setView([defLat, defLng], 12)
+  }
+
+  // Ensure tiles load after fitBounds
+  setTimeout(() => { window._adminMap.invalidateSize(); console.log('[Map] Final invalidateSize') }, 400)
+
+  console.log('[Map] Render complete ✅')
+}
+
+// ── assignRunner — update hex colour when runner assigned ──────────────────
+// Call: assignRunner(h3Index, runnerName, runnerId)
+function assignRunner(h3Index, runnerName, runnerId){
+  if(!window.homeownerData) return
+  const cell = Object.values(window.homeownerData).find(c => c.h3Index === h3Index)
+  if(!cell){ console.warn('[assignRunner] No cell for hex', h3Index); return }
+
+  cell.runnerName = runnerName
+  cell.runnerId   = runnerId
+
+  // Re-colour the anchor polygon
+  if(cell.poly){
+    const style = getZoneStyleGlobal(cell.status, true)
+    cell.poly.setStyle(style)
+    console.log('[assignRunner] Updated hex colour for', h3Index, '→', runnerName)
+  }
+
+  // Persist to Supabase homeowner_signups
+  cell.homeowners.forEach(ho => {
+    _supa.from('homeowner_signups')
+      .update({ assigned_runner: runnerId, updated_at: new Date().toISOString() })
+      .ilike('email', ho.email)
+      .catch(e => console.warn('[assignRunner] DB update:', e.message))
+  })
+
+  showToast(`🚐 ${runnerName} assigned to ${cell.homeowners.length} stop${cell.homeowners.length!==1?'s':''}`, 'ok', 4000)
+}
+
+// Global getZoneStyle (needed by assignRunner outside _initAdminMap scope)
+function getZoneStyleGlobal(status, assigned){
+  const s = {
+    active:        { color:'#2ecc71', fillColor:'#2ecc71', fillOpacity:.18, weight:1.5, opacity:.9 },
+    waitlist:      { color:'#f1c40f', fillColor:'#f1c40f', fillOpacity:.13, weight:1.5, opacity:.85 },
+    'no activity': { color:'#95a5a6', fillColor:'#95a5a6', fillOpacity:.09, weight:1,   opacity:.6 },
+  }
+  const base = { ...(s[status] || s['no activity']) }
+  if(assigned) base.fillOpacity = Math.min(.32, base.fillOpacity + .08)
+  return base
+}
+
+// ── Hex popup builder ──────────────────────────────────────────────────────
+function _bindHexPopup(layer, cell, key){
+  const style = getZoneStyleGlobal(cell.status, !!cell.runnerId)
+  const statusDot = cell.status === 'active' ? '#2ecc71' : cell.status === 'waitlist' ? '#f1c40f' : '#95a5a6'
+  const hos = cell.homeowners || []
+
+  // Runner options for dropdown
+  const runnerOpts = RUNNERS
+    .filter(r => r.status !== 'INACTIVE')
+    .map(r => `<option value="${r.id}" data-name="${r.name}">${r.name}</option>`)
+    .join('')
+
+  const popupHtml = `
+  <div style="font-family:system-ui;min-width:220px;max-width:260px;color:#0f172a">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <div style="width:10px;height:10px;border-radius:50%;background:${statusDot};flex-shrink:0"></div>
+      <div style="font-weight:700;font-size:13px;text-transform:capitalize">${cell.status}</div>
+      ${cell.runnerName ? `<div style="margin-left:auto;background:rgba(6,214,160,.1);color:#059669;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px">🚐 ${cell.runnerName}</div>` : ''}
+    </div>
+    ${cell.zone ? `<div style="font-size:11px;color:#64748b;margin-bottom:8px">📍 ${cell.zone.name}</div>` : ''}
+    <div style="font-size:11px;font-family:monospace;color:#94a3b8;margin-bottom:10px;word-break:break-all">${cell.h3Index||'no H3 index'}</div>
+    ${hos.length ? `
+    <div style="border-top:1px solid #e2e8f0;padding-top:8px;margin-bottom:8px">
+      ${hos.slice(0,3).map(h=>`
+      <div style="display:flex;flex-direction:column;gap:1px;padding:4px 0;border-bottom:1px solid #f1f5f9">
+        <div style="font-size:12px;font-weight:600">${h.name}</div>
+        <div style="font-size:10px;color:#94a3b8">${h.address}${h.zip?' · '+h.zip:''}</div>
+        <div style="font-size:10px;color:#64748b">${h.service}${h.day&&h.day!=='--'?' · '+h.day:''}</div>
+      </div>`).join('')}
+      ${hos.length>3?`<div style="font-size:10px;color:#94a3b8;padding-top:4px">+${hos.length-3} more homeowners</div>`:''}
+    </div>` : '<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">No homeowners with coordinates</div>'}
+    ${runnerOpts ? `
+    <div style="border-top:1px solid #e2e8f0;padding-top:8px">
+      <div style="font-size:10px;font-weight:600;color:#475569;margin-bottom:5px;text-transform:uppercase;letter-spacing:.06em">Assign Runner</div>
+      <div style="display:flex;gap:6px">
+        <select id="assign-runner-sel-${key}" style="flex:1;font-size:11px;padding:4px 6px;border:1px solid #e2e8f0;border-radius:5px;background:#fff;min-width:0">
+          <option value="">-- Select runner --</option>
+          ${runnerOpts}
+        </select>
+        <button onclick="(()=>{
+          const sel=document.getElementById('assign-runner-sel-${key}');
+          const rid=sel.value;
+          const rname=sel.options[sel.selectedIndex]?.dataset?.name||'';
+          if(!rid){return;}
+          assignRunner('${cell.h3Index}',rname,rid);
+          window._adminMap?.closePopup?.();
+        })()" style="padding:4px 10px;background:#06d6a0;border:none;border-radius:5px;color:#0f172a;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">Assign</button>
+      </div>
+    </div>` : '<div style="font-size:10px;color:#94a3b8">No active runners in system</div>'}
+  </div>`
+
+  layer.bindPopup(popupHtml, { maxWidth: 280 })
 }
 
 function showMicroZoneDetail(z){
@@ -8707,7 +8785,10 @@ function mzSetView(view){
     if(listWrap) listWrap.style.display = 'none'
     if(btnMap){  btnMap.style.background='rgba(6,214,160,.15)';  btnMap.style.color='#06d6a0';  btnMap.style.borderColor='rgba(6,214,160,.4)' }
     if(btnList){ btnList.style.background='transparent'; btnList.style.color='var(--muted)'; btnList.style.borderColor='var(--border)' }
-    setTimeout(() => _adminMap?.invalidateSize(), 50)
+    // Multiple invalidateSize calls — display:none → block needs time to recalc
+    setTimeout(() => window._adminMap?.invalidateSize(), 50)
+    setTimeout(() => window._adminMap?.invalidateSize(), 200)
+    setTimeout(() => window._adminMap?.invalidateSize(), 500)
   } else {
     if(mapWrap)  mapWrap.style.display  = 'none'
     if(listWrap) listWrap.style.display = 'flex'
@@ -10629,7 +10710,16 @@ function adNav(el, pg){
   const titleEl = document.getElementById('ad-pg-title')
   if(titleEl) titleEl.textContent = t[pg] || pg
   if(pg === 'ad-overview')   { updateOverviewCounts(); renderDensityAlerts() }
-  if(pg === 'ad-zones')      renderAdminZones()
+  if(pg === 'ad-zones'){
+    renderAdminZones()
+    // If micro zones map is visible, force re-render after nav transition
+    setTimeout(() => {
+      const hexPanel = document.getElementById('micro-zones-panel')
+      if(hexPanel && hexPanel.style.display !== 'none'){
+        window._adminMap?.invalidateSize()
+      }
+    }, 300)
+  }
   if(pg === 'ad-runners')    setTimeout(renderRunnerList, 50)
   if(pg === 'ad-payments')   setTimeout(renderPaymentsPage, 50)
   if(pg === 'ad-dispatch')   setTimeout(initDispatchPage, 50)
