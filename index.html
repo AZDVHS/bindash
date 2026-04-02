@@ -6411,10 +6411,23 @@ async function loadRunnerRoutes(runnerRow){
       if((rank[j.status]||0) > (rank[batches[key].status]||0)) batches[key].status = j.status
     })
 
-    // Store batches globally so startBatch can use stops immediately
-    window._rnBatchMap = batches
+    // Deduplicate: if runner has multiple batches for same date+visitType,
+    // keep only the highest-status one (in_progress > accepted > offered)
+    // This prevents showing stale routes after an admin reroute
+    const deduped = {}
+    Object.values(batches).forEach(b => {
+      const slotKey = (b.date||'no-date') + ':' + (b.type||'BIN_OUT')
+      const rank = {in_progress:4, accepted:3, scheduled:2, offered:1}
+      const existing = deduped[slotKey]
+      if(!existing || (rank[b.status]||0) > (rank[existing.status]||0)){
+        deduped[slotKey] = b
+      }
+    })
 
-    const batchCards = Object.values(batches).map(batch => {
+    // Store batches globally so startBatch can use stops immediately
+    window._rnBatchMap = deduped
+
+    const batchCards = Object.values(deduped).map(batch => {
       const earn = (batch.stops.length * 3.25).toFixed(2)
       const addrs = batch.stops.map(s=>encodeURIComponent((s.hw?.street_address||'')+', '+(s.hw?.zip_code||''))).filter(Boolean)
       const mapsUrl = addrs.length
@@ -6699,7 +6712,6 @@ async function acceptOffer(){
   const btn = document.querySelector('#offer-banner .btn-cyan')
   if(btn){ btn.disabled=true; btn.textContent='Accepting...' }
 
-  // Check scheduled date lock before accepting
   const offerJobs = (window._lastEnrichedJobs||[]).filter(j=>(j.batch_id||j.id)===offerId)
   const scheduledDate = offerJobs[0]?.scheduled_date || null
   const stopCount = offerJobs.length || 1
@@ -6715,29 +6727,66 @@ async function acceptOffer(){
   }
 
   try {
-    // First check if another runner already accepted
+    // 1. Check current DB state of this batch
     const { data: currentJobs } = await _supa.from('jobs')
-      .select('status, runner_id')
+      .select('status, runner_id, scheduled_date, visit_type')
       .eq('batch_id', offerId)
-      .limit(1)
+      .limit(5)
 
-    const currentStatus = currentJobs?.[0]?.status
-    const takenByOther  = ['accepted','in_progress','complete'].includes(currentStatus) &&
-                          currentJobs[0]?.runner_id && currentJobs[0].runner_id !== runnerRow.id
+    const currentStatus   = currentJobs?.[0]?.status
+    const currentRunnerId = currentJobs?.[0]?.runner_id
 
-    if(takenByOther){
+    // Block if taken by a DIFFERENT runner
+    if(['accepted','in_progress','complete'].includes(currentStatus) &&
+        currentRunnerId && currentRunnerId !== runnerRow.id){
       showToast('This route was already accepted by another runner', 'err', 4000)
       document.getElementById('offer-banner').style.display = 'none'
       if(btn){ btn.disabled=false; btn.textContent='✓ Accept' }
       return
     }
+
+    // Block double-tap by SAME runner
+    if(['accepted','in_progress'].includes(currentStatus) && currentRunnerId === runnerRow.id){
+      showToast('You already accepted this route — check My Routes below', 'info', 4000)
+      document.getElementById('offer-banner').style.display = 'none'
+      clearInterval(window._offerCountdownTimer)
+      if(btn){ btn.disabled=false; btn.textContent='✓ Accept' }
+      await loadRunnerRoutes(runnerRow)
+      return
+    }
+
+    // 2. Cancel any stale active route this runner has for the same date+type
+    // (happens when admin reroutes and runner accepts the new offer with old one still open)
+    if(scheduledDate){
+      const { data: stale } = await _supa.from('jobs')
+        .select('batch_id')
+        .eq('runner_id', runnerRow.id)
+        .eq('scheduled_date', scheduledDate)
+        .eq('visit_type', visitType)
+        .in('status', ['accepted','in_progress'])
+        .neq('batch_id', offerId)
+        .limit(3)
+
+      if(stale?.length){
+        for(const s of stale){
+          await _supa.from('jobs')
+            .update({ status:'cancelled', updated_at:new Date().toISOString() })
+            .eq('batch_id', s.batch_id)
+            .catch(e => console.warn('[BinDash] stale cancel:', e.message))
+          console.log('[BinDash] Cancelled stale batch', s.batch_id, 'before accepting', offerId)
+        }
+        showToast('Previous route replaced with this new offer', 'info', 3000)
+      }
+    }
+
+    // 3. Accept the new offer
     const { error } = await _supa.from('jobs')
-      .update({ 
-        status:          'accepted', 
-        runner_accepted: true, 
+      .update({
+        status:          'accepted',
+        runner_accepted: true,
         runner_id:       runnerRow.id,
         runner_name:     ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim(),
-        updated_at:      new Date().toISOString() 
+        updated_at:      new Date().toISOString()
       })
       .eq('batch_id', offerId)
 
