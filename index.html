@@ -9634,10 +9634,38 @@ async function rSubmit(){
 
   if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Submit Application' }
 
-  // Email confirmation
+  // Email confirmation to runner
   const _rn_em = document.getElementById('r-em')?.value?.trim()
   const _rn_fn = document.getElementById('r-fn')?.value?.trim()||'there'
   if(_rn_em) sendEmail(_rn_em, 'BinDash runner application received', EMAIL.runnerAppReceived(_rn_fn), 'runner_app_received')
+
+  // Email admin — runner needs review (critical for expansion)
+  if(!saveErr){
+    const vpLabel = vp==='both'?'Both (Bin Out + Bin In)':vp==='bin_out'?'Bin Out only':'Bin In only'
+    const selectedZoneNames = (window._selectedZoneIds||[]).map(id => ADMIN_ZONES.find(z=>z.id===id)?.name || id).filter(Boolean).join(', ') || 'None selected'
+    sendEmail('alpha1miller@gmail.com',
+      `🚐 New Runner Application — ${fn} ${ln} (ZIP ${zip})`,
+      `<div style="font-family:sans-serif;padding:20px;max-width:520px">
+        <h2 style="color:#06d6a0;margin:0 0 4px">New Runner Application</h2>
+        <p style="color:#666;margin:0 0 16px">Needs review and zone assignment</p>
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <tr><td style="padding:5px 0;color:#666;width:120px">Name</td><td style="font-weight:600">${fn} ${ln}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Email</td><td>${em}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Phone</td><td>${ph||'—'}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">ZIP</td><td style="font-weight:600">${zip}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Vehicle</td><td>${veh||'—'}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Visit Pref.</td><td>${vpLabel}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">BGC Consent</td><td>${bgc?'✅ Yes':'❌ No'}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Zones</td><td>${selectedZoneNames}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Status</td><td><strong style="color:#f59e0b">pending_review</strong></td></tr>
+        </table>
+        <div style="margin-top:16px;padding:12px;background:#f0fdf4;border-radius:8px;font-size:12px;color:#166534">
+          Review in Admin → Pending Applicants → Runners
+        </div>
+      </div>`,
+      'admin_runner_application'
+    )
+  }
 
   // Save zone preferences (all selected zones + waitlist entries)
   for(const zId of selectedZones){
@@ -16442,7 +16470,7 @@ function updateOverviewCounts(){
   const activeHW  = HOMEOWNERS.filter(h=>h.status==='active').length
   const activeRN  = RUNNERS.filter(r=>r.status!=='INACTIVE').length
   const availRN   = RUNNERS.filter(r=>r.status==='AVAILABLE').length
-  const pendingHW = PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length
+  const pendingHW = PENDING_HOMEOWNERS.filter(a => a.status==='pending_review' || a.status==='payment_pending').length
   const pendingRN = PENDING_RUNNERS.length
   pc = pendingRN
   const totalPending = pendingHW + pendingRN
@@ -16726,81 +16754,138 @@ async function checkZipCoverage(zip){
 }
 
 async function routeAfterSignup(appData){
-  const matchedZone = window._hwMatchedZone || null
+  const matchedZone    = window._hwMatchedZone || null
   const hasLiveCoverage = window._hwZipHasCoverage === true
 
-  // Always check for duplicate signup first
+  // Pull full homeowner data from DB (hSubmit only passes email+zip)
+  let fullRow = null
   try {
-    const { data: existing } = await _supa.from('homeowner_signups')
-      .select('id, status').ilike('email', appData.email).limit(1)
-    if(existing?.length > 1){
-      // More than the row we just inserted — consolidate
-      console.log('[BinDash] Duplicate signup detected — keeping newest')
-    }
-    // Dedup waitlist by ZIP: if another row with same ZIP + status=waitlisted exists, don't create another
-    const { data: dupWL } = await _supa.from('homeowner_signups')
-      .select('id').eq('zip_code', appData.zip).eq('status','waitlisted')
-      .neq('email', appData.email).limit(1)
-    if(dupWL?.length) console.log('[BinDash] ZIP already on waitlist — no zone creation needed')
-  } catch(e){ console.warn('[BinDash] Dedup check:', e) }
+    const { data } = await _supa.from('homeowner_signups')
+      .select('*').ilike('email', appData.email).order('created_at',{ascending:false}).limit(1)
+    fullRow = data?.[0] || null
+  } catch(e){}
+
+  const fn   = fullRow?.first_name || appData.name?.split(' ')[0] || 'New homeowner'
+  const ln   = fullRow?.last_name  || ''
+  const name = (fn+' '+ln).trim()
+  const zip  = fullRow?.zip_code || appData.zip || ''
+  const addr = fullRow?.street_address || ''
+  const svc  = fullRow?.service_type || 'Recycling'
+  const day  = fullRow?.collection_day || ''
+  const email = fullRow?.email || appData.email
 
   if(!hasLiveCoverage){
-    // ── WAITLIST FLOW ────────────────────────────────────────────────────────
-    // If zone exists as 'waitlist' status → immediately waitlisted, no approval needed
-    // If no zone → create zone request for admin, go to waitlist screen
+    // ── WAITLIST / EXPANSION ZONE FLOW ───────────────────────────────────────
+    // CRITICAL FIX: Keep status as 'pending_review' so admin sees them.
+    // Only change to 'waitlisted' AFTER admin approves when zone goes live.
     const isKnownWaitlistZone = matchedZone && matchedZone.status === 'waitlist'
+    const zoneName = matchedZone?.name || ('ZIP ' + zip)
 
-    const wlEntry = {...appData, status:'waitlist', zoneId: matchedZone?.id || null}
-    WAITLIST_SIGNUPS.push(wlEntry)
-    updateWaitlistBadge()
-    const zipDisplay = document.getElementById('waitlist-zip-display')
-    if(zipDisplay) zipDisplay.textContent = 'ZIP '+(appData.zip||'your area')
-
+    // Update zone_id link but preserve pending_review status
     try {
       await _supa.from('homeowner_signups').update({
-        status:   'waitlisted',
-        zone_id:  matchedZone?.id || null,
+        zone_id:    matchedZone?.id || null,
+        is_waitlist: true,   // flag so admin knows this is a waitlist signup
         updated_at: new Date().toISOString(),
-      }).eq('email', appData.email)
-    } catch(err){ console.warn('[BinDash] Waitlist update failed:', err) }
+        // DO NOT overwrite status — keep pending_review so admin sees it
+      }).ilike('email', email)
+    } catch(err){ console.warn('[BinDash] routeAfterSignup waitlist update:', err) }
+
+    // Add to local state for badge counts
+    const wlEntry = { email, zip, name, status:'pending_review', zoneId: matchedZone?.id || null }
+    WAITLIST_SIGNUPS.push(wlEntry)
+    updateWaitlistBadge?.()
 
     if(isKnownWaitlistZone){
-      // Zone exists — update zone homeowner count
       matchedZone.homeowners = (matchedZone.homeowners||0) + 1
-      try { await _supa.from('zones').update({ homeowners: matchedZone.homeowners, updated_at: new Date().toISOString() }).eq('id', matchedZone.id) } catch(e){}
-      console.log('[BinDash] Auto-waitlisted to existing zone:', matchedZone.name)
-    } else if(!matchedZone){
-      // New ZIP — create a zone request so admin knows about it
-      try {
-        await _supa.from('runner_zone_requests').insert({
-          runner_name:  'Homeowner Signup',
-          runner_email: appData.email,
-          zip_code:     appData.zip,
-          zone_name:    'ZIP '+appData.zip,
-          status:       'pending',
-          type:         'new_zone',
-          notes:        `Auto-created from homeowner signup: ${appData.name} (${appData.email})`,
-          created_at:   new Date().toISOString(),
-        })
-        // Update admin badges
-        loadZoneWaitlistBadge()
-        loadRunnerZoneRequestsBadge()
-      } catch(e){ console.warn('[BinDash] Zone request create:', e) }
+      _supa.from('zones').update({ homeowners: matchedZone.homeowners, updated_at: new Date().toISOString() })
+        .eq('id', matchedZone.id).catch(()=>{})
     }
 
+    // Create zone request in Scout panel so admin can act on it
+    try {
+      const { data: existingReq } = await _supa.from('runner_zone_requests')
+        .select('id').eq('zip_code', zip).eq('type', 'homeowner_waitlist')
+        .eq('runner_email', email).limit(1)
+      if(!existingReq?.length){
+        await _supa.from('runner_zone_requests').insert({
+          runner_name:  name + ' (Homeowner)',
+          runner_email: email,
+          zip_code:     zip,
+          zone_name:    zoneName,
+          status:       'pending',
+          type:         'homeowner_waitlist',
+          notes:        `Waitlist signup: ${name}, ${svc}${day?' · '+day:''}, ${addr||zip}. Zone: ${zoneName}`,
+          created_at:   new Date().toISOString(),
+        })
+        loadZoneWaitlistBadge?.()
+        loadRunnerZoneRequestsBadge?.()
+      }
+    } catch(e){ console.warn('[BinDash] Zone request from waitlist signup:', e) }
+
+    // ── CRITICAL: Email admin so they can review ──────────────────────────────
+    sendEmail('alpha1miller@gmail.com',
+      `🏠 New Homeowner — ${zoneName} Waitlist (${name})`,
+      `<div style="font-family:sans-serif;padding:20px;max-width:520px">
+        <h2 style="color:#f59e0b;margin:0 0 4px">New Homeowner on Waitlist</h2>
+        <p style="color:#666;margin:0 0 16px">Signup for <strong>${zoneName}</strong> (waitlist zone)</p>
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <tr><td style="padding:5px 0;color:#666;width:100px">Name</td><td style="font-weight:600">${name}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Email</td><td>${email}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Address</td><td>${addr||'—'}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">ZIP</td><td style="font-weight:600">${zip}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Service</td><td>${svc}${day?' · '+day:''}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Zone</td><td>${zoneName} (${matchedZone?.status||'no zone'})</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Status</td><td><strong style="color:#f59e0b">pending_review</strong></td></tr>
+        </table>
+        <div style="margin-top:16px;padding:12px;background:#fffbeb;border-radius:8px;font-size:12px;color:#92400e">
+          ⚠️ Review in Admin → Pending Applicants → Homeowners.<br>
+          This homeowner is in a <strong>waitlist zone</strong> — approve when zone activates.
+        </div>
+      </div>`,
+      'admin_hw_waitlist_alert'
+    )
+
+    // Show waitlist screen to homeowner
+    const zipDisplay = document.getElementById('waitlist-zip-display')
+    if(zipDisplay) zipDisplay.textContent = 'ZIP ' + zip
     go('S-hw-waitlist')
+
   } else {
-    // ── LIVE ZONE FLOW ───────────────────────────────────────────────────────
-    const pendingEntry = {...appData, status:'pending', zoneId: matchedZone?.id || null}
+    // ── LIVE ZONE FLOW ────────────────────────────────────────────────────────
+    const pendingEntry = { email, zip, name, status:'pending', zoneId: matchedZone?.id || null }
     PENDING_HOMEOWNERS.push(pendingEntry)
-    updateOverviewCounts()
+    updateOverviewCounts?.()
+
     try {
       await _supa.from('homeowner_signups').update({
         status:  'pending_review',
         zone_id: matchedZone?.id || null,
         updated_at: new Date().toISOString(),
-      }).eq('email', appData.email)
-    } catch(err){ console.warn('[BinDash] Pending update failed:', err) }
+      }).ilike('email', email)
+    } catch(err){ console.warn('[BinDash] routeAfterSignup live update:', err) }
+
+    // Email admin — live zone signup
+    sendEmail('alpha1miller@gmail.com',
+      `🏠 New Homeowner — ${matchedZone?.name || zip} (${name})`,
+      `<div style="font-family:sans-serif;padding:20px;max-width:520px">
+        <h2 style="color:#06d6a0;margin:0 0 4px">New Homeowner Signup</h2>
+        <p style="color:#666;margin:0 0 16px">Live zone: <strong>${matchedZone?.name || zip}</strong></p>
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <tr><td style="padding:5px 0;color:#666;width:100px">Name</td><td style="font-weight:600">${name}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Email</td><td>${email}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Address</td><td>${addr||'—'}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">ZIP</td><td style="font-weight:600">${zip}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Service</td><td>${svc}${day?' · '+day:''}</td></tr>
+          <tr><td style="padding:5px 0;color:#666">Status</td><td><strong style="color:#22c55e">pending_review</strong></td></tr>
+        </table>
+        <div style="margin-top:16px;padding:12px;background:#f0fdf4;border-radius:8px;font-size:12px;color:#166534">
+          Review in Admin → Pending Applicants → Homeowners
+        </div>
+      </div>`,
+      'admin_hw_live_alert'
+    )
+
     go('S-hw-pending')
   }
 }
@@ -17677,8 +17762,11 @@ function renderPendingHWList(){
 
   el.innerHTML = list.map(app=>{
     const assignedZone = ADMIN_ZONES.find(z=>z.id===app.zoneId)
+    const isWaitlistZone = app.isWaitlist || (assignedZone && assignedZone.status === 'waitlist')
     const zoneBadge = assignedZone
-      ? `<span class="badge" style="background:rgba(6,214,160,.1);color:var(--cyan);margin-left:8px">📍 ${assignedZone.name}</span>`
+      ? `<span class="badge" style="background:${isWaitlistZone?'rgba(245,158,11,.12)':'rgba(6,214,160,.1)'};color:${isWaitlistZone?'#fbbf24':'var(--cyan)'};margin-left:8px">
+           ${isWaitlistZone?'⏳':'📍'} ${assignedZone.name}${isWaitlistZone?' (waitlist)':''}
+         </span>`
       : `<span class="badge" style="background:rgba(239,68,68,.1);color:#ef4444;margin-left:8px">⚠️ No zone</span>`
 
     // Plan label -- human readable
@@ -17692,11 +17780,15 @@ function renderPendingHWList(){
       ? `<span class="badge" style="background:rgba(34,197,94,.15);color:#22c55e;margin-left:6px;font-size:10px">💳 Paid</span>`
       : `<span class="badge" style="background:rgba(245,158,11,.15);color:#f59e0b;margin-left:6px;font-size:10px">⏳ Unpaid</span>`
 
-    // Card border + urgency strip by payment status
+    // Card border + urgency strip
     const cardBorder  = isPaid
       ? 'border:1.5px solid rgba(34,197,94,.4);box-shadow:0 0 0 1px rgba(34,197,94,.1)'
       : 'border:1.5px solid rgba(245,158,11,.3)'
-    const urgencyBar  = isPaid
+    const urgencyBar  = isWaitlistZone
+      ? `<div style="background:linear-gradient(90deg,rgba(245,158,11,.1),transparent);border-radius:8px 8px 0 0;padding:6px 14px;font-size:11px;font-weight:600;color:#f59e0b;display:flex;align-items:center;gap:6px">
+           ⏳ Waitlist zone — save this application. Approve when zone goes live.
+         </div>`
+      : isPaid
       ? `<div style="background:linear-gradient(90deg,rgba(34,197,94,.15),transparent);border-radius:8px 8px 0 0;padding:6px 14px;font-size:11px;font-weight:700;color:#22c55e;display:flex;align-items:center;gap:6px">
            🔥 PAID — Approve ASAP to activate their service
          </div>`
@@ -22623,11 +22715,18 @@ async function loadSignupsFromSupabase(){
         // Referral
         referredByCode:  row.referred_by_code   || null,
         referredByRunner:row.referred_by_runner  || null,
+        // Waitlist zone flag — pending_review but in a waitlist zone
+        isWaitlist:      row.is_waitlist === true || row.status === 'waitlisted',
       }
-      if(row.status === 'waitlisted'){
-        WAITLIST_SIGNUPS.push(entry)
+      // ALL non-waitlisted records go to PENDING_HOMEOWNERS so admin can see and act on them
+      // 'waitlisted' (old) AND 'pending_review' with is_waitlist=true both show in pending panel with waitlist badge
+      if(row.status === 'waitlisted' && !row.is_waitlist){
+        // Legacy waitlisted — still show in pending panel so admin doesn't miss them
+        entry.status = 'pending_review'
+        entry.isWaitlist = true
+        PENDING_HOMEOWNERS.push(entry)
       } else {
-        PENDING_HOMEOWNERS.push(entry)  // includes pending_review, payment_pending, rejected, info_requested
+        PENDING_HOMEOWNERS.push(entry)
       }
     })
 
