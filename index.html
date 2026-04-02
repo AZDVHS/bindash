@@ -1224,6 +1224,50 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
     padding: 0 16px 48px !important;
   }
 }
+
+/* ── RUNNER MOBILE POLISH ───────────────────────────────────────── */
+/* Ensure all interactive elements meet 44px Apple HIG touch target */
+#S-rn-dash .btn,
+#S-rn-dash button:not([style*="font-size:9"]):not([style*="font-size:10"]):not([style*="font-size:11"]) {
+  min-height: 44px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+/* Prevent text overflow in stop cards */
+#active-route-container * {
+  max-width: 100%;
+  word-break: break-word;
+}
+/* Smooth tab transitions */
+#rn-routes-upcoming, #rn-routes-active, #rn-routes-completed {
+  animation: fadeIn .15s ease;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* Photo preview fills box cleanly */
+#active-route-container img.nav-proof-img {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  border-radius: 12px;
+  display: block;
+}
+/* Sticky complete bar safe area */
+#sticky-complete-bar {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+/* Exception / issue button tap feedback */
+button[onclick*="navReportIssue"],
+button[onclick*="navSkipStop"] {
+  transition: background .1s;
+}
+button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !important; }
+/* Complete button pulse after photo taken */
+@keyframes completePulse {
+  0%   { box-shadow: 0 4px 20px rgba(34,197,94,.3); }
+  50%  { box-shadow: 0 4px 32px rgba(34,197,94,.6), 0 0 0 4px rgba(34,197,94,.15); }
+  100% { box-shadow: 0 4px 20px rgba(34,197,94,.3); }
+}
+.complete-pulse { animation: completePulse .5s ease-in-out 2; }
 </style>
 </head>
 <body onload="initApp()">
@@ -3336,7 +3380,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
 
         <!-- RN ROUTES -->
-        <div class="pg" id="rn-routes">
+        <div class="pg" id="rn-routes" style="padding-bottom:70px">
 
           <!-- TAB BAR -->
           <div style="display:flex;gap:0;margin-bottom:16px;background:var(--surface2);border-radius:10px;padding:4px">
@@ -3372,10 +3416,12 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
               </div>
             </div>
             <!-- STICKY COMPLETE BUTTON — always visible without scrolling -->
-            <div id="sticky-complete-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;padding:10px 16px 20px;background:linear-gradient(transparent,var(--bg) 30%);z-index:200">
-              <button id="sticky-complete-btn" onclick="navCompleteStop()" class="btn btn-green" style="width:100%;padding:14px;font-size:16px;font-weight:800;border-radius:14px;box-shadow:0 4px 20px rgba(34,197,94,.4)">
-                ✓ Complete Stop
-              </button>
+            <div id="sticky-complete-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:300;padding:0 0 env(safe-area-inset-bottom,0)">
+              <div style="background:var(--bg);border-top:1px solid var(--border);padding:10px 16px 12px">
+                <button id="sticky-complete-btn" onclick="navComplete()" class="btn btn-green" style="width:100%;padding:15px;font-size:16px;font-weight:800;border-radius:14px;box-shadow:0 -2px 20px rgba(34,197,94,.25);min-height:54px">
+                  ✓ Done — Next Stop
+                </button>
+              </div>
             </div>
           </div>
 
@@ -6418,8 +6464,7 @@ async function loadRunnerRoutes(runnerRow){
             }
             return `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>`
           })() : ''}
-          ${batch.status==='in_progress' ? `<button class="btn btn-cyan btn-sm" onclick="resumeBatch('${batch.id}')">↺ Resume Route</button>` : ''}
-          ${batch.status==='in_progress' ? `<button class="btn btn-green btn-sm" onclick="completeBatch('${batch.id}')">✓ Mark All Complete</button>` : ''}
+          ${batch.status==='in_progress' ? `<button class="btn btn-cyan btn-sm" onclick="resumeBatch('${batch.id}')" style="min-height:48px;padding:10px 20px">↺ Resume Route</button>` : ''}
           <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600">$${earn}</span>
         </div>
       </div>`
@@ -6783,15 +6828,15 @@ async function resumeBatch(batchId){
     navRouteActive = true
     if(!navPhase || navPhase === 'idle') navPhase = 'travelling'
     navStop        = Math.max(0, navStop || 0)
+    _saveNavState()
 
     // Store enriched for other functions
     window._lastEnrichedJobs = rawJobs.map(j=>({...j, hw:hwMap[j.homeowner_email]||null, hwDisplayName:(hwMap[j.homeowner_email]?.first_name||j.homeowner_email?.split('@')[0]||'Stop')}))
-    // Open modal immediately
+
+    // Switch to active tab and render inline — no modal
     switchRouteTab('active')
     renderActiveRouteTab()
-    openM()
-    // Small delay to ensure DOM is ready
-    setTimeout(() => _renderNavModal(), 50)
+    showToast('↺ Route resumed — stop ' + (navStop+1) + ' of ' + NAV_STOPS.length, 'ok', 3000)
 
   } catch(e) {
     console.error('[resumeBatch]', e)
@@ -6941,12 +6986,12 @@ async function startBatch(batchId){
       navStop        = 0
       navPhase       = 'travelling'
       navRouteActive = true
+      _saveNavState()
 
-      // Open the nav modal immediately — don't wait for DB refresh
+      // Switch to active tab and render — no modal needed
       switchRouteTab('active')
       renderActiveRouteTab()
-      openM()
-      _renderNavModal()
+      showToast('▶ Route started — ' + jobsToUse.length + ' stops · $' + (jobsToUse.length * 3.25).toFixed(2), 'ok', 3500)
 
     } else {
       showToast('No stops found for this route — try refreshing', 'err')
@@ -12721,9 +12766,10 @@ function _renderNavModal(){
     s.gate    = s.gate    || null
     s.pets    = s.pets    || null
   }
-  const totalEarnings = (NAV_STOPS.length * 3.25).toFixed(2)
+  const totalEarnings  = (NAV_STOPS.length * 3.25).toFixed(2)
   const completedCount = navStop
   const progressPct    = Math.round((completedCount / NAV_STOPS.length) * 100)
+  const remainingStops = NAV_STOPS.slice(navStop)
   const mapsUrl        = buildGoogleMapsUrl(NAV_STOPS)
 
   // Google Maps CTA -- prominent button used across phases
@@ -12845,53 +12891,53 @@ function _renderNavModal(){
     const stopMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(s.address + ', Glendale, AZ')}&travelmode=driving`
 
     phaseCard = `
-      <div style="background:rgba(6,214,160,.07);border:1.5px solid rgba(6,214,160,.3);border-radius:12px;padding:14px;margin-bottom:12px">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px">
-          <div>
-            <div style="font-size:11px;font-weight:700;color:var(--cyan);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">&#x1F4CD; Stop ${navStop+1} of ${NAV_STOPS.length}</div>
-            <div style="font-size:17px;font-weight:700;margin-bottom:2px">${s.address}</div>
-            <div style="font-size:13px;color:var(--sub)">${s.name}</div>
-          </div>
-          <button onclick="showStopDetail(${navStop})"
-                  style="background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);
-                         color:#a5b4fc;border-radius:8px;padding:6px 10px;
-                         font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0">
-            &#x2139;&#xFE0F; Details
-          </button>
+      <!-- STOP CARD -->
+      <div style="background:${navPhase==='arrived'?'rgba(6,214,160,.07)':'rgba(99,102,241,.06)'};border:1.5px solid ${navPhase==='arrived'?'rgba(6,214,160,.3)':'rgba(99,102,241,.2)'};border-radius:14px;padding:14px;margin-bottom:10px">
+        <div style="font-size:10px;font-weight:700;color:${navPhase==='arrived'?'var(--cyan)':'#a5b4fc'};letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">
+          ${navPhase==='arrived'?'📍 ARRIVED — ':'🚗 NEXT STOP — '}Stop ${navStop+1} of ${NAV_STOPS.length}
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
-          <div style="background:var(--surface3);border-radius:8px;padding:8px 11px;font-size:12px">
-            <span style="color:var(--muted)">Access:</span> <strong style="color:var(--text)">${s.details||s.gate||"--"}</strong>
-          </div>
-          <div style="background:var(--surface3);border-radius:8px;padding:8px 11px;font-size:12px">
-            <span style="color:var(--muted)">Bins:</span> <strong style="color:var(--text)">${s.bins}</strong>
-          </div>
-          ${hasPet ? `<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:8px 11px;font-size:12px;font-weight:600;color:#fbbf24">&#x1F43E; Pet on premises &#x2014; check access notes</div>` : ''}
-        </div>
+        <div style="font-size:18px;font-weight:800;line-height:1.2;margin-bottom:3px">${s.address}</div>
+        <div style="font-size:13px;color:var(--sub);margin-bottom:10px">${s.name}</div>
+
+        ${s.gate && s.gate!=='No gate'?`<div style="background:rgba(245,158,11,.1);border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;color:#fbbf24;margin-bottom:6px">🔒 ${s.gate}</div>`:''}
+        ${hasPet?`<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:7px 11px;font-size:12px;font-weight:600;color:#fbbf24;margin-bottom:6px">🐾 Pet on premises — check access notes</div>`:''}
+        ${s.binLocation&&s.binLocation!=='--'?`<div style="font-size:11px;color:var(--muted);margin-bottom:8px">📦 Bins: ${s.binLocation}</div>`:''}
+
         <a href="${stopMapsUrl}" target="_blank" rel="noopener"
-           style="display:flex;align-items:center;justify-content:center;gap:7px;
-                  background:#1a73e8;border-radius:8px;padding:9px 14px;
-                  font-size:13px;font-weight:700;color:#fff;text-decoration:none">
-          &#x1F4CD; Navigate to This Stop
+           style="display:flex;align-items:center;justify-content:center;gap:8px;background:#1a73e8;border-radius:10px;padding:11px;font-size:14px;font-weight:700;color:#fff;text-decoration:none;-webkit-tap-highlight-color:transparent">
+          🗺️ Navigate to Stop ${navStop+1}${remainingStops.length>1?' <span style="font-size:11px;opacity:.7">+'+( remainingStops.length-1)+' more</span>':''}
         </a>
+
+        ${navPhase!=='arrived'?`<button onclick="navArrived()" class="btn btn-cyan" style="width:100%;margin-top:8px;padding:13px;font-size:15px;font-weight:800;border-radius:12px;min-height:52px">✓ I'm Here — Start Work</button>`:''}
       </div>
 
-      <div style="margin-bottom:4px">
-        <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px">&#x1F4F8; Photo required to complete stop</div>
-        <div style="font-size:11px;color:var(--sub);margin-bottom:10px">Take a photo showing the bins at curb to confirm completion.</div>
-        <input type="file" accept="image/*" capture="environment" id="stop-photo-${navStop}" style="display:none" onchange="navPhotoTaken(this)">
-        <div id="photo-preview-${navStop}" style="background:var(--surface2);border:2px dashed var(--border2);border-radius:12px;min-height:100px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer" onclick="document.getElementById('stop-photo-${navStop}').click()">
-          <div style="font-size:28px">&#x1F4F7;</div>
-          <div style="font-size:12px;font-weight:600;color:var(--sub)">Tap to take photo</div>
-          <div style="font-size:10px;color:var(--muted)">or upload from gallery</div>
+      ${navPhase==='arrived'?`
+      <!-- PHOTO TAP AREA — big, obvious, instant preview -->
+      <input type="file" accept="image/*" capture="environment" id="stop-photo-${navStop}" style="display:none" onchange="navPhotoTaken(this)">
+      <div id="photo-preview-${navStop}"
+        onclick="document.getElementById('stop-photo-${navStop}').click()"
+        style="border:2px dashed rgba(6,214,160,.35);border-radius:14px;min-height:140px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;background:rgba(6,214,160,.04);-webkit-tap-highlight-color:transparent;overflow:hidden;position:relative;margin-bottom:8px">
+        <div id="photo-placeholder-${navStop}" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:20px;pointer-events:none">
+          <div style="font-size:40px">📷</div>
+          <div style="font-size:14px;font-weight:700;color:var(--cyan)">Take Proof Photo</div>
+          <div style="font-size:11px;color:var(--muted);text-align:center">Tap to photograph — protects you<br>if homeowner disputes completion</div>
         </div>
       </div>
 
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
-        ${stopList}
-      </div>`
-    actionBtn = `<button class="btn btn-ghost btn-sm" onclick="navPauseConfirm()">&#x23F8; Pause</button>
-      <button class="btn btn-surface btn-sm" id="complete-btn-${navStop}" style="opacity:.4;cursor:not-allowed" disabled>&#x2705; Mark Complete</button>`
+      <!-- EXCEPTION BUTTON -->
+      <button onclick="navReportIssue()" style="width:100%;margin-bottom:8px;padding:12px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:10px;color:#f59e0b;font-size:13px;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent">
+        ⚠️ Issue at this stop
+      </button>
+
+      <!-- COMPLETE BUTTON — always enabled, photo is optional -->
+      <button onclick="navComplete()" id="complete-btn-${navStop}" class="btn btn-green" style="width:100%;padding:15px;font-size:17px;font-weight:800;border-radius:14px;min-height:56px;box-shadow:0 4px 20px rgba(34,197,94,.3)">
+        ✓ Done — Next Stop
+      </button>`:''}
+
+      <!-- STOP LIST — collapsed when arrived to keep complete button visible -->
+      ${navPhase!=='arrived'?`<div style="margin-top:12px">${stopList}</div>`:
+        navStop>0?`<div style="margin-top:10px;background:rgba(34,197,94,.06);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--muted)">✅ ${navStop} stop${navStop!==1?'s':''} done · $${(navStop*3.25).toFixed(2)} earned</div>`:''}`
+    actionBtn = `<button class="btn btn-ghost btn-sm" onclick="navPauseConfirm()">⏸ Pause</button>`
   }
   else if(navPhase === 'paused'){
     phaseCard = `
@@ -12907,24 +12953,23 @@ function _renderNavModal(){
       <button class="btn btn-cyan" onclick="navResume()">&#x25B6; Resume</button>`
   }
   else if(navPhase === 'done'){
+    const friday = (() => { const d=new Date(); const days=(5-d.getDay()+7)%7||7; d.setDate(d.getDate()+days); return d.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}) })()
     phaseCard = `
-      <div style="background:rgba(34,197,94,.07);border:1.5px solid rgba(34,197,94,.3);border-radius:12px;padding:20px;text-align:center;margin-bottom:14px">
-        <div style="font-size:40px;margin-bottom:8px">&#x1F389;</div>
-        <div style="font-size:18px;font-weight:800;margin-bottom:4px">Route Complete!</div>
-        <div style="font-size:13px;color:var(--sub);margin-bottom:16px">All ${NAV_STOPS.length} stops completed</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <div style="background:var(--surface2);border-radius:9px;padding:12px">
-            <div style="font-size:22px;font-weight:800;color:var(--green)">$${totalEarnings}</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px">Earned this batch</div>
-          </div>
-          <div style="background:var(--surface2);border-radius:9px;padding:12px">
-            <div style="font-size:22px;font-weight:800;color:var(--cyan)">${NAV_STOPS.length}/${NAV_STOPS.length}</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px">Stops completed</div>
-          </div>
+      <div style="padding:8px;text-align:center">
+        <div style="font-size:64px;margin-bottom:12px">🎉</div>
+        <div style="font-size:24px;font-weight:800;color:#22c55e;margin-bottom:4px">Route Done!</div>
+        <div style="font-size:14px;color:var(--sub);margin-bottom:20px">${NAV_STOPS.length} stops completed tonight</div>
+        <div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:16px;padding:22px;margin-bottom:20px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">You earned</div>
+          <div style="font-size:52px;font-weight:800;color:#22c55e;line-height:1">$${totalEarnings}</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:8px">💳 Paid on ${friday}</div>
         </div>
-      </div>
-      <div style="font-size:12px;color:var(--sub);text-align:center;line-height:1.6;margin-bottom:14px">Pay processed on your next Friday payout. Bin In batch unlocks after the truck clears your zone.</div>`
-    actionBtn = `<button class="btn btn-cyan" onclick="navSubmitRoute()">Submit &amp; Finish &#x2713;</button>`
+        <button onclick="navSubmitRoute()" class="btn btn-green" style="width:100%;padding:16px;font-size:17px;font-weight:800;border-radius:14px;min-height:56px;box-shadow:0 4px 20px rgba(34,197,94,.3)">
+          ✓ Submit Route & Get Paid
+        </button>
+        <div style="margin-top:10px;font-size:11px;color:var(--muted)">Homeowners notified · Great work tonight! 🌙</div>
+      </div>`
+    actionBtn = ''
   }
 
   // Progress bar
@@ -13135,28 +13180,58 @@ function navPhotoTaken(input){
   if(!input.files || !input.files[0]) return
   const stopIdx = parseInt(input.id.replace('stop-photo-',''))
   const file = input.files[0]
-  const reader = new FileReader()
-  reader.onload = e => {
-    const preview = document.getElementById('photo-preview-'+stopIdx)
-    if(preview){
-      preview.innerHTML = `
-        <img src="${e.target.result}" style="width:100%;height:110px;object-fit:cover;border-radius:10px;display:block">
-        <div style="position:absolute;bottom:6px;right:8px;background:rgba(34,197,94,.9);border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700;color:#fff">✓ Photo saved</div>`
-      preview.style.position='relative'
-      preview.style.border='2px solid rgba(34,197,94,.5)'
-      preview.style.cursor='default'
-      preview.onclick = null
+
+  // Store for upload on complete — compress before upload but show instantly
+  window._navPhotoFile = file
+
+  // Instant preview via createObjectURL — no FileReader delay, no memory spike
+  const objectUrl = URL.createObjectURL(file)
+  const preview = document.getElementById('photo-preview-'+stopIdx)
+  if(preview){
+    const placeholder = document.getElementById('photo-placeholder-'+stopIdx)
+    if(placeholder) placeholder.style.display = 'none'
+    // Remove old img if retake
+    const old = preview.querySelector('img.nav-proof-img')
+    if(old){ old.remove(); URL.revokeObjectURL(old._blobUrl||'') }
+
+    const img = document.createElement('img')
+    img.className = 'nav-proof-img'
+    img._blobUrl = objectUrl
+    img.style.cssText = 'width:100%;height:180px;object-fit:cover;border-radius:12px;display:block'
+    img.src = objectUrl
+    preview.appendChild(img)
+
+    // Retake overlay
+    let retake = preview.querySelector('.retake-btn')
+    if(!retake){
+      retake = document.createElement('div')
+      retake.className = 'retake-btn'
+      retake.style.cssText = 'position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;cursor:pointer;-webkit-tap-highlight-color:transparent'
+      retake.textContent = '📷 Retake'
+      retake.onclick = e => { e.stopPropagation(); document.getElementById('stop-photo-'+stopIdx)?.click() }
+      preview.appendChild(retake)
     }
-    const btn = document.getElementById('complete-btn-'+stopIdx)
-    if(btn){
-      btn.disabled = false
-      btn.style.opacity = '1'
-      btn.style.cursor = 'pointer'
-      btn.className = 'btn btn-cyan'
-      btn.onclick = () => navComplete()
+
+    // Ready badge
+    let badge = preview.querySelector('.photo-badge')
+    if(!badge){
+      badge = document.createElement('div')
+      badge.className = 'photo-badge'
+      badge.style.cssText = 'position:absolute;top:8px;left:8px;background:rgba(34,197,94,.9);color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px'
+      preview.appendChild(badge)
     }
+    badge.textContent = '✓ Photo ready'
   }
-  reader.readAsDataURL(file)
+
+  // Update complete button label to show photo is attached
+  const btn = document.getElementById('complete-btn-'+stopIdx)
+  if(btn){
+    btn.textContent = '✓ Done — Next Stop  📷'
+    btn.classList.add('complete-pulse')
+    setTimeout(() => btn.classList.remove('complete-pulse'), 1100)
+  }
+  const sticky = document.getElementById('sticky-complete-btn')
+  if(sticky) sticky.textContent = '✓ Done — Next Stop  📷'
 }
 
 // ── SNOWBIRD METERED BILLING ──────────────────────────────────────────────────
@@ -13242,68 +13317,101 @@ function navArrive(){
   _renderNavModal()
 }
 
-function navComplete(){
+async function navComplete(){
   const stop = NAV_STOPS[navStop]
-  // Fire per-stop homeowner completion notification immediately
-  if(stop){
-    const now = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})
-    showToast(`✅ Stop ${navStop+1} complete -- ${stop.name} notified by email`, 'ok')
-    // Email homeowner: bin out complete notification — guard against duplicates
-    if(stop.email){
-      const _stopKey = 'bin_out_emailed:' + (stop.jobId || stop.email + navBatchId)
-      if(!sessionStorage.getItem(_stopKey) && stop.email && !stop.email.includes('.test')){
-        sessionStorage.setItem(_stopKey, '1')
-        const runnerName = currentUser?.first_name || 'Your runner'
-        const day = new Date().toLocaleDateString([],{weekday:'long'})
-        // Stagger emails by stop index to avoid rate limiting (Resend: 5/sec max)
-        const delayMs = (navStop % 5) * 300
-        setTimeout(() => {
-          sendEmail(stop.email, 'Your bins are at the curb! 🌙', EMAIL.binOutComplete(stop.name?.split(' ')[0]||'there', runnerName, NAV_STOPS.length, day), 'bin_out_complete')
-        }, delayMs)
+  const btn = document.getElementById('complete-btn-'+navStop)
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+
+  // Upload compressed photo if taken
+  let photoUrl = null
+  if(window._navPhotoFile){
+    try {
+      const compressed = await _compressPhoto(window._navPhotoFile, 800, 0.72)
+      const fname = `jobs/${stop?.jobId||Date.now()}_stop${navStop}.jpg`
+      const { data, error } = await _supa.storage.from('job-photos').upload(fname, compressed, { upsert:true, contentType:'image/jpeg' })
+      if(!error){
+        const { data:ud } = _supa.storage.from('job-photos').getPublicUrl(fname)
+        photoUrl = ud?.publicUrl || null
       }
+    } catch(e){ console.warn('[photo]', e.message) }
+    window._navPhotoFile = null
+  }
+
+  // Save job completion — offline-resilient queue
+  if(stop?.jobId){
+    await _resilientUpdate('jobs', {
+      status:'complete', completed_at:new Date().toISOString(),
+      photo_url:photoUrl, updated_at:new Date().toISOString()
+    }, 'id', stop.jobId)
+  }
+
+  // Notify homeowner — deduped per session
+  if(stop?.email){
+    const _key = 'bin_out_emailed:'+(stop.jobId||stop.email+navBatchId)
+    if(!sessionStorage.getItem(_key) && !stop.email.includes('.test')){
+      sessionStorage.setItem(_key,'1')
+      const rname = (window._rnRow?.first_name||window._currentRunnerRow?.first_name||'Your runner')
+      const day = new Date().toLocaleDateString([],{weekday:'long'})
+      setTimeout(()=>{ sendEmail(stop.email,'Your bins are at the curb! 🌙',
+        EMAIL.binOutComplete(stop.name?.split(' ')[0]||'there',rname,NAV_STOPS.length,day),'bin_out_complete') },
+        (navStop%5)*300)
     }
   }
+
+  const isLast = (navStop+1) >= NAV_STOPS.length
   navStop++
   _saveNavState()
-  if(navStop >= NAV_STOPS.length){
+
+  if(isLast){
     navPhase = 'done'
     navRouteActive = false
-    sessionStorage.removeItem('nav_state') // clear on completion
-    // Email runner: route complete summary
-    const _routeEarn = (NAV_STOPS.length * 3.25).toFixed(2)
-    const _zoneName  = ADMIN_ZONES.find(z=>z.id===navBatchZoneId)?.name || 'your zone'
-    if(currentUser?.email){
-      sendEmail(currentUser.email, 'Route complete -- $'+_routeEarn+' earned 🎉', EMAIL.routeComplete(currentUser.first_name||'Runner', NAV_STOPS.length, _zoneName, _routeEarn), 'route_complete')
-    }
+    sessionStorage.removeItem('nav_state')
+    const sb = document.getElementById('sticky-complete-bar')
+    if(sb) sb.style.display='none'
+    const earn = (NAV_STOPS.length*3.25).toFixed(2)
+    const zname = ADMIN_ZONES.find(z=>z.id===navBatchZoneId)?.name||'your zone'
+    const rnRow = window._rnRow||window._currentRunnerRow||{}
+    if(rnRow.email) sendEmail(rnRow.email,'Route complete — $'+earn+' earned 🎉',
+      EMAIL.routeComplete(rnRow.first_name||'Runner',NAV_STOPS.length,zname,earn),'route_complete')
+    showToast('🎉 Route done! $'+earn+' queued for Friday','ok',4000)
   } else {
     navPhase = 'travelling'
+    showToast('✅ Stop '+navStop+' of '+NAV_STOPS.length+' — keep going!','ok',2500)
   }
-  _renderNavModal()
+  renderActiveRouteTab()
 }
 
 function navPauseConfirm(){
-  // Show pause/close options -- route stays active
-  const prev = navPhase
   navPhase = 'paused'
-  _renderNavModal()
+  _saveNavState()
+  const sb = document.getElementById('sticky-complete-bar')
+  if(sb) sb.style.display = 'none'
+  renderActiveRouteTab()
+  showToast('⏸ Route paused — your progress is saved', 'info', 3000)
 }
 
 function navResume(){
-  // Restore to travelling phase from pause
   navPhase = 'travelling'
-  _renderNavModal()
+  _saveNavState()
+  renderActiveRouteTab()
+  showToast('▶ Route resumed', 'ok', 2000)
 }
 
 function navAbandonConfirm(){
+  // Use a simple modal for the abandon confirmation
   document.getElementById('modal-box').innerHTML=`
-  <div class="mh" style="background:rgba(239,68,68,.06)"><div style="font-weight:700;color:#fca5a5">End Route Early?</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+  <div class="mh" style="background:rgba(239,68,68,.06)">
+    <div style="font-weight:700;color:#fca5a5">End Route Early?</div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
   <div class="mb">
-    <div class="warn-box">⚠️ You've completed <strong>${navStop} of ${NAV_STOPS.length}</strong> stops. Ending early will flag the remaining stops for reassignment. Completed stops will still be paid.</div>
+    <div class="warn-box">⚠️ You've completed <strong>${navStop} of ${NAV_STOPS.length}</strong> stops. Ending early will flag remaining stops for reassignment. Completed stops will still be paid.</div>
   </div>
   <div class="mf">
-    <button class="btn btn-ghost btn-sm" onclick="navResume()"><- Keep Going</button>
-    <button class="btn btn-red btn-sm" onclick="navAbandon()">End Route</button>
+    <button class="btn btn-ghost btn-sm" onclick="closeM();navResume()">← Keep Going</button>
+    <button class="btn btn-red btn-sm" onclick="closeM();navAbandon()">End Route</button>
   </div>`
+  openM()
 }
 
 function navAbandon(){
@@ -15198,8 +15306,9 @@ function renderActiveRouteTab(){
   const isArrived = navPhase === 'arrived'
   const isDone = navPhase === 'done'
 
-  // Show/hide sticky complete bar
+  // Show/hide sticky complete bar + add padding so content isn't hidden behind it
   if(stickyBar) stickyBar.style.display = isArrived ? 'block' : 'none'
+  if(container) container.style.paddingBottom = isArrived ? '80px' : '0'
 
   if(isDone){
     const earned = (totalStops * 3.25).toFixed(2)
@@ -15220,6 +15329,26 @@ function renderActiveRouteTab(){
         </button>
         <div style="margin-top:12px;font-size:11px;color:var(--muted)">Homeowners have been notified · Great work tonight!</div>
       </div>`
+    return
+  }
+
+  // ── PAUSED PHASE ──────────────────────────────────────────────────────────
+  if(navPhase === 'paused'){
+    if(stickyBar) stickyBar.style.display = 'none'
+    container.style.paddingBottom = '0'
+    container.innerHTML = `
+      <div style="background:rgba(245,158,11,.07);border:1.5px solid rgba(245,158,11,.3);border-radius:14px;padding:24px;text-align:center;margin-bottom:16px">
+        <div style="font-size:48px;margin-bottom:10px">⏸</div>
+        <div style="font-size:18px;font-weight:800;margin-bottom:4px">Route Paused</div>
+        <div style="font-size:13px;color:var(--sub);margin-bottom:4px">${navStop} of ${totalStops} stops done · $${(navStop*3.25).toFixed(2)} earned so far</div>
+        <div style="font-size:12px;color:var(--muted)">Your progress is saved. Resume when ready.</div>
+      </div>
+      <button onclick="navResume()" class="btn btn-cyan" style="width:100%;padding:15px;font-size:16px;font-weight:800;border-radius:12px;min-height:52px;margin-bottom:8px">
+        ▶ Resume Route
+      </button>
+      <button onclick="navAbandonConfirm()" style="width:100%;padding:11px;background:none;border:1px solid rgba(239,68,68,.3);border-radius:10px;color:#ef4444;font-size:13px;font-weight:600;cursor:pointer">
+        ✕ End Route Early
+      </button>`
     return
   }
 
@@ -15290,23 +15419,28 @@ function renderActiveRouteTab(){
         ⚠️ Can't access — skip this stop
       </button>`}
       ${isArrived?`
-      <div style="margin-top:10px">
-        <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px">📸 Photo (optional but recommended)</div>
-        <input type="file" accept="image/*" capture="environment" id="stop-photo-input" style="display:none" onchange="navPhotoSelected(this)">
-        <div id="nav-photo-preview" onclick="document.getElementById('stop-photo-input').click()"
-          style="border:2px dashed var(--border2);border-radius:10px;padding:16px;text-align:center;cursor:pointer;min-height:60px;display:flex;align-items:center;justify-content:center;background:var(--surface2)">
-          <span style="font-size:12px;color:var(--muted)">📷 Tap to take photo</span>
+      <!-- Photo: big tap target, instant preview, optional -->
+      <input type="file" accept="image/*" capture="environment" id="stop-photo-${navStop}" style="display:none" onchange="navPhotoTaken(this)">
+      <div id="photo-preview-${navStop}"
+        onclick="document.getElementById('stop-photo-${navStop}').click()"
+        style="margin-top:12px;border:2px dashed rgba(6,214,160,.4);border-radius:14px;min-height:140px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;background:rgba(6,214,160,.04);-webkit-tap-highlight-color:transparent;position:relative;overflow:hidden">
+        <div id="photo-placeholder-${navStop}" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:20px;pointer-events:none">
+          <div style="font-size:40px">📷</div>
+          <div style="font-size:14px;font-weight:700;color:var(--cyan)">Take Proof Photo</div>
+          <div style="font-size:11px;color:var(--muted);text-align:center">Optional — tap to photograph bins at curb<br><em>Protects you if a homeowner disputes</em></div>
         </div>
       </div>
-      <div style="margin-top:10px;display:flex;gap:8px">
-        <a href="${stopMapsUrl}" target="_blank" rel="noopener"
-           style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;background:rgba(26,115,232,.15);border:1px solid rgba(26,115,232,.3);border-radius:10px;padding:10px;font-size:12px;font-weight:700;color:#60a5fa;text-decoration:none">
-          📍 Maps
-        </a>
-        <button onclick="navCompleteStop()" id="nav-complete-btn" class="btn btn-green" style="flex:3;padding:10px;font-size:13px;font-weight:700;border-radius:10px">
-          ✓ Mark Stop Done & Continue
-        </button>
-      </div>`:''}
+
+      <!-- Issue / exception button -->
+      <button onclick="navReportIssue()" style="width:100%;margin-top:8px;padding:12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.22);border-radius:10px;color:#f59e0b;font-size:13px;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent">
+        ⚠️ Report issue with this stop
+      </button>
+
+      <!-- PRIMARY complete — always enabled, no photo required -->
+      <button onclick="navComplete()" id="complete-btn-${navStop}" class="btn btn-green"
+        style="width:100%;margin-top:8px;padding:16px;font-size:17px;font-weight:800;border-radius:14px;min-height:56px;box-shadow:0 4px 20px rgba(34,197,94,.3)">
+        ✓ Done — Next Stop
+      </button>`:''}
     </div>` : ''
 
   container.innerHTML = progressHtml + currentStopHtml + `
@@ -15467,29 +15601,51 @@ function navPhotoSelected(input){
   if(!input.files || !input.files[0]) return
   const file = input.files[0]
 
-  // Use createObjectURL — much faster, no base64 in memory, no crash risk
+  // Compress image before preview/upload on mobile to prevent memory crash
+  // Use createObjectURL for instant preview — no base64 in memory
   const objectUrl = URL.createObjectURL(file)
   window._navPhotoFile = file
   window._navPhotoObjectUrl = objectUrl
 
-  // Show preview immediately — no FileReader delay
   const preview = document.getElementById('nav-photo-preview')
+  const placeholder = document.getElementById('nav-photo-placeholder')
+
   if(preview){
-    preview.innerHTML = `
-      <img src="${objectUrl}" style="width:100%;max-height:160px;object-fit:cover;border-radius:10px" onload="URL.revokeObjectURL(this.src)">
-      <div style="padding:6px;font-size:11px;color:var(--cyan);font-weight:600;text-align:center">✓ Photo ready — tap Complete below</div>`
-    preview.style.cursor = 'default'
+    // Replace placeholder with actual photo — fills the preview box
+    if(placeholder) placeholder.style.display = 'none'
+    // Remove old image if any
+    const oldImg = preview.querySelector('img.nav-photo-img')
+    if(oldImg) oldImg.remove()
+
+    const img = document.createElement('img')
+    img.className = 'nav-photo-img'
+    img.style.cssText = 'width:100%;height:180px;object-fit:cover;border-radius:12px;display:block'
+    img.src = objectUrl
+    img.onload = () => URL.revokeObjectURL(objectUrl) // free memory after display
+    preview.appendChild(img)
+
+    // Add retake overlay
+    const retake = document.createElement('div')
+    retake.style.cssText = 'position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;cursor:pointer'
+    retake.textContent = '📷 Retake'
+    retake.onclick = (e) => { e.stopPropagation(); document.getElementById('stop-photo-input').click() }
+    preview.appendChild(retake)
+
+    // Add checkmark overlay
+    const check = document.createElement('div')
+    check.style.cssText = 'position:absolute;top:8px;left:8px;background:rgba(34,197,94,.9);color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px'
+    check.textContent = '✓ Photo ready'
+    preview.appendChild(check)
   }
 
-  // Enable complete button
+  // Pulse the complete button to draw attention
   const btn = document.getElementById('nav-complete-btn')
   if(btn){
-    btn.disabled = false
-    btn.style.background = 'rgba(34,197,94,.2)'
-    btn.style.color = '#22c55e'
-    btn.style.borderColor = 'rgba(34,197,94,.4)'
-    btn.style.cursor = 'pointer'
+    btn.style.animation = 'pulse 0.5s ease-in-out 3'
+    setTimeout(() => { if(btn) btn.style.animation = '' }, 1600)
   }
+  const stickyBtn = document.getElementById('sticky-complete-btn')
+  if(stickyBtn) stickyBtn.textContent = '✓ Done — Next Stop (photo attached)'
 }
 
 async function navSkipStop(){
@@ -15515,87 +15671,153 @@ async function navSkipStop(){
   showToast('Stop skipped — admin notified', 'warn', 3000)
 }
 
-async function navCompleteStop(){
-  const stops      = NAV_STOPS || []
-  const s          = stops[navStop]
-  const runnerRow  = window._rnRow
-  const isLastStop = navStop === stops.length - 1
+function navReportIssue(){
+  const s = (NAV_STOPS||[])[navStop]
+  if(!s) return
 
-  const btn = document.getElementById('nav-complete-btn')
-  if(btn){ btn.disabled = true; btn.textContent = 'Saving...' }
+  const issues = [
+    { id:'no_access', icon:'🔒', label:'Could not access property', detail:'Gate locked, no entry possible' },
+    { id:'bin_wrong_side', icon:'↔️', label:'Bin placed on opposite side', detail:'Road work, construction, or obstruction' },
+    { id:'bin_missing', icon:'❓', label:'Could not find bin', detail:'Bin not visible from street' },
+    { id:'bin_damaged', icon:'🗑️', label:'Bin damaged or overflowing', detail:'Will not move — needs admin attention' },
+    { id:'dog_aggressive', icon:'🐕', label:'Aggressive animal', detail:'Could not safely access property' },
+    { id:'wrong_day', icon:'📅', label:'Truck already came', detail:'Collection happened earlier than expected' },
+    { id:'other', icon:'📝', label:'Other issue', detail:'Add a note below' },
+  ]
 
-  try {
-    // Upload photo to Supabase Storage if available
-    let photoUrl = null
-    if(window._navPhotoFile){
-      try {
-        const ext      = window._navPhotoFile.name.split('.').pop() || 'jpg'
-        const fileName = `jobs/${s.jobId || Date.now()}_stop${navStop}.${ext}`
-        const { data, error } = await _supa.storage
-          .from('job-photos')
-          .upload(fileName, window._navPhotoFile, { upsert: true })
-        if(!error){
-          const { data: urlData } = _supa.storage.from('job-photos').getPublicUrl(fileName)
-          photoUrl = urlData?.publicUrl || null
-        }
-      } catch(e){ console.warn('Photo upload failed:', e) }
+  document.getElementById('modal-box').innerHTML = `
+    <div class="mh">
+      <div>
+        <div style="font-size:15px;font-weight:700">⚠️ Report Issue</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${s.name} · ${s.address}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+    </div>
+    <div class="mb" style="padding:16px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">What happened? Select all that apply:</div>
+      <div style="display:flex;flex-direction:column;gap:8px" id="issue-list">
+        ${issues.map(iss => `
+          <label style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;cursor:pointer;-webkit-tap-highlight-color:transparent" onclick="this.style.background=this.querySelector('input').checked?'var(--surface2)':'rgba(245,158,11,.1)';this.style.borderColor=this.querySelector('input').checked?'var(--border)':'rgba(245,158,11,.4)'">
+            <input type="checkbox" id="issue-${iss.id}" value="${iss.id}" style="width:18px;height:18px;flex-shrink:0;accent-color:#f59e0b">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:600">${iss.icon} ${iss.label}</div>
+              <div style="font-size:11px;color:var(--muted)">${iss.detail}</div>
+            </div>
+          </label>`).join('')}
+      </div>
+      <textarea id="issue-notes" placeholder="Additional notes (optional)..." style="width:100%;margin-top:12px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:13px;min-height:72px;resize:none;box-sizing:border-box;font-family:inherit"></textarea>
+    </div>
+    <div class="mf">
+      <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+      <button class="btn btn-amber btn-sm" style="background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3)" onclick="navSubmitIssue()">
+        ⚠️ Log Issue & Complete Stop
+      </button>
+    </div>`
+  openM()
+}
+
+async function navSubmitIssue(){
+  const s = (NAV_STOPS||[])[navStop]
+  const selected = [...document.querySelectorAll('#issue-list input:checked')].map(el => el.value)
+  const notes = document.getElementById('issue-notes')?.value?.trim() || ''
+
+  if(!selected.length && !notes){ showToast('Select at least one issue', 'warn'); return }
+
+  closeM()
+
+  const issueLabels = {
+    no_access:'Could not access',bin_wrong_side:'Bin placed opposite side',
+    bin_missing:'Bin not found',bin_damaged:'Bin damaged/overflowing',
+    dog_aggressive:'Aggressive animal',wrong_day:'Truck already came',other:'Other'
+  }
+  const issueText = selected.map(id => issueLabels[id]||id).join(', ') + (notes ? ` — ${notes}` : '')
+
+  // Log to DB
+  if(s?.jobId){
+    await _supa.from('jobs').update({
+      notes: issueText,
+      status: selected.includes('no_access') ? 'missed' : 'complete',
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', s.jobId).catch(()=>{})
+  }
+
+  // Notify admin via email
+  sendEmail('alpha1miller@gmail.com',
+    `⚠️ BinDash Issue — ${s?.name||'Stop'} · ${new Date().toLocaleDateString()}`,
+    `<div style="font-family:sans-serif;padding:20px;max-width:500px">
+      <h2 style="color:#f59e0b;margin:0 0 12px">Runner Reported Issue</h2>
+      <p><strong>Stop:</strong> ${s?.name} · ${s?.address}</p>
+      <p><strong>Issue:</strong> ${issueText}</p>
+      <p><strong>Runner:</strong> ${(window._rnRow?.first_name||'')+' '+(window._rnRow?.last_name||'')}</p>
+      <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+    </div>`,
+    'runner_issue_report'
+  ).catch(()=>{})
+
+  showToast('Issue logged — continuing route', 'warn', 3000)
+
+  // Advance to next stop
+  navStop++
+  navPhase = selected.includes('no_access') ? 'travelling' : 'travelling'
+  _saveNavState()
+  if(navStop >= (NAV_STOPS||[]).length){
+    navPhase = 'done'
+    sessionStorage.removeItem('nav_state')
+  }
+  renderActiveRouteTab()
+}
+
+// Compress photo using canvas — reduces 4MB phone photo to ~200KB
+// maxDim: max width/height in pixels, quality: 0-1 JPEG quality
+async function _compressPhoto(file, maxDim = 800, quality = 0.75){
+  return new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const canvas = document.createElement('canvas')
+      let w = img.width, h = img.height
+      if(w > maxDim || h > maxDim){
+        if(w > h){ h = Math.round(h * maxDim / w); w = maxDim }
+        else      { w = Math.round(w * maxDim / h); h = maxDim }
+      }
+      canvas.width = w; canvas.height = h
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0, w, h)
+      canvas.toBlob(blob => resolve(blob || file), 'image/jpeg', quality)
     }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
+    img.src = url
+  })
+}
 
-    // Mark this job complete in DB
-    if(s.jobId){
-      await _supa.from('jobs').update({
-        status:       'complete',
-        completed_at: new Date().toISOString(),
-        photo_url:    photoUrl,
-        updated_at:   new Date().toISOString(),
-      }).eq('id', s.jobId)
-    }
+// Offline-resilient Supabase wrapper — queues writes when offline, retries on reconnect
+const _offlineQueue = []
+let _isOnline = navigator.onLine
+window.addEventListener('online',  () => { _isOnline = true;  _flushOfflineQueue() })
+window.addEventListener('offline', () => { _isOnline = false; showToast('📵 Offline — stops will save when signal returns', 'warn', 4000) })
 
-    // Notify homeowner via email
-    if(s.hwEmail){
-      const visitDone = navVisitType === 'BIN_OUT' || navVisitType === 'Bin Out'
-        ? 'Bins are at the curb' : 'Bins have been returned to your property'
-      sendEmail(
-        s.hwEmail,
-        '✅ BinDash — your bins have been ' + (navVisitType === 'BIN_OUT' || navVisitType === 'Bin Out' ? 'put out' : 'brought in'),
-        `<div style="font-family:sans-serif;padding:20px;max-width:520px;margin:0 auto">
-          <div style="font-size:22px;font-weight:800;color:#06d6a0;margin-bottom:8px">✅ Done!</div>
-          <div style="font-size:15px;color:#333;margin-bottom:16px">${visitDone} — all set for collection.</div>
-          ${photoUrl ? `<img src="${photoUrl}" style="width:100%;border-radius:8px;margin-bottom:14px">` : ''}
-          <div style="font-size:12px;color:#999">BinDash · ${new Date().toLocaleDateString()}</div>
-        </div>`,
-        'stop_complete'
-      )
-    }
-
-    window._navPhotoData = null
-    window._navPhotoFile = null
-
-    if(isLastStop){
-      // Route done
-      navPhase = 'done'
-      navStop  = stops.length
-      sessionStorage.removeItem('nav_state') // clear saved state on completion
-      renderActiveRouteTab()
-      const stickyBar = document.getElementById('sticky-complete-bar')
-      if(stickyBar) stickyBar.style.display = 'none'
-    } else {
-      // Advance to next stop
-      navStop++
-      navPhase = 'travelling'
-      _saveNavState() // persist progress
-      renderActiveRouteTab()
-      // Reset photo for next stop
-      const preview = document.getElementById('nav-photo-preview')
-      if(preview) preview.innerHTML = '<span style="font-size:12px;color:var(--muted)">📷 Tap to take photo</span>'
-      showToast('✅ Stop ' + navStop + ' of ' + stops.length + ' — keep going!', 'ok', 2500)
-    }
-
-  } catch(e){
-    showToast('Error saving stop: ' + String(e?.message||e), 'err')
-    if(btn){ btn.disabled = false; btn.textContent = 'Mark Complete' }
+async function _flushOfflineQueue(){
+  if(!_offlineQueue.length) return
+  showToast(`📶 Back online — saving ${_offlineQueue.length} queued stop${_offlineQueue.length!==1?'s':''}`, 'ok', 3000)
+  while(_offlineQueue.length){
+    const op = _offlineQueue.shift()
+    try { await op() } catch(e){ _offlineQueue.unshift(op); break }
   }
 }
+
+function _resilientUpdate(table, data, matchCol, matchVal){
+  const op = () => _supa.from(table).update(data).eq(matchCol, matchVal)
+  if(!_isOnline){ _offlineQueue.push(op); return Promise.resolve() }
+  return op().then(({error}) => {
+    if(error) throw error
+  }).catch(e => {
+    _offlineQueue.push(op)
+    console.warn('[offline queue]', table, e.message)
+  })
+}
+
 
 async function navFinishRoute(){
   navRouteActive = false
@@ -15739,12 +15961,18 @@ function navSubmitRoute(){
   const submitTime = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})
   const visitType  = navVisitType
 
-  // 1. Reset route state immediately so modal closes cleanly
+  // 1. Reset route state immediately
   navPhase      = 'idle'
   navStop       = 0
   navRouteActive= false
   navBatchId    = ''
-  closeM()
+  sessionStorage.removeItem('nav_state')
+
+  // Hide sticky bar
+  const sb = document.getElementById('sticky-complete-bar')
+  if(sb) sb.style.display = 'none'
+  const container = document.getElementById('active-route-container')
+  if(container) container.style.paddingBottom = '0'
 
   // 2. Add to history with pending approval status + stop log
   const now = new Date()
