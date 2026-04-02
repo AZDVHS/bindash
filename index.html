@@ -10,20 +10,50 @@
 <meta name="theme-color" content="#0f172a">
 <title>BinDash -- Smart Bin Collection</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;853&family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" media="print" onload="this.media='all'"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" media="print" onload="this.media='all'"/>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <!-- Leaflet and H3 loaded on demand when maps are first opened -->
 <script>
 function _loadMapLibs(){
   if(window._mapLibsLoaded) return Promise.resolve()
   if(window._mapLibsLoading) return window._mapLibsLoading
-  window._mapLibsLoading = new Promise(resolve => {
+  window._mapLibsLoading = new Promise((resolve, reject) => {
+
+    // Step 1: Inject Leaflet CSS (required for tiles to render — missing = black map)
+    if(!document.getElementById('leaflet-css')){
+      const lc = document.createElement('link')
+      lc.id   = 'leaflet-css'
+      lc.rel  = 'stylesheet'
+      lc.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css'
+      document.head.appendChild(lc)
+      console.log('[Map] Leaflet CSS injected')
+    }
+
+    // Step 2: Load H3 from cdnjs (more reliable than unpkg)
     const h3s = document.createElement('script')
-    h3s.src = 'https://unpkg.com/h3-js@4.1.0/dist/browser/h3-js.umd.js'
+    h3s.src = 'https://cdnjs.cloudflare.com/ajax/libs/h3-js/4.1.0/h3-js.umd.js'
+    h3s.onerror = () => console.warn('[Map] h3-js load failed — hex grid will be disabled')
     h3s.onload = () => {
+      console.log('[Map] h3-js loaded from cdnjs ✅')
+
+      // Step 3: Load Leaflet JS from cdnjs
+      if(window.L){
+        console.log('[Map] Leaflet already loaded')
+        window._mapLibsLoaded = true
+        resolve()
+        return
+      }
       const ls = document.createElement('script')
-      ls.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-      ls.onload = () => { window._mapLibsLoaded = true; resolve() }
+      ls.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'
+      ls.onerror = () => {
+        console.error('[Map] Leaflet JS load failed')
+        reject(new Error('Leaflet failed to load'))
+      }
+      ls.onload = () => {
+        console.log('[Map] Leaflet JS loaded from cdnjs ✅')
+        window._mapLibsLoaded = true
+        resolve()
+      }
       document.head.appendChild(ls)
     }
     document.head.appendChild(h3s)
@@ -4297,7 +4327,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             </div>
             <!-- Map -->
             <div id="mz-map-wrap" style="border-radius:10px;overflow:hidden;border:1px solid var(--border2);margin-bottom:14px">
-              <div id="mz-admin-map" style="height:420px;width:100%"></div>
+              <div id="mz-admin-map" style="height:460px;width:100%;background:#0a0e18;display:block;position:relative"></div>
             </div>
             <!-- Zone list -->
             <div id="mz-list" style="display:none;flex-direction:column;gap:8px">
@@ -8204,75 +8234,72 @@ function drawRunnerHalos(map, runners){
 // Initialize or update the SIGNUP map
 async function _initSignupMap(lat, lng, zones){
   await _loadMapLibs()
-  // Guard: Leaflet must be loaded
   if(typeof L === 'undefined'){
-    console.warn('[H3 Map] Leaflet not loaded yet')
+    console.warn('[SignupMap] Leaflet not loaded')
     return
   }
   const wrap = document.getElementById('h3-signup-map-wrap')
   const el   = document.getElementById('h3-signup-map')
-  if(!wrap || !el){ console.warn('[H3 Map] map container not found'); return }
+  if(!wrap || !el){ console.warn('[SignupMap] container not found'); return }
 
   wrap.style.display = 'block'
+  el.style.height    = '240px'
+  el.style.width     = '100%'
+  el.style.display   = 'block'
 
   try {
     if(_signupMap){
-      _signupMap.setView([lat, lng], 14)
-      // Clear old hex/marker layers but keep tile layer
+      // Just reposition existing map — avoids full recreation flicker
+      _signupMap.setView([lat, lng], 14, {animate:false})
       _signupMap.eachLayer(l => {
         if(!(l instanceof L.TileLayer)) _signupMap.removeLayer(l)
       })
+      _signupPin = null
     } else {
-      // Make sure element has dimensions
-      el.style.height = '220px'
+      // Fresh map — always destroy any stale leaflet state first
+      if(el._leaflet_id){
+        try { if(window._signupMap) window._signupMap.remove() } catch(e){}
+      }
       _signupMap = L.map('h3-signup-map', {
-        center:          [lat, lng],
-        zoom:            12,
-        zoomControl:     true,
-        scrollWheelZoom: true,
-        attributionControl: false,
+        center: [lat, lng], zoom: 13,
+        zoomControl: true, scrollWheelZoom: true, attributionControl: false,
       })
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19, subdomains: 'abcd',
+        maxZoom: 20, subdomains: 'abcd',
       }).addTo(_signupMap)
+      console.log('[SignupMap] Created ✅')
     }
 
     // Draw hex zones
     if(zones && zones.length) drawHexLayers(_signupMap, zones)
 
-    // Cyan pulsing pin for user address — stored so we can move it later
+    // User address pin — cyan pulsing dot
     _signupPin = L.circleMarker([lat, lng], {
-      radius: 9, color: '#06d6a0', fillColor: '#06d6a0',
-      fillOpacity: 1, weight: 3,
+      radius:9, color:'#06d6a0', fillColor:'#06d6a0', fillOpacity:1, weight:3,
     }).bindPopup('<b style="font-size:12px">📍 Your address</b>').addTo(_signupMap)
 
     // Outer pulse ring
     L.circleMarker([lat, lng], {
-      radius: 16, color: '#06d6a0', fillColor: 'transparent',
-      weight: 1.5, opacity: 0.4,
+      radius:16, color:'#06d6a0', fillColor:'transparent', weight:1.5, opacity:.4,
     }).addTo(_signupMap)
 
-    // Update map status text
     const statusEl = document.getElementById('h3-map-status')
-    if(statusEl){
-      const zone = ADMIN_ZONES.find(z => (z.zips||[z.zip]).includes(String(lat).slice(0,3)) || true) // will update below
-      statusEl.textContent = 'Your pin · zoom in to explore · green = active service'
-    }
+    if(statusEl) statusEl.textContent = 'Your pin · green = active service'
 
-    // Runner halos — only for runners with geocoded addresses
+    // Runner coverage halos
     RUNNERS.filter(r => r.lat && r.lng && r.status !== 'INACTIVE').forEach(r => {
       L.circle([r.lat, r.lng], {
         radius: (typeof RUNNER_COVERAGE_RADIUS_KM !== 'undefined' ? RUNNER_COVERAGE_RADIUS_KM : 3) * 1000,
-        color:'#3b82f6', fillColor:'#3b82f6',
-        fillOpacity:0.05, weight:1, dashArray:'6 4',
+        color:'#3b82f6', fillColor:'#3b82f6', fillOpacity:.05, weight:1, dashArray:'6 4',
       }).addTo(_signupMap)
     })
 
-    // Force resize twice — once now, once after transition
-    _signupMap.invalidateSize()
-    setTimeout(() => _signupMap.invalidateSize(), 300)
+    // Multiple invalidateSize calls to ensure tiles load after container transitions
+    _signupMap.invalidateSize(true)
+    setTimeout(() => { _signupMap?.invalidateSize(true) }, 150)
+    setTimeout(() => { _signupMap?.invalidateSize(true) }, 500)
 
-  } catch(e){ console.error('[H3 Map] signup map error:', e) }
+  } catch(e){ console.error('[SignupMap] error:', e) }
 }
 
 // Move the address pin to precise coords without re-initialising the map
@@ -8300,201 +8327,187 @@ function _moveSignupPin(lat, lng, label){
 
 // Load zones from Supabase and render admin map
 async function _initAdminMap(){
+  console.log('[Map] _initAdminMap called')
   await _loadMapLibs()
+
   const el = document.getElementById('mz-admin-map')
-  if(!el){ console.warn('[Map] mz-admin-map element not found'); return }
+  if(!el){ console.warn('[Map] mz-admin-map not found'); return }
 
-  console.log('[Map] _initAdminMap start — HOMEOWNERS:', HOMEOWNERS.length, 'RUNNERS:', RUNNERS.length)
+  // Force the container to have real dimensions before Leaflet touches it
+  el.style.height = '460px'
+  el.style.width  = '100%'
+  el.style.display = 'block'
+  el.style.background = '#0a0e18'
 
-  // ── BUILD homeownerData — source of truth for map ──────────────────────────
-  // Indexed by H3 hex (Res 9). Each hex holds one or more HOs.
+  // Verify Leaflet loaded
+  if(typeof L === 'undefined'){
+    console.error('[Map] Leaflet not loaded — cannot init map')
+    el.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:13px">⚠️ Map library failed to load. Check network connection.</div>'
+    return
+  }
+  console.log('[Map] Leaflet v'+L.version+' ready')
+
+  // ── DESTROY stale map instance (prevents grey/black tiles on re-open) ──
+  if(window._adminMap){
+    try { window._adminMap.remove() } catch(e){}
+    window._adminMap = null
+    window._adminHexLayers = []
+    console.log('[Map] Previous map instance destroyed')
+  }
+
+  // ── BUILD homeownerData from HOMEOWNERS ────────────────────────────────
   window.homeownerData = {}
-  const activeHOs = HOMEOWNERS.filter(h => h.status === 'active' && h.lat && h.lng)
-  console.log('[Map] Active HOs with coords:', activeHOs.length)
-
-  activeHOs.forEach(ho => {
-    try {
-      const hex9 = (typeof h3 !== 'undefined' && h3.latLngToCell)
-        ? h3.latLngToCell(ho.lat, ho.lng, 9)
-        : null
-      const zoneObj = ADMIN_ZONES.find(z => z.id === ho.zoneId)
-      const runner  = RUNNERS.find(r => r.id === ho.assignedRunner || r.name === ho.assignedRunner)
-      const key = hex9 || `${ho.lat.toFixed(5)},${ho.lng.toFixed(5)}`
-      if(!window.homeownerData[key]){
-        window.homeownerData[key] = {
-          h3Index:   hex9,
-          lat:       ho.lat,
-          lng:       ho.lng,
-          status:    zoneObj?.status === 'live' ? 'active' : zoneObj?.status === 'waitlist' ? 'waitlist' : 'no activity',
-          zone:      zoneObj || null,
-          runnerId:  runner?.id || ho.assignedRunner || null,
-          runnerName:runner?.name || null,
-          homeowners:[],
-          poly:      null,   // Leaflet polygon ref — set after draw
-        }
-      }
-      window.homeownerData[key].homeowners.push({
-        name:    ((ho.first_name||'')+' '+(ho.last_name||'')).trim() || ho.email?.split('@')[0] || '--',
-        email:   ho.email,
-        address: ho.street_address || ho.address || '--',
-        zip:     ho.zip || '',
-        service: ho.service || 'Recycling',
-        day:     ho.day || '--',
-      })
-    } catch(e){ console.warn('[Map] homeownerData build error:', e.message) }
-  })
-  console.log('[Map] homeownerData built:', Object.keys(window.homeownerData).length, 'hex cells')
-
-  // ── ZONE STYLE ─────────────────────────────────────────────────────────────
-  function getZoneStyle(status, assigned){
-    const s = {
-      active:      { color:'#2ecc71', fillColor:'#2ecc71', fillOpacity:.18, weight:1.5, opacity:.9 },
-      waitlist:    { color:'#f1c40f', fillColor:'#f1c40f', fillOpacity:.13, weight:1.5, opacity:.85 },
-      'no activity':{ color:'#95a5a6', fillColor:'#95a5a6', fillOpacity:.09, weight:1,   opacity:.6 },
-    }
-    const base = s[status] || s['no activity']
-    // Runner assigned → boost fill slightly
-    if(assigned) base.fillOpacity = Math.min(.32, base.fillOpacity + .08)
-    return base
-  }
-
-  // ── MAP INIT ───────────────────────────────────────────────────────────────
-  // Default center: first HO with coords, else Glendale AZ
-  const firstHO = activeHOs[0]
-  const defLat  = firstHO?.lat || 33.5387
-  const defLng  = firstHO?.lng || -112.186
-
-  if(!window._adminMap){
-    console.log('[Map] Creating new Leaflet map instance')
-    window._adminMap = L.map('mz-admin-map', {
-      center: [defLat, defLng],
-      zoom:   12,
-      zoomControl: true,
-      attributionControl: true,
-    })
-    // CartoDB dark tiles — proven to work without black screen
-    L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      { attribution:'© <a href="https://carto.com/">CARTO</a>', subdomains:'abcd', maxZoom:20 }
-    ).addTo(window._adminMap)
-    console.log('[Map] Leaflet map + CartoDB dark tiles initialised')
-  } else {
-    console.log('[Map] Reusing existing map instance — clearing layers')
-    ;(window._adminHexLayers || []).forEach(l => { try { window._adminMap.removeLayer(l) } catch(e){} })
-  }
-  window._adminHexLayers = []
-
-  // Critical: force size recalc after any display:none → display:block transition
-  setTimeout(() => {
-    window._adminMap.invalidateSize()
-    console.log('[Map] invalidateSize() called')
-  }, 120)
-
   const h3Ready = typeof h3 !== 'undefined' && typeof h3.latLngToCell === 'function'
   console.log('[Map] H3 ready:', h3Ready)
+  console.log('[Map] HOMEOWNERS:', HOMEOWNERS.length, '| ADMIN_ZONES:', ADMIN_ZONES.length, '| RUNNERS:', RUNNERS.length)
 
-  // ── DRAW HOMEOWNER HEX CELLS ───────────────────────────────────────────────
-  const allBounds = []
+  const geoHOs = HOMEOWNERS.filter(h => h.status==='active' && h.lat && h.lng)
+  console.log('[Map] HOs with geocoded coords:', geoHOs.length)
+
+  geoHOs.forEach(ho => {
+    try {
+      const hex = (h3Ready) ? h3.latLngToCell(ho.lat, ho.lng, 9) : null
+      const zone = ADMIN_ZONES.find(z => z.id === ho.zoneId)
+      const runner = RUNNERS.find(r => r.id === ho.assignedRunner || r.name === ho.assignedRunner)
+      const key = hex || (ho.lat.toFixed(5)+','+ho.lng.toFixed(5))
+      const status = zone?.status==='live' ? 'active' : zone?.status==='waitlist' ? 'waitlist' : 'no activity'
+      if(!window.homeownerData[key]){
+        window.homeownerData[key] = { h3Index:hex, lat:ho.lat, lng:ho.lng, status, zone:zone||null, runnerId:runner?.id||null, runnerName:runner?.name||null, homeowners:[], poly:null }
+      }
+      window.homeownerData[key].homeowners.push({
+        name: ((ho.first_name||'')+' '+(ho.last_name||'')).trim() || ho.email?.split('@')[0] || '--',
+        email: ho.email, address: ho.street_address||ho.address||'--', zip: ho.zip||'', service: ho.service||'Recycling', day: ho.day||'--',
+      })
+    } catch(e){ console.warn('[Map] homeownerData err:', e.message) }
+  })
+  console.log('[Map] homeownerData cells:', Object.keys(window.homeownerData).length)
+
+  // ── FIND CENTER ────────────────────────────────────────────────────────
+  let defLat = 33.5387, defLng = -112.186
+  if(geoHOs.length){ defLat = geoHOs[0].lat; defLng = geoHOs[0].lng }
+  else if(ADMIN_ZONES.length){
+    const z0 = ADMIN_ZONES.find(z=>z.lat&&z.lng) || ADMIN_ZONES[0]
+    const zip = (z0?.zips?.[0]||z0?.zip||'')
+    const zc = ZIP_CENTROIDS?.[zip]
+    if(zc){ defLat=zc[0]; defLng=zc[1] }
+  }
+  console.log('[Map] Center:', defLat, defLng)
+
+  // ── CREATE MAP ─────────────────────────────────────────────────────────
+  window._adminMap = L.map('mz-admin-map', {
+    center: [defLat, defLng],
+    zoom: 12,
+    zoomControl: true,
+    attributionControl: true,
+    preferCanvas: false,
+  })
+  console.log('[Map] L.map created')
+
+  // CartoDB dark_all — proven reliable dark tile provider
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a> © <a href="https://carto.com/">CARTO</a>',
+    subdomains: 'abcd',
+    maxZoom: 20,
+  }).addTo(window._adminMap)
+  console.log('[Map] Tile layer added')
+
+  window._adminHexLayers = []
+
+  // ── DRAW HEX CELLS ─────────────────────────────────────────────────────
+  const bounds = []
 
   Object.entries(window.homeownerData).forEach(([key, cell]) => {
     try {
-      if(!h3Ready || !cell.h3Index){
-        // Fallback: plain circle marker
-        const circle = L.circleMarker([cell.lat, cell.lng], {
-          radius:10, ...getZoneStyle(cell.status, !!cell.runnerId)
+      const style = getZoneStyleGlobal(cell.status, !!cell.runnerId)
+
+      if(h3Ready && cell.h3Index){
+        // Anchor hex + 1-ring halo
+        const ring = h3.gridDisk(cell.h3Index, 1)
+        ring.forEach(hex => {
+          const isAnchor = hex === cell.h3Index
+          const boundary = h3.cellToBoundary(hex)
+          const latlngs  = boundary.map(([lt,ln]) => [lt,ln])
+          const hexStyle = { ...style, fillOpacity: isAnchor ? style.fillOpacity+.15 : style.fillOpacity*.4, weight: isAnchor ? 2 : 0.7 }
+          const poly = L.polygon(latlngs, hexStyle)
+          if(isAnchor){
+            cell.poly = poly
+            _bindHexPopup(poly, cell, key)
+            bounds.push(...latlngs)
+          }
+          poly.addTo(window._adminMap)
+          window._adminHexLayers.push(poly)
         })
-        _bindHexPopup(circle, cell, key)
-        circle.addTo(window._adminMap)
-        window._adminHexLayers.push(circle)
-        allBounds.push([cell.lat, cell.lng])
-        return
+      } else {
+        // Fallback circle
+        const c = L.circleMarker([cell.lat, cell.lng], { ...style, radius:10 })
+        _bindHexPopup(c, cell, key)
+        c.addTo(window._adminMap)
+        window._adminHexLayers.push(c)
+        bounds.push([cell.lat, cell.lng])
       }
 
-      // Draw anchor hex + 1-ring halo at Res 9
-      const hexRing = h3.gridDisk(cell.h3Index, 1)
-      console.log('[Map] Drawing', hexRing.length, 'hexes for cell', key.slice(0,14))
-
-      hexRing.forEach(hex => {
-        const isAnchor = hex === cell.h3Index
-        const boundary = h3.cellToBoundary(hex)  // returns [[lat,lng],...] in h3-js v4
-        const latlngs  = boundary.map(([lt, ln]) => [lt, ln])
-
-        const style = {
-          ...getZoneStyle(cell.status, !!cell.runnerId),
-          fillOpacity: isAnchor
-            ? getZoneStyle(cell.status, !!cell.runnerId).fillOpacity + .15
-            : getZoneStyle(cell.status, !!cell.runnerId).fillOpacity * .5,
-          weight: isAnchor ? 2 : 0.8,
-        }
-
-        const poly = L.polygon(latlngs, style)
-        if(isAnchor){
-          cell.poly = poly  // store anchor poly for assignRunner() updates
-          _bindHexPopup(poly, cell, key)
-          allBounds.push(...latlngs)
-        }
-        poly.addTo(window._adminMap)
-        window._adminHexLayers.push(poly)
+      // Anchor marker (star pin)
+      const pinStyle = getZoneStyleGlobal(cell.status, !!cell.runnerId)
+      const rnBadge = cell.runnerName
+        ? `<div style="position:absolute;bottom:-3px;right:-3px;width:14px;height:14px;background:#06d6a0;border:2px solid #0f172a;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px">🚐</div>`
+        : ''
+      const pin = L.divIcon({
+        html: `<div style="position:relative;width:20px;height:20px"><div style="width:20px;height:20px;background:${pinStyle.color};border:2.5px solid #0f172a;border-radius:50%;box-shadow:0 2px 8px ${pinStyle.color}70;display:flex;align-items:center;justify-content:center;font-size:10px">⭐</div>${rnBadge}</div>`,
+        className: '', iconAnchor:[10,10],
       })
-    } catch(e){ console.warn('[Map] Hex draw error:', e.message) }
+      const m = L.marker([cell.lat, cell.lng], {icon:pin})
+      _bindHexPopup(m, cell, 'pin:'+key)
+      m.addTo(window._adminMap)
+      window._adminHexLayers.push(m)
+    } catch(e){ console.warn('[Map] Draw error:', e.message) }
   })
+  console.log('[Map] Drew', window._adminHexLayers.length, 'layers')
 
-  // ── ANCHOR HOMEOWNER MARKERS ───────────────────────────────────────────────
-  Object.values(window.homeownerData).forEach(cell => {
-    const style = getZoneStyle(cell.status, !!cell.runnerId)
-    const runnerBadge = cell.runnerName
-      ? `<div style="width:20px;height:20px;background:#06d6a0;border:2px solid #0f172a;border-radius:50%;position:absolute;bottom:-4px;right:-4px;font-size:9px;display:flex;align-items:center;justify-content:center">🚐</div>`
-      : ''
-    const icon = L.divIcon({
-      html: `<div style="position:relative;width:22px;height:22px">
-        <div style="width:22px;height:22px;background:${style.color};border:2.5px solid #0f172a;border-radius:50%;box-shadow:0 2px 8px ${style.color}60;display:flex;align-items:center;justify-content:center;font-size:11px">⭐</div>
-        ${runnerBadge}
-      </div>`,
-      className: '', iconAnchor: [11, 11],
-    })
-    const marker = L.marker([cell.lat, cell.lng], { icon })
-    _bindHexPopup(marker, cell, 'marker:'+cell.h3Index)
-    marker.addTo(window._adminMap)
-    window._adminHexLayers.push(marker)
-  })
-
-  // ── ZONE FALLBACK — zones without geocoded HOs ─────────────────────────────
-  ADMIN_ZONES.filter(z => z.status !== 'inactive').forEach(z => {
+  // ── ZONE FALLBACK — no geocoded HOs ────────────────────────────────────
+  ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
     const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
-    const zip  = zips[0] || ''
-    const hasHO = Object.values(window.homeownerData).some(c => c.zone?.id === z.id)
-    if(hasHO) return  // already drawn via HO data
-
-    const zipCoords = ZIP_CENTROIDS?.[zip] || ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])] || null
-    if(!zipCoords) return
-    const [lat, lng] = zipCoords
-    const st = z.status === 'live' ? 'active' : z.status === 'waitlist' ? 'waitlist' : 'no activity'
-    const style = getZoneStyle(st, false)
-    console.log('[Map] Zone fallback circle:', z.name, zip)
-    const circle = L.circle([lat, lng], {
-      radius: 1800,
-      color: style.color, fillColor: style.fillColor, fillOpacity: style.fillOpacity * .8,
-      weight: 1.5, dashArray: '5 4',
-    }).bindPopup(`<div style="font-family:system-ui;color:#0f172a"><b>${z.name}</b><br>ZIP ${zip}<br>${z.homeowners||0} HOs — no geocoded addresses yet</div>`)
+    const hasDrawn = Object.values(window.homeownerData).some(c=>c.zone?.id===z.id)
+    if(hasDrawn) return
+    const zip = zips[0]||''
+    const zc = ZIP_CENTROIDS?.[zip] || ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]
+    if(!zc) return
+    const [lat,lng] = zc
+    const st = z.status==='live'?'active':z.status==='waitlist'?'waitlist':'no activity'
+    const sty = getZoneStyleGlobal(st, false)
+    const circle = L.circle([lat,lng], {
+      radius:1800, color:sty.color, fillColor:sty.fillColor, fillOpacity:sty.fillOpacity*.7,
+      weight:1.5, dashArray:'6 4',
+    }).bindPopup(`<div style="font-family:system-ui;color:#0f172a"><b>${z.name}</b><br>ZIP ${zip}<br>No geocoded addresses yet — click 📍 Geocode HOs</div>`)
     circle.addTo(window._adminMap)
     window._adminHexLayers.push(circle)
-    allBounds.push([lat, lng])
+    bounds.push([lat,lng])
+    console.log('[Map] Zone fallback circle:', z.name)
   })
 
-  // ── FIT BOUNDS ─────────────────────────────────────────────────────────────
-  if(allBounds.length){
+  // ── FIT BOUNDS ─────────────────────────────────────────────────────────
+  if(bounds.length > 0){
     try {
-      window._adminMap.fitBounds(allBounds, { padding:[30,30], maxZoom:15, animate:true })
-      console.log('[Map] fitBounds to', allBounds.length, 'points')
-    } catch(e){ window._adminMap.setView([defLat, defLng], 12) }
+      window._adminMap.fitBounds(bounds, {padding:[40,40], maxZoom:15, animate:false})
+      console.log('[Map] fitBounds complete, points:', bounds.length)
+    } catch(e){
+      window._adminMap.setView([defLat, defLng], 12)
+      console.warn('[Map] fitBounds failed, using default view:', e.message)
+    }
   } else {
     window._adminMap.setView([defLat, defLng], 12)
+    console.log('[Map] No bounds — default view at', defLat, defLng)
   }
 
-  // Ensure tiles load after fitBounds
-  setTimeout(() => { window._adminMap.invalidateSize(); console.log('[Map] Final invalidateSize') }, 400)
-
-  console.log('[Map] Render complete ✅')
+  // ── INVALIDATE SIZE — critical after container was hidden ───────────────
+  // Must be called AFTER fitBounds and with delays to let DOM settle
+  const doInvalidate = () => {
+    if(window._adminMap){ window._adminMap.invalidateSize(true); console.log('[Map] invalidateSize()') }
+  }
+  doInvalidate()
+  setTimeout(doInvalidate, 100)
+  setTimeout(doInvalidate, 400)
+  setTimeout(doInvalidate, 900)
+  console.log('[Map] Init complete ✅')
 }
 
 // ── assignRunner — update hex colour when runner assigned ──────────────────
