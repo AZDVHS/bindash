@@ -3825,7 +3825,12 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
               <div class="field"><label>Last Name</label><input id="rn-acct-ln" placeholder="Last name"></div>
               <div class="field"><label>Email</label><input id="rn-acct-em" placeholder="Email address" readonly style="opacity:.6;cursor:not-allowed"></div>
               <div class="field"><label>Phone</label><input id="rn-acct-ph" placeholder="Phone number"></div>
-              <div class="field"><label>Home ZIP</label><input id="rn-acct-zip" placeholder="85374" maxlength="5"></div>
+              <div class="field"><label>Home Street Address</label><input id="rn-acct-addr" placeholder="123 Main Street" oninput="clearTimeout(window._rnAddrTimer);window._rnAddrTimer=setTimeout(_rnAccountAddrHint,1200)"></div>
+              <div class="field"><label>City</label><input id="rn-acct-city" placeholder="Glendale"></div>
+              <div class="field"><label>Home ZIP</label><input id="rn-acct-zip" placeholder="85374" maxlength="5" oninput="clearTimeout(window._rnAddrTimer);window._rnAddrTimer=setTimeout(_rnAccountAddrHint,800)"></div>
+              <div id="rn-acct-addr-hint" style="display:none;background:rgba(6,214,160,.07);border:1px solid rgba(6,214,160,.2);border-radius:7px;padding:8px 10px;font-size:11px;color:var(--sub);margin-bottom:8px;line-height:1.5">
+                📍 <span id="rn-acct-addr-hint-text">Enter your address to set your service area boundary.</span>
+              </div>
               <div id="rn-acct-error" style="display:none;color:#fca5a5;font-size:12px;margin-bottom:8px"></div>
               <button class="btn btn-cyan btn-sm" onclick="saveRNAccountInfo()">Save Changes</button>
             </div>
@@ -5822,7 +5827,9 @@ async function populateRNDashboard(){
     setVal('rn-acct-ln',   merged.last_name  || ln)
     setVal('rn-acct-em',   merged.email      || '')
     setVal('rn-acct-ph',   merged.phone      || '')
-    setVal('rn-acct-zip',  merged.zip_code   || '')
+    setVal('rn-acct-zip',  merged.zip_code       || '')
+    setVal('rn-acct-addr', merged.street_address  || '')
+    setVal('rn-acct-city', merged.city            || '')
 
     // Vehicle dropdown pre-fill
     const vehicleEl = document.getElementById('rn-acct-vehicle')
@@ -10797,6 +10804,51 @@ async function _rnPickerGeocode(addr, city, state, zip){
 }
 
 
+// ── Runner address geocode helpers ──
+window._rnAnchorHex6 = null  // cached res-6 anchor for current runner
+
+async function _rnAccountAddrHint(){
+  const addr = document.getElementById('rn-acct-addr')?.value?.trim() || ''
+  const city = document.getElementById('rn-acct-city')?.value?.trim() || ''
+  const zip  = document.getElementById('rn-acct-zip')?.value?.trim()  || ''
+  const hint = document.getElementById('rn-acct-addr-hint')
+  const hintTxt = document.getElementById('rn-acct-addr-hint-text')
+  if(!hint || !hintTxt) return
+  if(!addr && !zip){ hint.style.display='none'; return }
+
+  const coords = await _rnPickerGeocode(addr, city, 'AZ', zip)
+  if(!coords){ hint.style.display='none'; return }
+
+  try {
+    const a7 = h3.latLngToCell(coords.lat, coords.lng, 7)
+    const a6 = h3.cellToParent(a7, 6)
+    const childCount = h3.cellToChildren(a6, 7).length
+    hint.style.display = 'block'
+    hintTxt.innerHTML = '✅ Location found — your service boundary covers <strong style="color:var(--cyan)">' + childCount + ' selectable zones</strong> around this address.'
+    window._rnAnchorHex6 = a6
+  } catch(e){
+    hint.style.display = 'block'
+    hintTxt.textContent = '⚠️ Could not compute zone boundary — check your address.'
+  }
+}
+
+async function _rnGeocodeSaveAnchor(addr, city, zip){
+  const coords = await _rnPickerGeocode(addr, city, 'AZ', zip)
+  if(!coords) return
+  try {
+    const a7 = h3.latLngToCell(coords.lat, coords.lng, 7)
+    const a6 = h3.cellToParent(a7, 6)
+    window._rnAnchorHex6 = a6
+    // Persist anchor to DB for faster future loads
+    const email = currentUser?.email
+    if(email){
+      await _supa.from('runners').update({ anchor_hex6: a6, anchor_hex7: a7, updated_at: new Date().toISOString() }).ilike('email', email)
+    }
+    if(window._rnRow){ window._rnRow.anchor_hex6=a6; window._rnRow.anchor_hex7=a7 }
+  } catch(e){ console.warn('[Anchor] geocode save:', e) }
+}
+
+
 // ================================================================
 // RUNNER ZONE HEATMAP  —  res-7 display, multi-select, zone fallback
 // ================================================================
@@ -11009,24 +11061,81 @@ async function renderRunnerHeatmap(){
     }
   } catch(e){ /* pending claims table query failed — ok */ }
 
-  // ── 3. Build full draw set — union of HO hexes + runner hexes + micro_zones ──
+  // ── 3. Compute runner's res-6 boundary — ALL drawing is restricted to this ──
+  // Get runner's geocoded anchor point
+  const rnRow    = window._rnRow || {}
+  const rnZip    = rnRow.zip_code || rnRow.zip || ''
+  const rnAddr   = rnRow.street_address || ''
+  const rnCity   = rnRow.city || ''
+
+  let anchorLat = null, anchorLng = null
+
+  // Try cached anchor hex first (set from address save)
+  if(window._rnAnchorHex6 && typeof h3 !== 'undefined'){
+    try {
+      const ctr = h3.cellToLatLng(window._rnAnchorHex6)
+      anchorLat = ctr[0]; anchorLng = ctr[1]
+    } catch(e){}
+  }
+  // Geocode from address if no cached anchor
+  if(!anchorLat && (rnAddr || rnZip)){
+    const gc = await _rnPickerGeocode(rnAddr, rnCity, 'AZ', rnZip)
+    if(gc){ anchorLat=gc.lat; anchorLng=gc.lng }
+  }
+  // Final fallback: ZIP centroid
+  if(!anchorLat && rnZip && ZIP_CENTROIDS[rnZip]){
+    anchorLat = ZIP_CENTROIDS[rnZip][0]
+    anchorLng = ZIP_CENTROIDS[rnZip][1]
+  }
+
+  // Compute res-6 boundary and the res-7 children inside it
+  let boundary6Hex   = null
+  let boundarySet    = new Set()   // res-7 hexIds within runner's res-6
+  let anchorHex7     = null
+
+  if(anchorLat && typeof h3 !== 'undefined'){
+    try {
+      anchorHex7  = h3.latLngToCell(anchorLat, anchorLng, RN_HEAT_RES)
+      boundary6Hex = h3.cellToParent(anchorHex7, 6)
+      h3.cellToChildren(boundary6Hex, RN_HEAT_RES).forEach(h => boundarySet.add(h))
+    } catch(e){}
+  }
+
+  const hasBoundary = boundarySet.size > 0
+
+  // Draw the res-6 boundary outline on the map
+  if(boundary6Hex){
+    try {
+      const b6pts = h3.cellToBoundary(boundary6Hex).map(([la,ln])=>[la,ln])
+      L.polygon(b6pts, { color:'rgba(6,214,160,.5)', fillColor:'transparent', weight:2, dashArray:'6,4', opacity:0.7 }).addTo(map)
+    } catch(e){}
+  }
+
+  // ── 4. Build draw set — ONLY within boundary ──
   const drawSet = new Map()  // res-7 hexId -> { hoCount, hasRunner, zone }
 
-  // Seed from HO hexes (already at res-7)
+  // All boundary hexes start as available (open)
+  boundarySet.forEach(h7 => {
+    drawSet.set(h7, { hoCount:0, hasRunner:false, zone:null, runnerNames:[] })
+  })
+
+  // Seed HO demand (only within boundary)
   Object.entries(hoHexes).forEach(([h7, cnt]) => {
+    if(hasBoundary && !boundarySet.has(h7)) return
     if(!drawSet.has(h7)) drawSet.set(h7, { hoCount:0, hasRunner:false, zone:null, runnerNames:[] })
     drawSet.get(h7).hoCount += cnt
   })
 
-  // Mark runner coverage
+  // Mark runner coverage (only within boundary)
   runnerHexes.forEach(h7 => {
+    if(hasBoundary && !boundarySet.has(h7)) return
     if(!drawSet.has(h7)) drawSet.set(h7, { hoCount:0, hasRunner:false, zone:null, runnerNames:[] })
     const d = drawSet.get(h7)
-    d.hasRunner = true
+    d.hasRunner   = true
     d.runnerNames = runnerZipMeta[h7] || []
   })
 
-  // Merge micro_zones (may be at res-8 — convert to res-7)
+  // Merge micro_zones (only within boundary)
   try {
     const { data: mz } = await _supa.from('micro_zones')
       .select('hex_id,status,member_count,waitlist_count,activation_threshold,zip_code,city,zone_label,trash_day,lat,lng')
@@ -11038,30 +11147,39 @@ async function renderRunnerHeatmap(){
         const res = h3.getResolution(z.hex_id)
         if(res !== RN_HEAT_RES) h7 = h3.cellToParent(z.hex_id, RN_HEAT_RES)
       } catch(e){ return }
+      if(hasBoundary && !boundarySet.has(h7)) return
       if(!drawSet.has(h7)) drawSet.set(h7, { hoCount:0, hasRunner:false, zone:null, runnerNames:[] })
       const d = drawSet.get(h7)
-      d.hoCount  = Math.max(d.hoCount, (z.member_count||0)+(z.waitlist_count||0))
-      d.zone     = d.zone || z
+      d.hoCount = Math.max(d.hoCount, (z.member_count||0)+(z.waitlist_count||0))
+      d.zone    = d.zone || z
     })
   } catch(e){}
 
-  // ── 4. Classify and draw ──
+  // ── 5. Classify and draw — only boundary hexes ──
   const counts = { active:0, demand:0, runner:0, open:0 }
 
   drawSet.forEach((d, h7) => {
+    const isAnchor = h7 === anchorHex7
     let type, fillColor, fillOpacity, borderColor, borderDash
-    if(d.hoCount > 0 && d.hasRunner){
-      type='active';  fillColor='#22c55e'; fillOpacity=0.40; borderColor='#22c55e'; borderDash=null;  counts.active++
-    } else if(d.hoCount > 0 && !d.hasRunner){
-      type='demand';  fillColor='#f59e0b'; fillOpacity=0.42; borderColor='#fbbf24'; borderDash=null;  counts.demand++
-    } else if(d.hasRunner && d.hoCount===0){
-      type='runner';  fillColor='#3b82f6'; fillOpacity=0.28; borderColor='#60a5fa'; borderDash='4,3'; counts.runner++
+
+    if(isAnchor){
+      // Runner's home hex — always green solid
+      type='active'; fillColor='#22c55e'; fillOpacity=0.80; borderColor='#22c55e'; borderDash=null; counts.active++
+    } else if(d.hasRunner){
+      // Runner covers this hex
+      type='runner';  fillColor='#3b82f6'; fillOpacity=0.35; borderColor='#60a5fa'; borderDash=null; counts.runner++
+    } else if(d.hoCount > 0){
+      // HOs here, no runner
+      type='demand';  fillColor='#f59e0b'; fillOpacity=0.40; borderColor='#fbbf24'; borderDash=null; counts.demand++
     } else {
-      type='open';    fillColor='#ffffff'; fillOpacity=0.05; borderColor='rgba(255,255,255,.18)'; borderDash='3,5'; counts.open++
+      // Available, no signal
+      type='open'; fillColor='rgba(255,255,255,1)'; fillOpacity=0.04; borderColor='rgba(255,255,255,.15)'; borderDash='2,4'; counts.open++
     }
+
     const isPending = pendingClaimHexes.has(h7)
     _rnDrawHex(map, h7, { type, fillColor, fillOpacity, borderColor, borderDash,
-      zone:d.zone, hoCount:d.hoCount, hasRunner:d.hasRunner, runnerNames:d.runnerNames, isPending })
+      zone:d.zone, hoCount:d.hoCount, hasRunner:d.hasRunner,
+      runnerNames:d.runnerNames, isPending, isAnchor })
   })
 
   // Update stat pills
@@ -11071,11 +11189,25 @@ async function renderRunnerHeatmap(){
   safe('rn-heat-ct-runner', counts.runner)
   safe('rn-heat-ct-open',   counts.open)
 
-  // Center on runner's area
-  const runner = window._rnRow || {}
-  const zip    = runner.zip_code || runner.zip || ''
-  const ctr    = (zip && ZIP_CENTROIDS[zip]) ? ZIP_CENTROIDS[zip] : [33.53, -112.18]
-  map.setView(ctr, 11)
+  // Center on runner's exact anchor, zoom to fit res-6 boundary
+  if(anchorLat && anchorLng){
+    if(boundary6Hex){
+      try {
+        const b6pts = h3.cellToBoundary(boundary6Hex).map(([la,ln])=>[la,ln])
+        map.fitBounds(L.polygon(b6pts).getBounds(), { padding:[20,20] })
+      } catch(e){ map.setView([anchorLat, anchorLng], 12) }
+    } else {
+      map.setView([anchorLat, anchorLng], 12)
+    }
+  } else {
+    // No anchor — show Phoenix metro
+    const ctr = (rnZip && ZIP_CENTROIDS[rnZip]) ? ZIP_CENTROIDS[rnZip] : [33.53, -112.18]
+    map.setView(ctr, 11)
+    // Show a hint
+    const loadEl2 = document.getElementById('rn-heat-loading')
+    if(loadEl2){ loadEl2.style.display='flex'; loadEl2.innerHTML='<div style="text-align:center;padding:20px"><div style="font-size:14px;color:#fbbf24;margin-bottom:8px">⚠️ No home address on file</div><div style="font-size:12px;color:var(--muted)">Go to My Info and add your street address to see your service area boundary</div></div>' }
+    return
+  }
 
   if(loadEl) loadEl.style.display = 'none'
 }
@@ -11084,7 +11216,9 @@ function _rnDrawHex(map, hexId, opts){
   let boundary
   try { boundary = h3.cellToBoundary(hexId).map(([la,ln])=>[la,ln]) } catch(e){ return }
 
-  const poly = L.polygon(boundary, opts.isPending ? {
+  const polyStyle = opts.isAnchor ? {
+    color:'#06d6a0', fillColor:'#06d6a0', fillOpacity:0.80, weight:3, opacity:1
+  } : opts.isPending ? {
     color:'#06d6a0', fillColor:'#06d6a0', fillOpacity:0.18, weight:2.5, opacity:1, dashArray:'6,3'
   } : {
     color:       opts.borderColor,
@@ -11093,7 +11227,8 @@ function _rnDrawHex(map, hexId, opts){
     weight:      1.5,
     opacity:     0.9,
     dashArray:   opts.borderDash || null,
-  }).addTo(map)
+  }
+  const poly = L.polygon(boundary, polyStyle).addTo(map)
 
   // Store meta for toggle + multi-select
   window._rnHeatHexMeta[hexId] = { ...opts, poly }
@@ -14280,21 +14415,25 @@ async function saveRNAccountInfo(){
   const errEl = document.getElementById('rn-acct-error')
   if(btn){ btn.disabled=true; btn.textContent='Saving...' }
   try {
-    const fn  = document.getElementById('rn-acct-fn')?.value.trim()  || ''
-    const ln  = document.getElementById('rn-acct-ln')?.value.trim()  || ''
-    const ph  = document.getElementById('rn-acct-ph')?.value.trim()  || null
-    const zip = document.getElementById('rn-acct-zip')?.value.trim() || null
-    const upd = { first_name: fn, last_name: ln, phone: ph, zip_code: zip, updated_at: new Date().toISOString() }
+    const fn   = document.getElementById('rn-acct-fn')?.value.trim()   || ''
+    const ln   = document.getElementById('rn-acct-ln')?.value.trim()   || ''
+    const ph   = document.getElementById('rn-acct-ph')?.value.trim()   || null
+    const zip  = document.getElementById('rn-acct-zip')?.value.trim()  || null
+    const addr = document.getElementById('rn-acct-addr')?.value.trim() || null
+    const city = document.getElementById('rn-acct-city')?.value.trim() || null
+    const upd  = { first_name: fn, last_name: ln, phone: ph, zip_code: zip,
+                   street_address: addr, city: city, updated_at: new Date().toISOString() }
 
-    // Update both tables — runner_applications is source of truth for pending,
-    // runners table is the live record once approved
-    const r1 = await _supa.from('runner_applications').update(upd).eq('email', currentUser.email)
-    const r2 = await _supa.from('runners').update(upd).eq('email', currentUser.email)
+    const r1 = await _supa.from('runner_applications').update(upd).ilike('email', currentUser.email)
+    const r2 = await _supa.from('runners').update(upd).ilike('email', currentUser.email)
     if(r1?.error) console.warn('[BinDash] saveRNAccount app:', r1.error.message)
     if(r2?.error) console.warn('[BinDash] saveRNAccount runner:', r2.error.message)
 
     // Update local state
-    if(window._rnRow){ window._rnRow.first_name=fn; window._rnRow.last_name=ln; window._rnRow.phone=ph; window._rnRow.zip_code=zip }
+    if(window._rnRow){ window._rnRow.first_name=fn; window._rnRow.last_name=ln; window._rnRow.phone=ph; window._rnRow.zip_code=zip; window._rnRow.street_address=addr; window._rnRow.city=city }
+
+    // Re-geocode so area editor and heatmap use new address immediately
+    if(addr && zip) _rnGeocodeSaveAnchor(addr, city, zip)
 
     // Update sidebar
     const nameEl = document.getElementById('rn-sidebar-name')
