@@ -2447,8 +2447,48 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <div id="r-s2" style="display:none">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Location &amp; Zone 🗺️</div>
         <div class="sec-h">Your Base Location</div>
-        <div class="field"><label>Home Address</label><input id="r-addr" placeholder="123 Main Street"></div>
-        <div class="g3"><div class="field"><label>City</label><input id="r-city" placeholder="Glendale"></div><div class="field"><label>State</label><input id="r-state" placeholder="AZ"></div><div class="field"><label>ZIP / Postcode</label><input id="r-zip" placeholder="85374" oninput="lookupRunnerZones(this.value)"></div></div>
+        <div class="field"><label>Home Address</label><input id="r-addr" placeholder="123 Main Street" onblur="if(document.getElementById('r-zip').value.length===5){clearTimeout(window._rzTimer);window._rzTimer=setTimeout(_triggerRunnerZonePicker,400)}"></div>
+        <div class="g3"><div class="field"><label>City</label><input id="r-city" placeholder="Glendale"></div><div class="field"><label>State</label><input id="r-state" placeholder="AZ"></div><div class="field"><label>ZIP / Postcode</label><input id="r-zip" placeholder="85374" oninput="lookupRunnerZones(this.value);if(this.value.length===5){clearTimeout(window._rzTimer);window._rzTimer=setTimeout(_triggerRunnerZonePicker,800)}"></div></div>
+
+        <!-- H3 SERVICE AREA PICKER -->
+        <div id="r-h3-picker" style="display:none;margin-bottom:18px">
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">🗺️ Your Service Area</div>
+          <div style="font-size:12px;color:var(--sub);margin-bottom:10px;line-height:1.6">
+            Your home location sets a boundary (res-6 hex ~36 km²). Tap res-7 hexes inside it to select the areas you're willing to cover.
+            Hexes outside your boundary are locked — this prevents you being assigned impossibly far routes.
+          </div>
+          <div style="border-radius:12px;overflow:hidden;border:1.5px solid var(--border2);margin-bottom:10px;position:relative">
+            <div id="r-h3-map" style="height:310px;width:100%;background:#0a0e18"></div>
+            <div id="r-h3-loading" style="position:absolute;inset:0;background:rgba(7,9,15,.78);display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;color:var(--muted)">
+              <span>⬡</span> Finding your area...
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px">
+            <div style="background:var(--surface2);border-radius:8px;padding:9px;text-align:center">
+              <div style="font-size:18px;font-weight:800;color:var(--cyan)" id="r-h3-count">0</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Hexes Selected</div>
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:9px;text-align:center">
+              <div style="font-size:18px;font-weight:800;color:#a5b4fc" id="r-h3-ho-count">--</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">HOs in Area</div>
+            </div>
+            <div style="background:var(--surface2);border-radius:8px;padding:9px;text-align:center">
+              <div style="font-size:18px;font-weight:800;color:#6ee7b7" id="r-h3-est-earn">--</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Est. Weekly</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--sub);margin-bottom:8px">
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:11px;height:11px;background:#06d6a0;border-radius:2px"></span>Your anchor</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:11px;height:11px;background:rgba(6,214,160,.4);border-radius:2px"></span>Selected</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:11px;height:11px;background:rgba(251,191,36,.35);border-radius:2px"></span>HOs waiting</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:11px;height:11px;background:rgba(34,197,94,.25);border-radius:2px"></span>HOs active</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:11px;height:11px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.15);border-radius:2px"></span>Available</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:11px;height:11px;background:rgba(239,68,68,.12);border:1px dashed rgba(239,68,68,.5);border-radius:2px"></span>Out of range</span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:7px;padding:8px 10px">
+            ⚠️ You can only select hexes within your res-6 boundary. Your home anchor hex is always included.
+          </div>
+        </div>
 
         <!-- ZONE PICKER -- always shown once ZIP entered -->
         <div id="r-zone-picker" style="display:none;margin-bottom:18px">
@@ -3562,6 +3602,46 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
 
         <!-- RN ZONES -->
         <div class="pg" id="rn-zones">
+          <!-- Edit service area map (collapsible) -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div>
+              <div style="font-size:16px;font-weight:700">My Zones</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px">Your service zones and route homeowners</div>
+            </div>
+            <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="rnToggleAreaEditor()">🗺️ Edit Service Area</button>
+          </div>
+          <!-- Collapsible area editor -->
+          <div id="rn-area-editor" style="display:none;margin-bottom:16px;border:1.5px solid rgba(6,214,160,.25);border-radius:12px;overflow:hidden">
+            <div style="padding:12px 14px;background:rgba(6,214,160,.05);border-bottom:1px solid rgba(6,214,160,.15);display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <div style="font-size:13px;font-weight:700;color:var(--cyan)">🗺️ Your Service Area</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">Tap hexes inside your boundary to add/remove coverage. Changes save instantly.</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="rnToggleAreaEditor()" style="font-size:11px;color:var(--muted)">✕ Close</button>
+            </div>
+            <div style="position:relative">
+              <div id="rn-area-map" style="height:340px;width:100%;background:#0a0e18"></div>
+              <div id="rn-area-loading" style="position:absolute;inset:0;background:rgba(7,9,15,.78);display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;color:var(--muted)">
+                <span>⬡</span> Loading your area...
+              </div>
+            </div>
+            <div style="padding:10px 14px;display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--sub);border-top:1px solid var(--border2)">
+              <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#06d6a0;border-radius:2px"></span>Home anchor</span>
+              <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:rgba(6,214,160,.4);border-radius:2px"></span>Your coverage</span>
+              <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:rgba(34,197,94,.3);border-radius:2px"></span>Active HOs</span>
+              <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:rgba(251,191,36,.3);border-radius:2px"></span>Waitlist HOs</span>
+              <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.15);border-radius:2px"></span>Available</span>
+              <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:rgba(239,68,68,.1);border:1px dashed rgba(239,68,68,.4);border-radius:2px"></span>Out of range</span>
+              <span style="margin-left:auto;display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:rgba(99,102,241,.35);border:1.5px solid #6366f1;border-radius:2px"></span>Assigned zone</span>
+            </div>
+            <div style="padding:10px 14px;border-top:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <div style="font-size:12px;color:var(--sub)">
+                <span id="rn-area-count" style="font-weight:700;color:var(--cyan)">--</span> hexes selected ·
+                <span id="rn-area-ho-count" style="color:#a5b4fc">-- HOs</span>
+              </div>
+              <button class="btn btn-cyan btn-sm" onclick="rnSaveServiceArea()" id="rn-area-save-btn">Save Changes</button>
+            </div>
+          </div>
           <div id="rn-zones-content">
             <div style="text-align:center;padding:32px;color:var(--muted)">Loading zones...</div>
           </div>
@@ -10362,6 +10442,322 @@ window._rnHeatVisible  = { active:true, demand:true, runner:true, open:true }
 window._rnHeatZones    = []   // raw classified zone objects
 
 // ================================================================
+// RUNNER SERVICE AREA PICKER  — shared by onboarding + My Zones editor
+// Resolution model:
+//   res-6 boundary  (~36 km²) — locked to runner's home, defines hard limit
+//   res-7 selectable (~5.2 km²) — children of res-6, runner picks these
+//   anchor = res-7 hex containing home address (always selected)
+// ================================================================
+const RN_PICKER_RES_BOUNDARY  = 6   // res-6 defines outer limit
+const RN_PICKER_RES_SELECT    = 7   // res-7 hexes runner picks from
+
+// Shared state — used by onboarding AND My Zones editor
+window._rnPickerAnchorHex6   = null   // res-6 boundary hex
+window._rnPickerAnchorHex7   = null   // res-7 home anchor (always selected)
+window._rnPickerSelected     = new Set() // currently selected res-7 hexIds
+window._rnPickerLayers       = {}     // hexId -> { poly, type }
+window._rnPickerMap          = null   // active Leaflet map
+window._rnPickerMapElId      = null   // which map div is active
+window._rnPickerHoHexes      = {}     // res-7 hexId -> { active, waitlist }
+window._rnPickerAssignedHexes= new Set() // res-7 hexes runner is already assigned to
+
+// ── Entry points ──
+
+async function _triggerRunnerZonePicker(){
+  // Called from onboarding step 2
+  const addr  = document.getElementById('r-addr')?.value?.trim() || ''
+  const city  = document.getElementById('r-city')?.value?.trim() || ''
+  const state = document.getElementById('r-state')?.value?.trim() || 'AZ'
+  const zip   = document.getElementById('r-zip')?.value?.trim()  || ''
+  if(zip.length < 5) return
+
+  const section = document.getElementById('r-h3-picker')
+  if(section) section.style.display = 'block'
+  const loadEl = document.getElementById('r-h3-loading')
+  if(loadEl) loadEl.style.display = 'flex'
+
+  const coords = await _rnPickerGeocode(addr, city, state, zip)
+  if(!coords){ showToast('Could not locate your address — try adding city', 'err'); if(loadEl) loadEl.style.display='none'; return }
+
+  await _rnPickerInit('r-h3-map', coords.lat, coords.lng, zip, {
+    onUpdate: _rnPickerOnboardingUpdate,
+    onToggle: _rnPickerOnboardingUpdate,
+  })
+  if(loadEl) loadEl.style.display = 'none'
+}
+
+async function rnToggleAreaEditor(){
+  const wrap = document.getElementById('rn-area-editor')
+  if(!wrap) return
+  const isOpen = wrap.style.display !== 'none'
+  if(isOpen){ wrap.style.display = 'none'; return }
+  wrap.style.display = 'block'
+  if(window._rnPickerMap && window._rnPickerMapElId === 'rn-area-map'){ return } // already init
+
+  const loadEl = document.getElementById('rn-area-loading')
+  if(loadEl) loadEl.style.display = 'flex'
+
+  // Get runner's location from their DB row
+  const row = window._rnRow || {}
+  const zip = row.zip_code || row.zip || ''
+  const addr = row.street_address || ''
+
+  // Pre-load their existing selection
+  const existingHexes = (() => {
+    try {
+      const raw = row.coverage_hexes
+      if(raw){ const p = typeof raw==='string' ? JSON.parse(raw) : raw; if(Array.isArray(p)) return p }
+    } catch(e){}
+    return []
+  })()
+
+  const coords = await _rnPickerGeocode(addr, '', 'AZ', zip)
+  if(!coords){ showToast('Could not locate your address', 'err'); if(loadEl) loadEl.style.display='none'; return }
+
+  await _rnPickerInit('rn-area-map', coords.lat, coords.lng, zip, {
+    existingSelected: existingHexes,
+    onUpdate: _rnAreaEditorUpdate,
+    onToggle: _rnAreaEditorUpdate,
+  })
+  if(loadEl) loadEl.style.display = 'none'
+}
+
+// ── Core picker initialiser ──
+async function _rnPickerInit(mapElId, lat, lng, zip, opts){
+  await _loadMapLibs()
+  if(typeof L === 'undefined' || typeof h3 === 'undefined') return
+
+  // Destroy previous map if switching contexts
+  if(window._rnPickerMap){
+    window._rnPickerMap.remove()
+    window._rnPickerMap = null
+  }
+  window._rnPickerLayers = {}
+  window._rnPickerSelected = new Set()
+  window._rnPickerMapElId  = mapElId
+
+  // Compute anchors
+  const anchor7 = h3.latLngToCell(lat, lng, RN_PICKER_RES_SELECT)
+  const anchor6 = h3.cellToParent(anchor7, RN_PICKER_RES_BOUNDARY)
+  window._rnPickerAnchorHex7 = anchor7
+  window._rnPickerAnchorHex6 = anchor6
+
+  // Selectable = all res-7 children of res-6
+  const selectableChildren = h3.cellToChildren(anchor6, RN_PICKER_RES_SELECT)
+  const selectableSet = new Set(selectableChildren)
+
+  // Default selection: anchor + 1-ring neighbours (all within boundary)
+  if(opts.existingSelected && opts.existingSelected.length){
+    opts.existingSelected.forEach(h => {
+      // Accept either res-7 directly or res-8 (convert up)
+      try {
+        const res = h3.getResolution(h)
+        const h7 = res === RN_PICKER_RES_SELECT ? h : h3.cellToParent(h, RN_PICKER_RES_SELECT)
+        if(selectableSet.has(h7)) window._rnPickerSelected.add(h7)
+      } catch(e){}
+    })
+  }
+  if(window._rnPickerSelected.size === 0){
+    // Default: anchor + its ring-1 neighbours that are within boundary
+    h3.gridDisk(anchor7, 1).forEach(h => { if(selectableSet.has(h)) window._rnPickerSelected.add(h) })
+  }
+  window._rnPickerSelected.add(anchor7) // anchor always selected
+
+  // Fetch HO demand inside this res-6
+  window._rnPickerHoHexes = {}
+  try {
+    const { data: hos } = await _supa.from('homeowners')
+      .select('h3_index,status').not('h3_index','is',null).limit(5000)
+    if(hos) hos.forEach(h => {
+      if(!h.h3_index) return
+      try {
+        const p7 = h3.cellToParent(h.h3_index, RN_PICKER_RES_SELECT)
+        if(!selectableSet.has(p7)) return
+        if(!window._rnPickerHoHexes[p7]) window._rnPickerHoHexes[p7] = { active:0, waitlist:0 }
+        if(h.status === 'active') window._rnPickerHoHexes[p7].active++
+        else window._rnPickerHoHexes[p7].waitlist++
+      } catch(e){}
+    })
+  } catch(e){}
+
+  // Fetch runner's already-assigned zones for overlay
+  window._rnPickerAssignedHexes = new Set()
+  try {
+    const row = window._rnRow || {}
+    const zoneIds = (() => { try { const r=row.coverage_zones; return r?(typeof r==='string'?JSON.parse(r):r):row.zone_id?[row.zone_id]:[] } catch(e){ return [] } })()
+    zoneIds.forEach(zid => {
+      const zone = ADMIN_ZONES.find(z=>z.id===zid)
+      const zips = zone?.zips || (zone?.zip ? [zone.zip] : [])
+      zips.forEach(z => {
+        const ctr = ZIP_CENTROIDS[z]
+        if(!ctr) return
+        try {
+          const zh7 = h3.latLngToCell(ctr[0], ctr[1], RN_PICKER_RES_SELECT)
+          h3.gridDisk(zh7, 1).forEach(h => { if(selectableSet.has(h)) window._rnPickerAssignedHexes.add(h) })
+        } catch(e){}
+      })
+    })
+  } catch(e){}
+
+  // Init Leaflet map
+  const mapEl = document.getElementById(mapElId)
+  if(!mapEl) return
+  const map = L.map(mapElId, { zoomControl:true, attributionControl:false })
+  window._rnPickerMap = map
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
+
+  // Draw res-6 boundary outline
+  try {
+    const b6 = h3.cellToBoundary(anchor6).map(([la,ln])=>[la,ln])
+    L.polygon(b6, { color:'rgba(6,214,160,.6)', fillColor:'transparent', weight:2, dashArray:'6,4' }).addTo(map)
+    map.fitBounds(L.polygon(b6).getBounds(), { padding:[14,14] })
+  } catch(e){}
+
+  // Draw all res-7 children + a buffer ring outside (shown as locked)
+  const allToDraw = new Set(selectableChildren)
+  // Add 1-ring outside res-6 children so the boundary is visible
+  try { h3.gridDisk(anchor7, Math.ceil(selectableChildren.length / 6) + 2).forEach(h => allToDraw.add(h)) } catch(e){}
+
+  allToDraw.forEach(hexId => {
+    _rnPickerDrawHex(map, hexId, selectableSet, opts)
+  })
+
+  if(opts.onUpdate) opts.onUpdate()
+}
+
+function _rnPickerDrawHex(map, hexId, selectableSet, opts){
+  let boundary
+  try { boundary = h3.cellToBoundary(hexId).map(([la,ln])=>[la,ln]) } catch(e){ return }
+
+  const isAnchor     = hexId === window._rnPickerAnchorHex7
+  const isSelected   = window._rnPickerSelected.has(hexId)
+  const isSelectable = selectableSet.has(hexId)
+  const isAssigned   = window._rnPickerAssignedHexes.has(hexId)
+  const ho           = window._rnPickerHoHexes[hexId] || null
+  const hasActiveHO  = ho && ho.active > 0
+  const hasWaitHO    = ho && ho.waitlist > 0
+
+  const style = _rnPickerHexStyle(isAnchor, isSelected, isSelectable, isAssigned, hasActiveHO, hasWaitHO)
+  const poly  = L.polygon(boundary, style).addTo(map)
+  window._rnPickerLayers[hexId] = { poly, isAnchor, isSelectable, ho: ho||null, isAssigned }
+
+  // Tooltip
+  const lines = []
+  if(isAnchor) lines.push('<strong style="color:#06d6a0">🏠 Your Home</strong>')
+  if(isAssigned && !isAnchor) lines.push('<span style="color:#818cf8">✓ Assigned zone</span>')
+  if(hasActiveHO)  lines.push('<span style="color:#22c55e">'+ho.active+' active HO'+(ho.active!==1?'s':'')+'</span>')
+  if(hasWaitHO)    lines.push('<span style="color:#fbbf24">'+ho.waitlist+' waitlist HO'+(ho.waitlist!==1?'s':'')+'</span>')
+  if(!isSelectable) lines.push('<span style="color:#ef4444">Outside your range</span>')
+  else if(!isSelected && !isAnchor) lines.push('<span style="color:var(--muted)">Tap to add</span>')
+  if(lines.length) poly.bindTooltip('<div style="font-size:11px;line-height:1.7">'+lines.join('<br>')+'</div>', { direction:'top', className:'h3-tip' })
+
+  if(isSelectable) poly.on('click', () => {
+    if(isAnchor){ showToast('Home hex always included','info'); return }
+    const nowSelected = window._rnPickerSelected.has(hexId)
+    nowSelected ? window._rnPickerSelected.delete(hexId) : window._rnPickerSelected.add(hexId)
+    poly.setStyle(_rnPickerHexStyle(false, !nowSelected, true, isAssigned, hasActiveHO, hasWaitHO))
+    if(opts.onUpdate) opts.onUpdate()
+  })
+}
+
+function _rnPickerHexStyle(isAnchor, isSelected, isSelectable, isAssigned, hasActiveHO, hasWaitHO){
+  if(isAnchor)     return { color:'#06d6a0', weight:3, fillColor:'#06d6a0', fillOpacity:0.80 }
+  if(!isSelectable)return { color:'rgba(239,68,68,.45)', weight:1, fillColor:'rgba(239,68,68,.07)', fillOpacity:1, dashArray:'4,4' }
+  if(isSelected){
+    if(isAssigned)   return { color:'#818cf8', weight:2.5, fillColor:'#818cf8', fillOpacity:0.38 }
+    if(hasActiveHO)  return { color:'#22c55e', weight:2, fillColor:'#06d6a0', fillOpacity:0.38 }
+    if(hasWaitHO)    return { color:'#fbbf24', weight:2, fillColor:'#f59e0b', fillOpacity:0.35 }
+    return { color:'#06d6a0', weight:1.5, fillColor:'#06d6a0', fillOpacity:0.28 }
+  }
+  // Not selected
+  if(isAssigned)   return { color:'#6366f1', weight:1.5, fillColor:'rgba(99,102,241,.12)', fillOpacity:1, dashArray:'3,3' }
+  if(hasActiveHO)  return { color:'rgba(34,197,94,.6)', weight:1, fillColor:'rgba(34,197,94,.15)', fillOpacity:1 }
+  if(hasWaitHO)    return { color:'rgba(251,191,36,.6)', weight:1, fillColor:'rgba(251,191,36,.12)', fillOpacity:1 }
+  return { color:'rgba(255,255,255,.18)', weight:1, fillColor:'rgba(255,255,255,.04)', fillOpacity:1 }
+}
+
+// ── Onboarding callbacks ──
+function _rnPickerOnboardingUpdate(){
+  const sel   = window._rnPickerSelected
+  const hoMap = window._rnPickerHoHexes
+  const hoTotal = [...sel].reduce((acc,h) => acc + (hoMap[h]?.active||0) + (hoMap[h]?.waitlist||0), 0)
+  const estWeekly = hoTotal > 0 ? '$' + (hoTotal * 6.50 * 2).toFixed(0) : '--'
+  const safe = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v }
+  safe('r-h3-count', sel.size)
+  safe('r-h3-ho-count', hoTotal > 0 ? hoTotal : '--')
+  safe('r-h3-est-earn', estWeekly)
+  // Sync to rSubmit globals
+  window._runnerAnchorHex7   = window._rnPickerAnchorHex7
+  window._runnerAnchorHex6   = window._rnPickerAnchorHex6
+  window._runnerCoverageHexes= [...sel]
+  window._selectedZoneIds    = [...sel] // backward compat
+}
+
+// ── My Zones editor callbacks ──
+function _rnAreaEditorUpdate(){
+  const sel   = window._rnPickerSelected
+  const hoMap = window._rnPickerHoHexes
+  const hoTotal = [...sel].reduce((acc,h) => acc + (hoMap[h]?.active||0) + (hoMap[h]?.waitlist||0), 0)
+  const safe = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v }
+  safe('rn-area-count', sel.size)
+  safe('rn-area-ho-count', hoTotal > 0 ? hoTotal+' HOs' : 'No HOs yet')
+}
+
+async function rnSaveServiceArea(){
+  const btn = document.getElementById('rn-area-save-btn')
+  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+
+  const hexes  = [...window._rnPickerSelected]
+  const anchor7 = window._rnPickerAnchorHex7
+  const anchor6 = window._rnPickerAnchorHex6
+  const email  = window._rnRow?.email || currentUser?.email
+  if(!email || !hexes.length){ showToast('Nothing to save','err'); if(btn){ btn.disabled=false; btn.textContent='Save Changes' }; return }
+
+  try {
+    await _supa.from('runners').update({
+      anchor_hex7:    anchor7,
+      anchor_hex6:    anchor6,
+      coverage_hexes: JSON.stringify(hexes),
+      updated_at:     new Date().toISOString(),
+    }).ilike('email', email)
+    // Also update runner_applications for consistency
+    await _supa.from('runner_applications').update({
+      anchor_hex8:    anchor7,
+      anchor_hex6:    anchor6,
+      coverage_hexes: JSON.stringify(hexes),
+      updated_at:     new Date().toISOString(),
+    }).ilike('email', email)
+    // Update in-memory row
+    if(window._rnRow){ window._rnRow.coverage_hexes = JSON.stringify(hexes); window._rnRow.anchor_hex7 = anchor7; window._rnRow.anchor_hex6 = anchor6 }
+    showToast('Service area saved ✅ — '+hexes.length+' hexes', 'ok', 4000)
+    if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
+    // Refresh heatmap if visible
+    if(document.getElementById('rn-heat-map')?.offsetParent) renderRunnerHeatmap()
+  } catch(e){
+    showToast('Save failed: '+String(e?.message||e), 'err')
+    if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
+  }
+}
+
+// ── Geocoder (reused by both entry points) ──
+async function _rnPickerGeocode(addr, city, state, zip){
+  // Try full address via Nominatim
+  if(addr && addr.length > 5){
+    try {
+      const q = encodeURIComponent([addr,city,state,zip,'USA'].filter(Boolean).join(', '))
+      const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&q='+q+'&limit=1&countrycodes=us', { headers:{'Accept-Language':'en'} })
+      const d = await r.json()
+      if(d?.[0]) return { lat:parseFloat(d[0].lat), lng:parseFloat(d[0].lon) }
+    } catch(e){}
+  }
+  // Fall back to ZIP centroid
+  const ctr = ZIP_CENTROIDS[zip]
+  if(ctr) return { lat:ctr[0], lng:ctr[1] }
+  return null
+}
+
+
+// ================================================================
 // RUNNER ZONE HEATMAP  —  res-7 display, multi-select, zone fallback
 // ================================================================
 // Res 7 = ~5.2 km² per hex, ~2.6 km across — city-readable scale
@@ -10486,6 +10882,19 @@ async function renderRunnerHeatmap(){
     if(r.zip) addZipCoverage(r.zip, name)
   })
 
+  // ── 2b. Fetch this runner's pending claims to show on map ──
+  const pendingClaimHexes = new Set()
+  try {
+    const email = (window._rnRow?.email || currentUser?.email || '').toLowerCase()
+    if(email){
+      const { data: claims } = await _supa.from('runner_zone_requests')
+        .select('requested_hexes').ilike('runner_email', email).eq('status','pending').eq('type','claim')
+      if(claims) claims.forEach(c => {
+        try { const hs = JSON.parse(c.requested_hexes||'[]'); hs.forEach(h => pendingClaimHexes.add(h)) } catch(e){}
+      })
+    }
+  } catch(e){}
+
   // ── 3. Build full draw set — union of HO hexes + runner hexes + micro_zones ──
   const drawSet = new Map()  // res-7 hexId -> { hoCount, hasRunner, zone }
 
@@ -10536,8 +10945,9 @@ async function renderRunnerHeatmap(){
     } else {
       type='open';    fillColor='#ffffff'; fillOpacity=0.05; borderColor='rgba(255,255,255,.18)'; borderDash='3,5'; counts.open++
     }
+    const isPending = pendingClaimHexes.has(h7)
     _rnDrawHex(map, h7, { type, fillColor, fillOpacity, borderColor, borderDash,
-      zone:d.zone, hoCount:d.hoCount, hasRunner:d.hasRunner, runnerNames:d.runnerNames })
+      zone:d.zone, hoCount:d.hoCount, hasRunner:d.hasRunner, runnerNames:d.runnerNames, isPending })
   })
 
   // Update stat pills
@@ -10560,7 +10970,9 @@ function _rnDrawHex(map, hexId, opts){
   let boundary
   try { boundary = h3.cellToBoundary(hexId).map(([la,ln])=>[la,ln]) } catch(e){ return }
 
-  const poly = L.polygon(boundary, {
+  const poly = L.polygon(boundary, opts.isPending ? {
+    color:'#06d6a0', fillColor:'#06d6a0', fillOpacity:0.18, weight:2.5, opacity:1, dashArray:'6,3'
+  } : {
     color:       opts.borderColor,
     fillColor:   opts.fillColor,
     fillOpacity: opts.fillOpacity,
