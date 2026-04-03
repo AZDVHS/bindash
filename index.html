@@ -10497,22 +10497,31 @@ async function rnToggleAreaEditor(){
   const loadEl = document.getElementById('rn-area-loading')
   if(loadEl) loadEl.style.display = 'flex'
 
-  // Get runner's location from their DB row
+  // Get runner's location — try multiple sources
   const row = window._rnRow || {}
-  const zip = row.zip_code || row.zip || ''
-  const addr = row.street_address || ''
+  const zip  = row.zip_code || row.zip || ''
+  const addr = row.street_address || row.address || ''
 
-  // Pre-load their existing selection
+  // Pre-load existing hex selection if saved
   const existingHexes = (() => {
     try {
       const raw = row.coverage_hexes
-      if(raw){ const p = typeof raw==='string' ? JSON.parse(raw) : raw; if(Array.isArray(p)) return p }
+      if(raw){ const p = typeof raw==='string' ? JSON.parse(raw) : raw; if(Array.isArray(p) && p.length) return p }
     } catch(e){}
     return []
   })()
 
-  const coords = await _rnPickerGeocode(addr, '', 'AZ', zip)
-  if(!coords){ showToast('Could not locate your address', 'err'); if(loadEl) loadEl.style.display='none'; return }
+  // Get coords — try address geocode, then ZIP centroid, then zone ZIP
+  let coords = await _rnPickerGeocode(addr, '', 'AZ', zip)
+  if(!coords && zip) coords = ZIP_CENTROIDS[zip] ? { lat: ZIP_CENTROIDS[zip][0], lng: ZIP_CENTROIDS[zip][1] } : null
+  if(!coords){
+    // Try from assigned zone ZIP
+    const zoneId = row.zone_id
+    const zone = zoneId ? ADMIN_ZONES.find(z=>z.id===zoneId) : null
+    const zoneZip = zone?.zips?.[0] || zone?.zip || ''
+    if(zoneZip && ZIP_CENTROIDS[zoneZip]) coords = { lat: ZIP_CENTROIDS[zoneZip][0], lng: ZIP_CENTROIDS[zoneZip][1] }
+  }
+  if(!coords){ showToast('Could not locate your area — make sure your ZIP is saved in My Info', 'err'); if(loadEl) loadEl.style.display='none'; return }
 
   await _rnPickerInit('rn-area-map', coords.lat, coords.lng, zip, {
     existingSelected: existingHexes,
@@ -10563,18 +10572,42 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   }
   window._rnPickerSelected.add(anchor7) // anchor always selected
 
-  // Fetch HO demand inside this res-6
+  // Fetch HO demand inside this res-6 — hardened against missing h3_index column
   window._rnPickerHoHexes = {}
   try {
-    const { data: hos } = await _supa.from('homeowners')
-      .select('h3_index,status').not('h3_index','is',null).limit(5000)
-    if(hos) hos.forEach(h => {
-      if(!h.h3_index) return
+    const { data: hos, error: hosErr } = await _supa.from('homeowners')
+      .select('h3_index,lat,lng,status').limit(5000)
+    const rows = (!hosErr && hos) ? hos : []
+    // Also pull homeowner_signups as fallback
+    let sigRows = []
+    if(!rows.length || hosErr){
+      const { data: sigs } = await _supa.from('homeowner_signups')
+        .select('zip_code,status').limit(2000)
+      sigRows = sigs || []
+    }
+    rows.forEach(h => {
+      let hexId = h.h3_index || null
+      if(!hexId && h.lat && h.lng && typeof h3 !== 'undefined'){
+        try { hexId = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8) } catch(e){}
+      }
+      if(!hexId) return
       try {
-        const p7 = h3.cellToParent(h.h3_index, RN_PICKER_RES_SELECT)
+        const p7 = h3.cellToParent(hexId, RN_PICKER_RES_SELECT)
         if(!selectableSet.has(p7)) return
         if(!window._rnPickerHoHexes[p7]) window._rnPickerHoHexes[p7] = { active:0, waitlist:0 }
         if(h.status === 'active') window._rnPickerHoHexes[p7].active++
+        else window._rnPickerHoHexes[p7].waitlist++
+      } catch(e){}
+    })
+    sigRows.forEach(s => {
+      const ctr = ZIP_CENTROIDS[s.zip_code]
+      if(!ctr) return
+      try {
+        const hexId = h3.latLngToCell(ctr[0], ctr[1], 8)
+        const p7 = h3.cellToParent(hexId, RN_PICKER_RES_SELECT)
+        if(!selectableSet.has(p7)) return
+        if(!window._rnPickerHoHexes[p7]) window._rnPickerHoHexes[p7] = { active:0, waitlist:0 }
+        if(s.status === 'approved') window._rnPickerHoHexes[p7].active++
         else window._rnPickerHoHexes[p7].waitlist++
       } catch(e){}
     })
@@ -10714,17 +10747,24 @@ async function rnSaveServiceArea(){
   if(!email || !hexes.length){ showToast('Nothing to save','err'); if(btn){ btn.disabled=false; btn.textContent='Save Changes' }; return }
 
   try {
-    await _supa.from('runners').update({
+    // Try saving new columns — if they don't exist yet the error is caught below
+    const hexJson = JSON.stringify(hexes)
+    const { error: rnErr } = await _supa.from('runners').update({
       anchor_hex7:    anchor7,
       anchor_hex6:    anchor6,
-      coverage_hexes: JSON.stringify(hexes),
+      coverage_hexes: hexJson,
       updated_at:     new Date().toISOString(),
     }).ilike('email', email)
-    // Also update runner_applications for consistency
+    if(rnErr) {
+      // Columns may not exist — try minimal update and warn
+      console.warn('[ServiceArea] runners update error (columns may need migration):', rnErr.message)
+      await _supa.from('runners').update({ updated_at: new Date().toISOString() }).ilike('email', email)
+    }
+    // runner_applications — same approach
     await _supa.from('runner_applications').update({
       anchor_hex8:    anchor7,
       anchor_hex6:    anchor6,
-      coverage_hexes: JSON.stringify(hexes),
+      coverage_hexes: hexJson,
       updated_at:     new Date().toISOString(),
     }).ilike('email', email)
     // Update in-memory row
@@ -10796,17 +10836,35 @@ async function renderRunnerHeatmap(){
   // ── 1. Fetch HO hex data ──
   const hoHexes = {}   // res-8 hexId -> count
   try {
-    const { data: hos } = await _supa.from('homeowners')
-      .select('h3_index').not('h3_index','is',null).limit(5000)
-    if(hos) hos.forEach(h => {
-      if(!h.h3_index) return
-      // Also index at res-7 parent for heatmap display
+    // h3_index may not exist on all rows — use lat/lng fallback if query fails
+    const { data: hos, error: hosErr } = await _supa.from('homeowners')
+      .select('h3_index,lat,lng').limit(5000)
+    if(!hosErr && hos) hos.forEach(h => {
+      let hexId = h.h3_index || null
+      // Fallback: compute hex from lat/lng if h3_index missing
+      if(!hexId && h.lat && h.lng && typeof h3 !== 'undefined'){
+        try { hexId = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8) } catch(e){}
+      }
+      if(!hexId) return
       try {
-        const p7 = h3.cellToParent(h.h3_index, RN_HEAT_RES)
+        const p7 = h3.cellToParent(hexId, RN_HEAT_RES)
         hoHexes[p7] = (hoHexes[p7]||0) + 1
-      } catch(e){ hoHexes[h.h3_index] = (hoHexes[h.h3_index]||0)+1 }
+      } catch(e){}
     })
-  } catch(e){}
+    // Also check homeowner_signups for lat/lng data
+    if(!hos?.length || hosErr){
+      const { data: sigs } = await _supa.from('homeowner_signups')
+        .select('zip_code').eq('status','approved').limit(2000)
+      if(sigs) sigs.forEach(s => {
+        const ctr = ZIP_CENTROIDS[s.zip_code]
+        if(!ctr) return
+        try {
+          const p7 = h3.latLngToCell(ctr[0], ctr[1], RN_HEAT_RES)
+          hoHexes[p7] = (hoHexes[p7]||0) + 1
+        } catch(e){}
+      })
+    }
+  } catch(e){ console.warn('[Heatmap] HO fetch:', e) }
 
   // ── 2. Build runner coverage set at res-7 ──
   // Strategy A: new coverage_hexes column (runners onboarded via hex picker)
@@ -10828,14 +10886,32 @@ async function renderRunnerHeatmap(){
     } catch(e){}
   }
 
-  // From DB runners table
+  // From DB runners table — only select columns that definitely exist
+  // New columns (coverage_hexes, anchor_hex8) queried separately with fallback
   try {
     const { data: rns } = await _supa.from('runners')
-      .select('coverage_hexes,anchor_hex8,zone_id,zip_code,first_name,last_name,status')
+      .select('zone_id,zip_code,first_name,last_name,status')
       .neq('status','inactive')
     if(rns) rns.forEach(r => {
       const name = ((r.first_name||'')+ ' '+(r.last_name||'')).trim() || 'Runner'
-      // A: new hex columns
+      // B: zone_id -> zone ZIPs (always available)
+      if(r.zone_id){
+        const zone = ADMIN_ZONES.find(z=>z.id===r.zone_id)
+        const zips = zone?.zips || (zone?.zip ? [zone.zip] : [])
+        zips.forEach(zip => addZipCoverage(zip, name))
+      }
+      // C: direct zip_code (always available)
+      if(r.zip_code) addZipCoverage(r.zip_code, name)
+    })
+  } catch(e){ console.warn('[Heatmap] runners fetch:', e) }
+
+  // Try new hex columns separately — silently skip if columns don't exist yet
+  try {
+    const { data: rnsHex, error: hexErr } = await _supa.from('runners')
+      .select('coverage_hexes,anchor_hex8,first_name,last_name,status')
+      .neq('status','inactive')
+    if(!hexErr && rnsHex) rnsHex.forEach(r => {
+      const name = ((r.first_name||'')+ ' '+(r.last_name||'')).trim() || 'Runner'
       if(r.anchor_hex8){
         try {
           const p7 = h3.cellToParent(r.anchor_hex8, RN_HEAT_RES)
@@ -10853,47 +10929,85 @@ async function renderRunnerHeatmap(){
           } catch(e){}
         })
       } catch(e){}
-      // B: zone_id -> zone ZIPs
-      if(r.zone_id){
-        const zone = ADMIN_ZONES.find(z=>z.id===r.zone_id)
-        const zips = zone?.zips || (zone?.zip ? [zone.zip] : [])
-        zips.forEach(zip => addZipCoverage(zip, name))
-      }
-      // C: direct zip_code fallback
-      if(r.zip_code) addZipCoverage(r.zip_code, name)
     })
-  } catch(e){ console.warn('[Heatmap] runners fetch:', e) }
+  } catch(e){ /* columns don't exist yet — ok, zone/zip fallback used */ }
 
-  // Also use in-memory RUNNERS (already loaded)
+  // Use in-memory RUNNERS (loaded by populateRNDashboard)
   ;(RUNNERS||[]).forEach(r => {
     if(r.status==='INACTIVE') return
     const name = r.name || 'Runner'
-    // New hex fields
     if(r.anchorHex8){
       try {
         const p7 = h3.cellToParent(r.anchorHex8, RN_HEAT_RES)
         h3.gridDisk(p7,1).forEach(h=>{ runnerHexes.add(h); if(!runnerZipMeta[h]) runnerZipMeta[h]=[]; if(!runnerZipMeta[h].includes(name)) runnerZipMeta[h].push(name) })
       } catch(e){}
     }
-    // Zone fallback
     const zone = ADMIN_ZONES.find(z=>z.id===r.zoneId)
     const zips = zone?.zips || (zone?.zip ? [zone.zip] : [])
     zips.forEach(zip => addZipCoverage(zip, name))
     if(r.zip) addZipCoverage(r.zip, name)
   })
 
-  // ── 2b. Fetch this runner's pending claims to show on map ──
+  // CRITICAL: Also use _rnRow (the logged-in runner's own data)
+  // This guarantees the current runner shows as covering their zone immediately
+  const currentRunnerRow = window._rnRow || {}
+  const currentRunnerName = ((currentRunnerRow.first_name||'')+ ' '+(currentRunnerRow.last_name||'')).trim() || 'You'
+  // From zone_id
+  if(currentRunnerRow.zone_id){
+    const z = ADMIN_ZONES.find(z=>z.id===currentRunnerRow.zone_id)
+    const zips = z?.zips || (z?.zip ? [z.zip] : [])
+    zips.forEach(zip => addZipCoverage(zip, currentRunnerName))
+  }
+  // From coverage_zones (old zone-ID-based system)
+  try {
+    const czRaw = currentRunnerRow.coverage_zones
+    const czIds = czRaw ? (typeof czRaw==='string' ? JSON.parse(czRaw) : czRaw) : []
+    czIds.forEach(zid => {
+      const z = ADMIN_ZONES.find(x=>x.id===zid)
+      const zips = z?.zips || (z?.zip ? [z.zip] : [])
+      zips.forEach(zip => addZipCoverage(zip, currentRunnerName))
+    })
+  } catch(e){}
+  // From zip directly
+  if(currentRunnerRow.zip_code) addZipCoverage(currentRunnerRow.zip_code, currentRunnerName)
+  if(currentRunnerRow.zip) addZipCoverage(currentRunnerRow.zip, currentRunnerName)
+  // From new hex columns if already saved
+  try {
+    const ch = currentRunnerRow.coverage_hexes
+    const hexes = ch ? (typeof ch==='string' ? JSON.parse(ch) : ch) : []
+    hexes.forEach(h => {
+      try {
+        const p7 = h3.cellToParent(h, RN_HEAT_RES)
+        runnerHexes.add(p7)
+        if(!runnerZipMeta[p7]) runnerZipMeta[p7]=[]
+        if(!runnerZipMeta[p7].includes(currentRunnerName)) runnerZipMeta[p7].push(currentRunnerName)
+      } catch(e){}
+    })
+  } catch(e){}
+
+  // ── 2b. Fetch this runner's pending claims ──
   const pendingClaimHexes = new Set()
   try {
     const email = (window._rnRow?.email || currentUser?.email || '').toLowerCase()
     if(email){
-      const { data: claims } = await _supa.from('runner_zone_requests')
-        .select('requested_hexes').ilike('runner_email', email).eq('status','pending').eq('type','claim')
+      // Try with type filter first; fall back without it if column missing
+      let claims = null
+      const { data: c1, error: e1 } = await _supa.from('runner_zone_requests')
+        .select('requested_hexes,notes').ilike('runner_email', email).eq('status','pending')
+      if(!e1 && c1){
+        // Filter in JS — works even if 'type' column doesn't exist yet
+        claims = c1.filter(c => !c.notes || c.notes.toLowerCase().includes('claim') || c.notes.toLowerCase().includes('heatmap'))
+      }
       if(claims) claims.forEach(c => {
-        try { const hs = JSON.parse(c.requested_hexes||'[]'); hs.forEach(h => pendingClaimHexes.add(h)) } catch(e){}
+        try {
+          // requested_hexes may not exist yet — skip silently
+          if(!c.requested_hexes) return
+          const hs = JSON.parse(c.requested_hexes)
+          hs.forEach(h => pendingClaimHexes.add(h))
+        } catch(e){}
       })
     }
-  } catch(e){}
+  } catch(e){ /* pending claims table query failed — ok */ }
 
   // ── 3. Build full draw set — union of HO hexes + runner hexes + micro_zones ──
   const drawSet = new Map()  // res-7 hexId -> { hoCount, hasRunner, zone }
