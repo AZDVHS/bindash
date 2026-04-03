@@ -23037,7 +23037,7 @@ async function confirmSplitZone(zId){
   if(!zipsA.length || !zipsB.length){ showToast('Each zone needs at least one ZIP','err'); return }
 
   // Update zone A (the original)
-  z.name = nameA; z.zips = zipsA; z.zip = zipsA[0].slice(0,3)
+  z.name = nameA; z.zips = zipsA; z.zip = zipsA[0]  // keep full 5-digit ZIP
   dbSaveZone(z)
 
   // Create zone B
@@ -23113,8 +23113,8 @@ async function loadZonesFromSupabase(){
         name:            row.name,
         label:           row.label || '',
         city:            row.label || '',   // use label as city fallback for display
-        zip:             row.zip_prefix || '',
-        zips:            row.zip_codes || (row.zip_prefix ? [row.zip_prefix] : []),
+        zip:             (row.zip_prefix && row.zip_prefix.length === 5) ? row.zip_prefix : (row.zip_codes?.[0] || ''),
+        zips:            row.zip_codes?.filter(z => z && z.length === 5) || ((row.zip_prefix && row.zip_prefix.length === 5) ? [row.zip_prefix] : []),
         area:            row.area || 'A1',
         status:          row.status || 'waitlist',
         pilot:           row.pilot || false,
@@ -23572,7 +23572,7 @@ function syncZoneData(){
     // Index by each full ZIP code the zone serves
     const allZips = z.zips?.length ? z.zips : (z.zip ? [z.zip] : [])
     allZips.forEach(zip => {
-      if(!zip || zip.length < 3) return
+      if(!zip || zip.length < 5) return  // require full 5-digit ZIP
       if(!ZONE_DATA[zip]) ZONE_DATA[zip] = []
       ZONE_DATA[zip].push({ id:z.id, name:z.name, status:z.status, runners:z.runners,
         capacity:z.capacity, homeowners:z.homeowners,
