@@ -17554,6 +17554,43 @@ function renderPendingRunnerList(){
           </div>
         </div>
 
+        <!-- H3 ZONE MAP PANEL -->
+        ${(app.anchorHex8 || app.coverageHexes?.length) ? `
+        <div style="background:rgba(6,214,160,.05);border:1.5px solid rgba(6,214,160,.25);border-radius:12px;padding:12px 14px;margin-bottom:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div>
+              <div style="font-size:12px;font-weight:700;color:var(--cyan)">🗺️ Runner's Proposed Zone</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px">
+                ${app.coverageHexes?.length||0} hexes selected · Anchor: <span style="font-family:'DM Mono',monospace;font-size:9px">${(app.anchorHex8||'—').slice(-8)}</span>
+                ${app.hexReviewStatus ? ` · <span style="font-weight:700;color:${app.hexReviewStatus==='approved'?'#22c55e':app.hexReviewStatus==='denied'?'#ef4444':'#f59e0b'}">${app.hexReviewStatus==='approved'?'✅ Zone approved':app.hexReviewStatus==='denied'?'✕ Zone denied':'✏️ Zone modified'}</span>` : ''}
+              </div>
+            </div>
+            <button class="btn btn-cyan btn-sm" style="font-size:11px;padding:5px 12px"
+              onclick="openRunnerHexReview('${app.id}')">
+              🗺 Review Map →
+            </button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+            <div style="background:var(--surface);border-radius:7px;padding:7px;text-align:center">
+              <div style="font-size:16px;font-weight:800;color:var(--cyan)">${app.coverageHexes?.length||0}</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:1px">Hexes</div>
+            </div>
+            <div style="background:var(--surface);border-radius:7px;padding:7px;text-align:center">
+              <div style="font-size:16px;font-weight:800;color:#a5b4fc" id="rnpc-ho-count-${app.id}">--</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:1px">HOs in Area</div>
+            </div>
+            <div style="background:var(--surface);border-radius:7px;padding:7px;text-align:center">
+              <div style="font-size:13px;font-weight:700;color:#fbbf24">${app.anchorHex6 ? 'Res-6' : '?'}</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:1px">Boundary</div>
+            </div>
+          </div>
+        </div>
+        ` : `
+        <div style="background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:var(--muted)">
+          ⚠️ No H3 zone data — runner applied before hex picker or address wasn't geocoded. Assign zone manually below.
+        </div>
+        `}
+
         <div class="field" style="margin-bottom:10px">
           <label style="font-size:11px">Assign Service Zone
             ${app.preferredZones?.length ? `<span style="color:var(--cyan);font-weight:400;margin-left:6px">Runner selected: ${app.preferredZones.map(zid=>ADMIN_ZONES.find(z=>z.id===zid)?.name||zid).join(', ')}</span>` : ''}
@@ -17698,6 +17735,280 @@ async function approveZoneReqThenAssignRunner(appId, reqId, zip){
   }
 }
 
+// ================================================================
+// RUNNER HEX REVIEW MODAL — admin map view with approve/modify/deny
+// ================================================================
+window._adminModifiedHexes = {}  // appId → modified hex array
+window._hexReviewMap        = null
+window._hexReviewLayers     = {}
+window._hexReviewAppId      = null
+
+async function openRunnerHexReview(appId){
+  const app = PENDING_RUNNERS.find(x=>x.id===appId)
+  if(!app){ showToast('Application not found','err'); return }
+  window._hexReviewAppId = appId
+
+  // Build modal HTML
+  const hexCount = (window._adminModifiedHexes[appId] || app.coverageHexes || []).length
+  document.getElementById('modal-box').innerHTML = `
+    <div class="mh" style="background:linear-gradient(135deg,rgba(6,214,160,.08),rgba(99,102,241,.06));border-bottom:1px solid rgba(6,214,160,.2)">
+      <div>
+        <div style="font-size:15px;font-weight:700">🗺️ Zone Review — ${app.name}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">
+          ${hexCount} hexes proposed · ZIP ${app.zip} · Anchor: <span style="font-family:'DM Mono',monospace;font-size:10px">${(app.anchorHex8||'none').slice(-8)}</span>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+    </div>
+    <div class="mb" style="padding:0">
+      <!-- Map -->
+      <div style="position:relative">
+        <div id="hrm-map" style="height:340px;width:100%;background:#0a0e18"></div>
+        <div id="hrm-loading" style="position:absolute;inset:0;background:rgba(7,9,15,.8);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--muted);gap:8px;z-index:999">
+          ⬡ Loading map...
+        </div>
+        <!-- Map overlay stats -->
+        <div style="position:absolute;top:10px;left:10px;background:rgba(7,9,15,.85);border:1px solid rgba(6,214,160,.3);border-radius:8px;padding:8px 12px;font-size:11px;z-index:500;backdrop-filter:blur(4px)">
+          <div style="color:var(--cyan);font-weight:700;margin-bottom:4px">Selected hexes</div>
+          <div style="font-size:18px;font-weight:800;color:#fff" id="hrm-count">${hexCount}</div>
+          <div style="color:var(--muted);font-size:9px;margin-top:2px">of ~37 max</div>
+        </div>
+        <div style="position:absolute;top:10px;right:10px;background:rgba(7,9,15,.85);border:1px solid rgba(99,102,241,.3);border-radius:8px;padding:8px 12px;font-size:11px;z-index:500;backdrop-filter:blur(4px)">
+          <div style="color:#a5b4fc;font-weight:700;margin-bottom:4px">HOs in zone</div>
+          <div style="font-size:18px;font-weight:800;color:#fff" id="hrm-ho-count">--</div>
+        </div>
+      </div>
+      <!-- Legend -->
+      <div style="display:flex;gap:12px;flex-wrap:wrap;padding:10px 14px;font-size:10px;color:var(--sub);border-bottom:1px solid var(--border2)">
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:rgba(6,214,160,.9);border-radius:2px;flex-shrink:0"></span>Anchor</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:rgba(6,214,160,.4);border-radius:2px;flex-shrink:0"></span>Selected</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:rgba(99,102,241,.35);border-radius:2px;flex-shrink:0"></span>Has HOs</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:2px;flex-shrink:0"></span>Available (click to add)</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:rgba(239,68,68,.15);border:1px dashed rgba(239,68,68,.5);border-radius:2px;flex-shrink:0"></span>Out of range</span>
+        <span style="margin-left:auto;color:var(--cyan);font-weight:700;font-size:10px">Tap hexes to modify</span>
+      </div>
+      <!-- Admin notes -->
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border2)">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Admin notes (sent to runner if denied/modified)</div>
+        <textarea id="hrm-notes" rows="2" placeholder="e.g. Reduced zone to 12 hexes — too large for a single runner. Approved core neighbourhood only." style="font-size:12px;resize:none;width:100%;box-sizing:border-box"></textarea>
+      </div>
+    </div>
+    <div class="mf" style="gap:8px;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" onclick="closeM()" style="flex-shrink:0">Cancel</button>
+      <button class="btn btn-red btn-sm" style="flex-shrink:0" onclick="_hexReviewAction('deny')">✕ Deny Zone</button>
+      <button class="btn btn-outline btn-sm" style="flex-shrink:0;color:#fbbf24;border-color:rgba(251,191,36,.4)" onclick="_hexReviewAction('modify')">✏️ Approve Modified</button>
+      <button class="btn btn-green btn-sm" style="flex-shrink:0" onclick="_hexReviewAction('approve')">✅ Approve as-is</button>
+    </div>
+  `
+  openM()
+
+  // Render the map
+  await _buildHexReviewMap(app)
+}
+
+async function _buildHexReviewMap(app){
+  await _loadMapLibs()
+  const loadingEl = document.getElementById('hrm-loading')
+  if(typeof L === 'undefined'){ if(loadingEl) loadingEl.textContent = '❌ Map unavailable'; return }
+
+  if(window._hexReviewMap){ window._hexReviewMap.remove(); window._hexReviewMap = null }
+  window._hexReviewLayers = {}
+
+  const mapEl = document.getElementById('hrm-map')
+  if(!mapEl) return
+
+  const map = L.map('hrm-map', { zoomControl:true, attributionControl:false })
+  window._hexReviewMap = map
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
+
+  const appId = app.id
+  const anchorHex8 = app.anchorHex8
+  const anchorHex6 = app.anchorHex6
+  // Use admin-modified hexes if available, otherwise runner's original selection
+  const selectedHexes = new Set(window._adminModifiedHexes[appId] || app.coverageHexes || [])
+
+  // Build selectable set from res-6 boundary
+  let selectableSet = new Set()
+  if(anchorHex6 && typeof h3 !== 'undefined'){
+    try { h3.cellToChildren(anchorHex6, 8).forEach(h => selectableSet.add(h)) } catch(e){}
+  } else if(anchorHex8 && typeof h3 !== 'undefined'){
+    try { h3.gridDisk(anchorHex8, 4).forEach(h => selectableSet.add(h)) } catch(e){}
+  }
+
+  // Fetch HO heat data
+  const hoHexes = {}
+  try {
+    const { data: hos } = await _supa.from('homeowners').select('h3_index').not('h3_index','is',null).limit(3000)
+    if(hos) hos.forEach(h=>{ if(h.h3_index) hoHexes[h.h3_index]=(hoHexes[h.h3_index]||0)+1 })
+  } catch(e){}
+
+  // All hexes to draw = selectable union selected union small buffer around anchor
+  const drawSet = new Set([...selectableSet, ...selectedHexes])
+  if(anchorHex8 && typeof h3 !== 'undefined'){
+    try { h3.gridDisk(anchorHex8, 2).forEach(h => drawSet.add(h)) } catch(e){}
+  }
+
+  drawSet.forEach(hexId => {
+    if(!hexId) return
+    let boundary
+    try { boundary = h3.cellToBoundary(hexId).map(([la,ln])=>[la,ln]) } catch(e){ return }
+    const isAnchor     = hexId === anchorHex8
+    const isSelected   = selectedHexes.has(hexId)
+    const isSelectable = selectableSet.has(hexId)
+    const hoCount      = hoHexes[hexId] || 0
+
+    const style = _hexReviewStyle(isAnchor, isSelected, isSelectable, hoCount > 0)
+    const poly = L.polygon(boundary, style).addTo(map)
+    window._hexReviewLayers[hexId] = { poly, isAnchor, isSelectable, hoCount }
+
+    const tip = isAnchor
+      ? '<strong style="color:#06d6a0">🏠 Runner's Home (Anchor)</strong><div style="color:var(--muted);font-size:10px">Always included</div>'
+      : (hoCount > 0
+          ? `<strong>${hoCount} homeowner${hoCount>1?'s':''}</strong><div style="font-size:10px;color:#a5b4fc">Active demand</div>`
+          : (isSelectable ? 'Click to toggle' : '⛔ Out of range'))
+    poly.bindTooltip(`<div style="font-size:11px">${tip}</div>`, { direction:'top', className:'h3-tip' })
+
+    poly.on('click', () => _hexReviewToggle(hexId, hoHexes))
+  })
+
+  // Fit to selection
+  const fitHexes = anchorHex6
+    ? (() => { try { return h3.cellToBoundary(anchorHex6).map(([la,ln])=>[la,ln]) } catch(e){ return null } })()
+    : null
+  if(fitHexes){
+    map.fitBounds(L.polygon(fitHexes).getBounds(), { padding:[20,20] })
+  } else if(anchorHex8){
+    const ctr = h3.cellToLatLng(anchorHex8)
+    map.setView(ctr, 14)
+  }
+
+  _hexReviewUpdateStats(hoHexes, selectedHexes)
+  if(loadingEl) loadingEl.style.display = 'none'
+}
+
+function _hexReviewStyle(isAnchor, isSelected, isSelectable, hasHOs){
+  if(isAnchor)      return { color:'#06d6a0', weight:3, fillColor:'#06d6a0', fillOpacity:0.8 }
+  if(isSelected)    return { color:'#06d6a0', weight:1.5, fillColor:'#06d6a0', fillOpacity:0.28 }
+  if(!isSelectable) return { color:'rgba(239,68,68,.5)', weight:1, fillColor:'rgba(239,68,68,.06)', fillOpacity:1, dashArray:'4,4' }
+  if(hasHOs)        return { color:'rgba(99,102,241,.7)', weight:1.5, fillColor:'rgba(99,102,241,.22)', fillOpacity:1 }
+  return { color:'rgba(255,255,255,.18)', weight:1, fillColor:'rgba(255,255,255,.03)', fillOpacity:1 }
+}
+
+function _hexReviewToggle(hexId, hoHexes){
+  const appId = window._hexReviewAppId
+  const app   = PENDING_RUNNERS.find(x=>x.id===appId)
+  if(!app) return
+
+  const info = window._hexReviewLayers[hexId]
+  if(!info) return
+  if(info.isAnchor){ showToast('Anchor hex cannot be removed','info'); return }
+  if(!info.isSelectable){ showToast('Out of allowed range','err'); return }
+
+  // Init modified set from current state
+  if(!window._adminModifiedHexes[appId]){
+    window._adminModifiedHexes[appId] = [...(app.coverageHexes||[])]
+  }
+  const hexes = window._adminModifiedHexes[appId]
+  const idx = hexes.indexOf(hexId)
+  let isNowSelected
+  if(idx >= 0){
+    hexes.splice(idx, 1)
+    isNowSelected = false
+  } else {
+    hexes.push(hexId)
+    isNowSelected = true
+  }
+
+  info.poly.setStyle(_hexReviewStyle(false, isNowSelected, true, info.hoCount > 0))
+  _hexReviewUpdateStats(hoHexes, new Set(hexes))
+
+  // Update the "Approve Modified" button to show it's been changed
+  const modBtn = document.querySelector('.mf .btn-outline')
+  if(modBtn) modBtn.style.background = 'rgba(251,191,36,.08)'
+}
+
+function _hexReviewUpdateStats(hoHexes, selectedSet){
+  const count = selectedSet ? selectedSet.size : 0
+  const hoCount = [...(selectedSet||[])].reduce((acc,h)=>acc+(hoHexes[h]||0),0)
+  const countEl = document.getElementById('hrm-count')
+  const hoEl    = document.getElementById('hrm-ho-count')
+  if(countEl) countEl.textContent = count
+  if(hoEl)    hoEl.textContent    = hoCount > 0 ? hoCount : '--'
+}
+
+async function _hexReviewAction(action){
+  const appId = window._hexReviewAppId
+  const app   = PENDING_RUNNERS.find(x=>x.id===appId)
+  if(!app) return
+
+  const notes = document.getElementById('hrm-notes')?.value?.trim() || ''
+  const modHexes = window._adminModifiedHexes[appId] || app.coverageHexes || []
+  const fn = app.name?.split(' ')[0] || 'Runner'
+
+  if(action === 'deny'){
+    if(!confirm('Deny this runner\'s zone application? They will be notified.')) return
+    // Persist denial reason to application
+    await _supa.from('runner_applications').update({
+      hex_review_status: 'denied',
+      hex_review_notes:  notes || null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', appId)
+    // Email runner
+    if(app.email) sendEmail(app.email, 'Your BinDash zone application — update',
+      `<div style="font-family:sans-serif;padding:20px;max-width:520px">
+        <h2 style="color:#ef4444">Zone Application Not Approved</h2>
+        <p>Hi ${fn}, thanks for applying to run in your area.</p>
+        <p>Unfortunately we weren't able to approve your proposed service zone at this time.${notes ? ` Our team noted: <em style="color:#64748b">${notes}</em>` : ''}</p>
+        <p>You can reapply with a different area at <a href="https://bindash.shop">bindash.shop</a>.</p>
+      </div>`,
+      'runner_zone_denied'
+    )
+    closeM()
+    showToast(`${app.name}'s zone denied — runner notified`, 'info', 4000)
+    return
+  }
+
+  if(action === 'modify'){
+    if(!modHexes.length){ showToast('No hexes selected — add at least one hex', 'err'); return }
+    // Save modified hexes back to the app object so approveRunner picks them up
+    app.coverageHexes = modHexes
+    window._adminModifiedHexes[appId] = modHexes
+    // Persist modification note
+    await _supa.from('runner_applications').update({
+      coverage_hexes:    JSON.stringify(modHexes),
+      hex_review_status: 'modified',
+      hex_review_notes:  notes || null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', appId)
+    // Email runner
+    if(app.email) sendEmail(app.email, 'Your BinDash zone — updated',
+      `<div style="font-family:sans-serif;padding:20px;max-width:520px">
+        <h2 style="color:#f59e0b">Zone Modified by Admin</h2>
+        <p>Hi ${fn}, your zone application has been approved with some adjustments.</p>
+        <p>Your service area has been updated to <strong>${modHexes.length} hexes</strong>.${notes ? ` Admin note: <em style="color:#64748b">${notes}</em>` : ''}</p>
+        <p>The rest of your application is moving to approval — you'll hear from us shortly.</p>
+      </div>`,
+      'runner_zone_modified'
+    )
+    closeM()
+    showToast(`Zone modified (${modHexes.length} hexes) — now use Approve to finalise`, 'ok', 5000)
+    renderPendingRunnerList()
+    return
+  }
+
+  if(action === 'approve'){
+    // Persist approval status, then trigger the normal approveRunner flow
+    await _supa.from('runner_applications').update({
+      hex_review_status: 'approved',
+      hex_review_notes:  notes || null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', appId)
+    closeM()
+    showToast('Zone approved ✅ — use the Approve button on the card to finalise', 'ok', 4000)
+    return
+  }
+}
+
 async function approveRunner(appId){
   const app = PENDING_RUNNERS.find(x=>x.id===appId); if(!app) return
   let zoneId = document.getElementById('rnpc-zone-'+appId)?.value || ''
@@ -17756,6 +18067,12 @@ async function approveRunner(appId){
       visit_preference: app.visitPref || 'both',
       zone_id:          zoneId,
       status:           'active',
+      anchor_hex8:      app.anchorHex8 || null,
+      anchor_hex6:      app.anchorHex6 || null,
+      coverage_hexes:   app.coverageHexes?.length ? JSON.stringify(
+                          // Use admin-modified hexes if available, else runner's original selection
+                          window._adminModifiedHexes?.[app.id] || app.coverageHexes
+                        ) : null,
       own_ref_code:     ownRefCode,    // their shareable referral code
       referral_code:    usedRefCode,   // code they used at signup
       referred_by:      referredBy,
@@ -22945,6 +23262,11 @@ async function loadRunnerApplicationsFromSupabase(){
         referredBy:   row.referred_by   || null,   // name/id of referring runner
         loyaltyTier:  row.loyalty_tier  || null,   // set by admin on approval
         preferredZones: (() => { try { return row.preferred_zones ? JSON.parse(row.preferred_zones) : [] } catch(e){ return [] } })(),
+        anchorHex8:     row.anchor_hex8    || null,
+        hexReviewStatus: row.hex_review_status || null,
+        hexReviewNotes:  row.hex_review_notes  || null,
+        anchorHex6:     row.anchor_hex6    || null,
+        coverageHexes:  (() => { try { return row.coverage_hexes ? JSON.parse(row.coverage_hexes) : [] } catch(e){ return [] } })(),
       })
     })
 
