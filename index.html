@@ -3321,7 +3321,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <div class="nav-i on" onclick="rnNav(this,'rn-home')"><span class="ic">📊</span> Dashboard</div>
       <div class="nav-i" onclick="rnNav(this,'rn-routes')"><span class="ic">🗺️</span> My Routes</div>
       <div class="nav-i" onclick="rnNav(this,'rn-zones')"><span class="ic">📍</span> My Zones</div>
-      <div class="nav-i" onclick="rnNav(this,'rn-scout');renderRunnerScoutPanel()"><span class="ic">🚩</span> Scout Area</div>
+      <div class="nav-i" onclick="rnNav(this,'rn-scout');renderRunnerScoutPanel();renderRunnerHeatmap()"><span class="ic">🚩</span> Scout Area</div>
       <div class="nav-i" onclick="rnNav(this,'rn-earnings')"><span class="ic">💵</span> Earnings &amp; Pay</div>
       <div class="nav-i" onclick="rnNav(this,'rn-account')"><span class="ic">👤</span> My Info</div>
       <div class="s-bot">
@@ -3569,17 +3569,80 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
 
         <!-- RN EARNINGS -->
         <!-- RN SCOUT AREA -->
-        <div class="pg" id="rn-scout">
-          <div style="margin-bottom:16px">
-            <div style="font-size:20px;font-weight:700">🚩 Scout an Area</div>
-            <div style="font-size:13px;color:var(--muted);margin-top:3px;line-height:1.6">
-              Spotted a neighborhood with lots of bins out? Neighbors asking about trash service?
-              Flag it here — admin reviews all flags and may open a new zone.
+        <div class="pg" id="rn-scout" style="padding-bottom:80px">
+          <!-- Header -->
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;gap:10px">
+            <div>
+              <div style="font-size:20px;font-weight:700">🗺️ Zone Heatmap</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:3px">Demand across your area — tap a zone to claim or flag it</div>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="renderRunnerHeatmap()" style="flex-shrink:0;font-size:11px">↺ Refresh</button>
+          </div>
+
+          <!-- Legend pills -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <div style="display:flex;align-items:center;gap:5px;background:var(--surface2);border-radius:99px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer" onclick="rnHeatToggle('active')" id="rn-heat-leg-active">
+              <span style="width:10px;height:10px;background:#22c55e;border-radius:2px;flex-shrink:0"></span> Active + Runner
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;background:var(--surface2);border-radius:99px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer" onclick="rnHeatToggle('demand')" id="rn-heat-leg-demand">
+              <span style="width:10px;height:10px;background:#f59e0b;border-radius:2px;flex-shrink:0"></span> HOs, No Runner
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;background:var(--surface2);border-radius:99px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer" onclick="rnHeatToggle('runner')" id="rn-heat-leg-runner">
+              <span style="width:10px;height:10px;background:#3b82f6;border-radius:2px;flex-shrink:0"></span> Runner, No HOs
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;background:var(--surface2);border-radius:99px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer" onclick="rnHeatToggle('open')" id="rn-heat-leg-open">
+              <span style="width:10px;height:10px;background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.3);border-radius:2px;flex-shrink:0"></span> Open Zone
             </div>
           </div>
 
+          <!-- Map -->
+          <div style="border-radius:12px;overflow:hidden;border:1.5px solid var(--border2);margin-bottom:14px;position:relative">
+            <div id="rn-heat-map" style="height:380px;width:100%;background:#0a0e18"></div>
+            <div id="rn-heat-loading" style="position:absolute;inset:0;background:rgba(7,9,15,.8);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;z-index:500">
+              <div style="font-size:22px">🗺️</div>
+              <div style="font-size:13px;color:var(--muted)">Loading zone heatmap...</div>
+            </div>
+          </div>
+
+          <!-- Zone stats pills -->
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px">
+            <div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);border-radius:8px;padding:8px;text-align:center">
+              <div style="font-size:18px;font-weight:800;color:#22c55e" id="rn-heat-ct-active">--</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Active</div>
+            </div>
+            <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:8px;text-align:center">
+              <div style="font-size:18px;font-weight:800;color:#f59e0b" id="rn-heat-ct-demand">--</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Need Runner</div>
+            </div>
+            <div style="background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:8px;padding:8px;text-align:center">
+              <div style="font-size:18px;font-weight:800;color:#3b82f6" id="rn-heat-ct-runner">--</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Runner Only</div>
+            </div>
+            <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px;text-align:center">
+              <div style="font-size:18px;font-weight:800;color:var(--muted)" id="rn-heat-ct-open">--</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Open</div>
+            </div>
+          </div>
+
+          <!-- Zone detail panel (shown on hex tap) -->
+          <div id="rn-heat-detail" style="display:none;background:var(--surface);border:1.5px solid var(--border2);border-radius:12px;padding:14px;margin-bottom:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div style="font-size:14px;font-weight:700" id="rn-heat-detail-title">Zone Detail</div>
+              <button onclick="document.getElementById('rn-heat-detail').style.display='none'" style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer">✕</button>
+            </div>
+            <div id="rn-heat-detail-body"></div>
+            <div id="rn-heat-detail-actions" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"></div>
+          </div>
+
+          <!-- Divider -->
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <div style="flex:1;height:1px;background:var(--border2)"></div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Flag an Area</div>
+            <div style="flex:1;height:1px;background:var(--border2)"></div>
+          </div>
+
           <!-- Previous flags -->
-          <div id="rn-scout-history" style="margin-bottom:16px"></div>
+          <div id="rn-scout-history" style="margin-bottom:12px"></div>
 
           <!-- Flag form -->
           <div style="background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:16px">
@@ -10287,6 +10350,242 @@ async function submitScoutFlag(){
     showToast('Error submitting flag: '+e.message,'err')
   } finally {
     if(btn){ btn.disabled = false; btn.textContent = '🚩 Submit Flag' }
+  }
+}
+
+// ================================================================
+// RUNNER ZONE HEATMAP
+// ================================================================
+window._rnHeatMap      = null
+window._rnHeatLayers   = {}   // type -> [L.layer, ...]
+window._rnHeatVisible  = { active:true, demand:true, runner:true, open:true }
+window._rnHeatZones    = []   // raw classified zone objects
+
+async function renderRunnerHeatmap(){
+  const loadEl = document.getElementById('rn-heat-loading')
+  if(loadEl) loadEl.style.display = 'flex'
+
+  await _loadMapLibs()
+  if(typeof L === 'undefined'){
+    if(loadEl) loadEl.innerHTML = '<div style="color:#ef4444;font-size:13px">Map unavailable</div>'
+    return
+  }
+
+  // Destroy & recreate map
+  if(window._rnHeatMap){ window._rnHeatMap.remove(); window._rnHeatMap = null }
+  window._rnHeatLayers  = { active:[], demand:[], runner:[], open:[] }
+  window._rnHeatZones   = []
+
+  const mapEl = document.getElementById('rn-heat-map')
+  if(!mapEl) return
+
+  const map = L.map('rn-heat-map', { zoomControl:true, attributionControl:false })
+  window._rnHeatMap = map
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
+
+  // ── Fetch data ──
+  let microZones = [], hoHexes = {}, runnerHexes = new Set()
+
+  try {
+    const { data } = await _supa.from('micro_zones')
+      .select('hex_id,status,member_count,waitlist_count,activation_threshold,zip_code,city,zone_label,trash_day,lat,lng')
+      .limit(500)
+    microZones = data || []
+  } catch(e){}
+
+  try {
+    const { data: hos } = await _supa.from('homeowners')
+      .select('h3_index').not('h3_index','is',null).limit(3000)
+    if(hos) hos.forEach(h => { if(h.h3_index) hoHexes[h.h3_index] = (hoHexes[h.h3_index]||0)+1 })
+  } catch(e){}
+
+  // Build runner hex coverage set from RUNNERS in memory + DB
+  try {
+    const { data: rns } = await _supa.from('runners')
+      .select('coverage_hexes,anchor_hex8,zone_id').eq('status','active')
+    if(rns) rns.forEach(r => {
+      if(r.anchor_hex8) runnerHexes.add(r.anchor_hex8)
+      try { const hexes = r.coverage_hexes ? JSON.parse(r.coverage_hexes) : []; hexes.forEach(h=>runnerHexes.add(h)) } catch(e){}
+    })
+  } catch(e){}
+  // Also use in-memory RUNNERS
+  ;(RUNNERS||[]).forEach(r => {
+    if(r.status==='INACTIVE') return
+    try { const hexes = typeof r.coverageHexes==='string' ? JSON.parse(r.coverageHexes) : (r.coverageHexes||[]); hexes.forEach(h=>runnerHexes.add(h)) } catch(e){}
+    if(r.anchorHex8) runnerHexes.add(r.anchorHex8)
+  })
+
+  // ── Classify and draw zones from micro_zones ──
+  const counts = { active:0, demand:0, runner:0, open:0 }
+  const drawnHexes = new Set()
+
+  microZones.forEach(z => {
+    if(!z.hex_id) return
+    drawnHexes.add(z.hex_id)
+    const hasRunner = runnerHexes.has(z.hex_id)
+    const hoCount   = (z.member_count||0) + (z.waitlist_count||0) + (hoHexes[z.hex_id]||0)
+    const isActive  = z.status === 'active'
+
+    let type, fillColor, fillOpacity, borderColor, borderDash
+    if(isActive && hasRunner){
+      type='active'; fillColor='#22c55e'; fillOpacity=0.40; borderColor='#22c55e'; borderDash=null; counts.active++
+    } else if(hoCount > 0 && !hasRunner){
+      type='demand'; fillColor='#f59e0b'; fillOpacity=0.38; borderColor='#fbbf24'; borderDash=null; counts.demand++
+    } else if(hasRunner && hoCount === 0){
+      type='runner'; fillColor='#3b82f6'; fillOpacity=0.30; borderColor='#60a5fa'; borderDash='4,3'; counts.runner++
+    } else {
+      type='open'; fillColor='rgba(255,255,255,1)'; fillOpacity=0.06; borderColor='rgba(255,255,255,.2)'; borderDash='3,5'; counts.open++
+    }
+
+    _rnDrawHex(map, z.hex_id, { type, fillColor, fillOpacity, borderColor, borderDash, zone:z, hoCount, hasRunner })
+  })
+
+  // ── Draw homeowner hexes not yet in micro_zones ──
+  Object.entries(hoHexes).forEach(([hexId, hoCount]) => {
+    if(drawnHexes.has(hexId)) return
+    drawnHexes.add(hexId)
+    const hasRunner = runnerHexes.has(hexId)
+    const type = hasRunner ? 'active' : 'demand'
+    if(type==='active') counts.active++; else counts.demand++
+    _rnDrawHex(map, hexId, {
+      type, hoCount, hasRunner,
+      fillColor: hasRunner ? '#22c55e' : '#f59e0b',
+      fillOpacity: hasRunner ? 0.35 : 0.32,
+      borderColor: hasRunner ? '#22c55e' : '#fbbf24',
+      borderDash: null, zone:null
+    })
+  })
+
+  // ── Draw runner-only hexes with no HOs ──
+  runnerHexes.forEach(hexId => {
+    if(drawnHexes.has(hexId)) return
+    drawnHexes.add(hexId)
+    counts.runner++
+    _rnDrawHex(map, hexId, {
+      type:'runner', hoCount:0, hasRunner:true,
+      fillColor:'#3b82f6', fillOpacity:0.25,
+      borderColor:'#60a5fa', borderDash:'4,3', zone:null
+    })
+  })
+
+  // Store classified zones for toggle
+  window._rnHeatZones = [...drawnHexes]
+
+  // Update counts
+  const safe = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v }
+  safe('rn-heat-ct-active', counts.active)
+  safe('rn-heat-ct-demand', counts.demand)
+  safe('rn-heat-ct-runner', counts.runner)
+  safe('rn-heat-ct-open',   counts.open)
+
+  // Fit to bounds — use runner's area if known
+  const runner = window._rnRow || {}
+  const zip    = runner.zip_code || runner.zip || ''
+  const ctr    = (zip && ZIP_CENTROIDS[zip]) ? ZIP_CENTROIDS[zip] : [33.53, -112.18]
+  map.setView(ctr, 11)
+
+  if(loadEl) loadEl.style.display = 'none'
+}
+
+function _rnDrawHex(map, hexId, opts){
+  let boundary
+  try { boundary = h3.cellToBoundary(hexId).map(([la,ln])=>[la,ln]) } catch(e){ return }
+
+  const poly = L.polygon(boundary, {
+    color:       opts.borderColor,
+    fillColor:   opts.fillColor,
+    fillOpacity: opts.fillOpacity,
+    weight:      1.5,
+    opacity:     0.9,
+    dashArray:   opts.borderDash || null,
+  }).addTo(map)
+
+  const z = opts.zone
+  const typeLabel = opts.type==='active' ? '✅ Active + Runner'
+    : opts.type==='demand' ? '🟡 Homeowners — Runner Needed'
+    : opts.type==='runner' ? '🔵 Runner Staked — No HOs Yet'
+    : '⬜ Open Zone'
+
+  poly.on('click', () => {
+    const detail  = document.getElementById('rn-heat-detail')
+    const title   = document.getElementById('rn-heat-detail-title')
+    const body    = document.getElementById('rn-heat-detail-body')
+    const actions = document.getElementById('rn-heat-detail-actions')
+    if(!detail || !body || !actions) return
+
+    detail.style.display = 'block'
+    if(title) title.textContent = z?.zone_label || ('Hex ···'+hexId.slice(-6))
+
+    const hoLine = opts.hoCount > 0
+      ? '<div style="color:#a5b4fc;font-size:12px;margin-top:4px">'+opts.hoCount+' homeowner'+(opts.hoCount!==1?'s':'')+' in this hex</div>'
+      : '<div style="color:var(--muted);font-size:12px;margin-top:4px">No homeowners yet</div>'
+    const rnLine = opts.hasRunner
+      ? '<div style="color:#22c55e;font-size:12px">Runner assigned</div>'
+      : '<div style="color:#f59e0b;font-size:12px">No runner — open for claiming</div>'
+    const zipLine = z?.zip_code ? '<div style="color:var(--muted);font-size:11px;margin-top:3px">ZIP '+z.zip_code+(z.city?' · '+z.city:'')+'</div>' : ''
+
+    body.innerHTML = '<div style="font-size:12px;font-weight:700;margin-bottom:6px">'+typeLabel+'</div>' + hoLine + rnLine + zipLine
+
+    actions.innerHTML = ''
+    if(opts.type==='demand' || opts.type==='open'){
+      const claimBtn = document.createElement('button')
+      claimBtn.className = 'btn btn-cyan btn-sm'
+      claimBtn.textContent = '🏃 Claim this zone'
+      claimBtn.onclick = function(){ _rnClaimHex(hexId, z) }
+      actions.appendChild(claimBtn)
+    }
+    const flagBtn = document.createElement('button')
+    flagBtn.className = 'btn btn-outline btn-sm'
+    flagBtn.textContent = '🚩 Flag area'
+    flagBtn.onclick = function(){
+      const zipEl = document.getElementById('rn-scout-zip')
+      if(zipEl && z?.zip_code) zipEl.value = z.zip_code
+      detail.style.display = 'none'
+      document.getElementById('rn-scout-zip')?.scrollIntoView({ behavior:'smooth' })
+    }
+    actions.appendChild(flagBtn)
+    detail.scrollIntoView({ behavior:'smooth', block:'nearest' })
+  })
+
+  if(!window._rnHeatLayers[opts.type]) window._rnHeatLayers[opts.type] = []
+  window._rnHeatLayers[opts.type].push(poly)
+}
+
+function rnHeatToggle(type){
+  window._rnHeatVisible[type] = !window._rnHeatVisible[type]
+  const isOn = window._rnHeatVisible[type]
+  const layers = window._rnHeatLayers[type] || []
+  const map = window._rnHeatMap
+  if(!map) return
+  layers.forEach(l => { isOn ? l.addTo(map) : l.remove() })
+  const leg = document.getElementById('rn-heat-leg-'+type)
+  if(leg) leg.style.opacity = isOn ? '1' : '0.35'
+}
+
+async function _rnClaimHex(hexId, zone){
+  const runner = window._rnRow || {}
+  const email  = runner.email || currentUser?.email
+  const name   = runner.name  || currentUser?.user_metadata?.first_name || 'Runner'
+  const zip    = zone?.zip_code || ''
+  if(!email){ showToast('Please log in first','err'); return }
+
+  try {
+    await _supa.from('runner_zone_requests').insert({
+      runner_email: email,
+      runner_name:  name,
+      zip_code:     zip,
+      zone_id:      zone?.id || null,
+      zone_name:    zone?.zone_label || ('Hex '+hexId.slice(-6)),
+      status:       'pending',
+      type:         'claim',
+      notes:        'Runner claimed via heatmap — hex '+hexId,
+      requested_hexes: JSON.stringify([hexId]),
+      created_at:   new Date().toISOString(),
+    })
+    showToast('Claim submitted — admin will review and assign you to this zone ✅', 'ok', 5000)
+    document.getElementById('rn-heat-detail').style.display = 'none'
+  } catch(e){
+    showToast('Could not submit claim: '+String(e?.message||e), 'err')
   }
 }
 
