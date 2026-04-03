@@ -10361,6 +10361,18 @@ window._rnHeatLayers   = {}   // type -> [L.layer, ...]
 window._rnHeatVisible  = { active:true, demand:true, runner:true, open:true }
 window._rnHeatZones    = []   // raw classified zone objects
 
+// ================================================================
+// RUNNER ZONE HEATMAP  —  res-7 display, multi-select, zone fallback
+// ================================================================
+// Res 7 = ~5.2 km² per hex, ~2.6 km across — city-readable scale
+const RN_HEAT_RES = 7
+
+window._rnHeatMap        = null
+window._rnHeatLayers     = {}       // type -> [L.layer, ...]
+window._rnHeatVisible    = { active:true, demand:true, runner:true, open:true }
+window._rnHeatSelected   = new Set() // hexIds the runner has tapped (multi-select)
+window._rnHeatHexMeta    = {}       // hexId -> { type, hoCount, hasRunner, zone, poly }
+
 async function renderRunnerHeatmap(){
   const loadEl = document.getElementById('rn-heat-loading')
   if(loadEl) loadEl.style.display = 'flex'
@@ -10374,7 +10386,9 @@ async function renderRunnerHeatmap(){
   // Destroy & recreate map
   if(window._rnHeatMap){ window._rnHeatMap.remove(); window._rnHeatMap = null }
   window._rnHeatLayers  = { active:[], demand:[], runner:[], open:[] }
-  window._rnHeatZones   = []
+  window._rnHeatHexMeta = {}
+  window._rnHeatSelected.clear()
+  _rnUpdateClaimBar()
 
   const mapEl = document.getElementById('rn-heat-map')
   if(!mapEl) return
@@ -10383,102 +10397,157 @@ async function renderRunnerHeatmap(){
   window._rnHeatMap = map
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
-  // ── Fetch data ──
-  let microZones = [], hoHexes = {}, runnerHexes = new Set()
-
-  try {
-    const { data } = await _supa.from('micro_zones')
-      .select('hex_id,status,member_count,waitlist_count,activation_threshold,zip_code,city,zone_label,trash_day,lat,lng')
-      .limit(500)
-    microZones = data || []
-  } catch(e){}
-
+  // ── 1. Fetch HO hex data ──
+  const hoHexes = {}   // res-8 hexId -> count
   try {
     const { data: hos } = await _supa.from('homeowners')
-      .select('h3_index').not('h3_index','is',null).limit(3000)
-    if(hos) hos.forEach(h => { if(h.h3_index) hoHexes[h.h3_index] = (hoHexes[h.h3_index]||0)+1 })
+      .select('h3_index').not('h3_index','is',null).limit(5000)
+    if(hos) hos.forEach(h => {
+      if(!h.h3_index) return
+      // Also index at res-7 parent for heatmap display
+      try {
+        const p7 = h3.cellToParent(h.h3_index, RN_HEAT_RES)
+        hoHexes[p7] = (hoHexes[p7]||0) + 1
+      } catch(e){ hoHexes[h.h3_index] = (hoHexes[h.h3_index]||0)+1 }
+    })
   } catch(e){}
 
-  // Build runner hex coverage set from RUNNERS in memory + DB
+  // ── 2. Build runner coverage set at res-7 ──
+  // Strategy A: new coverage_hexes column (runners onboarded via hex picker)
+  // Strategy B: zone_id -> ADMIN_ZONES zips -> ZIP_CENTROIDS -> gridDisk at res-7
+  // Strategy C: zip_code directly -> centroid -> gridDisk at res-7
+  const runnerHexes   = new Set()  // res-7 hexIds covered by any runner
+  const runnerZipMeta = {}         // zip -> runner name (for tooltip)
+
+  const addZipCoverage = (zip, name) => {
+    const ctr = ZIP_CENTROIDS[zip]
+    if(!ctr) return
+    try {
+      const anchor7 = h3.latLngToCell(ctr[0], ctr[1], RN_HEAT_RES)
+      h3.gridDisk(anchor7, 1).forEach(h => {
+        runnerHexes.add(h)
+        if(!runnerZipMeta[h]) runnerZipMeta[h] = []
+        if(!runnerZipMeta[h].includes(name)) runnerZipMeta[h].push(name)
+      })
+    } catch(e){}
+  }
+
+  // From DB runners table
   try {
     const { data: rns } = await _supa.from('runners')
-      .select('coverage_hexes,anchor_hex8,zone_id').eq('status','active')
+      .select('coverage_hexes,anchor_hex8,zone_id,zip_code,first_name,last_name,status')
+      .neq('status','inactive')
     if(rns) rns.forEach(r => {
-      if(r.anchor_hex8) runnerHexes.add(r.anchor_hex8)
-      try { const hexes = r.coverage_hexes ? JSON.parse(r.coverage_hexes) : []; hexes.forEach(h=>runnerHexes.add(h)) } catch(e){}
+      const name = ((r.first_name||'')+ ' '+(r.last_name||'')).trim() || 'Runner'
+      // A: new hex columns
+      if(r.anchor_hex8){
+        try {
+          const p7 = h3.cellToParent(r.anchor_hex8, RN_HEAT_RES)
+          h3.gridDisk(p7, 1).forEach(h => { runnerHexes.add(h); if(!runnerZipMeta[h]) runnerZipMeta[h]=[]; if(!runnerZipMeta[h].includes(name)) runnerZipMeta[h].push(name) })
+        } catch(e){}
+      }
+      try {
+        const hexes = r.coverage_hexes ? JSON.parse(r.coverage_hexes) : []
+        hexes.forEach(h => {
+          try {
+            const p7 = h3.cellToParent(h, RN_HEAT_RES)
+            runnerHexes.add(p7)
+            if(!runnerZipMeta[p7]) runnerZipMeta[p7]=[]
+            if(!runnerZipMeta[p7].includes(name)) runnerZipMeta[p7].push(name)
+          } catch(e){}
+        })
+      } catch(e){}
+      // B: zone_id -> zone ZIPs
+      if(r.zone_id){
+        const zone = ADMIN_ZONES.find(z=>z.id===r.zone_id)
+        const zips = zone?.zips || (zone?.zip ? [zone.zip] : [])
+        zips.forEach(zip => addZipCoverage(zip, name))
+      }
+      // C: direct zip_code fallback
+      if(r.zip_code) addZipCoverage(r.zip_code, name)
     })
-  } catch(e){}
-  // Also use in-memory RUNNERS
+  } catch(e){ console.warn('[Heatmap] runners fetch:', e) }
+
+  // Also use in-memory RUNNERS (already loaded)
   ;(RUNNERS||[]).forEach(r => {
     if(r.status==='INACTIVE') return
-    try { const hexes = typeof r.coverageHexes==='string' ? JSON.parse(r.coverageHexes) : (r.coverageHexes||[]); hexes.forEach(h=>runnerHexes.add(h)) } catch(e){}
-    if(r.anchorHex8) runnerHexes.add(r.anchorHex8)
-  })
-
-  // ── Classify and draw zones from micro_zones ──
-  const counts = { active:0, demand:0, runner:0, open:0 }
-  const drawnHexes = new Set()
-
-  microZones.forEach(z => {
-    if(!z.hex_id) return
-    drawnHexes.add(z.hex_id)
-    const hasRunner = runnerHexes.has(z.hex_id)
-    const hoCount   = (z.member_count||0) + (z.waitlist_count||0) + (hoHexes[z.hex_id]||0)
-    const isActive  = z.status === 'active'
-
-    let type, fillColor, fillOpacity, borderColor, borderDash
-    if(isActive && hasRunner){
-      type='active'; fillColor='#22c55e'; fillOpacity=0.40; borderColor='#22c55e'; borderDash=null; counts.active++
-    } else if(hoCount > 0 && !hasRunner){
-      type='demand'; fillColor='#f59e0b'; fillOpacity=0.38; borderColor='#fbbf24'; borderDash=null; counts.demand++
-    } else if(hasRunner && hoCount === 0){
-      type='runner'; fillColor='#3b82f6'; fillOpacity=0.30; borderColor='#60a5fa'; borderDash='4,3'; counts.runner++
-    } else {
-      type='open'; fillColor='rgba(255,255,255,1)'; fillOpacity=0.06; borderColor='rgba(255,255,255,.2)'; borderDash='3,5'; counts.open++
+    const name = r.name || 'Runner'
+    // New hex fields
+    if(r.anchorHex8){
+      try {
+        const p7 = h3.cellToParent(r.anchorHex8, RN_HEAT_RES)
+        h3.gridDisk(p7,1).forEach(h=>{ runnerHexes.add(h); if(!runnerZipMeta[h]) runnerZipMeta[h]=[]; if(!runnerZipMeta[h].includes(name)) runnerZipMeta[h].push(name) })
+      } catch(e){}
     }
-
-    _rnDrawHex(map, z.hex_id, { type, fillColor, fillOpacity, borderColor, borderDash, zone:z, hoCount, hasRunner })
+    // Zone fallback
+    const zone = ADMIN_ZONES.find(z=>z.id===r.zoneId)
+    const zips = zone?.zips || (zone?.zip ? [zone.zip] : [])
+    zips.forEach(zip => addZipCoverage(zip, name))
+    if(r.zip) addZipCoverage(r.zip, name)
   })
 
-  // ── Draw homeowner hexes not yet in micro_zones ──
-  Object.entries(hoHexes).forEach(([hexId, hoCount]) => {
-    if(drawnHexes.has(hexId)) return
-    drawnHexes.add(hexId)
-    const hasRunner = runnerHexes.has(hexId)
-    const type = hasRunner ? 'active' : 'demand'
-    if(type==='active') counts.active++; else counts.demand++
-    _rnDrawHex(map, hexId, {
-      type, hoCount, hasRunner,
-      fillColor: hasRunner ? '#22c55e' : '#f59e0b',
-      fillOpacity: hasRunner ? 0.35 : 0.32,
-      borderColor: hasRunner ? '#22c55e' : '#fbbf24',
-      borderDash: null, zone:null
+  // ── 3. Build full draw set — union of HO hexes + runner hexes + micro_zones ──
+  const drawSet = new Map()  // res-7 hexId -> { hoCount, hasRunner, zone }
+
+  // Seed from HO hexes (already at res-7)
+  Object.entries(hoHexes).forEach(([h7, cnt]) => {
+    if(!drawSet.has(h7)) drawSet.set(h7, { hoCount:0, hasRunner:false, zone:null, runnerNames:[] })
+    drawSet.get(h7).hoCount += cnt
+  })
+
+  // Mark runner coverage
+  runnerHexes.forEach(h7 => {
+    if(!drawSet.has(h7)) drawSet.set(h7, { hoCount:0, hasRunner:false, zone:null, runnerNames:[] })
+    const d = drawSet.get(h7)
+    d.hasRunner = true
+    d.runnerNames = runnerZipMeta[h7] || []
+  })
+
+  // Merge micro_zones (may be at res-8 — convert to res-7)
+  try {
+    const { data: mz } = await _supa.from('micro_zones')
+      .select('hex_id,status,member_count,waitlist_count,activation_threshold,zip_code,city,zone_label,trash_day,lat,lng')
+      .limit(500)
+    if(mz) mz.forEach(z => {
+      if(!z.hex_id) return
+      let h7 = z.hex_id
+      try {
+        const res = h3.getResolution(z.hex_id)
+        if(res !== RN_HEAT_RES) h7 = h3.cellToParent(z.hex_id, RN_HEAT_RES)
+      } catch(e){ return }
+      if(!drawSet.has(h7)) drawSet.set(h7, { hoCount:0, hasRunner:false, zone:null, runnerNames:[] })
+      const d = drawSet.get(h7)
+      d.hoCount  = Math.max(d.hoCount, (z.member_count||0)+(z.waitlist_count||0))
+      d.zone     = d.zone || z
     })
+  } catch(e){}
+
+  // ── 4. Classify and draw ──
+  const counts = { active:0, demand:0, runner:0, open:0 }
+
+  drawSet.forEach((d, h7) => {
+    let type, fillColor, fillOpacity, borderColor, borderDash
+    if(d.hoCount > 0 && d.hasRunner){
+      type='active';  fillColor='#22c55e'; fillOpacity=0.40; borderColor='#22c55e'; borderDash=null;  counts.active++
+    } else if(d.hoCount > 0 && !d.hasRunner){
+      type='demand';  fillColor='#f59e0b'; fillOpacity=0.42; borderColor='#fbbf24'; borderDash=null;  counts.demand++
+    } else if(d.hasRunner && d.hoCount===0){
+      type='runner';  fillColor='#3b82f6'; fillOpacity=0.28; borderColor='#60a5fa'; borderDash='4,3'; counts.runner++
+    } else {
+      type='open';    fillColor='#ffffff'; fillOpacity=0.05; borderColor='rgba(255,255,255,.18)'; borderDash='3,5'; counts.open++
+    }
+    _rnDrawHex(map, h7, { type, fillColor, fillOpacity, borderColor, borderDash,
+      zone:d.zone, hoCount:d.hoCount, hasRunner:d.hasRunner, runnerNames:d.runnerNames })
   })
 
-  // ── Draw runner-only hexes with no HOs ──
-  runnerHexes.forEach(hexId => {
-    if(drawnHexes.has(hexId)) return
-    drawnHexes.add(hexId)
-    counts.runner++
-    _rnDrawHex(map, hexId, {
-      type:'runner', hoCount:0, hasRunner:true,
-      fillColor:'#3b82f6', fillOpacity:0.25,
-      borderColor:'#60a5fa', borderDash:'4,3', zone:null
-    })
-  })
-
-  // Store classified zones for toggle
-  window._rnHeatZones = [...drawnHexes]
-
-  // Update counts
+  // Update stat pills
   const safe = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v }
   safe('rn-heat-ct-active', counts.active)
   safe('rn-heat-ct-demand', counts.demand)
   safe('rn-heat-ct-runner', counts.runner)
   safe('rn-heat-ct-open',   counts.open)
 
-  // Fit to bounds — use runner's area if known
+  // Center on runner's area
   const runner = window._rnRow || {}
   const zip    = runner.zip_code || runner.zip || ''
   const ctr    = (zip && ZIP_CENTROIDS[zip]) ? ZIP_CENTROIDS[zip] : [33.53, -112.18]
@@ -10500,94 +10569,178 @@ function _rnDrawHex(map, hexId, opts){
     dashArray:   opts.borderDash || null,
   }).addTo(map)
 
-  const z = opts.zone
-  const typeLabel = opts.type==='active' ? '✅ Active + Runner'
-    : opts.type==='demand' ? '🟡 Homeowners — Runner Needed'
-    : opts.type==='runner' ? '🔵 Runner Staked — No HOs Yet'
-    : '⬜ Open Zone'
-
-  poly.on('click', () => {
-    const detail  = document.getElementById('rn-heat-detail')
-    const title   = document.getElementById('rn-heat-detail-title')
-    const body    = document.getElementById('rn-heat-detail-body')
-    const actions = document.getElementById('rn-heat-detail-actions')
-    if(!detail || !body || !actions) return
-
-    detail.style.display = 'block'
-    if(title) title.textContent = z?.zone_label || ('Hex ···'+hexId.slice(-6))
-
-    const hoLine = opts.hoCount > 0
-      ? '<div style="color:#a5b4fc;font-size:12px;margin-top:4px">'+opts.hoCount+' homeowner'+(opts.hoCount!==1?'s':'')+' in this hex</div>'
-      : '<div style="color:var(--muted);font-size:12px;margin-top:4px">No homeowners yet</div>'
-    const rnLine = opts.hasRunner
-      ? '<div style="color:#22c55e;font-size:12px">Runner assigned</div>'
-      : '<div style="color:#f59e0b;font-size:12px">No runner — open for claiming</div>'
-    const zipLine = z?.zip_code ? '<div style="color:var(--muted);font-size:11px;margin-top:3px">ZIP '+z.zip_code+(z.city?' · '+z.city:'')+'</div>' : ''
-
-    body.innerHTML = '<div style="font-size:12px;font-weight:700;margin-bottom:6px">'+typeLabel+'</div>' + hoLine + rnLine + zipLine
-
-    actions.innerHTML = ''
-    if(opts.type==='demand' || opts.type==='open'){
-      const claimBtn = document.createElement('button')
-      claimBtn.className = 'btn btn-cyan btn-sm'
-      claimBtn.textContent = '🏃 Claim this zone'
-      claimBtn.onclick = function(){ _rnClaimHex(hexId, z) }
-      actions.appendChild(claimBtn)
-    }
-    const flagBtn = document.createElement('button')
-    flagBtn.className = 'btn btn-outline btn-sm'
-    flagBtn.textContent = '🚩 Flag area'
-    flagBtn.onclick = function(){
-      const zipEl = document.getElementById('rn-scout-zip')
-      if(zipEl && z?.zip_code) zipEl.value = z.zip_code
-      detail.style.display = 'none'
-      document.getElementById('rn-scout-zip')?.scrollIntoView({ behavior:'smooth' })
-    }
-    actions.appendChild(flagBtn)
-    detail.scrollIntoView({ behavior:'smooth', block:'nearest' })
-  })
-
+  // Store meta for toggle + multi-select
+  window._rnHeatHexMeta[hexId] = { ...opts, poly }
   if(!window._rnHeatLayers[opts.type]) window._rnHeatLayers[opts.type] = []
   window._rnHeatLayers[opts.type].push(poly)
+
+  const typeLabel = {
+    active: 'Active + Runner',
+    demand: 'HOs — No Runner',
+    runner: 'Runner — No HOs Yet',
+    open:   'Open Zone'
+  }[opts.type] || opts.type
+
+  poly.on('click', () => _rnHexTap(hexId, typeLabel, opts))
+}
+
+function _rnHexTap(hexId, typeLabel, opts){
+  const isSelected = window._rnHeatSelected.has(hexId)
+
+  if(isSelected){
+    window._rnHeatSelected.delete(hexId)
+    // Restore original style
+    const meta = window._rnHeatHexMeta[hexId]
+    if(meta) meta.poly.setStyle({ color:meta.borderColor, fillColor:meta.fillColor, fillOpacity:meta.fillOpacity, dashArray:meta.borderDash||null, weight:1.5 })
+  } else {
+    window._rnHeatSelected.add(hexId)
+    // Highlight selected
+    opts.poly.setStyle({ color:'#06d6a0', fillColor:'#06d6a0', fillOpacity:0.55, dashArray:null, weight:3 })
+  }
+
+  _rnUpdateClaimBar()
+
+  // Update detail panel
+  const detail  = document.getElementById('rn-heat-detail')
+  const title   = document.getElementById('rn-heat-detail-title')
+  const body    = document.getElementById('rn-heat-detail-body')
+  const actions = document.getElementById('rn-heat-detail-actions')
+  if(!detail) return
+
+  const z = opts.zone
+  const selCount = window._rnHeatSelected.size
+
+  detail.style.display = 'block'
+  if(title) title.textContent = selCount > 1 ? selCount + ' hexes selected' : (z?.zone_label || ('Hex \u00b7\u00b7\u00b7'+hexId.slice(-6)))
+
+  const hoLine = opts.hoCount > 0
+    ? '<div style="color:#a5b4fc;font-size:12px;margin-top:4px">'+opts.hoCount+' homeowner'+(opts.hoCount!==1?'s':'')+' in this hex</div>'
+    : '<div style="color:var(--muted);font-size:12px;margin-top:4px">No homeowners yet</div>'
+  const rnLine = opts.hasRunner
+    ? '<div style="color:#22c55e;font-size:12px">Runner covered'+(opts.runnerNames?.length?' by '+opts.runnerNames.join(', '):'')+'</div>'
+    : '<div style="color:#f59e0b;font-size:12px">No runner — open for claiming</div>'
+  const zipLine = z?.zip_code ? '<div style="color:var(--muted);font-size:11px;margin-top:3px">ZIP '+z.zip_code+(z.city?' \u00b7 '+z.city:'')+'</div>' : ''
+  const selLine = selCount > 1
+    ? '<div style="background:rgba(6,214,160,.1);border:1px solid rgba(6,214,160,.3);border-radius:6px;padding:5px 9px;font-size:11px;color:var(--cyan);margin-top:8px">'+selCount+' hexes selected — claim all at once below</div>'
+    : ''
+
+  body.innerHTML = '<div style="font-size:12px;font-weight:700;color:var(--sub);margin-bottom:6px">'+typeLabel+'</div>' + hoLine + rnLine + zipLine + selLine
+
+  actions.innerHTML = ''
+  const canClaim = [...window._rnHeatSelected].some(h => {
+    const m = window._rnHeatHexMeta[h]
+    return m && (m.type==='demand' || m.type==='open')
+  })
+  if(canClaim){
+    const claimBtn = document.createElement('button')
+    claimBtn.className = 'btn btn-cyan btn-sm'
+    claimBtn.textContent = selCount > 1 ? 'Claim '+selCount+' hexes' : 'Claim this zone'
+    claimBtn.onclick = function(){ _rnClaimSelected() }
+    actions.appendChild(claimBtn)
+  }
+  const clearBtn = document.createElement('button')
+  clearBtn.className = 'btn btn-ghost btn-sm'
+  clearBtn.style.color = 'var(--muted)'
+  clearBtn.textContent = 'Clear selection'
+  clearBtn.onclick = function(){ _rnClearSelection() }
+  actions.appendChild(clearBtn)
+
+  const flagBtn = document.createElement('button')
+  flagBtn.className = 'btn btn-outline btn-sm'
+  flagBtn.textContent = 'Flag area'
+  flagBtn.onclick = function(){
+    const zipEl = document.getElementById('rn-scout-zip')
+    if(zipEl && z?.zip_code) zipEl.value = z.zip_code
+    detail.style.display = 'none'
+    document.getElementById('rn-scout-zip')?.scrollIntoView({ behavior:'smooth' })
+  }
+  actions.appendChild(flagBtn)
+}
+
+function _rnUpdateClaimBar(){
+  const count = window._rnHeatSelected.size
+  let bar = document.getElementById('rn-heat-claim-bar')
+  if(!bar){
+    bar = document.createElement('div')
+    bar.id = 'rn-heat-claim-bar'
+    bar.style.cssText = 'position:sticky;bottom:70px;left:0;right:0;margin:12px 0;background:linear-gradient(135deg,rgba(6,214,160,.15),rgba(99,102,241,.1));border:1.5px solid rgba(6,214,160,.4);border-radius:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;z-index:100;backdrop-filter:blur(8px)'
+    const scoutEl = document.getElementById('rn-scout')
+    if(scoutEl) scoutEl.insertBefore(bar, scoutEl.querySelector('#rn-scout-history'))
+  }
+  if(count === 0){
+    bar.style.display = 'none'
+    return
+  }
+  bar.style.display = 'flex'
+  const claimable = [...window._rnHeatSelected].filter(h => {
+    const m = window._rnHeatHexMeta[h]; return m && (m.type==='demand'||m.type==='open')
+  }).length
+  bar.innerHTML = '<div><div style="font-size:13px;font-weight:700;color:var(--cyan)">'+count+' hex'+(count!==1?'es':'')+' selected</div><div style="font-size:11px;color:var(--muted);margin-top:2px">'+claimable+' claimable · tap hexes to add/remove</div></div><div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="_rnClearSelection()">Clear</button>'+(claimable>0?'<button class="btn btn-cyan btn-sm" onclick="_rnClaimSelected()">Claim '+claimable+' zone'+(claimable!==1?'s':'')+'</button>':'')+'</div>'
+}
+
+function _rnClearSelection(){
+  window._rnHeatSelected.forEach(hexId => {
+    const meta = window._rnHeatHexMeta[hexId]
+    if(meta) meta.poly.setStyle({ color:meta.borderColor, fillColor:meta.fillColor, fillOpacity:meta.fillOpacity, dashArray:meta.borderDash||null, weight:1.5 })
+  })
+  window._rnHeatSelected.clear()
+  _rnUpdateClaimBar()
+  const detail = document.getElementById('rn-heat-detail')
+  if(detail) detail.style.display = 'none'
 }
 
 function rnHeatToggle(type){
   window._rnHeatVisible[type] = !window._rnHeatVisible[type]
-  const isOn = window._rnHeatVisible[type]
+  const isOn   = window._rnHeatVisible[type]
   const layers = window._rnHeatLayers[type] || []
-  const map = window._rnHeatMap
+  const map    = window._rnHeatMap
   if(!map) return
   layers.forEach(l => { isOn ? l.addTo(map) : l.remove() })
   const leg = document.getElementById('rn-heat-leg-'+type)
   if(leg) leg.style.opacity = isOn ? '1' : '0.35'
 }
 
-async function _rnClaimHex(hexId, zone){
-  const runner = window._rnRow || {}
-  const email  = runner.email || currentUser?.email
-  const name   = runner.name  || currentUser?.user_metadata?.first_name || 'Runner'
-  const zip    = zone?.zip_code || ''
+async function _rnClaimSelected(){
+  const runner  = window._rnRow || {}
+  const email   = runner.email  || currentUser?.email
+  const name    = runner.name   || ((runner.first_name||'')+' '+(runner.last_name||'')).trim() || 'Runner'
   if(!email){ showToast('Please log in first','err'); return }
 
+  const hexIds    = [...window._rnHeatSelected]
+  const claimable = hexIds.filter(h => { const m=window._rnHeatHexMeta[h]; return m&&(m.type==='demand'||m.type==='open') })
+  if(!claimable.length){ showToast('No claimable hexes selected','err'); return }
+
+  // Group by ZIP for cleaner admin review
+  const byZip = {}
+  claimable.forEach(h => {
+    const z   = window._rnHeatHexMeta[h]?.zone
+    const zip = z?.zip_code || ''
+    if(!byZip[zip]) byZip[zip] = { zip, zoneName:z?.zone_label||('Zone '+zip), zoneId:z?.id||null, hexes:[] }
+    byZip[zip].hexes.push(h)
+  })
+
   try {
-    await _supa.from('runner_zone_requests').insert({
-      runner_email: email,
-      runner_name:  name,
-      zip_code:     zip,
-      zone_id:      zone?.id || null,
-      zone_name:    zone?.zone_label || ('Hex '+hexId.slice(-6)),
-      status:       'pending',
-      type:         'claim',
-      notes:        'Runner claimed via heatmap — hex '+hexId,
-      requested_hexes: JSON.stringify([hexId]),
-      created_at:   new Date().toISOString(),
-    })
-    showToast('Claim submitted — admin will review and assign you to this zone ✅', 'ok', 5000)
-    document.getElementById('rn-heat-detail').style.display = 'none'
+    const inserts = Object.values(byZip).map(grp => ({
+      runner_email:    email,
+      runner_name:     name,
+      zip_code:        grp.zip,
+      zone_id:         grp.zoneId,
+      zone_name:       grp.zoneName,
+      status:          'pending',
+      type:            'claim',
+      notes:           'Runner claimed '+grp.hexes.length+' hex'+(grp.hexes.length!==1?'es':'')+' via heatmap',
+      requested_hexes: JSON.stringify(grp.hexes),
+      created_at:      new Date().toISOString(),
+    }))
+    await _supa.from('runner_zone_requests').insert(inserts)
+    showToast('Claim submitted for '+claimable.length+' zone'+(claimable.length!==1?'s':'')+' — admin will review shortly', 'ok', 5000)
+    _rnClearSelection()
+    renderRunnerScoutPanel()  // refresh flags list
   } catch(e){
-    showToast('Could not submit claim: '+String(e?.message||e), 'err')
+    showToast('Could not submit: '+String(e?.message||e), 'err')
   }
 }
+
 
 async function renderRunnerScoutPanel(){
   const el = document.getElementById('rn-scout-history')
