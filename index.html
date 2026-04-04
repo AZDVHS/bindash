@@ -26768,23 +26768,28 @@ async function assignRunnerFromRequest(zip, runnerEmailsCsv, zoneId, requestIdsC
   const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
   if(!zone){ showToast('Zone not found','err'); return }
 
-  const emails   = runnerEmailsCsv.split(',').map(e=>e.trim().toLowerCase()).filter(Boolean)
+  const emails   = [...new Set(runnerEmailsCsv.split(',').map(e=>e.trim().toLowerCase()).filter(Boolean))]
+  console.log('[BinDash] assignRunnerFromRequest emails:', emails, 'zone:', zoneId)
   const reqIds   = requestIdsCsv.split(',').filter(Boolean)
   // Case-insensitive email match
   const runners  = RUNNERS.filter(r => r.email && emails.includes(r.email.trim().toLowerCase()))
 
   if(!runners.length){
-    // Try fetching from DB directly — runner may not be in in-memory RUNNERS yet
+    // Try fetching from DB — use ilike per email for case-insensitive match
     try {
-      const { data: dbRunners } = await _supa.from('runners')
-        .select('id,first_name,last_name,email,zip_code,zone_id,coverage_zones')
-        .in('email', emails.map(e=>e.toLowerCase()))
-      if(dbRunners?.length){
-        dbRunners.forEach(r => {
-          const existing = RUNNERS.find(x=>x.email?.toLowerCase()===r.email?.toLowerCase())
+      // Fetch ALL active runners and match in JS (avoids Supabase .in() case sensitivity)
+      const { data: allRunners } = await _supa.from('runners')
+        .select('id,first_name,last_name,email,zip_code,zone_id,coverage_zones,status')
+        .neq('status','inactive')
+      if(allRunners?.length){
+        allRunners.forEach(r => {
+          const emailLower = r.email?.trim().toLowerCase() || ''
+          if(!emails.includes(emailLower)) return   // not the one we want
+          const existing = RUNNERS.find(x=>x.email?.trim().toLowerCase()===emailLower)
           if(!existing){
             RUNNERS.push({
-              id: r.id, name: ((r.first_name||'')+' '+(r.last_name||'')).trim()||r.email,
+              id: r.id,
+              name: ((r.first_name||'')+' '+(r.last_name||'')).trim() || r.email,
               email: r.email, zip: r.zip_code||'', zoneId: r.zone_id||null,
               coverageZones: (() => { try { return r.coverage_zones ? JSON.parse(r.coverage_zones) : [] } catch(e){ return [] } })(),
               status:'AVAILABLE', initials:'??', color:'#6366f1',
@@ -26792,11 +26797,14 @@ async function assignRunnerFromRequest(zip, runnerEmailsCsv, zoneId, requestIdsC
           }
         })
       }
+      console.log('[BinDash] DB runner fallback fetched, RUNNERS now:', RUNNERS.length)
     } catch(e){ console.warn('[BinDash] DB runner fallback:', e.message) }
 
     const reFetched = RUNNERS.filter(r => r.email && emails.includes(r.email.trim().toLowerCase()))
     if(!reFetched.length){
-      showToast('Runner not found — they may need to be fully approved in Pending Runners first','err', 5000)
+      // Last resort: show which emails we tried and what's in RUNNERS
+      console.warn('[BinDash] Still not found. Tried:', emails, 'RUNNERS emails:', RUNNERS.map(r=>r.email))
+      showToast('Runner not found — check they are approved in Pending Runners (email: '+emails.join(', ')+')','err', 7000)
       return
     }
   }
