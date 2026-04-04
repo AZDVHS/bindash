@@ -8516,7 +8516,7 @@ function getHexFomoMessage(zone){
   const needed = Math.max(0, (activation_threshold||5) - total)
   if(status === 'active') return { type:'active', color:'#22c55e', icon:'✅',
     headline:'BinDash is live in your area!',
-    sub: trash_day ? `Collection day: ${trash_day}. A runner will be in touch.` : 'Service is active — a runner will be in touch.' }
+    sub: 'Service is active in your area — a runner will be in touch about collection timing.' }
   if(needed <= 0) return { type:'launching', color:'#06d6a0', icon:'🚀',
     headline:'Your block is launching!', sub:'Threshold reached — activation underway. You\'re in!' }
   if(total >= (activation_threshold||5) * 0.6) return { type:'almost', color:'#f59e0b', icon:'🔥',
@@ -8982,28 +8982,33 @@ async function _initSignupMap(lat, lng, zones){
   el.style.height    = '240px'
   el.style.width     = '100%'
   el.style.display   = 'block'
+  // Force layout before map init so Leaflet measures container correctly
+  el.offsetHeight
 
   try {
     if(_signupMap){
       // Just reposition existing map — avoids full recreation flicker
-      _signupMap.setView([lat, lng], 14, {animate:false})
+      _signupMap.setView([lat, lng], 15, {animate:false})
       _signupMap.eachLayer(l => {
         if(!(l instanceof L.TileLayer)) _signupMap.removeLayer(l)
       })
       _signupPin = null
+      setTimeout(() => _signupMap?.invalidateSize(), 120)
     } else {
       // Fresh map — always destroy any stale leaflet state first
       if(el._leaflet_id){
         try { if(window._signupMap) window._signupMap.remove() } catch(e){}
       }
       _signupMap = L.map('h3-signup-map', {
-        center: [lat, lng], zoom: 13,
+        center: [lat, lng], zoom: 15,
         zoomControl: true, scrollWheelZoom: true, attributionControl: false,
       })
       L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
         maxZoom: 20, subdomains: 'abcd',
       }).addTo(_signupMap)
       console.log('[SignupMap] Created ✅')
+      // Force tile redraw after container size is known
+      setTimeout(() => _signupMap?.invalidateSize(), 120)
     }
 
     // Draw hex zones
@@ -12956,7 +12961,7 @@ function _renderRNZoneCard(zone, type, row, zoneRequests){
         <span style="font-size:20px">📍</span>
         <div>
           <div style="font-size:14px;font-weight:700">${zone.name}</div>
-          <div style="font-size:11px;color:var(--muted)">ZIP ${zone.zips?.join(', ')||zone.zip} · Collection: ${dayLabels}</div>
+          <div style="font-size:11px;color:var(--muted)">ZIP ${zone.zips?.join(', ')||zone.zip}</div>
         </div>
       </div>
       <span class="badge" style="background:#22c55e22;color:#22c55e">● Active</span>
@@ -19600,7 +19605,7 @@ async function checkZipCoverage(zip){
   if(zone && zone.status === 'live'){
     el.style.cssText = 'display:block;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:4px'
     el.innerHTML = `<span style="color:#22c55e;font-weight:700">✅ BinDash services your area!</span><br>
-      <span style="font-size:12px;color:var(--sub)">${zone.name} is active${zone.collection?.length?' · Collection: '+zone.collection.join(', '):''}.</span>`
+      <span style="font-size:12px;color:var(--sub)">${zone.name} is active in your area. Complete signup and your runner will be in touch about collection timing.</span>`
     window._hwZipHasCoverage = true
 
   } else if(zone && zone.status === 'waitlist'){
@@ -27813,7 +27818,13 @@ async function renderRunnerZoneRequests(){
     const waitlist = ADMIN_ZONES.filter(z=>z.status==='waitlist')
     const noRunner = live.filter(z=>{
       const zips = z.zips||[z.zip]
-      return RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===z.id||zips.includes(r.zip))).length === 0
+      return RUNNERS.filter(r=>
+        r.status!=='INACTIVE' && (
+          r.zoneId===z.id ||
+          (r.coverageZones||[]).includes(z.id) ||
+          zips.includes(r.zip)
+        )
+      ).length === 0
     })
     overview.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
