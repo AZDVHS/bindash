@@ -3721,8 +3721,14 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             <div style="flex:1;height:1px;background:var(--border2)"></div>
           </div>
 
-          <!-- Previous flags -->
-          <div id="rn-scout-history" style="margin-bottom:12px"></div>
+          <!-- Previous flags — collapsible -->
+          <div id="rn-scout-history-wrap" style="margin-bottom:12px">
+            <div onclick="rnToggleScoutHistory()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--border2);margin-bottom:8px">
+              <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Your Previous Flags</div>
+              <span id="rn-scout-history-chev" style="font-size:11px;color:var(--muted);transition:transform .2s">▼</span>
+            </div>
+            <div id="rn-scout-history" style="display:none"></div>
+          </div>
 
           <!-- Flag form -->
           <div style="background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:16px">
@@ -4528,6 +4534,27 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
               <button id="mz-view-list" onclick="mzSetView('list')" style="flex:1;padding:6px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer">📋 List View</button>
             </div>
             <!-- Map -->
+            <!-- Map layer toggles -->
+            <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+              <div style="font-size:11px;color:var(--muted);display:flex;align-items:center;margin-right:4px">Show:</div>
+              <button id="admap-tog-customers" onclick="adMapToggle('customers')"
+                style="padding:4px 12px;border-radius:99px;border:1.5px solid rgba(6,214,160,.5);background:rgba(6,214,160,.15);color:#06d6a0;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s">
+                🏠 Customers
+              </button>
+              <button id="admap-tog-runners" onclick="adMapToggle('runners')"
+                style="padding:4px 12px;border-radius:99px;border:1.5px solid rgba(99,102,241,.4);background:transparent;color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;transition:all .15s">
+                🚐 Runners
+              </button>
+              <button id="admap-tog-both" onclick="adMapToggle('both')"
+                style="padding:4px 12px;border-radius:99px;border:1.5px solid var(--border2);background:transparent;color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;transition:all .15s">
+                ⊕ Both
+              </button>
+              <div style="margin-left:auto;display:flex;gap:10px;font-size:10px;color:var(--muted);align-items:center">
+                <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;background:#22c55e;border-radius:50%"></span>Active HO</span>
+                <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;background:#f59e0b;border-radius:50%"></span>Waitlist HO</span>
+                <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;background:rgba(99,102,241,.6);border-radius:2px;border:1px solid #818cf8"></span>Runner zone</span>
+              </div>
+            </div>
             <div id="mz-map-wrap" style="border-radius:10px;overflow:hidden;border:1px solid var(--border2);margin-bottom:14px">
               <div id="mz-admin-map" style="height:460px;width:100%;background:#0a0e18;display:block;position:relative"></div>
             </div>
@@ -8728,6 +8755,140 @@ function drawRunnerHalos(map, runners){
   return halos
 }
 
+// ── ADMIN MAP TOGGLE ────────────────────────────────────────────────────
+window._adMapMode         = 'customers'  // 'customers' | 'runners' | 'both'
+window._adMapRunnerLayers = []           // Leaflet layers for runner coverage
+
+function adMapToggle(mode){
+  window._adMapMode = mode
+  const btns = {
+    customers: document.getElementById('admap-tog-customers'),
+    runners:   document.getElementById('admap-tog-runners'),
+    both:      document.getElementById('admap-tog-both'),
+  }
+  const activeStyle  = (color, bg) => `padding:4px 12px;border-radius:99px;border:1.5px solid ${color};background:${bg};color:${color};font-size:11px;font-weight:700;cursor:pointer;transition:all .15s`
+  const inactiveStyle = `padding:4px 12px;border-radius:99px;border:1.5px solid rgba(255,255,255,.12);background:transparent;color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;transition:all .15s`
+  if(btns.customers) btns.customers.style.cssText = mode==='customers'||mode==='both' ? activeStyle('rgba(6,214,160,1)','rgba(6,214,160,.15)') : inactiveStyle
+  if(btns.runners)   btns.runners.style.cssText   = mode==='runners'||mode==='both'   ? activeStyle('rgba(99,102,241,1)','rgba(99,102,241,.12)') : inactiveStyle
+  if(btns.both)      btns.both.style.cssText       = mode==='both'                    ? activeStyle('rgba(255,255,255,.7)','rgba(255,255,255,.07)') : inactiveStyle
+
+  const map = window._adminMap
+  if(!map) return
+
+  // Customer hex layers
+  ;(window._adminHexLayers||[]).forEach(l => {
+    try { mode==='runners' ? l.remove() : l.addTo(map) } catch(e){}
+  })
+
+  // Runner coverage layers — draw or remove
+  ;(window._adMapRunnerLayers||[]).forEach(l => {
+    try { l.remove() } catch(e){}
+  })
+  window._adMapRunnerLayers = []
+
+  if(mode === 'runners' || mode === 'both'){
+    _adDrawRunnerCoverage(map)
+  }
+}
+
+async function _adDrawRunnerCoverage(map){
+  if(typeof h3 === 'undefined' || typeof L === 'undefined') return
+  const layers = window._adMapRunnerLayers
+
+  RUNNERS.forEach(r => {
+    if(r.status === 'INACTIVE') return
+    const name = r.name || 'Runner'
+
+    // ── Draw res-6 zone boundary ──
+    let anchor6 = r.anchorHex6 || null
+
+    // Derive anchor6 from address/ZIP if not stored
+    if(!anchor6){
+      const zip = r.zip || ''
+      const ctr = ZIP_CENTROIDS[zip]
+      if(ctr){
+        try {
+          const a7 = h3.latLngToCell(ctr[0], ctr[1], 7)
+          anchor6  = h3.cellToParent(a7, 6)
+        } catch(e){}
+      }
+    }
+    // Also derive from zone ZIP
+    if(!anchor6 && r.zoneId){
+      const zone = ADMIN_ZONES.find(z=>z.id===r.zoneId)
+      const zip  = zone?.zips?.[0] || zone?.zip || ''
+      const ctr  = ZIP_CENTROIDS[zip]
+      if(ctr){
+        try {
+          const a7 = h3.latLngToCell(ctr[0], ctr[1], 7)
+          anchor6  = h3.cellToParent(a7, 6)
+        } catch(e){}
+      }
+    }
+
+    if(anchor6){
+      try {
+        // Res-6 boundary outline
+        const b6 = h3.cellToBoundary(anchor6).map(([la,ln])=>[la,ln])
+        const outline = L.polygon(b6, {
+          color:'#818cf8', fillColor:'rgba(99,102,241,.08)', fillOpacity:1,
+          weight:2.5, dashArray:'6,4', opacity:0.85,
+        })
+        const zone = ADMIN_ZONES.find(z=>z.id===r.zoneId)
+        const zoneName = zone?.name || r.zip || 'Zone'
+        outline.bindTooltip(
+          '<div style="font-size:11px"><strong style="color:#a5b4fc">🚐 '+name+'</strong><br>Zone: '+zoneName+'<br>ZIP: '+r.zip+'</div>',
+          { direction:'top', className:'h3-tip' }
+        )
+        outline.addTo(map)
+        layers.push(outline)
+
+        // Res-8 coverage hexes (selected service area)
+        const hexes = r.coverageHexes || []
+        hexes.forEach(h => {
+          try {
+            const bd = h3.cellToBoundary(h).map(([la,ln])=>[la,ln])
+            const poly = L.polygon(bd, {
+              color:'#6366f1', fillColor:'rgba(99,102,241,.22)',
+              fillOpacity:1, weight:1, opacity:0.7,
+            }).addTo(map)
+            layers.push(poly)
+          } catch(e){}
+        })
+
+        // If no coverage hexes, shade res-7 children lightly
+        if(!hexes.length){
+          h3.cellToChildren(anchor6, 7).forEach(h7 => {
+            try {
+              const bd = h3.cellToBoundary(h7).map(([la,ln])=>[la,ln])
+              const poly = L.polygon(bd, {
+                color:'rgba(99,102,241,.4)', fillColor:'rgba(99,102,241,.07)',
+                fillOpacity:1, weight:1, dashArray:'3,4',
+              }).addTo(map)
+              layers.push(poly)
+            } catch(e){}
+          })
+        }
+
+        // Runner home pin
+        const pinLat = r.lat || (ZIP_CENTROIDS[r.zip]?.[0])
+        const pinLng = r.lng || (ZIP_CENTROIDS[r.zip]?.[1])
+        if(pinLat && pinLng){
+          const icon = L.divIcon({
+            html: '<div style="width:22px;height:22px;background:#6366f1;border:2.5px solid #c7d2fe;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;box-shadow:0 0 8px rgba(99,102,241,.7)">🚐</div>',
+            className:'', iconAnchor:[11,11],
+          })
+          const pin = L.marker([pinLat, pinLng], { icon })
+            .bindPopup('<div style="font-size:12px"><strong>'+name+'</strong><br>ZIP: '+r.zip+'<br>Zone: '+(ADMIN_ZONES.find(z=>z.id===r.zoneId)?.name||'—')+'</div>')
+          pin.addTo(map)
+          layers.push(pin)
+        }
+      } catch(e){ console.warn('[AdminMap] runner draw:', e.message) }
+    }
+  })
+}
+// ── END ADMIN MAP TOGGLE ──────────────────────────────────────────────────
+
 // Initialize or update the SIGNUP map
 async function _initSignupMap(lat, lng, zones){
   await _loadMapLibs()
@@ -10853,7 +11014,7 @@ async function _rnGeocodeSaveAnchor(addr, city, zip){
 // RUNNER ZONE HEATMAP  —  res-7 display, multi-select, zone fallback
 // ================================================================
 // Res 7 = ~5.2 km² per hex, ~2.6 km across — city-readable scale
-const RN_HEAT_RES = 7
+const RN_HEAT_RES = 8   // res-8 ~0.74km² — neighbourhood block scale
 
 window._rnHeatMap        = null
 window._rnHeatLayers     = {}       // type -> [L.layer, ...]
@@ -11111,75 +11272,96 @@ async function renderRunnerHeatmap(){
     } catch(e){}
   }
 
-  // ── 4. Build draw set — ONLY within boundary ──
-  const drawSet = new Map()  // res-7 hexId -> { hoCount, hasRunner, zone }
+  // ── 4. Build draw set — ALL zones shown, boundary used for styling only ──
+  // Distance limit: ~25 miles = ~40km from anchor
+  const MAX_KM = 40
+  const drawSet = new Map()  // res-8 hexId -> { hoCount, hasRunner, zone, inBoundary }
 
-  // All boundary hexes start as available (open)
-  boundarySet.forEach(h7 => {
-    drawSet.set(h7, { hoCount:0, hasRunner:false, zone:null, runnerNames:[] })
+  // Helper: distance check from anchor
+  const withinRange = (h8) => {
+    if(!anchorLat) return true  // no anchor = show all
+    try {
+      const ctr = h3.cellToLatLng(h8)
+      const dLat = (ctr[0]-anchorLat)*111
+      const dLng = (ctr[1]-anchorLng)*111*Math.cos(anchorLat*Math.PI/180)
+      return Math.sqrt(dLat*dLat+dLng*dLng) <= MAX_KM
+    } catch(e){ return true }
+  }
+
+  // Seed from HO hexes
+  Object.entries(hoHexes).forEach(([h8, cnt]) => {
+    if(!withinRange(h8)) return
+    if(!drawSet.has(h8)) drawSet.set(h8, { hoCount:0, hasRunner:false, zone:null, runnerNames:[], inBoundary: boundarySet.has(h8) })
+    drawSet.get(h8).hoCount += cnt
   })
 
-  // Seed HO demand (only within boundary)
-  Object.entries(hoHexes).forEach(([h7, cnt]) => {
-    if(hasBoundary && !boundarySet.has(h7)) return
-    if(!drawSet.has(h7)) drawSet.set(h7, { hoCount:0, hasRunner:false, zone:null, runnerNames:[] })
-    drawSet.get(h7).hoCount += cnt
-  })
-
-  // Mark runner coverage (only within boundary)
-  runnerHexes.forEach(h7 => {
-    if(hasBoundary && !boundarySet.has(h7)) return
-    if(!drawSet.has(h7)) drawSet.set(h7, { hoCount:0, hasRunner:false, zone:null, runnerNames:[] })
-    const d = drawSet.get(h7)
+  // Mark runner coverage
+  runnerHexes.forEach(h8 => {
+    if(!withinRange(h8)) return
+    if(!drawSet.has(h8)) drawSet.set(h8, { hoCount:0, hasRunner:false, zone:null, runnerNames:[], inBoundary: boundarySet.has(h8) })
+    const d = drawSet.get(h8)
     d.hasRunner   = true
-    d.runnerNames = runnerZipMeta[h7] || []
+    d.runnerNames = runnerZipMeta[h8] || []
   })
 
-  // Merge micro_zones (only within boundary)
+  // Merge micro_zones
   try {
     const { data: mz } = await _supa.from('micro_zones')
       .select('hex_id,status,member_count,waitlist_count,activation_threshold,zip_code,city,zone_label,trash_day,lat,lng')
       .limit(500)
     if(mz) mz.forEach(z => {
       if(!z.hex_id) return
-      let h7 = z.hex_id
+      let h8 = z.hex_id
       try {
         const res = h3.getResolution(z.hex_id)
-        if(res !== RN_HEAT_RES) h7 = h3.cellToParent(z.hex_id, RN_HEAT_RES)
+        if(res !== RN_HEAT_RES) h8 = h3.cellToParent(z.hex_id, RN_HEAT_RES)
       } catch(e){ return }
-      if(hasBoundary && !boundarySet.has(h7)) return
-      if(!drawSet.has(h7)) drawSet.set(h7, { hoCount:0, hasRunner:false, zone:null, runnerNames:[] })
-      const d = drawSet.get(h7)
+      if(!withinRange(h8)) return
+      if(!drawSet.has(h8)) drawSet.set(h8, { hoCount:0, hasRunner:false, zone:null, runnerNames:[], inBoundary: boundarySet.has(h8) })
+      const d = drawSet.get(h8)
       d.hoCount = Math.max(d.hoCount, (z.member_count||0)+(z.waitlist_count||0))
       d.zone    = d.zone || z
     })
   } catch(e){}
 
+  // Fill in all boundary hexes as available even if no data
+  boundarySet.forEach(h8 => {
+    if(!drawSet.has(h8)) drawSet.set(h8, { hoCount:0, hasRunner:false, zone:null, runnerNames:[], inBoundary:true })
+  })
+
   // ── 5. Classify and draw — only boundary hexes ──
   const counts = { active:0, demand:0, runner:0, open:0 }
 
-  drawSet.forEach((d, h7) => {
-    const isAnchor = h7 === anchorHex7
+  drawSet.forEach((d, h8) => {
+    const isAnchor = h8 === anchorHex7
+    const inBoundary = d.inBoundary !== false
+    const h7 = h8  // alias for clarity
     let type, fillColor, fillOpacity, borderColor, borderDash
 
     if(isAnchor){
-      // Runner's home hex — always green solid
-      type='active'; fillColor='#22c55e'; fillOpacity=0.80; borderColor='#22c55e'; borderDash=null; counts.active++
+      // Runner's home hex — solid green
+      type='active'; fillColor='#22c55e'; fillOpacity=0.85; borderColor='#06d6a0'; borderDash=null; counts.active++
     } else if(d.hasRunner){
-      // Runner covers this hex
-      type='runner';  fillColor='#3b82f6'; fillOpacity=0.35; borderColor='#60a5fa'; borderDash=null; counts.runner++
+      // Runner covers this hex — visible blue
+      type='runner'; fillColor='#3b82f6'; fillOpacity=0.50; borderColor='#60a5fa'; borderDash=null; counts.runner++
     } else if(d.hoCount > 0){
-      // HOs here, no runner
-      type='demand';  fillColor='#f59e0b'; fillOpacity=0.40; borderColor='#fbbf24'; borderDash=null; counts.demand++
+      // HOs here, no runner — clear amber
+      type='demand'; fillColor='#f59e0b'; fillOpacity=0.55; borderColor='#fbbf24'; borderDash=null; counts.demand++
     } else {
-      // Available, no signal
-      type='open'; fillColor='rgba(255,255,255,1)'; fillOpacity=0.04; borderColor='rgba(255,255,255,.15)'; borderDash='2,4'; counts.open++
+      // Available — light grey outline, barely filled
+      type='open'; fillColor='rgba(255,255,255,1)'; fillOpacity=0.07; borderColor='rgba(255,255,255,.25)'; borderDash='3,4'; counts.open++
     }
 
-    const isPending = pendingClaimHexes.has(h7)
-    _rnDrawHex(map, h7, { type, fillColor, fillOpacity, borderColor, borderDash,
+    const isPending = pendingClaimHexes.has(h8)
+    // Dim hexes outside runner's current res-6 boundary
+    const dimmed = hasBoundary && !inBoundary
+    _rnDrawHex(map, h8, { type,
+      fillColor:   dimmed ? 'rgba(255,255,255,1)' : fillColor,
+      fillOpacity: dimmed ? 0.03 : fillOpacity,
+      borderColor: dimmed ? 'rgba(255,255,255,.1)' : borderColor,
+      borderDash:  dimmed ? '2,6' : borderDash,
       zone:d.zone, hoCount:d.hoCount, hasRunner:d.hasRunner,
-      runnerNames:d.runnerNames, isPending, isAnchor })
+      runnerNames:d.runnerNames, isPending, isAnchor, inBoundary, dimmed })
   })
 
   // Update stat pills
@@ -11288,16 +11470,27 @@ function _rnHexTap(hexId, typeLabel, opts){
   body.innerHTML = '<div style="font-size:12px;font-weight:700;color:var(--sub);margin-bottom:6px">'+typeLabel+'</div>' + hoLine + rnLine + zipLine + selLine
 
   actions.innerHTML = ''
-  const canClaim = [...window._rnHeatSelected].some(h => {
-    const m = window._rnHeatHexMeta[h]
-    return m && (m.type==='demand' || m.type==='open')
-  })
+  const selMetas = [...window._rnHeatSelected].map(h => window._rnHeatHexMeta[h]).filter(Boolean)
+  const canClaim = selMetas.some(m => (m.type==='demand' || m.type==='open') && !m.dimmed)
+  const canRequest = selMetas.some(m => m.dimmed && (m.type==='demand' || m.type==='open'))
+
   if(canClaim){
     const claimBtn = document.createElement('button')
     claimBtn.className = 'btn btn-cyan btn-sm'
     claimBtn.textContent = selCount > 1 ? 'Claim '+selCount+' hexes' : 'Claim this zone'
     claimBtn.onclick = function(){ _rnClaimSelected() }
     actions.appendChild(claimBtn)
+  }
+  if(canRequest || (opts.dimmed && (opts.type==='demand'||opts.type==='open'))){
+    // Outside current boundary — runner can request to activate a new res-6 zone
+    const reqBtn = document.createElement('button')
+    reqBtn.className = 'btn btn-outline btn-sm'
+    reqBtn.style.color = '#fbbf24'
+    reqBtn.style.borderColor = 'rgba(251,191,36,.4)'
+    reqBtn.textContent = 'Request Zone Activation'
+    reqBtn.title = 'Ask admin to activate this area as a new service zone for you'
+    reqBtn.onclick = function(){ _rnRequestZoneActivation(hexId, opts.zone) }
+    actions.appendChild(reqBtn)
   }
   const clearBtn = document.createElement('button')
   clearBtn.className = 'btn btn-ghost btn-sm'
@@ -11361,6 +11554,37 @@ function rnHeatToggle(type){
   if(leg) leg.style.opacity = isOn ? '1' : '0.35'
 }
 
+async function _rnRequestZoneActivation(hexId, zone){
+  const runner = window._rnRow || {}
+  const email  = runner.email || currentUser?.email
+  const name   = ((runner.first_name||'')+ ' '+(runner.last_name||'')).trim() || 'Runner'
+  if(!email){ showToast('Please log in first','err'); return }
+
+  // Compute which res-6 this hex belongs to
+  let res6Id = null
+  try { res6Id = h3.cellToParent(hexId, 6) } catch(e){}
+
+  const zip = zone?.zip_code || ''
+  try {
+    await _supa.from('runner_zone_requests').insert({
+      runner_email: email,
+      runner_name:  name,
+      zip_code:     zip,
+      zone_id:      zone?.id || null,
+      zone_name:    zone?.zone_label || ('Zone '+zip) || ('Hex '+hexId.slice(-6)),
+      status:       'pending',
+      type:         'zone_activation',
+      notes:        'Runner requesting to activate res-6 zone '+res6Id+' (hex '+hexId+')',
+      requested_hexes: JSON.stringify([hexId]),
+      created_at:   new Date().toISOString(),
+    })
+    showToast('Zone activation request sent — admin will review and set up the new area', 'ok', 5000)
+    document.getElementById('rn-heat-detail').style.display = 'none'
+  } catch(e){
+    showToast('Could not send request: '+String(e?.message||e), 'err')
+  }
+}
+
 async function _rnClaimSelected(){
   const runner  = window._rnRow || {}
   const email   = runner.email  || currentUser?.email
@@ -11403,6 +11627,16 @@ async function _rnClaimSelected(){
 }
 
 
+function rnToggleScoutHistory(){
+  const el   = document.getElementById('rn-scout-history')
+  const chev = document.getElementById('rn-scout-history-chev')
+  if(!el) return
+  const isOpen = el.style.display !== 'none'
+  el.style.display  = isOpen ? 'none' : 'flex'
+  el.style.flexDirection = 'column'
+  if(chev) chev.style.transform = isOpen ? '' : 'rotate(180deg)'
+}
+
 async function renderRunnerScoutPanel(){
   const el = document.getElementById('rn-scout-history')
   if(!el) return
@@ -11422,8 +11656,8 @@ async function renderRunnerScoutPanel(){
       return
     }
 
+    document.getElementById('rn-scout-history-wrap') && (document.getElementById('rn-scout-history').style.display = 'flex')
     el.innerHTML = `
-    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Your Previous Flags</div>
     <div style="display:flex;flex-direction:column;gap:6px">
       ${data.map(r=>`
         <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface2);border-radius:8px;font-size:12px">
@@ -24598,6 +24832,13 @@ async function loadRunnersFromSupabase(){
         email:         row.email,
         phone:         row.phone||'--',
         zip:           row.zip_code||'',
+        streetAddress: row.street_address||'',
+        city:          row.city||'',
+        lat:           row.lat ? parseFloat(row.lat) : null,
+        lng:           row.lng ? parseFloat(row.lng) : null,
+        anchorHex6:    row.anchor_hex6||null,
+        anchorHex7:    row.anchor_hex7||null,
+        coverageHexes: (() => { try { const r=row.coverage_hexes; return r?(typeof r==='string'?JSON.parse(r):r):[] } catch(e){ return [] } })(),
         zoneId:        row.zone_id||null,
         get area(){ return ADMIN_ZONES.find(z=>z.id===this.zoneId)?.name || this.zip || '--' },
         vehicle:       row.vehicle_type||'--',
