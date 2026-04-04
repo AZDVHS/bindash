@@ -1319,6 +1319,28 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
 }
 .complete-pulse { animation: completePulse .5s ease-in-out 2; }
 .adj-zone-expand { cursor: pointer !important; }
+
+/* Leaflet tooltip overrides — dark text on white Leaflet tooltip */
+.h3-tip {
+  background: rgba(15, 23, 42, 0.92) !important;
+  border: 1px solid rgba(255,255,255,.12) !important;
+  color: #e2e8f0 !important;
+  font-family: inherit !important;
+  border-radius: 6px !important;
+  padding: 5px 9px !important;
+  font-size: 11px !important;
+  box-shadow: none !important;
+}
+.h3-tip::before { border-top-color: rgba(15,23,42,.92) !important; }
+
+/* Leaflet popup — ensure dark text on white background */
+.leaflet-popup-content { color: #0f172a !important; font-family: inherit !important; }
+.leaflet-popup-content-wrapper { border-radius: 10px !important; box-shadow: 0 4px 16px rgba(0,0,0,.12) !important; }
+.leaflet-popup-tip-container .leaflet-popup-tip { background: #fff !important; }
+
+/* Default Leaflet tooltip — dark text */
+.leaflet-tooltip { color: #1e293b !important; font-family: inherit !important; font-size: 11px !important; }
+
 </style>
 </head>
 <body onload="initApp()">
@@ -8846,7 +8868,7 @@ async function _adDrawRunnerCoverage(map){
           color:'#a78bfa', fillColor:'rgba(167,139,250,.07)', fillOpacity:1,
           weight:2, dashArray:'4,3', opacity:0.75,
         })
-        eOutline.bindTooltip('<div style="font-size:11px"><strong style="color:#a78bfa">🚐 '+name+'</strong><br>Additional zone: '+(ez?.name||ezip)+'</div>', { direction:'top', className:'h3-tip' })
+        eOutline.bindTooltip('<div style="font-size:11px;color:#1e293b"><strong style="color:#4338ca">🚐 '+name+'</strong><br>Additional zone: '+(ez?.name||ezip)+'</div>', { direction:'top', className:'h3-tip' })
         eOutline.addTo(map)
         layers.push(eOutline)
       } catch(e){}
@@ -8889,7 +8911,7 @@ async function _adDrawRunnerCoverage(map){
         const zone = ADMIN_ZONES.find(z=>z.id===r.zoneId)
         const zoneName = zone?.name || r.zip || 'Zone'
         outline.bindTooltip(
-          '<div style="font-size:11px"><strong style="color:#a5b4fc">🚐 '+name+'</strong><br>Zone: '+zoneName+'<br>ZIP: '+r.zip+'</div>',
+          '<div style="font-size:11px;color:#1e293b"><strong style="color:#4338ca">🚐 '+name+'</strong><br>Zone: '+zoneName+'<br>ZIP: '+r.zip+'</div>',
           { direction:'top', className:'h3-tip' }
         )
         outline.addTo(map)
@@ -8935,7 +8957,7 @@ async function _adDrawRunnerCoverage(map){
             className:'', iconAnchor:[11,11],
           })
           const pin = L.marker([pinLat, pinLng], { icon })
-            .bindPopup('<div style="font-size:12px"><strong>'+name+'</strong><br>ZIP: '+r.zip+'<br>Zone: '+(ADMIN_ZONES.find(z=>z.id===r.zoneId)?.name||'—')+'</div>')
+            .bindPopup('<div style="font-size:12px;color:#1e293b"><strong>'+name+'</strong><br>ZIP: '+r.zip+'<br>Zone: '+(ADMIN_ZONES.find(z=>z.id===r.zoneId)?.name||'—')+'</div>')
           pin.addTo(map)
           layers.push(pin)
         }
@@ -9312,7 +9334,7 @@ function _bindHexPopup(layer, cell, key){
       ${cell.runnerName ? `<div style="margin-left:auto;background:rgba(6,214,160,.1);color:#059669;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px">🚐 ${cell.runnerName}</div>` : ''}
     </div>
     ${cell.zone ? `<div style="font-size:11px;color:#64748b;margin-bottom:8px">📍 ${cell.zone.name}</div>` : ''}
-    <div style="font-size:11px;font-family:monospace;color:#94a3b8;margin-bottom:10px;word-break:break-all">${cell.h3Index||'no H3 index'}</div>
+    <div style="font-size:11px;font-family:monospace;color:#64748b;margin-bottom:10px;word-break:break-all">${cell.h3Index||'no H3 index'}</div>
     ${hos.length ? `
     <div style="border-top:1px solid #e2e8f0;padding-top:8px;margin-bottom:8px">
       ${hos.slice(0,3).map(h=>`
@@ -10925,12 +10947,12 @@ function _rnPickerDrawHex(map, hexId, selectableSet, opts){
 
   // Tooltip
   const lines = []
-  if(isAnchor) lines.push('<strong style="color:#06d6a0">🏠 Your Home</strong>')
+  if(isAnchor) lines.push('<strong style="color:#065f46">🏠 Your Home</strong>')
   if(isAssigned && !isAnchor) lines.push('<span style="color:#818cf8">✓ Assigned zone</span>')
-  if(hasActiveHO)  lines.push('<span style="color:#22c55e">'+ho.active+' active HO'+(ho.active!==1?'s':'')+'</span>')
-  if(hasWaitHO)    lines.push('<span style="color:#fbbf24">'+ho.waitlist+' waitlist HO'+(ho.waitlist!==1?'s':'')+'</span>')
-  if(!isSelectable) lines.push('<span style="color:#ef4444">Outside your range</span>')
-  else if(!isSelected && !isAnchor) lines.push('<span style="color:var(--muted)">Tap to add</span>')
+  if(hasActiveHO)  lines.push('<span style="color:#15803d">'+ho.active+' active HO'+(ho.active!==1?'s':'')+'</span>')
+  if(hasWaitHO)    lines.push('<span style="color:#b45309">'+ho.waitlist+' waitlist HO'+(ho.waitlist!==1?'s':'')+'</span>')
+  if(!isSelectable) lines.push('<span style="color:#dc2626">Outside your range</span>')
+  else if(!isSelected && !isAnchor) lines.push('<span style="color:#475569">Tap to add</span>')
   if(lines.length) poly.bindTooltip('<div style="font-size:11px;line-height:1.7">'+lines.join('<br>')+'</div>', { direction:'top', className:'h3-tip' })
 
   if(isSelectable) poly.on('click', () => {
@@ -11719,7 +11741,7 @@ async function renderRunnerHeatmap(){
       const tapHint    = isExpand ? '<br><span style="color:#06d6a0;font-weight:700">▶ Tap to configure &amp; request this zone</span>' : ''
       outline.bindTooltip(
         '<div style="font-size:11px;line-height:1.7;min-width:160px">'
-        +'<strong style="color:'+(isExpand?'#fbbf24':'var(--muted)')+'">Neighbouring zone</strong><br>'
+        +'<strong style="color:'+(isExpand?'#b45309':'#475569')+'">Neighbouring zone</strong><br>'
         +hoText+runnerText+tapHint+'</div>',
         { direction:'top', className:'h3-tip', sticky:false }
       )
@@ -11990,30 +12012,30 @@ function _rnHexTap(hexId, typeLabel, opts){
   let hoLine
   if(hoNames.length > 0){
     const nameItems = hoNames.slice(0,5).map(h => {
-      const dot = h.status==='active' ? '#22c55e' : '#f59e0b'
+      const dot = h.status==='active' ? '#16a34a' : '#d97706'
       return '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text)">'
         + '<span style="width:6px;height:6px;border-radius:50%;background:'+dot+';flex-shrink:0"></span>'
         + h.name
         + '</div>'
     }).join('')
     const extra = hoNames.length > 5 ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">+' + (hoNames.length-5) + ' more</div>' : ''
-    hoLine = '<div style="margin-top:6px;background:rgba(165,180,252,.06);border-radius:7px;padding:7px 9px">'
-      + '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Homeowners ('+hoNames.length+')</div>'
+    hoLine = '<div style="margin-top:6px;background:rgba(30,41,59,.06);border-radius:7px;padding:7px 9px">'
+      + '<div style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Homeowners ('+hoNames.length+')</div>'
       + nameItems + extra + '</div>'
   } else if(opts.hoCount > 0){
-    hoLine = '<div style="color:#a5b4fc;font-size:12px;margin-top:4px">'+opts.hoCount+' homeowner'+(opts.hoCount!==1?'s':'')+' in this hex</div>'
+    hoLine = '<div style="color:#2563eb;font-size:12px;margin-top:4px">'+opts.hoCount+' homeowner'+(opts.hoCount!==1?'s':'')+' in this hex</div>'
   } else {
-    hoLine = '<div style="color:var(--muted);font-size:12px;margin-top:4px">No homeowners yet</div>'
+    hoLine = '<div style="color:#64748b;font-size:12px;margin-top:4px">No homeowners yet</div>'
   }
   const rnLine = opts.hasRunner
-    ? '<div style="color:#22c55e;font-size:12px">Runner covered'+(opts.runnerNames?.length?' by '+opts.runnerNames.join(', '):'')+'</div>'
-    : '<div style="color:#f59e0b;font-size:12px">No runner — open for claiming</div>'
-  const zipLine = z?.zip_code ? '<div style="color:var(--muted);font-size:11px;margin-top:3px">ZIP '+z.zip_code+(z.city?' \u00b7 '+z.city:'')+'</div>' : ''
+    ? '<div style="color:#15803d;font-size:12px">Runner covered'+(opts.runnerNames?.length?' by '+opts.runnerNames.join(', '):'')+'</div>'
+    : '<div style="color:#b45309;font-size:12px">No runner — open for claiming</div>'
+  const zipLine = z?.zip_code ? '<div style="color:#64748b;font-size:11px;margin-top:3px">ZIP '+z.zip_code+(z.city?' · '+z.city:'')+'</div>' : ''
   const selLine = selCount > 1
-    ? '<div style="background:rgba(6,214,160,.1);border:1px solid rgba(6,214,160,.3);border-radius:6px;padding:5px 9px;font-size:11px;color:var(--cyan);margin-top:8px">'+selCount+' hexes selected — claim all at once below</div>'
+    ? '<div style="background:rgba(13,148,136,.1);border:1px solid rgba(13,148,136,.4);border-radius:6px;padding:5px 9px;font-size:11px;color:#0d9488;margin-top:8px">'+selCount+' hexes selected — claim all at once below</div>'
     : ''
 
-  body.innerHTML = '<div style="font-size:12px;font-weight:700;color:var(--sub);margin-bottom:6px">'+typeLabel+'</div>' + hoLine + rnLine + zipLine + selLine
+  body.innerHTML = '<div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">'+typeLabel+'</div>' + hoLine + rnLine + zipLine + selLine
 
   actions.innerHTML = ''
   const selMetas = [...window._rnHeatSelected].map(h => window._rnHeatHexMeta[h]).filter(Boolean)
@@ -12282,24 +12304,78 @@ async function _rnZspAccept(){
       renderRunnerHeatmap()
     } catch(e){ showToast('Could not save: '+String(e?.message||e), 'err') }
   } else {
-    // Requesting an adjacent zone — submit for admin approval
+    // Adjacent zone expansion
+    // Check if any active HOs in the requested hexes are already being served by another runner
+    let hoesBeingServed = []
     try {
-      await _supa.from('runner_zone_requests').insert({
-        runner_email:    email,
-        runner_name:     name,
-        zip_code:        zip,
-        zone_id:         existingZone?.id || null,
-        zone_name:       existingZone?.name || ('ZIP '+zip+' area'),
-        status:          'pending',
-        type:            'zone_expansion',
-        zone_role:       'runner',
-        notes:           'Runner selected '+hexes.length+' res-8 hexes in adjacent zone '+hex6,
-        requested_hexes: JSON.stringify(hexes),
-        created_at:      new Date().toISOString(),
-      })
-      showToast('Zone request sent for '+(existingZone?.name||('ZIP '+zip))+' ✅ — admin will review', 'ok', 5000)
-      _rnZspClose()
-      _rnLoadPendingRequests()
+      const { data: activeHOs } = await _supa.from('homeowner_signups')
+        .select('id,first_name,last_name,zip_code,assigned_runner')
+        .eq('status','approved').eq('zip_code', zip).limit(50)
+      hoesBeingServed = (activeHOs||[]).filter(h => h.assigned_runner && h.assigned_runner !== (window._rnRow?.id))
+    } catch(e){}
+
+    const needsAdminApproval = hoesBeingServed.length > 0
+    const zoneName = existingZone?.name || ('ZIP '+zip+' area')
+
+    try {
+      if(!needsAdminApproval){
+        // Auto-approve — no active HOs being served by another runner
+        // Save coverage hexes directly and write an approved zone request
+        const existingCoverage = (() => {
+          try {
+            const raw = window._rnRow?.coverage_hexes
+            return raw ? (typeof raw==='string'?JSON.parse(raw):raw) : []
+          } catch(e){ return [] }
+        })()
+        const mergedHexes = [...new Set([...existingCoverage, ...hexes])]
+        const hexJson = JSON.stringify(mergedHexes)
+
+        await _supa.from('runners').update({
+          coverage_hexes: hexJson, updated_at: new Date().toISOString(),
+        }).ilike('email', email)
+        if(window._rnRow) window._rnRow.coverage_hexes = hexJson
+
+        // Write auto-approved zone request so admin can see what happened
+        await _supa.from('runner_zone_requests').insert({
+          runner_email:    email,
+          runner_name:     name,
+          zip_code:        zip,
+          zone_id:         existingZone?.id || null,
+          zone_name:       zoneName,
+          status:          'approved',
+          type:            'zone_expansion',
+          zone_role:       'runner',
+          notes:           'Auto-approved: runner added '+hexes.length+' res-8 hexes in '+hex6+' (no active HOs in area)',
+          requested_hexes: JSON.stringify(hexes),
+          created_at:      new Date().toISOString(),
+        })
+
+        // Auto-lead if only runner in this zone
+        if(existingZone) await _autoLeadIfOnlyRunner(existingZone.id)
+
+        showToast('Zone expanded to '+zoneName+' ✅ — '+hexes.length+' hexes added to your coverage', 'ok', 5000)
+        _rnZspClose()
+        renderRunnerHeatmap()
+        _rnLoadPendingRequests()
+      } else {
+        // Needs admin approval — HOs already being served in this area
+        await _supa.from('runner_zone_requests').insert({
+          runner_email:    email,
+          runner_name:     name,
+          zip_code:        zip,
+          zone_id:         existingZone?.id || null,
+          zone_name:       zoneName,
+          status:          'pending',
+          type:            'zone_expansion',
+          zone_role:       'runner',
+          notes:           'Needs admin review: '+hoesBeingServed.length+' active HO(s) being served in this area. Runner selected '+hexes.length+' res-8 hexes in '+hex6,
+          requested_hexes: JSON.stringify(hexes),
+          created_at:      new Date().toISOString(),
+        })
+        showToast('Zone request sent to admin — '+hoesBeingServed.length+' homeowner(s) already being served here, admin will coordinate handoff', 'ok', 6000)
+        _rnZspClose()
+        _rnLoadPendingRequests()
+      }
     } catch(e){ showToast('Could not submit: '+String(e?.message||e), 'err') }
   }
 }
@@ -13732,6 +13808,94 @@ function showAdminSetPriority(zoneId){
 // ── Auto-promote to lead if only runner in zone ──────────────────────────────
 // Called after any runner assignment. If this zone now has exactly 1 runner,
 // automatically set them as lead so dispatch always has a primary target.
+// ── Shared: add a zone to runner's coverage_zones array in DB + in-memory ──────
+async function _addZoneToRunnerCoverage(runner, zoneId){
+  if(!runner || !zoneId) return
+  const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+  if(!zone) return
+
+  // ── 1. Update in-memory runner object ──
+  const existingArr = (() => {
+    try {
+      const raw = runner.coverageZones
+      if(Array.isArray(raw)) return raw
+      const parsed = raw ? JSON.parse(raw) : []
+      return Array.isArray(parsed) ? parsed : []
+    } catch(e){ return [] }
+  })()
+  const updated = [...new Set([...existingArr, zoneId])]
+  runner.coverageZones = updated
+  if(!runner.zoneId) runner.zoneId = zoneId
+
+  // ── 2. Update runners table — coverage_zones + zone_id ──
+  try {
+    const updatePayload = {
+      coverage_zones: JSON.stringify(updated),
+      updated_at:     new Date().toISOString(),
+    }
+    if(!runner.zoneId) updatePayload.zone_id = zoneId
+    const { error } = await _supa.from('runners')
+      .update(updatePayload)
+      .ilike('email', runner.email)
+    if(error) console.warn('[Coverage] runners.coverage_zones update:', error.message)
+    else console.log('[Coverage] ✅', runner.name, 'coverage_zones →',
+      updated.map(id => ADMIN_ZONES.find(z=>z.id===id)?.name||id).join(', '))
+  } catch(e){ console.warn('[Coverage] runners update failed:', e.message) }
+
+  // ── 3. Ensure an approved runner_zone_requests row exists ──
+  // Use insert-or-update pattern: check if row exists first, then update or insert
+  try {
+    const email = (runner.email||'').toLowerCase().trim()
+    const role  = runner.zoneRoles?.[zoneId]?.role || 'runner'
+    const zip   = zone.zips?.[0] || zone.zip || ''
+
+    // Fetch existing row (any status) for this runner+zone
+    const { data: existing } = await _supa.from('runner_zone_requests')
+      .select('id').ilike('runner_email', email).eq('zone_id', zoneId).limit(1)
+
+    if(existing?.length){
+      // Update existing row to approved
+      await _supa.from('runner_zone_requests')
+        .update({ status:'approved', zone_role: role, updated_at: new Date().toISOString() })
+        .eq('id', existing[0].id)
+    } else {
+      // Insert new approved row
+      await _supa.from('runner_zone_requests').insert({
+        runner_email: runner.email,
+        runner_name:  runner.name,
+        zip_code:     zip,
+        zone_id:      zoneId,
+        zone_name:    zone.name,
+        status:       'approved',
+        zone_role:    role,
+        zone_order:   1,
+        created_at:   new Date().toISOString(),
+        updated_at:   new Date().toISOString(),
+      })
+    }
+    console.log('[Coverage] ✅ runner_zone_requests row ensured for', runner.name, zone.name)
+  } catch(e){ console.warn('[Coverage] zone_requests write:', e.message) }
+
+  // ── 4. Refresh maps ──
+  _refreshAdminMapRunners()
+  // If this is the current logged-in runner, reset zone role cache so heatmap reloads
+  if(runner.email?.toLowerCase() === (window._rnRow?.email||'').toLowerCase()){
+    window._runnerZoneRoles = {}
+    if(window._rnRow) window._rnRow.coverage_zones = JSON.stringify(updated)
+  }
+}
+
+// ── Refresh admin map runner layers without full reload ──────────────────────
+function _refreshAdminMapRunners(){
+  const map = window._adminMap
+  if(!map) return
+  if(window._adMapMode === 'runners' || window._adMapMode === 'both'){
+    ;(window._adMapRunnerLayers||[]).forEach(l=>{ try{l.remove()}catch(e){} })
+    window._adMapRunnerLayers = []
+    _adDrawRunnerCoverage(map)
+  }
+}
+
 async function _autoLeadIfOnlyRunner(zoneId){
   if(!zoneId) return
   const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
@@ -13771,6 +13935,8 @@ async function _autoLeadIfOnlyRunner(zoneId){
       }, { onConflict: 'runner_email,zone_id' })
 
       dbSaveZone(zone)
+      // Update coverage_zones so maps show this zone
+      await _addZoneToRunnerCoverage(r, zoneId)
       console.log('[BinDash] Auto-lead set ✅', r.name, 'for', zone.name)
     } catch(e){ console.warn('[BinDash] auto-lead persist:', e.message) }
   }
@@ -13894,6 +14060,9 @@ async function adminUpdateZoneRole(zoneId, runnerId, newRole, newOrder){
       })
     }
   }
+
+  // Update coverage_zones so runner's dashboard + admin map both show this zone
+  await _addZoneToRunnerCoverage(r, zoneId)
 
   // Refresh the modal to show updated state
   showAdminSetPriority(zoneId)
@@ -14348,6 +14517,8 @@ async function saveRnEdit(rId){
       })
       await _supa.from('runner_zone_requests').insert(zoneInserts)
       console.log('[BinDash] Zone assignments written to runner_zone_requests ✅', r.coverageZones.length, 'zones')
+    // Force heatmap to reload zone roles on next open
+    window._runnerZoneRoles = {}
     } catch(e){ console.warn('[BinDash] Zone request write:', String(e?.message||e)) }
   } else if(r.email && !r.coverageZones.length){
     const rEmail = r.email.trim().toLowerCase()
@@ -24950,6 +25121,32 @@ function confirmActivateMicroZone(zip, city){
   setTimeout(()=>{ adNav(null,'ad-zones') }, 1000)
 }
 
+function _adminCreateZoneFromRequest(zip, status, requestIdsCsv, runnerEmail, runnerName, hwCount){
+  // Find the runner in RUNNERS by email for the dropdown pre-select
+  const runner = RUNNERS.find(r => r.email && r.email.toLowerCase() === (runnerEmail||'').toLowerCase())
+  showCreateZone({
+    zip:        zip,
+    city:       zip + ' Area',
+    status:     status,
+    hwCount:    hwCount || 0,
+    runnerEmail: runnerEmail || '',
+    runnerName:  runnerName  || '',
+    runnerId:    runner?.id  || null,
+    requestIds:  requestIdsCsv || '',
+    name:        (status === 'waitlist' ? 'ZIP ' + zip + ' Waitlist' : 'ZIP ' + zip + ' Zone'),
+  })
+  // Dismiss the flags after modal opens
+  const reqIds = (requestIdsCsv||'').split(',').filter(Boolean)
+  if(reqIds.length){
+    setTimeout(() => {
+      _supa.from('runner_zone_requests')
+        .update({ status:'reviewed', updated_at: new Date().toISOString() })
+        .in('id', reqIds)
+        .then(() => {})
+    }, 2000)  // slight delay so admin can cancel if needed
+  }
+}
+
 function showCreateZone(prefill){
   prefill = prefill || {}
   // Decode URI-encoded runner info if passed from template strings
@@ -25167,6 +25364,8 @@ function saveCreateZone(){
   closeM(); renderAdminZones(); syncZoneData()
   dbSaveZone(newZone)
   if(runnerId) adminUpdateZoneRole(newZone.id, runnerId, 'lead', 1)
+  if(runner) _addZoneToRunnerCoverage(runner, newZone.id)
+  if(runnerId) setTimeout(()=>_autoLeadIfOnlyRunner(newZone.id), 500)
 
   // ── AUTO-LINK homeowner_signups in these ZIPs to the new zone ──
   _linkHomeownersToNewZone(newZone)
@@ -25223,14 +25422,8 @@ function saveCreateZone(){
 
   showToast(name + ' created ✅' + (runner ? ' · ' + runner.name + ' assigned' : '') + (day ? ' · ' + day + ' collection' : ''), 'ok', 5000)
 
-  // Refresh admin map if visible
-  setTimeout(() => {
-    if(window._adminMap && document.getElementById('mz-admin-map')?.offsetParent){
-      window._adMapRunnerLayers?.forEach(l => { try { l.remove() } catch(e){} })
-      window._adMapRunnerLayers = []
-      if(window._adMapMode === 'both' || window._adMapMode === 'runners') _adDrawRunnerCoverage(window._adminMap)
-    }
-  }, 800)
+  // Refresh admin map runner layers
+  setTimeout(() => _refreshAdminMapRunners(), 1000)
 }
 
 async function _linkHomeownersToNewZone(zone){
@@ -27377,6 +27570,9 @@ async function assignRunnerFromRequest(zip, runnerEmailsCsv, zoneId, requestIdsC
       )
     }
 
+    // Update coverage_zones for each assigned runner so maps update
+    for(const runner of finalRunners) await _addZoneToRunnerCoverage(runner, zoneId)
+
     // Auto-promote to lead if this is the only runner in the zone
     for(const runner of finalRunners) await _autoLeadIfOnlyRunner(zoneId)
 
@@ -27528,11 +27724,11 @@ async function renderRunnerZoneRequests(){
           </div>`:''}
 
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            ${!existingZone?`<button onclick="showCreateZone({zip:'${zip}',city:'${zip} Area',status:'waitlist',hwCount:${hwWaiting},runnerEmail:encodeURIComponent(group[0]?.runner_email||''),runnerName:encodeURIComponent(group[0]?.runner_name||''),requestIds:group.map(r=>r.id).join(',')});dismissScoutFlags('${zip}')"
+            ${!existingZone?`<button onclick="_adminCreateZoneFromRequest('${zip}','waitlist','${group.map(r=>r.id).join(',')}','${group[0]?.runner_email||''}','${group[0]?.runner_name||''}',${hwWaiting})"
               class="btn btn-sm" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:#f59e0b">
               ⏳ Create Waitlist Zone
             </button>
-            <button onclick="showCreateZone({zip:'${zip}',city:'${zip} Area',status:'live',hwCount:${hwWaiting},runnerEmail:encodeURIComponent(group[0]?.runner_email||''),runnerName:encodeURIComponent(group[0]?.runner_name||''),requestIds:group.map(r=>r.id).join(',')});dismissScoutFlags('${zip}')"
+            <button onclick="_adminCreateZoneFromRequest('${zip}','live','${group.map(r=>r.id).join(',')}','${group[0]?.runner_email||''}','${group[0]?.runner_name||''}',${hwWaiting})"
               class="btn btn-cyan btn-sm">
               ⚡ Create Live Zone
             </button>`:`
