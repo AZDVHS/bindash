@@ -11612,7 +11612,7 @@ async function renderRunnerHeatmap(){
   if(boundary6Hex){
     try {
       const b6pts = h3.cellToBoundary(boundary6Hex).map(([la,ln])=>[la,ln])
-      L.polygon(b6pts, { color:'rgba(6,214,160,.5)', fillColor:'transparent', weight:2, dashArray:'6,4', opacity:0.7 }).addTo(map)
+      L.polygon(b6pts, { color:'#0d9488', fillColor:'transparent', weight:2.5, dashArray:'6,4', opacity:0.9 }).addTo(map)
     } catch(e){}
   }
 
@@ -11657,20 +11657,20 @@ async function renderRunnerHeatmap(){
       type='active'; fillColor='#22c55e'; fillOpacity=0.90; borderColor='#06d6a0'; borderDash=null; counts.active++
     } else if(mode === 'mine'){
       if(isCovered && hoCount > 0){
-        type='active'; fillColor='#22c55e'; fillOpacity=0.50; borderColor='#06d6a0'; borderDash=null; counts.active++
+        type='active'; fillColor='#16a34a'; fillOpacity=0.40; borderColor='#15803d'; borderDash=null; counts.active++
       } else if(isCovered){
-        type='runner'; fillColor='#06d6a0'; fillOpacity=0.30; borderColor='rgba(6,214,160,.7)'; borderDash=null; counts.runner++
+        type='runner'; fillColor='#06d6a0'; fillOpacity=0.35; borderColor='#0d9488'; borderDash=null; counts.runner++
       } else if(hoCount > 0){
-        type='demand'; fillColor='#f59e0b'; fillOpacity=0.45; borderColor='#fbbf24'; borderDash=null; counts.demand++
+        type='demand'; fillColor='#f59e0b'; fillOpacity=0.40; borderColor='#d97706'; borderDash=null; counts.demand++
       } else {
-        type='open'; fillColor='rgba(255,255,255,1)'; fillOpacity=0.04; borderColor='rgba(255,255,255,.15)'; borderDash='3,4'; counts.open++
+        type='open'; fillColor='rgba(100,116,139,1)'; fillOpacity=0.08; borderColor='rgba(71,85,105,.4)'; borderDash='3,4'; counts.open++
       }
     } else {
       // Expand mode — dim own zone
       type = isCovered ? 'runner' : 'open'
-      fillColor = isCovered ? 'rgba(6,214,160,1)' : 'rgba(255,255,255,1)'
-      fillOpacity = isCovered ? 0.12 : 0.03
-      borderColor = isCovered ? 'rgba(6,214,160,.3)' : 'rgba(255,255,255,.08)'
+      fillColor = isCovered ? 'rgba(6,214,160,1)' : 'rgba(100,116,139,1)'
+      fillOpacity = isCovered ? 0.18 : 0.05
+      borderColor = isCovered ? 'rgba(13,148,136,.5)' : 'rgba(71,85,105,.25)'
       borderDash  = '2,5'
       if(isCovered) counts.runner++; else counts.open++
     }
@@ -11770,9 +11770,9 @@ async function renderRunnerHeatmap(){
           const hoC   = hoHexes[h8] || 0
           const hasRn = runnerHexes.has(h8)
           // Draw all — empty hexes get a very faint fill so the zone is visible + tappable
-          const fc  = hoC>0&&hasRn ? '#22c55e' : hoC>0 ? '#f59e0b' : hasRn ? '#3b82f6' : 'rgba(255,255,255,1)'
-          const fo  = hoC>0&&hasRn ? 0.35 : hoC>0 ? 0.35 : hasRn ? 0.25 : 0.04
-          const bc  = hoC>0 ? '#fbbf24' : hasRn ? '#60a5fa' : 'rgba(255,255,255,.2)'
+          const fc  = hoC>0&&hasRn ? '#16a34a' : hoC>0 ? '#f59e0b' : hasRn ? '#3b82f6' : 'rgba(100,116,139,1)'
+          const fo  = hoC>0&&hasRn ? 0.35 : hoC>0 ? 0.35 : hasRn ? 0.25 : 0.08
+          const bc  = hoC>0 ? '#d97706' : hasRn ? '#2563eb' : 'rgba(71,85,105,.35)'
           let bd, type
           if(hoC>0&&hasRn){ type='active'; counts.active++ }
           else if(hoC>0){   type='demand'; counts.demand++ }
@@ -11825,15 +11825,15 @@ function _rnDrawHex(map, hexId, opts){
   try { boundary = h3.cellToBoundary(hexId).map(([la,ln])=>[la,ln]) } catch(e){ return }
 
   const polyStyle = opts.isAnchor ? {
-    color:'#06d6a0', fillColor:'#06d6a0', fillOpacity:0.80, weight:3, opacity:1
+    color:'#0d9488', fillColor:'#06d6a0', fillOpacity:0.75, weight:3, opacity:1
   } : opts.isPending ? {
-    color:'#06d6a0', fillColor:'#06d6a0', fillOpacity:0.18, weight:2.5, opacity:1, dashArray:'6,3'
+    color:'#0d9488', fillColor:'#06d6a0', fillOpacity:0.22, weight:2.5, opacity:1, dashArray:'6,3'
   } : {
     color:       opts.borderColor,
     fillColor:   opts.fillColor,
     fillOpacity: opts.fillOpacity,
-    weight:      1.5,
-    opacity:     0.9,
+    weight:      2,
+    opacity:     1.0,
     dashArray:   opts.borderDash || null,
   }
   const poly = L.polygon(boundary, polyStyle).addTo(map)
@@ -11981,15 +11981,15 @@ function _rnHexTap(hexId, typeLabel, opts){
 
   const isSelected = window._rnHeatSelected.has(hexId)
 
+  const meta = window._rnHeatHexMeta[hexId]
+  const poly = meta?.poly  // always get poly from stored meta, not opts
+
   if(isSelected){
     window._rnHeatSelected.delete(hexId)
-    // Restore original style
-    const meta = window._rnHeatHexMeta[hexId]
-    if(meta) meta.poly.setStyle({ color:meta.borderColor, fillColor:meta.fillColor, fillOpacity:meta.fillOpacity, dashArray:meta.borderDash||null, weight:1.5 })
+    if(poly) poly.setStyle({ color:meta.borderColor, fillColor:meta.fillColor, fillOpacity:meta.fillOpacity, dashArray:meta.borderDash||null, weight:1.5 })
   } else {
     window._rnHeatSelected.add(hexId)
-    // Highlight selected
-    opts.poly.setStyle({ color:'#06d6a0', fillColor:'#06d6a0', fillOpacity:0.55, dashArray:null, weight:3 })
+    if(poly) poly.setStyle({ color:'#1d4ed8', fillColor:'#3b82f6', fillOpacity:0.45, dashArray:null, weight:2.5 })
   }
 
   _rnUpdateClaimBar()
