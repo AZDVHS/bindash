@@ -1318,6 +1318,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
   100% { box-shadow: 0 4px 20px rgba(34,197,94,.3); }
 }
 .complete-pulse { animation: completePulse .5s ease-in-out 2; }
+.adj-zone-expand { cursor: pointer !important; }
 </style>
 </head>
 <body onload="initApp()">
@@ -11211,7 +11212,13 @@ async function _rnLoadPendingRequests(){
     if(!data?.length){ el.innerHTML = ''; return }
 
     const pending  = data.filter(r=>r.status==='pending')
-    const approved = data.filter(r=>r.status==='approved')
+    // Deduplicate approved by zone_id — keep most recent per zone
+    const approvedMap = {}
+    data.filter(r=>r.status==='approved').forEach(r => {
+      const key = r.zone_id || r.zip_code || r.id
+      if(!approvedMap[key] || r.updated_at > approvedMap[key].updated_at) approvedMap[key] = r
+    })
+    const approved = Object.values(approvedMap)
 
     let html = ''
     if(pending.length){
@@ -11598,58 +11605,63 @@ async function renderRunnerHeatmap(){
       if(runnerHexes.has(h8)) adjHasRunner = true
     })
 
-    // Draw the res-6 outline for this adjacent zone
+    // Draw the res-6 adjacent zone — always visible, style varies by mode
     try {
       const b6pts = h3.cellToBoundary(adj6).map(([la,ln])=>[la,ln])
-      // Colour the outline based on demand
-      const outlineColor = adjHoCount > 0 ? '#f59e0b' : 'rgba(255,255,255,.25)'
-      const outlineFill  = adjHoCount > 0 ? 'rgba(245,158,11,.06)' : 'rgba(255,255,255,.02)'
-      const outlineWeight = adjHoCount > 0 ? 2 : 1.5
+
+      // Style: expand mode = clearly visible + interactive; mine mode = faint reference
+      const isExpand = mode === 'expand'
+      const outlineColor  = adjHoCount > 0 ? '#f59e0b' : (isExpand ? 'rgba(255,255,255,.55)' : 'rgba(255,255,255,.18)')
+      const outlineFill   = adjHoCount > 0 ? 'rgba(245,158,11,.08)' : (isExpand ? 'rgba(255,255,255,.04)' : 'rgba(255,255,255,.01)')
+      const outlineWeight = isExpand ? (adjHoCount > 0 ? 2.5 : 1.5) : 0.8
+      const outlineDash   = isExpand ? null : '4,6'
+      const outlineOp     = isExpand ? 1.0 : 0.35
 
       const outline = L.polygon(b6pts, {
-        color: outlineColor, fillColor: outlineFill, fillOpacity:1,
-        weight: outlineWeight, dashArray: mode==='mine' ? '4,6' : '6,3',
-        opacity: mode==='mine' ? 0.4 : 0.8,
+        color: outlineColor, fillColor: outlineFill, fillOpacity: 1,
+        weight: outlineWeight, dashArray: outlineDash, opacity: outlineOp,
+        // Use className for cursor in expand mode
+        className: isExpand ? 'adj-zone-expand' : '',
       })
 
-      // Tooltip on the outline
-      const hoText = adjHoCount > 0 ? adjHoCount+' HO'+(adjHoCount!==1?'s':'')+' · ' : ''
+      const hoText     = adjHoCount > 0 ? adjHoCount+' homeowner'+(adjHoCount!==1?'s':'')+' · ' : 'No homeowners · '
       const runnerText = adjHasRunner ? 'Runner active' : 'No runner yet'
+      const tapHint    = isExpand ? '<br><span style="color:#06d6a0;font-weight:700">▶ Tap to configure &amp; request this zone</span>' : ''
       outline.bindTooltip(
-        '<div style="font-size:11px;line-height:1.6"><strong style="color:'+(mode==='expand'?'#fbbf24':'var(--muted)')+'">Adjacent zone</strong><br>'
-        +hoText+runnerText+(mode==='expand'?'<br><em style="color:var(--cyan)">Tap to request this zone</em>':'')+'</div>',
-        { direction:'top', className:'h3-tip' }
+        '<div style="font-size:11px;line-height:1.7;min-width:160px">'
+        +'<strong style="color:'+(isExpand?'#fbbf24':'var(--muted)')+'">Neighbouring zone</strong><br>'
+        +hoText+runnerText+tapHint+'</div>',
+        { direction:'top', className:'h3-tip', sticky:false }
       )
 
-      if(mode === 'expand'){
-        outline.on('click', () => {
-          // Open the res-6 zone configurator for this adjacent zone
-          _rnZspOpen(adj6, null, { hoCount: adjHoCount, hasRunner: adjHasRunner })
-        })
-        outline.setStyle({ cursor:'pointer' })
+      if(isExpand){
+        outline.on('click', () => _rnZspOpen(adj6, null, { hoCount: adjHoCount, hasRunner: adjHasRunner }))
       }
 
       outline.addTo(map)
       if(!window._rnHeatLayers.open) window._rnHeatLayers.open = []
       window._rnHeatLayers.open.push(outline)
 
-      // In expand mode, also draw individual res-8 hexes inside with demand colouring
-      if(mode === 'expand'){
+      // In expand mode: fill the zone with individual res-8 hexes showing demand
+      // Always draw all hexes (not just those with data) so runner sees the zone shape
+      if(isExpand){
         adjChildren.forEach(h8 => {
-          const hoC = hoHexes[h8] || 0
+          const hoC   = hoHexes[h8] || 0
           const hasRn = runnerHexes.has(h8)
-          if(hoC === 0 && !hasRn) return  // don't draw empty hexes in adjacent zones
+          // Draw all — empty hexes get a very faint fill so the zone is visible + tappable
+          const fc  = hoC>0&&hasRn ? '#22c55e' : hoC>0 ? '#f59e0b' : hasRn ? '#3b82f6' : 'rgba(255,255,255,1)'
+          const fo  = hoC>0&&hasRn ? 0.35 : hoC>0 ? 0.35 : hasRn ? 0.25 : 0.04
+          const bc  = hoC>0 ? '#fbbf24' : hasRn ? '#60a5fa' : 'rgba(255,255,255,.2)'
+          let bd, type
+          if(hoC>0&&hasRn){ type='active'; counts.active++ }
+          else if(hoC>0){   type='demand'; counts.demand++ }
+          else if(hasRn){   type='runner'; counts.runner++; bd='3,4' }
+          else{             type='open';   counts.open++;   bd='2,5' }
           _rnDrawHex(map, h8, {
-            type: hoC>0&&hasRn ? 'active' : hoC>0 ? 'demand' : 'runner',
-            fillColor: hoC>0&&hasRn ? '#22c55e' : hoC>0 ? '#f59e0b' : '#3b82f6',
-            fillOpacity: 0.40, borderColor: hoC>0 ? '#fbbf24' : '#60a5fa',
-            borderDash: null, isPending:false, isAnchor:false,
-            inBoundary:false, hoCount:hoC, hasRunner:hasRn,
-            runnerNames: d_runnerNames(h8), zone:null, isMine:false
+            type, fillColor:fc, fillOpacity:fo, borderColor:bc, borderDash:bd||null,
+            isPending:false, isAnchor:false, inBoundary:false,
+            hoCount:hoC, hasRunner:hasRn, runnerNames:d_runnerNames(h8), zone:null, isMine:false
           })
-          if(hoC>0&&hasRn) counts.active++
-          else if(hoC>0) counts.demand++
-          else counts.runner++
         })
       }
     } catch(e){ console.warn('[Scout] adjacent zone draw:', e.message) }
