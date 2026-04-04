@@ -26860,7 +26860,30 @@ async function assignRunnerFromRequest(zip, runnerEmailsCsv, zoneId, requestIdsC
       return
     }
   }
-  const finalRunners = RUNNERS.filter(r => r.email && emails.includes(r.email.trim().toLowerCase()))
+
+  // Build final runner list — email match first, then name match as fallback
+  // (zone requests may have stored a test email that differs from the real runners table email)
+  let finalRunners = RUNNERS.filter(r => r.email && emails.includes(r.email.trim().toLowerCase()))
+
+  if(!finalRunners.length){
+    // Fallback: match by runner_name from the request rows
+    // Fetch the request rows to get the names
+    try {
+      const { data: reqRows } = await _supa.from('runner_zone_requests')
+        .select('runner_name,runner_email')
+        .in('id', reqIds)
+      const requestedNames = (reqRows||[]).map(r=>(r.runner_name||'').trim().toLowerCase()).filter(Boolean)
+      if(requestedNames.length){
+        finalRunners = RUNNERS.filter(r => r.name && requestedNames.includes(r.name.trim().toLowerCase()))
+        if(finalRunners.length) console.log('[BinDash] Matched runners by name fallback:', finalRunners.map(r=>r.name))
+      }
+    } catch(e){ console.warn('[BinDash] name fallback:', e.message) }
+  }
+
+  if(!finalRunners.length){
+    showToast('Runner not found. Zone request email ('+emails.join(', ')+') does not match any runner in the system. Edit the runner record to fix their email, then try again.','err', 8000)
+    return
+  }
 
   const names = finalRunners.map(r=>r.name).join(', ')
   if(!confirm('Assign '+names+' to zone "'+zone.name+'" (ZIP '+zip+')? They will be added to the dispatch pool for this zone.')){ return }
