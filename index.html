@@ -27716,6 +27716,91 @@ function showZoneEditModal(zoneId){
 }
 
 
+function _showNoRunnerZones(){
+  const live = ADMIN_ZONES.filter(z=>z.status==='live')
+  const noRunner = live.filter(z=>{
+    const zips = z.zips||[z.zip]
+    return RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===z.id||(r.coverageZones||[]).includes(z.id)||zips.includes(r.zip))).length === 0
+  })
+  if(!noRunner.length){ showToast('All live zones have runners assigned ✓','ok'); return }
+
+  const availRunners = RUNNERS.filter(r=>r.status!=='INACTIVE')
+
+  const rows = noRunner.map(z => {
+    const zip  = z.zips?.[0] || z.zip || '--'
+    const hoCt = z.homeowners || 0
+    const runnerOpts = availRunners.map(r =>
+      `<option value="${r.id}">${r.name} · ${r.zip||'--'}</option>`
+    ).join('')
+    return `
+      <div style="border:1px solid rgba(239,68,68,.2);background:rgba(239,68,68,.04);border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:#1e293b">${z.name}</div>
+            <div style="font-size:11px;color:#64748b;margin-top:2px">ZIP ${zip} · ${hoCt} homeowner${hoCt!==1?'s':''} · No runner assigned</div>
+          </div>
+          <button onclick="_czPreviewZone('${zip}')" style="flex-shrink:0;font-size:11px;padding:4px 10px;background:#eef2ff;border:1px solid #c7d2fe;color:#4338ca;border-radius:6px;cursor:pointer;white-space:nowrap">
+            🗺 Preview
+          </button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="nr-runner-${z.id}" style="flex:1;font-size:12px;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;color:#1e293b">
+            <option value="">-- Select runner to assign --</option>
+            ${runnerOpts}
+          </select>
+          <select id="nr-role-${z.id}" style="font-size:12px;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;color:#1e293b;width:110px">
+            <option value="lead">Lead</option>
+            <option value="runner">Runner</option>
+          </select>
+          <button onclick="_assignNoRunner('${z.id}')" style="padding:6px 14px;background:#ef4444;border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">
+            Assign
+          </button>
+        </div>
+      </div>`
+  }).join('')
+
+  document.getElementById('modal-box').innerHTML = `
+    <div class="mh">
+      <div style="font-size:15px;font-weight:700;color:#ef4444">⚠️ Zones Without Runners (${noRunner.length})</div>
+      <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+    </div>
+    <div class="mb">
+      <p style="font-size:12px;color:#64748b;margin:0 0 14px">These live zones have no runner assigned. Homeowners here cannot be dispatched until a runner covers the area.</p>
+      ${rows}
+      <div id="cz-preview-panel" style="display:none;border:1px solid rgba(71,85,105,.2);border-radius:10px;overflow:hidden;margin-top:10px">
+        <div id="cz-preview-map" style="height:200px;width:100%;background:#f1f5f9"></div>
+        <div id="cz-preview-stats" style="padding:10px 12px;background:#f8fafc;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:11px"></div>
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn btn-ghost btn-sm" onclick="closeM()">Close</button>
+    </div>`
+  openM()
+}
+
+async function _assignNoRunner(zoneId){
+  const runnerId = document.getElementById('nr-runner-'+zoneId)?.value
+  const role     = document.getElementById('nr-role-'+zoneId)?.value || 'lead'
+  if(!runnerId){ showToast('Select a runner first','err'); return }
+  const runner = RUNNERS.find(r=>r.id===runnerId)
+  if(!runner){ showToast('Runner not found','err'); return }
+  const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+
+  const btn = event?.target
+  if(btn){ btn.disabled=true; btn.textContent='Assigning...' }
+
+  try {
+    await adminUpdateZoneRole(zoneId, runnerId, role, 1)
+    await _addZoneToRunnerCoverage(runner, zoneId)
+    showToast(runner.name+' assigned to '+zone?.name+' as '+role+' ✅','ok',4000)
+    closeM()
+    renderRunnerZoneRequests()
+  } catch(e){
+    showToast('Assignment failed: '+e.message,'err')
+    if(btn){ btn.disabled=false; btn.textContent='Assign' }
+  }
+}
+
 async function renderRunnerZoneRequests(){
   const el       = document.getElementById('rzr-list')
   const overview = document.getElementById('rzr-overview')
@@ -27742,10 +27827,18 @@ async function renderRunnerZoneRequests(){
         <div style="font-size:11px;color:var(--muted)">Waitlist Zones</div>
         <div style="font-size:10px;color:var(--muted);margin-top:2px">building demand</div>
       </div>
-      <div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:9px;padding:12px;text-align:center">
+      <div onclick="_showNoRunnerZones()" style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:9px;padding:12px;text-align:center;cursor:${noRunner.length>0?'pointer':'default'}">
         <div style="font-size:24px;font-weight:700;color:#ef4444">${noRunner.length}</div>
         <div style="font-size:11px;color:var(--muted)">Need Runner</div>
-        <div style="font-size:10px;color:${noRunner.length>0?'#ef4444':'var(--muted)'};margin-top:2px">${noRunner.length>0?noRunner.map(z=>z.name.split(' ')[0]).join(', '):'all covered ✓'}</div>
+        <div style="font-size:10px;color:${noRunner.length>0?'#ef4444':'var(--muted)'};margin-top:2px">
+          ${noRunner.length>0
+            ? noRunner.slice(0,2).map(z=>{
+                // Strip generic "ZIP " prefix, show real name or ZIP
+                const n = z.name || ''
+                return n.startsWith('ZIP ') ? n.replace('ZIP ','').split(' ')[0] : n.split(' ').slice(0,2).join(' ')
+              }).join(', ') + (noRunner.length>2?' +' + (noRunner.length-2)+' more':'') + ' — click to assign'
+            : 'all covered ✓'}
+        </div>
       </div>
     </div>`
   }
