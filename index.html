@@ -5306,7 +5306,7 @@ async function _renderHWNeighborhoodMap(){
 
   const map = L.map('hw-nb-map', { zoomControl:false, attributionControl:false, dragging:true, scrollWheelZoom:false })
   window._hwNbMap = map
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
   // Fetch HO positions in cluster for dot markers
   let hoInCluster = []
@@ -8978,7 +8978,7 @@ async function _initSignupMap(lat, lng, zones){
         center: [lat, lng], zoom: 13,
         zoomControl: true, scrollWheelZoom: true, attributionControl: false,
       })
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
         maxZoom: 20, subdomains: 'abcd',
       }).addTo(_signupMap)
       console.log('[SignupMap] Created ✅')
@@ -9128,7 +9128,7 @@ async function _initAdminMap(){
   console.log('[Map] L.map created')
 
   // CartoDB dark_all — proven reliable dark tile provider
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a> © <a href="https://carto.com/">CARTO</a>',
     subdomains: 'abcd',
     maxZoom: 20,
@@ -10880,7 +10880,7 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   if(!mapEl) return
   const map = L.map(mapElId, { zoomControl:true, attributionControl:false })
   window._rnPickerMap = map
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
   // Draw res-6 boundary outline
   try {
@@ -11326,7 +11326,7 @@ async function renderRunnerHeatmap(){
 
   const map = L.map('rn-heat-map', { zoomControl:true, attributionControl:false })
   window._rnHeatMap = map
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
   // ── 1. Fetch HO hex data ──
   const hoHexes = {}   // res-8 hexId -> count
