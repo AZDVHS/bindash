@@ -8854,14 +8854,28 @@ async function _adDrawRunnerCoverage(map){
       } catch(e){}
     })
 
-    if(!anchor6 && r.zoneId){
+    // Derive anchor6 from HOME location (not zone) — runner's zone boundary
+    // is their service area, their home is where they start from
+    if(!anchor6 && r.zip){
+      const homeCtr = ZIP_CENTROIDS[r.zip]
+      if(homeCtr){
+        try {
+          const a7 = h3.latLngToCell(homeCtr[0], homeCtr[1], 7)
+          anchor6  = h3.cellToParent(a7, 6)
+        } catch(e){}
+      }
+    }
+    // Secondary fallback: zone ZIP (used for showing coverage area, but home pin is separate)
+    let zoneBoundaryHex6 = null
+    if(r.zoneId){
       const zone = ADMIN_ZONES.find(z=>z.id===r.zoneId)
       const zip  = zone?.zips?.[0] || zone?.zip || ''
       const ctr  = ZIP_CENTROIDS[zip]
       if(ctr){
         try {
           const a7 = h3.latLngToCell(ctr[0], ctr[1], 7)
-          anchor6  = h3.cellToParent(a7, 6)
+          zoneBoundaryHex6 = h3.cellToParent(a7, 6)
+          if(!anchor6) anchor6 = zoneBoundaryHex6  // use zone if no home data
         } catch(e){}
       }
     }
@@ -8911,9 +8925,12 @@ async function _adDrawRunnerCoverage(map){
           } catch(e){}
         }
 
-        // Runner home pin
-        const pinLat = r.lat || (ZIP_CENTROIDS[r.zip]?.[0])
-        const pinLng = r.lng || (ZIP_CENTROIDS[r.zip]?.[1])
+        // Runner home pin — prefer geocoded home address, then ZIP centroid
+        // NOT the zone ZIP (zone may be different city from where runner lives)
+        const homeZip = r.zip || ''
+        const homeCtr = ZIP_CENTROIDS[homeZip]
+        const pinLat = r.lat || (homeCtr?.[0]) || null
+        const pinLng = r.lng || (homeCtr?.[1]) || null
         if(pinLat && pinLng){
           const icon = L.divIcon({
             html: '<div style="width:22px;height:22px;background:#6366f1;border:2.5px solid #c7d2fe;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;box-shadow:0 0 8px rgba(99,102,241,.7)">🚐</div>',
@@ -11057,6 +11074,25 @@ async function _rnAccountAddrHint(){
     hint.style.display = 'block'
     hintTxt.textContent = '⚠️ Could not compute zone boundary — check your address.'
   }
+}
+
+async function _rnGeocodeSaveAnchorAdmin(runnerId, addr, city, zip){
+  // Geocode from admin side and update runner's anchor hex + lat/lng
+  try {
+    const coords = await _rnPickerGeocode(addr, city, 'AZ', zip)
+    if(!coords) return
+    const a8 = h3.latLngToCell(coords.lat, coords.lng, 8)
+    const a6 = h3.cellToParent(a8, 6)
+    await _supa.from('runners').update({
+      lat: coords.lat, lng: coords.lng,
+      anchor_hex6: a6, anchor_hex7: a8,
+      updated_at: new Date().toISOString(),
+    }).eq('id', runnerId)
+    // Update in-memory
+    const r = RUNNERS.find(x=>x.id===runnerId)
+    if(r){ r.lat=coords.lat; r.lng=coords.lng; r.anchorHex6=a6; r.anchorHex7=a8 }
+    console.log('[Admin] Runner geocoded:', addr, coords.lat, coords.lng)
+  } catch(e){ console.warn('[Admin] Geocode runner:', e.message) }
 }
 
 async function _rnGeocodeSaveAnchor(addr, city, zip){
@@ -13631,6 +13667,9 @@ function showRnEditForce(rId){
       <div class="field"><label>Full Name</label><input id="re-name" value="${r.name}"></div>
       <div class="field"><label>Email</label><input id="re-email" value="${r.email}"></div>
       <div class="field"><label>Phone</label><input id="re-phone" value="${r.phone}"></div>
+      <div class="field"><label>Home Street Address</label><input id="re-addr" value="${r.streetAddress||''}" placeholder="123 Main Street"></div>
+      <div class="field"><label>City</label><input id="re-city" value="${r.city||''}" placeholder="Glendale"></div>
+      <div class="field"><label>Home ZIP</label><input id="re-zip" value="${r.zip||''}" placeholder="85301" maxlength="5"></div>
       <div class="field"><label>Vehicle</label>
         <select id="re-vehicle">
           <option ${(r.vehicle||'').toUpperCase().includes('CAR')?'selected':''}>Car</option>
@@ -13689,9 +13728,12 @@ function addRunnerZoneRow(rId){
 async function saveRnEdit(rId){
   const r = RUNNERS.find(x=>x.id===rId)
   if(!r) return
-  r.name    = document.getElementById('re-name')?.value.trim()  || r.name
-  r.email   = document.getElementById('re-email')?.value.trim() || r.email
-  r.phone   = document.getElementById('re-phone')?.value.trim() || r.phone
+  r.name         = document.getElementById('re-name')?.value.trim()  || r.name
+  r.email        = document.getElementById('re-email')?.value.trim() || r.email
+  r.phone        = document.getElementById('re-phone')?.value.trim() || r.phone
+  r.streetAddress= document.getElementById('re-addr')?.value.trim()  || r.streetAddress || ''
+  r.city         = document.getElementById('re-city')?.value.trim()  || r.city || ''
+  r.zip          = document.getElementById('re-zip')?.value.trim()   || r.zip || ''
   r.vehicle = (document.getElementById('re-vehicle')?.value||r.vehicle).toUpperCase()
   r.status  = document.getElementById('re-status')?.value || r.status
   r.initials = r.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
@@ -13717,13 +13759,26 @@ async function saveRnEdit(rId){
 
   // Persist to Supabase runners table — save zone_id + coverage_zones JSON
   try {
+    const [fn, ...lnParts] = r.name.split(' ')
+    const ln = lnParts.join(' ')
     await _supa.from('runners').update({
+      first_name:     fn,
+      last_name:      ln,
+      email:          r.email,
+      phone:          r.phone,
+      street_address: r.streetAddress || null,
+      city:           r.city || null,
+      zip_code:       r.zip || null,
       zone_id:        r.zoneId,
       coverage_zones: r.coverageZones.length ? JSON.stringify(r.coverageZones) : null,
       status:         r.status.toLowerCase(),
       vehicle_type:   r.vehicle,
       updated_at:     new Date().toISOString(),
     }).eq('id', rId)
+    // Geocode address and update anchor hex if address changed
+    if(r.streetAddress && r.zip){
+      _rnGeocodeSaveAnchorAdmin(rId, r.streetAddress, r.city, r.zip)
+    }
   } catch(e){ console.warn('[BinDash] Runner update:', String(e?.message||e)) }
 
   // CRITICAL: Also write zone assignments to runner_zone_requests (keyed by email)
@@ -24358,6 +24413,9 @@ function confirmActivateMicroZone(zip, city){
 
 function showCreateZone(prefill){
   prefill = prefill || {}
+  // Decode URI-encoded runner info if passed from template strings
+  if(prefill.runnerEmail && prefill.runnerEmail.includes('%')) prefill.runnerEmail = decodeURIComponent(prefill.runnerEmail)
+  if(prefill.runnerName  && prefill.runnerName.includes('%'))  prefill.runnerName  = decodeURIComponent(prefill.runnerName)
   const availRunners = RUNNERS.filter(r => r.status !== 'INACTIVE')
   document.getElementById('modal-box').innerHTML=`
   <div class="mh">
@@ -24405,11 +24463,13 @@ function showCreateZone(prefill){
         <label>Lead Runner <span style="color:var(--muted);font-weight:400;font-size:10px">optional</span></label>
         <select id="cz-runner">
           <option value="">-- Assign later --</option>
-          ${availRunners.map(r=>'<option value="'+r.id+'" '+(prefill.runnerId===r.id?'selected':'')+'>'+r.name+' · '+(r.zip||r.area||'--')+'</option>').join('')}
+          ${availRunners.map(r=>'<option value="'+r.id+'" '+((prefill.runnerId===r.id||(prefill.runnerEmail&&r.email?.toLowerCase()===prefill.runnerEmail?.toLowerCase()))?'selected':'')+'>'+r.name+' · '+(r.zip||r.area||'--')+'</option>').join('')}
         </select>
       </div>
     </div>
     <div class="field"><label>Notes</label><input id="cz-notes" placeholder="Optional" value="${prefill.notes||''}"></div>
+    <input type="hidden" id="cz-request-ids" value="${prefill.requestIds||''}">
+    ${prefill.runnerName ? '<div style="background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--sub)">🚐 Requested by runner: <strong style="color:#a5b4fc">${prefill.runnerName}</strong> — they will be auto-assigned when zone is created.</div>' : ''}
     ${prefill.hwCount ? '<div style="background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.15);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--sub)">✅ <strong style="color:#22c55e">'+prefill.hwCount+' homeowners</strong> in ZIP '+prefill.zip+' will be linked to this zone on creation.</div>' : ''}
     <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.15);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--sub)">
       💡 Homeowners auto-match by ZIP. The collection day drives dispatch scheduling.
@@ -24546,6 +24606,7 @@ function saveCreateZone(){
   if(!name || !zipRaw){ showToast('Zone name and ZIP code(s) are required','err'); return }
   const zips = zipRaw.split(',').map(z=>z.trim()).filter(z=>z.length>=3)
   const zip  = zips[0]
+  const linkedRequestIds = document.getElementById('cz-request-ids')?.value?.split(',').filter(Boolean) || []
   const statusRaw = document.getElementById('cz-status')?.value || 'live'
   const runner = runnerId ? RUNNERS.find(r=>r.id===runnerId) : null
   const newZone = {
@@ -24567,8 +24628,111 @@ function saveCreateZone(){
   closeM(); renderAdminZones(); syncZoneData()
   dbSaveZone(newZone)
   if(runnerId) adminUpdateZoneRole(newZone.id, runnerId, 'lead', 1)
+
+  // ── AUTO-LINK homeowner_signups in these ZIPs to the new zone ──
+  _linkHomeownersToNewZone(newZone)
+
+  // ── APPROVE any specific zone requests that triggered this creation ──
+  if(linkedRequestIds.length){
+    _supa.from('runner_zone_requests').update({
+      status: 'approved', zone_id: newZone.id, updated_at: new Date().toISOString()
+    }).in('id', linkedRequestIds).then(()=>{
+      console.log('[BinDash] Zone requests approved:', linkedRequestIds)
+      renderRunnerZoneRequests()
+    }).catch(e => console.warn('[BinDash] Approve requests:', e.message))
+  }
+
+  // ── AUTO-ASSIGN the runner who requested the zone ──
+  if(runnerId){
+    _supa.from('runner_zone_requests').upsert({
+      runner_email: runner?.email || '',
+      runner_name:  runner?.name  || '',
+      zip_code:     zip,
+      zone_id:      newZone.id,
+      zone_name:    name,
+      status:       'approved',
+      type:         'expansion',
+      notes:        'Auto-assigned on zone creation',
+      updated_at:   new Date().toISOString(),
+      created_at:   new Date().toISOString(),
+    }, { onConflict: 'runner_email,zone_id' }).catch(e => console.warn(e.message))
+  }
+
+  // ── NOTIFY WAITLISTED HOs ──
   zips.forEach(z => notifyWaitlistForZip(z, newZone))
-  showToast(name+' created ✅'+(runner?' · '+runner.name+' assigned':'')+(day?' · '+day+' collection':''), 'ok', 5000)
+
+  // ── EMAIL ADMIN for verification ──
+  const adminNote = `Zone "${name}" created for ZIP ${zips.join(', ')} · Status: ${statusRaw}` +
+    (runner ? ` · Runner: ${runner.name}` : '') +
+    (day ? ` · Collection: ${day}` : '')
+  sendEmail('alpha1miller@gmail.com',
+    '🗺️ New Zone Created — Verify: ' + name,
+    `<div style="font-family:sans-serif;padding:20px;max-width:520px">
+      <h2 style="color:#06d6a0;margin:0 0 4px">Zone Created — Action Required</h2>
+      <p style="color:#666;margin:0 0 16px">A new zone was created and homeowners have been auto-linked. Please verify the details below.</p>
+      <table style="width:100%;font-size:13px;border-collapse:collapse">
+        <tr><td style="padding:5px 0;color:#666;width:120px">Zone Name</td><td style="font-weight:600">${name}</td></tr>
+        <tr><td style="padding:5px 0;color:#666">ZIP(s)</td><td>${zips.join(', ')}</td></tr>
+        <tr><td style="padding:5px 0;color:#666">Status</td><td>${statusRaw}</td></tr>
+        <tr><td style="padding:5px 0;color:#666">Collection Day</td><td>${day || 'Not set'}</td></tr>
+        <tr><td style="padding:5px 0;color:#666">Runner</td><td>${runner ? runner.name + ' (' + runner.email + ')' : 'Not assigned'}</td></tr>
+      </table>
+      <p style="margin-top:16px;font-size:12px;color:#666">Log in to BinDash admin to verify homeowner assignments and activate dispatch.</p>
+    </div>`,
+    'zone_created'
+  )
+
+  showToast(name + ' created ✅' + (runner ? ' · ' + runner.name + ' assigned' : '') + (day ? ' · ' + day + ' collection' : ''), 'ok', 5000)
+
+  // Refresh admin map if visible
+  setTimeout(() => {
+    if(window._adminMap && document.getElementById('mz-admin-map')?.offsetParent){
+      window._adMapRunnerLayers?.forEach(l => { try { l.remove() } catch(e){} })
+      window._adMapRunnerLayers = []
+      if(window._adMapMode === 'both' || window._adMapMode === 'runners') _adDrawRunnerCoverage(window._adminMap)
+    }
+  }, 800)
+}
+
+async function _linkHomeownersToNewZone(zone){
+  // Find all pending homeowner_signups in this zone's ZIPs and link them
+  const zips = zone.zips?.length ? zone.zips : (zone.zip ? [zone.zip] : [])
+  if(!zips.length) return
+  try {
+    const { data: pending } = await _supa.from('homeowner_signups')
+      .select('id,first_name,last_name,email,zip_code,status')
+      .in('zip_code', zips)
+      .in('status', ['pending_review', 'waitlisted'])
+    if(!pending?.length) return
+
+    // Link all to new zone
+    await _supa.from('homeowner_signups').update({
+      zone_id:    zone.id,
+      is_waitlist: zone.status !== 'live',
+      updated_at: new Date().toISOString(),
+    }).in('id', pending.map(p => p.id))
+
+    // Update in-memory HOMEOWNERS
+    let linked = 0
+    pending.forEach(p => {
+      const ho = HOMEOWNERS.find(h => h.email === p.email)
+      if(ho){ ho.zoneId = zone.id; linked++ }
+    })
+
+    // Mark pending zone requests as resolved
+    await _supa.from('runner_zone_requests')
+      .update({ status:'approved', updated_at: new Date().toISOString() })
+      .in('zip_code', zips)
+      .in('status', ['pending'])
+      .eq('type', 'homeowner_waitlist')
+
+    zone.homeowners = pending.length
+    dbSaveZone(zone)
+    renderAdminZones()
+
+    console.log('[BinDash] Zone created: linked', pending.length, 'homeowners to', zone.name)
+    showToast(pending.length + ' homeowner' + (pending.length!==1?'s':'') + ' linked to ' + zone.name + ' automatically', 'info', 4000)
+  } catch(e){ console.warn('[BinDash] _linkHomeownersToNewZone:', e.message) }
 }
 
 function confirmDeleteZone(zId, name){
@@ -26749,11 +26913,11 @@ async function renderRunnerZoneRequests(){
           </div>`:''}
 
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            ${!existingZone?`<button onclick="showCreateZone({zip:'${zip}',city:'${zip} Area',status:'waitlist',hwCount:${hwWaiting}});dismissScoutFlags('${zip}')"
+            ${!existingZone?`<button onclick="showCreateZone({zip:'${zip}',city:'${zip} Area',status:'waitlist',hwCount:${hwWaiting},runnerEmail:encodeURIComponent(group[0]?.runner_email||''),runnerName:encodeURIComponent(group[0]?.runner_name||''),requestIds:group.map(r=>r.id).join(',')});dismissScoutFlags('${zip}')"
               class="btn btn-sm" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:#f59e0b">
               ⏳ Create Waitlist Zone
             </button>
-            <button onclick="showCreateZone({zip:'${zip}',city:'${zip} Area',status:'live',hwCount:${hwWaiting}});dismissScoutFlags('${zip}')"
+            <button onclick="showCreateZone({zip:'${zip}',city:'${zip} Area',status:'live',hwCount:${hwWaiting},runnerEmail:encodeURIComponent(group[0]?.runner_email||''),runnerName:encodeURIComponent(group[0]?.runner_name||''),requestIds:group.map(r=>r.id).join(',')});dismissScoutFlags('${zip}')"
               class="btn btn-cyan btn-sm">
               ⚡ Create Live Zone
             </button>`:`
