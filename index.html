@@ -11280,7 +11280,7 @@ async function renderRunnerHeatmap(){
   // Load approved zone assignments if not already loaded
   if(!window._runnerZoneRoles || Object.keys(window._runnerZoneRoles).length === 0){
     try {
-      const email = rnRow.email || currentUser?.email
+      const email = (window._rnRow?.email || currentUser?.email || '').trim()
       if(email){
         const { data: approvedReqs } = await _supa.from('runner_zone_requests')
           .select('zone_id,zone_role,zone_order').ilike('runner_email', email).eq('status','approved')
@@ -11656,6 +11656,8 @@ async function renderRunnerHeatmap(){
     })
   })
 
+  console.log('[Scout] Drawing', adjacentRes6.length, 'adjacent zones, mode:', mode, 'anchor:', boundary6Hex)
+
   // ── Draw adjacent res-6 zones (1 ring) — shown as whole blocks ──
   adjacentRes6.forEach(adj6 => {
     // Get all res-8 children of this adjacent zone
@@ -11696,11 +11698,15 @@ async function renderRunnerHeatmap(){
         outlineWeight=1.5; outlineDash='5,4'; outlineOp=1
       }
 
-      const outline = L.polygon(b6pts, {
+      const outlineStyle = {
         color: outlineColor, fillColor: outlineFill, fillOpacity: 1,
         weight: outlineWeight, dashArray: outlineDash, opacity: outlineOp,
-        // Use className for cursor in expand mode
-        className: isExpand ? 'adj-zone-expand' : '',
+        interactive: isExpand,  // only interactive in expand mode
+      }
+      const outline = L.polygon(b6pts, outlineStyle)
+      if(isExpand) outline.getElement && outline.on('add', () => {
+        const el = outline.getElement()
+        if(el) el.style.cursor = 'pointer'
       })
 
       const hoText     = adjHoCount > 0 ? adjHoCount+' homeowner'+(adjHoCount!==1?'s':'')+' · ' : 'No homeowners · '
@@ -11714,7 +11720,16 @@ async function renderRunnerHeatmap(){
       )
 
       if(isExpand){
-        outline.on('click', () => _rnZspOpen(adj6, null, { hoCount: adjHoCount, hasRunner: adjHasRunner }))
+        const openZsp = () => _rnZspOpen(adj6, null, { hoCount: adjHoCount, hasRunner: adjHasRunner })
+        outline.on('click', openZsp)
+        // Also add a transparent clickable overlay so tapping anywhere in the zone works
+        const overlay = L.polygon(b6pts, {
+          color:'transparent', fillColor:'transparent', fillOpacity:0.01,
+          weight:0, opacity:0, interactive:true,
+        })
+        overlay.on('click', openZsp)
+        overlay.addTo(map)
+        window._rnHeatLayers.open.push(overlay)
       }
 
       outline.addTo(map)
