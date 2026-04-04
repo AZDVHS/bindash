@@ -8734,7 +8734,7 @@ function drawHexLayers(map, zones, opts = {}){
       // For active zones draw ring-1 neighbors at 40% opacity to show coverage area
       if(z.status === 'active' && typeof h3 !== 'undefined'){
         try {
-          const ring = h3.gridRing(hexId, 1)
+          const ring = h3.gridDisk(hexId, 1).filter(h => h !== hexId)
           ring.forEach(nHex => {
             const nb = h3.cellToBoundary(nHex).map(([la,ln])=>[la,ln])
             L.polygon(nb, {
@@ -11602,7 +11602,12 @@ async function renderRunnerHeatmap(){
 
   // Compute the adjacent res-6 ring (1 ring of res-6 neighbours)
   let adjacentRes6 = []
-  try { adjacentRes6 = h3.gridRing(boundary6Hex, 1) } catch(e){}
+  try {
+    // gridDisk returns center + ring; filter center out to get just the 6 neighbours
+    // Works in both H3 v3 (kRing) and v4 (gridDisk)
+    const disk = h3.gridDisk(boundary6Hex, 1)
+    adjacentRes6 = disk.filter(h => h !== boundary6Hex)
+  } catch(e){ console.warn('[Scout] gridDisk failed:', e.message) }
   const adjacentRes6Set = new Set(adjacentRes6)
 
   // Get the runner's own coverage hexes (res-8) from their DB row
