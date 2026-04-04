@@ -11297,44 +11297,50 @@ async function renderRunnerHeatmap(){
 
   // ── 1. Fetch HO hex data ──
   const hoHexes = {}   // res-8 hexId -> count
+  const hoNamesByHex = {}
   try {
-    // Fetch HOs with names for display in detail panel
-    const hoNamesByHex = {}  // hexId -> [{ name, status }]
+    // Try homeowners table with h3_index first
     const { data: hos, error: hosErr } = await _supa.from('homeowners')
       .select('h3_index,lat,lng,first_name,last_name,status').limit(5000)
-    if(!hosErr && hos) hos.forEach(h => {
-      let hexId = h.h3_index || null
-      if(!hexId && h.lat && h.lng && typeof h3 !== 'undefined'){
-        try { hexId = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8) } catch(e){}
-      }
-      if(!hexId) return
-      try {
-        const p7 = h3.cellToParent(hexId, RN_HEAT_RES)
-        hoHexes[p7] = (hoHexes[p7]||0) + 1
-        const name = ((h.first_name||'')+' '+(h.last_name||'')).trim() || 'Homeowner'
-        if(!hoNamesByHex[p7]) hoNamesByHex[p7] = []
-        hoNamesByHex[p7].push({ name, status: h.status||'unknown' })
-      } catch(e){}
-    })
-    // Fallback: homeowner_signups
-    if(!hos?.length || hosErr){
-      const { data: sigs } = await _supa.from('homeowner_signups')
-        .select('zip_code,first_name,last_name,status').eq('status','approved').limit(2000)
-      if(sigs) sigs.forEach(s => {
-        const ctr = ZIP_CENTROIDS[s.zip_code]
-        if(!ctr) return
+
+    if(!hosErr && hos?.length){
+      hos.forEach(h => {
+        let hexId = h.h3_index || null
+        if(!hexId && h.lat && h.lng){
+          try { hexId = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8) } catch(e){}
+        }
+        if(!hexId) return
         try {
-          const p7 = h3.latLngToCell(ctr[0], ctr[1], RN_HEAT_RES)
-          hoHexes[p7] = (hoHexes[p7]||0) + 1
-          const name = ((s.first_name||'')+' '+(s.last_name||'')).trim() || 'Homeowner'
-          if(!hoNamesByHex[p7]) hoNamesByHex[p7] = []
-          hoNamesByHex[p7].push({ name, status: s.status||'approved' })
+          const p8 = h3.getResolution(hexId) === RN_HEAT_RES ? hexId : h3.cellToParent(hexId, RN_HEAT_RES)
+          hoHexes[p8] = (hoHexes[p8]||0) + 1
+          const name = ((h.first_name||'')+' '+(h.last_name||'')).trim() || 'Homeowner'
+          if(!hoNamesByHex[p8]) hoNamesByHex[p8] = []
+          hoNamesByHex[p8].push({ name, status: h.status||'unknown' })
         } catch(e){}
       })
     }
-    // Store for use in hex tap
-    window._rnHeatHoNames = hoNamesByHex
-  } catch(e){ console.warn('[Heatmap] HO fetch:', e) }
+  } catch(e){ /* h3_index column may not exist */ }
+
+  // Always also try homeowner_signups — more reliable, has zip_code
+  try {
+    const { data: sigs } = await _supa.from('homeowner_signups')
+      .select('zip_code,first_name,last_name,status')
+      .in('status',['approved','waitlisted','pending_review']).limit(2000)
+    if(sigs) sigs.forEach(s => {
+      const ctr = ZIP_CENTROIDS[s.zip_code]
+      if(!ctr) return
+      try {
+        const p8 = h3.latLngToCell(ctr[0], ctr[1], RN_HEAT_RES)
+        hoHexes[p8] = (hoHexes[p8]||0) + 1
+        const name = ((s.first_name||'')+' '+(s.last_name||'')).trim() || 'Homeowner'
+        if(!hoNamesByHex[p8]) hoNamesByHex[p8] = []
+        if(!hoNamesByHex[p8].find(x=>x.name===name))
+          hoNamesByHex[p8].push({ name, status: s.status||'approved' })
+      } catch(e){}
+    })
+  } catch(e){ console.warn('[Heatmap] homeowner_signups fetch:', e) }
+
+  window._rnHeatHoNames = hoNamesByHex
 
   // ── 2. Build runner coverage set at res-7 ──
   // Strategy A: new coverage_hexes column (runners onboarded via hex picker)
@@ -11375,32 +11381,9 @@ async function renderRunnerHeatmap(){
     })
   } catch(e){ console.warn('[Heatmap] runners fetch:', e) }
 
-  // Try new hex columns separately — silently skip if columns don't exist yet
-  try {
-    const { data: rnsHex, error: hexErr } = await _supa.from('runners')
-      .select('coverage_hexes,anchor_hex8,first_name,last_name,status')
-      .neq('status','inactive')
-    if(!hexErr && rnsHex) rnsHex.forEach(r => {
-      const name = ((r.first_name||'')+ ' '+(r.last_name||'')).trim() || 'Runner'
-      if(r.anchor_hex8){
-        try {
-          const p7 = h3.cellToParent(r.anchor_hex8, RN_HEAT_RES)
-          h3.gridDisk(p7, 1).forEach(h => { runnerHexes.add(h); if(!runnerZipMeta[h]) runnerZipMeta[h]=[]; if(!runnerZipMeta[h].includes(name)) runnerZipMeta[h].push(name) })
-        } catch(e){}
-      }
-      try {
-        const hexes = r.coverage_hexes ? JSON.parse(r.coverage_hexes) : []
-        hexes.forEach(h => {
-          try {
-            const p7 = h3.cellToParent(h, RN_HEAT_RES)
-            runnerHexes.add(p7)
-            if(!runnerZipMeta[p7]) runnerZipMeta[p7]=[]
-            if(!runnerZipMeta[p7].includes(name)) runnerZipMeta[p7].push(name)
-          } catch(e){}
-        })
-      } catch(e){}
-    })
-  } catch(e){ /* columns don't exist yet — ok, zone/zip fallback used */ }
+  // New hex columns (coverage_hexes, anchor_hex8) may not exist in DB yet
+  // Use _rnRow data loaded from the runner's own session instead — always available
+  // (The _rnRow block below handles this)
 
   // Use in-memory RUNNERS (loaded by populateRNDashboard)
   ;(RUNNERS||[]).forEach(r => {
