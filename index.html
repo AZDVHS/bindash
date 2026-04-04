@@ -11162,12 +11162,12 @@ async function renderRunnerHeatmap(){
   // ── 1. Fetch HO hex data ──
   const hoHexes = {}   // res-8 hexId -> count
   try {
-    // h3_index may not exist on all rows — use lat/lng fallback if query fails
+    // Fetch HOs with names for display in detail panel
+    const hoNamesByHex = {}  // hexId -> [{ name, status }]
     const { data: hos, error: hosErr } = await _supa.from('homeowners')
-      .select('h3_index,lat,lng').limit(5000)
+      .select('h3_index,lat,lng,first_name,last_name,status').limit(5000)
     if(!hosErr && hos) hos.forEach(h => {
       let hexId = h.h3_index || null
-      // Fallback: compute hex from lat/lng if h3_index missing
       if(!hexId && h.lat && h.lng && typeof h3 !== 'undefined'){
         try { hexId = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8) } catch(e){}
       }
@@ -11175,21 +11175,29 @@ async function renderRunnerHeatmap(){
       try {
         const p7 = h3.cellToParent(hexId, RN_HEAT_RES)
         hoHexes[p7] = (hoHexes[p7]||0) + 1
+        const name = ((h.first_name||'')+' '+(h.last_name||'')).trim() || 'Homeowner'
+        if(!hoNamesByHex[p7]) hoNamesByHex[p7] = []
+        hoNamesByHex[p7].push({ name, status: h.status||'unknown' })
       } catch(e){}
     })
-    // Also check homeowner_signups for lat/lng data
+    // Fallback: homeowner_signups
     if(!hos?.length || hosErr){
       const { data: sigs } = await _supa.from('homeowner_signups')
-        .select('zip_code').eq('status','approved').limit(2000)
+        .select('zip_code,first_name,last_name,status').eq('status','approved').limit(2000)
       if(sigs) sigs.forEach(s => {
         const ctr = ZIP_CENTROIDS[s.zip_code]
         if(!ctr) return
         try {
           const p7 = h3.latLngToCell(ctr[0], ctr[1], RN_HEAT_RES)
           hoHexes[p7] = (hoHexes[p7]||0) + 1
+          const name = ((s.first_name||'')+' '+(s.last_name||'')).trim() || 'Homeowner'
+          if(!hoNamesByHex[p7]) hoNamesByHex[p7] = []
+          hoNamesByHex[p7].push({ name, status: s.status||'approved' })
         } catch(e){}
       })
     }
+    // Store for use in hex tap
+    window._rnHeatHoNames = hoNamesByHex
   } catch(e){ console.warn('[Heatmap] HO fetch:', e) }
 
   // ── 2. Build runner coverage set at res-7 ──
@@ -11575,9 +11583,26 @@ function _rnHexTap(hexId, typeLabel, opts){
   detail.style.display = 'block'
   if(title) title.textContent = selCount > 1 ? selCount + ' hexes selected' : (z?.zone_label || ('Hex \u00b7\u00b7\u00b7'+hexId.slice(-6)))
 
-  const hoLine = opts.hoCount > 0
-    ? '<div style="color:#a5b4fc;font-size:12px;margin-top:4px">'+opts.hoCount+' homeowner'+(opts.hoCount!==1?'s':'')+' in this hex</div>'
-    : '<div style="color:var(--muted);font-size:12px;margin-top:4px">No homeowners yet</div>'
+  // Build HO list with names from cached data
+  const hoNames = (window._rnHeatHoNames||{})[hexId] || []
+  let hoLine
+  if(hoNames.length > 0){
+    const nameItems = hoNames.slice(0,5).map(h => {
+      const dot = h.status==='active' ? '#22c55e' : '#f59e0b'
+      return '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text)">'
+        + '<span style="width:6px;height:6px;border-radius:50%;background:'+dot+';flex-shrink:0"></span>'
+        + h.name
+        + '</div>'
+    }).join('')
+    const extra = hoNames.length > 5 ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">+' + (hoNames.length-5) + ' more</div>' : ''
+    hoLine = '<div style="margin-top:6px;background:rgba(165,180,252,.06);border-radius:7px;padding:7px 9px">'
+      + '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Homeowners ('+hoNames.length+')</div>'
+      + nameItems + extra + '</div>'
+  } else if(opts.hoCount > 0){
+    hoLine = '<div style="color:#a5b4fc;font-size:12px;margin-top:4px">'+opts.hoCount+' homeowner'+(opts.hoCount!==1?'s':'')+' in this hex</div>'
+  } else {
+    hoLine = '<div style="color:var(--muted);font-size:12px;margin-top:4px">No homeowners yet</div>'
+  }
   const rnLine = opts.hasRunner
     ? '<div style="color:#22c55e;font-size:12px">Runner covered'+(opts.runnerNames?.length?' by '+opts.runnerNames.join(', '):'')+'</div>'
     : '<div style="color:#f59e0b;font-size:12px">No runner — open for claiming</div>'
@@ -26800,11 +26825,45 @@ async function assignRunnerFromRequest(zip, runnerEmailsCsv, zoneId, requestIdsC
       console.log('[BinDash] DB runner fallback fetched, RUNNERS now:', RUNNERS.length)
     } catch(e){ console.warn('[BinDash] DB runner fallback:', e.message) }
 
-    const reFetched = RUNNERS.filter(r => r.email && emails.includes(r.email.trim().toLowerCase()))
+    let reFetched = RUNNERS.filter(r => r.email && emails.includes(r.email.trim().toLowerCase()))
+
+    // If still not found, try matching by runner_name from the request
+    if(!reFetched.length && runnerEmailsCsv){
+      // Extract runner names from the zone request rows directly
+      const { data: reqRows } = await _supa.from('runner_zone_requests')
+        .select('runner_email,runner_name,id')
+        .in('runner_email', emails)
+        .limit(10)
+        .catch(() => ({ data: null }))
+
+      // Also try case-insensitive fetch using ilike for each email
+      for(const email of emails){
+        const { data: matched } = await _supa.from('runners')
+          .select('id,first_name,last_name,email,zip_code,zone_id,coverage_zones')
+          .ilike('email', email)
+          .limit(1)
+        if(matched?.length){
+          const r = matched[0]
+          const eLow = r.email?.trim().toLowerCase()
+          const existing = RUNNERS.find(x=>x.email?.trim().toLowerCase()===eLow)
+          if(!existing){
+            RUNNERS.push({
+              id: r.id,
+              name: ((r.first_name||'')+' '+(r.last_name||'')).trim() || r.email,
+              email: r.email, zip: r.zip_code||'', zoneId: r.zone_id||null,
+              coverageZones: (() => { try { return r.coverage_zones?JSON.parse(r.coverage_zones):[] } catch(e){ return [] } })(),
+              status:'AVAILABLE', initials:'??', color:'#6366f1',
+            })
+          }
+        }
+      }
+      reFetched = RUNNERS.filter(r => r.email && emails.includes(r.email.trim().toLowerCase()))
+    }
+
     if(!reFetched.length){
-      // Last resort: show which emails we tried and what's in RUNNERS
-      console.warn('[BinDash] Still not found. Tried:', emails, 'RUNNERS emails:', RUNNERS.map(r=>r.email))
-      showToast('Runner not found — check they are approved in Pending Runners (email: '+emails.join(', ')+')','err', 7000)
+      console.warn('[BinDash] Runner not found. Tried emails:', emails)
+      console.warn('[BinDash] RUNNERS in memory:', RUNNERS.map(r=>r.email))
+      showToast('Runner not found — emails tried: '+emails.join(', ')+'. Check they are approved in Pending Runners.','err', 8000)
       return
     }
   }
