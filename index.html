@@ -26829,13 +26829,6 @@ async function assignRunnerFromRequest(zip, runnerEmailsCsv, zoneId, requestIdsC
 
     // If still not found, try matching by runner_name from the request
     if(!reFetched.length && runnerEmailsCsv){
-      // Extract runner names from the zone request rows directly
-      const { data: reqRows } = await _supa.from('runner_zone_requests')
-        .select('runner_email,runner_name,id')
-        .in('runner_email', emails)
-        .limit(10)
-        .catch(() => ({ data: null }))
-
       // Also try case-insensitive fetch using ilike for each email
       for(const email of emails){
         const { data: matched } = await _supa.from('runners')
@@ -27003,12 +26996,33 @@ async function renderRunnerZoneRequests(){
     // Pending flags — grouped by ZIP
     if(pending.length){
       const byZip = {}
-      pending.forEach(r => { const z=r.zip_code||'?'; if(!byZip[z]) byZip[z]=[]; byZip[z].push(r) })
+      const noZip = []  // requests with no ZIP — handle separately
+      pending.forEach(r => {
+        if(!r.zip_code || r.zip_code.trim() === ''){
+          noZip.push(r)  // collect no-ZIP requests
+        } else {
+          const z = r.zip_code.trim()
+          if(!byZip[z]) byZip[z] = []
+          byZip[z].push(r)
+        }
+      })
 
       html += `<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">
         🚩 Pending Flags (${pending.length})
         <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:8px">— runners spotted demand here</span>
       </div>`
+
+      // No-ZIP requests: dismiss them silently or show as a single cleanup card
+      if(noZip.length){
+        const noZipIds = noZip.map(r=>r.id).join(',')
+        html += `<div style="border:1px solid rgba(100,116,139,.3);border-left:4px solid #64748b;border-radius:9px;padding:12px 14px;background:var(--surface);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--muted)">🧹 ${noZip.length} incomplete flag${noZip.length!==1?'s':''} — no ZIP recorded</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">These requests have no ZIP code. They can be safely dismissed.</div>
+          </div>
+          <button onclick="dismissScoutFlags('', this, '${noZipIds}')" class="btn btn-ghost btn-sm" style="color:var(--muted);white-space:nowrap">Dismiss All</button>
+        </div>`
+      }
 
       html += Object.entries(byZip).sort((a,b)=>b[1].length-a[1].length).map(([zip,group])=>{
         const existingZone = ADMIN_ZONES.find(z=>(z.zips||[z.zip]).includes(zip))
@@ -27064,7 +27078,7 @@ async function renderRunnerZoneRequests(){
               class="btn btn-sm" style="background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.4);color:#22c55e">
               ✅ Assign Runner(s) to Zone
             </button>`}
-            <button onclick="dismissScoutFlags('${zip}', this)" class="btn btn-ghost btn-sm" style="color:var(--muted)">Dismiss</button>
+            <button onclick="dismissScoutFlags('${zip}', this, '${group.map(r=>r.id).join(',')}')" class="btn btn-ghost btn-sm" style="color:var(--muted)">Dismiss</button>
           </div>
         </div>`
       }).join('')
@@ -27109,21 +27123,33 @@ async function renderRunnerZoneRequests(){
   }
 }
 
-async function dismissScoutFlags(zip, btnEl){
+async function dismissScoutFlags(zip, btnEl, reqIdsCsv){
   // Immediately hide the card for instant feedback
   const card = btnEl?.closest('[style*="border-left"]') || btnEl?.closest('.card')
   if(card){ card.style.opacity='0.3'; card.style.pointerEvents='none' }
 
-  // Only dismiss runner scout flags — NOT homeowner waitlist entries
-  const { error } = await _supa.from('runner_zone_requests')
-    .update({ status:'dismissed', updated_at: new Date().toISOString() })
-    .eq('zip_code', zip)
-    .in('status', ['pending'])
-    .neq('type', 'homeowner_waitlist')
+  let error = null
+  const reqIds = (reqIdsCsv||'').split(',').filter(Boolean)
+
+  if(reqIds.length){
+    // Dismiss by specific request IDs (handles null ZIP cards correctly)
+    const res = await _supa.from('runner_zone_requests')
+      .update({ status:'dismissed', updated_at: new Date().toISOString() })
+      .in('id', reqIds)
+    error = res.error
+  } else if(zip && zip !== '?'){
+    // Dismiss by ZIP — only runner flags, not homeowner waitlist
+    const res = await _supa.from('runner_zone_requests')
+      .update({ status:'dismissed', updated_at: new Date().toISOString() })
+      .eq('zip_code', zip)
+      .in('status', ['pending'])
+      .neq('type', 'homeowner_waitlist')
+    error = res.error
+  }
 
   if(error){ console.warn('[BinDash] dismissScoutFlags:', error.message); if(card){ card.style.opacity='1'; card.style.pointerEvents='' } }
   else {
-    showToast('Flags for ZIP '+zip+' dismissed','info')
+    showToast('Flags dismissed','info')
     setTimeout(() => renderRunnerZoneRequests(), 400)
   }
 }
