@@ -25147,6 +25147,113 @@ function _adminCreateZoneFromRequest(zip, status, requestIdsCsv, runnerEmail, ru
   }
 }
 
+async function _czPreviewZone(zip){
+  const panel  = document.getElementById('cz-preview-panel')
+  const mapEl  = document.getElementById('cz-preview-map')
+  const statsEl= document.getElementById('cz-preview-stats')
+  if(!panel || !mapEl) return
+
+  panel.style.display = 'block'
+  mapEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#64748b;font-size:13px">Loading map...</div>'
+
+  await _loadMapLibs()
+  if(typeof L === 'undefined' || typeof h3 === 'undefined') return
+
+  // Destroy old map if exists
+  if(window._czPreviewMapInstance){ window._czPreviewMapInstance.remove(); window._czPreviewMapInstance = null }
+  mapEl.innerHTML = ''
+
+  const map = L.map('cz-preview-map', { zoomControl:true, attributionControl:false })
+  window._czPreviewMapInstance = map
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
+
+  // Get ZIP centroid
+  const zips = zip.split(',').map(z=>z.trim()).filter(Boolean)
+  let anchorLat = null, anchorLng = null
+  const allHexPolys = []
+
+  zips.forEach(z => {
+    const ctr = ZIP_CENTROIDS[z]
+    if(!ctr) return
+    if(!anchorLat){ anchorLat = ctr[0]; anchorLng = ctr[1] }
+    try {
+      const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+      const h6 = h3.cellToParent(h8, 6)
+      // Draw res-6 boundary
+      const pts = h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
+      const poly = L.polygon(pts, { color:'#4338ca', fillColor:'rgba(67,56,202,.1)', fillOpacity:1, weight:2.5, dashArray:'5,4' }).addTo(map)
+      allHexPolys.push(...pts)
+      // Draw res-8 children
+      h3.cellToChildren(h6, 8).forEach(h8c => {
+        const p8 = h3.cellToBoundary(h8c).map(([la,ln])=>[la,ln])
+        L.polygon(p8, { color:'rgba(67,56,202,.4)', fillColor:'rgba(67,56,202,.04)', fillOpacity:1, weight:1 }).addTo(map)
+      })
+    } catch(e){}
+  })
+
+  if(allHexPolys.length) map.fitBounds(allHexPolys, { padding:[12,12], maxZoom:13 })
+  else if(anchorLat) map.setView([anchorLat, anchorLng], 12)
+
+  // ── Fetch stats ──
+  try {
+    const [sigRes, rnRes] = await Promise.all([
+      _supa.from('homeowner_signups').select('id,status,first_name').in('zip_code', zips).limit(200),
+      _supa.from('runners').select('id,first_name,last_name,zip_code,zone_id').limit(100),
+    ])
+    const sigs    = sigRes?.data || []
+    const active  = sigs.filter(s=>s.status==='approved').length
+    const waitl   = sigs.filter(s=>s.status==='waitlisted').length
+    const pending = sigs.filter(s=>s.status==='pending_review').length
+    const rnsInZip= (rnRes?.data||[]).filter(r => zips.includes(r.zip_code))
+    const existZ  = ADMIN_ZONES.filter(z => zips.some(z2 => (z.zips||[z.zip]).includes(z2)))
+
+    // Draw HO demand hexes
+    const hoHexMap = {}
+    sigs.forEach(s => {
+      const ctr = ZIP_CENTROIDS[s.zip_code||zips[0]]
+      if(!ctr) return
+      try {
+        const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+        hoHexMap[h8] = (hoHexMap[h8]||0) + 1
+      } catch(e){}
+    })
+    Object.entries(hoHexMap).forEach(([h8, cnt]) => {
+      const pts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
+      const col = cnt > 3 ? '#15803d' : cnt > 1 ? '#d97706' : '#64748b'
+      L.polygon(pts, { color:col, fillColor:col, fillOpacity:0.35, weight:1.5 })
+        .bindTooltip(cnt+' HO'+(cnt!==1?'s':''), { className:'h3-tip', direction:'top' })
+        .addTo(map)
+    })
+
+    statsEl.innerHTML = [
+      `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:7px;padding:8px;text-align:center">
+        <div style="font-size:18px;font-weight:700;color:#15803d">${active}</div>
+        <div style="color:#166534;font-size:10px;text-transform:uppercase;font-weight:600">Active HOs</div>
+       </div>`,
+      `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:8px;text-align:center">
+        <div style="font-size:18px;font-weight:700;color:#b45309">${waitl}</div>
+        <div style="color:#92400e;font-size:10px;text-transform:uppercase;font-weight:600">Waitlisted</div>
+       </div>`,
+      `<div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:7px;padding:8px;text-align:center">
+        <div style="font-size:18px;font-weight:700;color:#4338ca">${rnsInZip.length}</div>
+        <div style="color:#3730a3;font-size:10px;text-transform:uppercase;font-weight:600">Runners in ZIP</div>
+       </div>`,
+      `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:7px;padding:8px;text-align:center">
+        <div style="font-size:18px;font-weight:700;color:#0369a1">${existZ.length}</div>
+        <div style="color:#075985;font-size:10px;text-transform:uppercase;font-weight:600">Existing Zones</div>
+       </div>`,
+      `<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:7px;padding:8px;text-align:center">
+        <div style="font-size:18px;font-weight:700;color:#c2410c">${pending}</div>
+        <div style="color:#9a3412;font-size:10px;text-transform:uppercase;font-weight:600">Pending Review</div>
+       </div>`,
+      `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:8px;text-align:center">
+        <div style="font-size:18px;font-weight:700;color:#1e293b">${sigs.length}</div>
+        <div style="color:#475569;font-size:10px;text-transform:uppercase;font-weight:600">Total Signups</div>
+       </div>`,
+    ].join('')
+  } catch(e){ statsEl.innerHTML = '<div style="color:#64748b;font-size:11px;padding:8px">Could not load stats</div>' }
+}
+
 function showCreateZone(prefill){
   prefill = prefill || {}
   // Decode URI-encoded runner info if passed from template strings
@@ -25205,9 +25312,20 @@ function showCreateZone(prefill){
     </div>
     <div class="field"><label>Notes</label><input id="cz-notes" placeholder="Optional" value="${prefill.notes||''}"></div>
     <input type="hidden" id="cz-request-ids" value="${prefill.requestIds||''}">
-    ${prefill.runnerName ? '<div style="background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--sub)">🚐 Requested by runner: <strong style="color:#a5b4fc">${prefill.runnerName}</strong> — they will be auto-assigned when zone is created.</div>' : ''}
-    ${prefill.hwCount ? '<div style="background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.15);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--sub)">✅ <strong style="color:#22c55e">'+prefill.hwCount+' homeowners</strong> in ZIP '+prefill.zip+' will be linked to this zone on creation.</div>' : ''}
-    <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.15);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--sub)">
+    ${prefill.zip ? `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <button onclick="_czPreviewZone('${prefill.zip}')" class="btn btn-outline btn-sm" style="font-size:11px;color:#4338ca;border-color:rgba(67,56,202,.4)">
+        🗺 Preview Zone on Map
+      </button>
+      <span style="font-size:11px;color:#64748b">See location &amp; demand stats before creating</span>
+    </div>
+    <div id="cz-preview-panel" style="display:none;border:1px solid rgba(71,85,105,.2);border-radius:10px;overflow:hidden;margin-bottom:4px">
+      <div id="cz-preview-map" style="height:200px;width:100%;background:#f1f5f9"></div>
+      <div id="cz-preview-stats" style="padding:10px 12px;background:#f8fafc;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:11px"></div>
+    </div>` : ''}
+    ${prefill.runnerName ? `<div style="background:rgba(79,70,229,.07);border:1px solid rgba(79,70,229,.25);border-radius:8px;padding:10px 13px;font-size:12px;color:#1e293b">🚐 Requested by runner: <strong style="color:#4338ca">${prefill.runnerName}</strong> — they will be auto-assigned when zone is created.</div>` : ''}
+    ${prefill.hwCount ? `<div style="background:rgba(22,163,74,.07);border:1px solid rgba(22,163,74,.3);border-radius:8px;padding:10px 13px;font-size:12px;color:#1e293b">✅ <strong style="color:#15803d">${prefill.hwCount} homeowners</strong> in ZIP ${prefill.zip} will be linked to this zone on creation.</div>` : ''}
+    <div style="background:rgba(13,148,136,.07);border:1px solid rgba(13,148,136,.25);border-radius:8px;padding:10px 13px;font-size:12px;color:#1e293b">
       💡 Homeowners auto-match by ZIP. The collection day drives dispatch scheduling.
     </div>
   </div>
