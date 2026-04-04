@@ -11277,6 +11277,32 @@ async function renderRunnerHeatmap(){
 
   const mode = window._rnScoutMode || 'mine'
 
+  // Load approved zone assignments if not already loaded
+  if(!window._runnerZoneRoles || Object.keys(window._runnerZoneRoles).length === 0){
+    try {
+      const email = rnRow.email || currentUser?.email
+      if(email){
+        const { data: approvedReqs } = await _supa.from('runner_zone_requests')
+          .select('zone_id,zone_role,zone_order').ilike('runner_email', email).eq('status','approved')
+        window._runnerZoneRoles = window._runnerZoneRoles || {}
+        ;(approvedReqs||[]).forEach(r => {
+          if(r.zone_id){
+            window._runnerZoneRoles[r.zone_id] = { role: r.zone_role||'runner', order: r.zone_order||99 }
+            // Also ensure in-memory RUNNERS has these zones
+            if(window._rnRow && !JSON.stringify(window._rnRow.coverage_zones||'').includes(r.zone_id)){
+              try {
+                const czRaw = window._rnRow.coverage_zones
+                const czIds = czRaw ? (typeof czRaw==='string'?JSON.parse(czRaw):czRaw) : []
+                if(!czIds.includes(r.zone_id)) czIds.push(r.zone_id)
+                window._rnRow.coverage_zones = JSON.stringify(czIds)
+              } catch(e){}
+            }
+          }
+        })
+      }
+    } catch(e){ console.warn('[Scout] approved zones load:', e.message) }
+  }
+
   const loadEl = document.getElementById('rn-heat-loading')
   if(loadEl) loadEl.style.display = 'flex'
 
@@ -11481,20 +11507,40 @@ async function renderRunnerHeatmap(){
   // Build anchor zone selector options from runner's approved zones
   const anchorSel = document.getElementById('rn-scout-anchor-zone')
   if(anchorSel && mode === 'expand'){
-    const currentVal = anchorSel.value || 'home'
-    const approvedZoneIds = (() => {
-      try {
-        const czRaw = rnRow.coverage_zones
-        return czRaw ? (typeof czRaw==='string'?JSON.parse(czRaw):czRaw) : (rnRow.zone_id ? [rnRow.zone_id] : [])
-      } catch(e){ return rnRow.zone_id ? [rnRow.zone_id] : [] }
-    })()
-    const opts = ['<option value="home">My Home Location</option>']
-    approvedZoneIds.forEach(zid => {
+    // Preserve current selection across re-renders
+    const currentVal = window._rnScoutAnchorVal || anchorSel.value || 'home'
+
+    // Collect zone IDs from all sources: coverage_zones, zone_id, and in-memory RUNNERS
+    const zoneIdSet = new Set()
+    try {
+      const czRaw = rnRow.coverage_zones
+      const czIds = czRaw ? (typeof czRaw==='string'?JSON.parse(czRaw):czRaw) : []
+      czIds.forEach(id => zoneIdSet.add(id))
+    } catch(e){}
+    if(rnRow.zone_id) zoneIdSet.add(rnRow.zone_id)
+    // Also check in-memory RUNNERS for this runner's zones
+    const myRunner = RUNNERS.find(r => r.email?.toLowerCase() === (rnRow.email||'').toLowerCase())
+    if(myRunner){
+      myRunner.coverageZones?.forEach(id => zoneIdSet.add(id))
+      if(myRunner.zoneId) zoneIdSet.add(myRunner.zoneId)
+    }
+    // Also check runner_zone_requests approved entries (loaded in loadRNZones)
+    if(window._runnerZoneRoles){
+      Object.keys(window._runnerZoneRoles).forEach(zid => zoneIdSet.add(zid))
+    }
+
+    const opts = ['<option value="home">My Home ('+rnZip+')</option>']
+    zoneIdSet.forEach(zid => {
       const z = ADMIN_ZONES.find(x=>x.id===zid)
       if(!z) return
-      opts.push('<option value="'+zid+'"'+(currentVal===zid?' selected':'')+'>'+z.name+' ('+( z.zips?.[0]||z.zip||'--')+')</option>')
+      opts.push('<option value="'+zid+'"'+(currentVal===zid?' selected':'')+'>'+z.name+' — '+( z.zips?.[0]||z.zip||'?')+'</option>')
     })
     anchorSel.innerHTML = opts.join('')
+    // Restore selection
+    if(currentVal && anchorSel.querySelector('option[value="'+currentVal+'"]')){
+      anchorSel.value = currentVal
+    }
+    anchorSel.onchange = () => { window._rnScoutAnchorVal = anchorSel.value; renderRunnerHeatmap() }
   }
 
   // Determine anchor based on selected zone (in expand mode) or home (mine mode)
@@ -11630,11 +11676,25 @@ async function renderRunnerHeatmap(){
 
       // Style: expand mode = clearly visible + interactive; mine mode = faint reference
       const isExpand = mode === 'expand'
-      const outlineColor  = adjHoCount > 0 ? '#f59e0b' : (isExpand ? 'rgba(255,255,255,.55)' : 'rgba(255,255,255,.18)')
-      const outlineFill   = adjHoCount > 0 ? 'rgba(245,158,11,.08)' : (isExpand ? 'rgba(255,255,255,.04)' : 'rgba(255,255,255,.01)')
-      const outlineWeight = isExpand ? (adjHoCount > 0 ? 2.5 : 1.5) : 0.8
-      const outlineDash   = isExpand ? null : '4,6'
-      const outlineOp     = isExpand ? 1.0 : 0.35
+      // Visible colour coding for adjacent zones
+      let outlineColor, outlineFill, outlineWeight, outlineDash, outlineOp
+      if(!isExpand){
+        // Mine mode — very faint reference rings
+        outlineColor = 'rgba(255,255,255,.2)'; outlineFill = 'rgba(255,255,255,.01)'
+        outlineWeight = 0.8; outlineDash = '4,6'; outlineOp = 0.3
+      } else if(adjHoCount > 0 && adjHasRunner){
+        // Active zone with runner — green tint, informational only
+        outlineColor='#22c55e'; outlineFill='rgba(34,197,94,.10)'
+        outlineWeight=2; outlineDash=null; outlineOp=1
+      } else if(adjHoCount > 0){
+        // Demand with no runner — amber, prime target
+        outlineColor='#f59e0b'; outlineFill='rgba(245,158,11,.12)'
+        outlineWeight=2.5; outlineDash=null; outlineOp=1
+      } else {
+        // Empty available zone — clearly visible grey with solid fill
+        outlineColor='rgba(255,255,255,.6)'; outlineFill='rgba(255,255,255,.07)'
+        outlineWeight=1.5; outlineDash='5,4'; outlineOp=1
+      }
 
       const outline = L.polygon(b6pts, {
         color: outlineColor, fillColor: outlineFill, fillOpacity: 1,
@@ -11698,16 +11758,21 @@ async function renderRunnerHeatmap(){
   safe('rn-heat-ct-runner', counts.runner)
   safe('rn-heat-ct-open',   counts.open)
 
-  // Fit map to show runner's res-6 + adjacent ring
+  // Fit map to show runner's res-6 + adjacent ring — with zoom cap
   try {
     const allHexes = [boundary6Hex, ...adjacentRes6].filter(Boolean)
     const allPts = allHexes.flatMap(h6 => {
       try { return h3.cellToBoundary(h6).map(([la,ln])=>[la,ln]) } catch(e){ return [] }
     })
-    if(allPts.length) map.fitBounds(allPts, { padding:[16,16] })
-    else if(anchorLat) map.setView([anchorLat, anchorLng], 12)
+    if(allPts.length){
+      map.fitBounds(allPts, { padding:[20,20], maxZoom:12, animate:false })
+      // If zoomed too far out, pull in — res-6 ring should be visible at z11+
+      setTimeout(() => { if(map.getZoom() < 10) map.setZoom(11) }, 100)
+    } else if(anchorLat){
+      map.setView([anchorLat, anchorLng], 11)
+    }
   } catch(e){
-    if(anchorLat) map.setView([anchorLat, anchorLng], 12)
+    if(anchorLat) map.setView([anchorLat, anchorLng], 11)
   }
 
   if(loadEl) loadEl.style.display = 'none'
