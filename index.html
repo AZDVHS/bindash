@@ -11083,11 +11083,20 @@ async function _rnGeocodeSaveAnchorAdmin(runnerId, addr, city, zip){
     if(!coords) return
     const a8 = h3.latLngToCell(coords.lat, coords.lng, 8)
     const a6 = h3.cellToParent(a8, 6)
-    await _supa.from('runners').update({
+    // Try both lat/lng column name variants
+    const geoPayload = {
       lat: coords.lat, lng: coords.lng,
       anchor_hex6: a6, anchor_hex7: a8,
       updated_at: new Date().toISOString(),
-    }).eq('id', runnerId)
+    }
+    const { error: geoErr } = await _supa.from('runners').update(geoPayload).eq('id', runnerId)
+    if(geoErr){
+      // Try without new columns — at minimum save lat/lng
+      await _supa.from('runners').update({
+        lat: coords.lat, lng: coords.lng, updated_at: new Date().toISOString()
+      }).eq('id', runnerId)
+      console.warn('[BinDash] anchor hex columns may not exist yet:', geoErr.message)
+    }
     // Update in-memory
     const r = RUNNERS.find(x=>x.id===runnerId)
     if(r){ r.lat=coords.lat; r.lng=coords.lng; r.anchorHex6=a6; r.anchorHex7=a8 }
@@ -13373,6 +13382,21 @@ async function adminUpdateZoneRole(zoneId, runnerId, newRole, newOrder){
     }
   }
 
+  // CRITICAL: Persist zone assignment to DB (was missing — caused "doesn't save" bug)
+  if(zone) {
+    dbSaveZone(zone)
+    // Also directly update zones table assigned_runner for instant dispatch
+    if(newRole === 'lead' && r.id){
+      _supa.from('zones').update({
+        assigned_runner: r.id,
+        updated_at: new Date().toISOString(),
+      }).eq('id', zoneId).then(res => {
+        if(res.error) console.warn('[BinDash] zones assigned_runner update:', res.error.message)
+        else console.log('[BinDash] zones.assigned_runner updated ✅', r.name, '->', zone.name)
+      })
+    }
+  }
+
   // Refresh the modal to show updated state
   showAdminSetPriority(zoneId)
 }
@@ -13731,9 +13755,10 @@ async function saveRnEdit(rId){
   r.name         = document.getElementById('re-name')?.value.trim()  || r.name
   r.email        = document.getElementById('re-email')?.value.trim() || r.email
   r.phone        = document.getElementById('re-phone')?.value.trim() || r.phone
-  r.streetAddress= document.getElementById('re-addr')?.value.trim()  || r.streetAddress || ''
-  r.city         = document.getElementById('re-city')?.value.trim()  || r.city || ''
-  r.zip          = document.getElementById('re-zip')?.value.trim()   || r.zip || ''
+  r.streetAddress= (document.getElementById('re-addr')?.value||'').trim()  || r.streetAddress || ''
+  r.city         = (document.getElementById('re-city')?.value||'').trim()  || r.city || ''
+  r.zip          = (document.getElementById('re-zip')?.value||'').trim()   || r.zip || ''
+  console.log('[BinDash] saveRnEdit address:', r.streetAddress, r.city, r.zip)
   r.vehicle = (document.getElementById('re-vehicle')?.value||r.vehicle).toUpperCase()
   r.status  = document.getElementById('re-status')?.value || r.status
   r.initials = r.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
@@ -13759,13 +13784,14 @@ async function saveRnEdit(rId){
 
   // Persist to Supabase runners table — save zone_id + coverage_zones JSON
   try {
-    const [fn, ...lnParts] = r.name.split(' ')
-    const ln = lnParts.join(' ')
+    const nameParts = r.name.trim().split(/\s+/)
+    const fn = nameParts[0] || ''
+    const ln = nameParts.slice(1).join(' ') || ''
     await _supa.from('runners').update({
       first_name:     fn,
       last_name:      ln,
       email:          r.email,
-      phone:          r.phone,
+      phone:          r.phone || null,
       street_address: r.streetAddress || null,
       city:           r.city || null,
       zip_code:       r.zip || null,
@@ -13775,10 +13801,25 @@ async function saveRnEdit(rId){
       vehicle_type:   r.vehicle,
       updated_at:     new Date().toISOString(),
     }).eq('id', rId)
-    // Geocode address and update anchor hex if address changed
+    // Geocode address and update anchor hex + lat/lng
     if(r.streetAddress && r.zip){
-      _rnGeocodeSaveAnchorAdmin(rId, r.streetAddress, r.city, r.zip)
+      _rnGeocodeSaveAnchorAdmin(rId, r.streetAddress, r.city, r.zip).then(() => {
+        // Refresh admin map runner coverage after geocode completes
+        if(window._adminMap && (window._adMapMode==='runners'||window._adMapMode==='both')){
+          ;(window._adMapRunnerLayers||[]).forEach(l=>{ try{l.remove()}catch(e){} })
+          window._adMapRunnerLayers = []
+          _adDrawRunnerCoverage(window._adminMap)
+        }
+      })
     }
+    // Also update runner_applications for consistency
+    try {
+      await _supa.from('runner_applications').update({
+        first_name: fn, last_name: ln, phone: r.phone||null,
+        street_address: r.streetAddress||null, city: r.city||null, zip_code: r.zip||null,
+        updated_at: new Date().toISOString(),
+      }).ilike('email', r.email)
+    } catch(e){ console.warn('[BinDash] runner_applications update:', e.message) }
   } catch(e){ console.warn('[BinDash] Runner update:', String(e?.message||e)) }
 
   // CRITICAL: Also write zone assignments to runner_zone_requests (keyed by email)
@@ -25258,8 +25299,8 @@ async function loadRunnersFromSupabase(){
         zip:           row.zip_code||'',
         streetAddress: row.street_address||'',
         city:          row.city||'',
-        lat:           row.lat ? parseFloat(row.lat) : null,
-        lng:           row.lng ? parseFloat(row.lng) : null,
+        lat:           parseFloat(row.lat||row.latitude||0) || null,
+        lng:           parseFloat(row.lng||row.longitude||0) || null,
         anchorHex6:    row.anchor_hex6||null,
         anchorHex7:    row.anchor_hex7||null,
         coverageHexes: (() => { try { const r=row.coverage_hexes; return r?(typeof r==='string'?JSON.parse(r):r):[] } catch(e){ return [] } })(),
@@ -26727,17 +26768,45 @@ async function assignRunnerFromRequest(zip, runnerEmailsCsv, zoneId, requestIdsC
   const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
   if(!zone){ showToast('Zone not found','err'); return }
 
-  const emails   = runnerEmailsCsv.split(',').filter(Boolean)
+  const emails   = runnerEmailsCsv.split(',').map(e=>e.trim().toLowerCase()).filter(Boolean)
   const reqIds   = requestIdsCsv.split(',').filter(Boolean)
-  const runners  = RUNNERS.filter(r => emails.includes(r.email))
+  // Case-insensitive email match
+  const runners  = RUNNERS.filter(r => r.email && emails.includes(r.email.trim().toLowerCase()))
 
-  if(!runners.length){ showToast('Runner not found in system — may need to be approved first','err'); return }
+  if(!runners.length){
+    // Try fetching from DB directly — runner may not be in in-memory RUNNERS yet
+    try {
+      const { data: dbRunners } = await _supa.from('runners')
+        .select('id,first_name,last_name,email,zip_code,zone_id,coverage_zones')
+        .in('email', emails.map(e=>e.toLowerCase()))
+      if(dbRunners?.length){
+        dbRunners.forEach(r => {
+          const existing = RUNNERS.find(x=>x.email?.toLowerCase()===r.email?.toLowerCase())
+          if(!existing){
+            RUNNERS.push({
+              id: r.id, name: ((r.first_name||'')+' '+(r.last_name||'')).trim()||r.email,
+              email: r.email, zip: r.zip_code||'', zoneId: r.zone_id||null,
+              coverageZones: (() => { try { return r.coverage_zones ? JSON.parse(r.coverage_zones) : [] } catch(e){ return [] } })(),
+              status:'AVAILABLE', initials:'??', color:'#6366f1',
+            })
+          }
+        })
+      }
+    } catch(e){ console.warn('[BinDash] DB runner fallback:', e.message) }
 
-  const names = runners.map(r=>r.name).join(', ')
+    const reFetched = RUNNERS.filter(r => r.email && emails.includes(r.email.trim().toLowerCase()))
+    if(!reFetched.length){
+      showToast('Runner not found — they may need to be fully approved in Pending Runners first','err', 5000)
+      return
+    }
+  }
+  const finalRunners = RUNNERS.filter(r => r.email && emails.includes(r.email.trim().toLowerCase()))
+
+  const names = finalRunners.map(r=>r.name).join(', ')
   if(!confirm('Assign '+names+' to zone "'+zone.name+'" (ZIP '+zip+')? They will be added to the dispatch pool for this zone.')){ return }
 
   try {
-    for(const runner of runners){
+    for(const runner of finalRunners){
       // Update runners table — add this zone to their coverage
       const existingCoverage = runner.coverageZones || (runner.zoneId ? [runner.zoneId] : [])
       if(!existingCoverage.includes(zoneId)) existingCoverage.push(zoneId)
@@ -26778,7 +26847,7 @@ async function assignRunnerFromRequest(zip, runnerEmailsCsv, zoneId, requestIdsC
     syncZoneData()
 
     // Email runners
-    for(const runner of runners){
+    for(const runner of finalRunners){
       if(runner.email) sendEmail(runner.email,
         'You\'ve been assigned to ' + zone.name,
         '<div style="font-family:sans-serif;padding:20px"><h2 style="color:#06d6a0">New Zone Assignment</h2><p>Hi '+runner.name.split(' ')[0]+',</p><p>You\'ve been added to the dispatch pool for <strong>'+zone.name+'</strong> (ZIP '+zip+'). You may now receive route offers for this area.</p><p>— The BinDash Team</p></div>',
@@ -26924,11 +26993,11 @@ async function renderRunnerZoneRequests(){
             <button onclick="showZoneEditModal('${existingZone.id}')" class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3)">
               ⚙ View Zone
             </button>
-            <button onclick="assignRunnerFromRequest('${zip}','${group.map(r=>r.runner_email).join(',')}','${existingZone.id}','${group.map(r=>r.id).join(',')}')"
-              class="btn btn-green btn-sm">
+            <button onclick="assignRunnerFromRequest('${zip}','${group.filter(r=>r.type!=='homeowner_waitlist').map(r=>r.runner_email).join(',')}','${existingZone.id}','${group.map(r=>r.id).join(',')}')"
+              class="btn btn-sm" style="background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.4);color:#22c55e">
               ✅ Assign Runner(s) to Zone
             </button>`}
-            <button onclick="dismissScoutFlags('${zip}')" class="btn btn-ghost btn-sm" style="color:var(--muted)">Dismiss</button>
+            <button onclick="dismissScoutFlags('${zip}', this)" class="btn btn-ghost btn-sm" style="color:var(--muted)">Dismiss</button>
           </div>
         </div>`
       }).join('')
@@ -26973,12 +27042,23 @@ async function renderRunnerZoneRequests(){
   }
 }
 
-async function dismissScoutFlags(zip){
-  await _supa.from('runner_zone_requests')
-    .update({ status:'reviewed', updated_at: new Date().toISOString() })
-    .eq('zip_code', zip).eq('status','pending')
-  renderRunnerZoneRequests()
-  showToast('Scout flags for ZIP '+zip+' marked reviewed','info')
+async function dismissScoutFlags(zip, btnEl){
+  // Immediately hide the card for instant feedback
+  const card = btnEl?.closest('[style*="border-left"]') || btnEl?.closest('.card')
+  if(card){ card.style.opacity='0.3'; card.style.pointerEvents='none' }
+
+  // Only dismiss runner scout flags — NOT homeowner waitlist entries
+  const { error } = await _supa.from('runner_zone_requests')
+    .update({ status:'dismissed', updated_at: new Date().toISOString() })
+    .eq('zip_code', zip)
+    .in('status', ['pending'])
+    .neq('type', 'homeowner_waitlist')
+
+  if(error){ console.warn('[BinDash] dismissScoutFlags:', error.message); if(card){ card.style.opacity='1'; card.style.pointerEvents='' } }
+  else {
+    showToast('Flags for ZIP '+zip+' dismissed','info')
+    setTimeout(() => renderRunnerZoneRequests(), 400)
+  }
 }
 
 
