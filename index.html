@@ -8756,7 +8756,7 @@ function drawRunnerHalos(map, runners){
 }
 
 // ── ADMIN MAP TOGGLE ────────────────────────────────────────────────────
-window._adMapMode         = 'customers'  // 'customers' | 'runners' | 'both'
+window._adMapMode         = 'both'  // 'customers' | 'runners' | 'both'
 window._adMapRunnerLayers = []           // Leaflet layers for runner coverage
 
 function adMapToggle(mode){
@@ -8843,31 +8843,32 @@ async function _adDrawRunnerCoverage(map){
         outline.addTo(map)
         layers.push(outline)
 
-        // Res-8 coverage hexes (selected service area)
+        // Res-8 coverage hexes — shade each selected service hex
         const hexes = r.coverageHexes || []
-        hexes.forEach(h => {
-          try {
-            const bd = h3.cellToBoundary(h).map(([la,ln])=>[la,ln])
-            const poly = L.polygon(bd, {
-              color:'#6366f1', fillColor:'rgba(99,102,241,.22)',
-              fillOpacity:1, weight:1, opacity:0.7,
-            }).addTo(map)
-            layers.push(poly)
-          } catch(e){}
-        })
-
-        // If no coverage hexes, shade res-7 children lightly
-        if(!hexes.length){
-          h3.cellToChildren(anchor6, 7).forEach(h7 => {
+        if(hexes.length){
+          hexes.forEach(h => {
             try {
-              const bd = h3.cellToBoundary(h7).map(([la,ln])=>[la,ln])
+              const bd = h3.cellToBoundary(h).map(([la,ln])=>[la,ln])
               const poly = L.polygon(bd, {
-                color:'rgba(99,102,241,.4)', fillColor:'rgba(99,102,241,.07)',
-                fillOpacity:1, weight:1, dashArray:'3,4',
+                color:'#818cf8', fillColor:'rgba(99,102,241,.30)',
+                fillOpacity:1, weight:1.5, opacity:0.9,
               }).addTo(map)
               layers.push(poly)
             } catch(e){}
           })
+        } else {
+          // No res-8 coverage stored — shade all res-8 children of res-6 lightly
+          // (shows runner's potential area)
+          try {
+            h3.cellToChildren(anchor6, 8).forEach(h8 => {
+              const bd = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
+              const poly = L.polygon(bd, {
+                color:'rgba(99,102,241,.35)', fillColor:'rgba(99,102,241,.08)',
+                fillOpacity:1, weight:1, dashArray:'2,4',
+              }).addTo(map)
+              layers.push(poly)
+            })
+          } catch(e){}
         }
 
         // Runner home pin
@@ -9081,55 +9082,65 @@ async function _initAdminMap(){
 
   window._adminHexLayers = []
 
-  // ── DRAW HEX CELLS ─────────────────────────────────────────────────────
+  // ── DRAW HEX CELLS at res-8 (same scale as runner coverage) ──────────────
   const bounds = []
+  // Aggregate HOs by res-8 hex for a cleaner view
+  const hoByHex8 = {}
+  geoHOs.forEach(ho => {
+    try {
+      const h8 = h3Ready ? h3.latLngToCell(ho.lat, ho.lng, 8) : null
+      const key = h8 || (ho.lat.toFixed(4)+','+ho.lng.toFixed(4))
+      if(!hoByHex8[key]) hoByHex8[key] = { h8, lat:ho.lat, lng:ho.lng, hos:[], status:'no activity', runnerId:null, runnerName:null }
+      const zone   = ADMIN_ZONES.find(z => z.id === ho.zoneId)
+      const runner = RUNNERS.find(r => r.id === ho.assignedRunner || r.name === ho.assignedRunner)
+      const st     = zone?.status==='live' ? 'active' : zone?.status==='waitlist' ? 'waitlist' : 'no activity'
+      if(st === 'active' || hoByHex8[key].status === 'no activity') hoByHex8[key].status = st
+      if(runner){ hoByHex8[key].runnerId = runner.id; hoByHex8[key].runnerName = runner.name }
+      hoByHex8[key].hos.push({
+        name: ((ho.first_name||'')+' '+(ho.last_name||'')).trim() || ho.email?.split('@')[0] || '--',
+        email: ho.email, address: ho.street_address||ho.address||'--',
+        zip: ho.zip||'', day: ho.day||'--',
+      })
+    } catch(e){}
+  })
 
-  Object.entries(window.homeownerData).forEach(([key, cell]) => {
+  Object.entries(hoByHex8).forEach(([key, cell]) => {
     try {
       const style = getZoneStyleGlobal(cell.status, !!cell.runnerId)
 
-      if(h3Ready && cell.h3Index){
-        // Anchor hex + 1-ring halo
-        const ring = h3.gridDisk(cell.h3Index, 1)
-        ring.forEach(hex => {
-          const isAnchor = hex === cell.h3Index
-          const boundary = h3.cellToBoundary(hex)
-          const latlngs  = boundary.map(([lt,ln]) => [lt,ln])
-          const hexStyle = { ...style, fillOpacity: isAnchor ? style.fillOpacity+.15 : style.fillOpacity*.4, weight: isAnchor ? 2 : 0.7 }
-          const poly = L.polygon(latlngs, hexStyle)
-          if(isAnchor){
-            cell.poly = poly
-            _bindHexPopup(poly, cell, key)
-            bounds.push(...latlngs)
-          }
-          poly.addTo(window._adminMap)
-          window._adminHexLayers.push(poly)
+      if(h3Ready && cell.h8){
+        // Draw the res-8 hex
+        const boundary = h3.cellToBoundary(cell.h8).map(([lt,ln]) => [lt,ln])
+        const poly = L.polygon(boundary, {
+          color: style.color, fillColor: style.fillColor,
+          fillOpacity: style.fillOpacity + 0.15,
+          weight: 2, opacity: 1,
         })
-      } else {
-        // Fallback circle
-        const c = L.circleMarker([cell.lat, cell.lng], { ...style, radius:10 })
-        _bindHexPopup(c, cell, key)
-        c.addTo(window._adminMap)
-        window._adminHexLayers.push(c)
-        bounds.push([cell.lat, cell.lng])
+        // Build popup manually (cell structure compatible with _bindHexPopup)
+        const fakeCellForPopup = { ...cell, homeowners: cell.hos, zone: ADMIN_ZONES.find(z=>z.id===cell.hos[0]?.zoneId)||null }
+        _bindHexPopup(poly, fakeCellForPopup, key)
+        poly.addTo(window._adminMap)
+        window._adminHexLayers.push(poly)
+        bounds.push(...boundary)
       }
 
-      // Anchor marker (star pin)
-      const pinStyle = getZoneStyleGlobal(cell.status, !!cell.runnerId)
+      // HO count dot marker
+      const count = cell.hos.length
+      const dotColor = cell.status==='active' ? '#22c55e' : cell.status==='waitlist' ? '#f59e0b' : '#64748b'
       const rnBadge = cell.runnerName
-        ? `<div style="position:absolute;bottom:-3px;right:-3px;width:14px;height:14px;background:#06d6a0;border:2px solid #0f172a;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px">🚐</div>`
+        ? '<div style="position:absolute;bottom:-2px;right:-2px;width:12px;height:12px;background:#06d6a0;border:1.5px solid #07090f;border-radius:50%;font-size:7px;display:flex;align-items:center;justify-content:center">🚐</div>'
         : ''
       const pin = L.divIcon({
-        html: `<div style="position:relative;width:20px;height:20px"><div style="width:20px;height:20px;background:${pinStyle.color};border:2.5px solid #0f172a;border-radius:50%;box-shadow:0 2px 8px ${pinStyle.color}70;display:flex;align-items:center;justify-content:center;font-size:10px">⭐</div>${rnBadge}</div>`,
-        className: '', iconAnchor:[10,10],
+        html: '<div style="position:relative"><div style="width:22px;height:22px;background:'+dotColor+';border:2px solid #07090f;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#07090f;box-shadow:0 0 6px '+dotColor+'88">'+count+'</div>'+rnBadge+'</div>',
+        className: '', iconAnchor:[11,11],
       })
-      const m = L.marker([cell.lat, cell.lng], {icon:pin})
-      _bindHexPopup(m, cell, 'pin:'+key)
+      const m = L.marker([cell.lat, cell.lng], { icon:pin })
+      _bindHexPopup(m, { ...cell, homeowners:cell.hos }, 'pin:'+key)
       m.addTo(window._adminMap)
       window._adminHexLayers.push(m)
     } catch(e){ console.warn('[Map] Draw error:', e.message) }
   })
-  console.log('[Map] Drew', window._adminHexLayers.length, 'layers')
+  console.log('[Map] Drew', window._adminHexLayers.length, 'HO layers at res-8')
 
   // ── ZONE FALLBACK — no geocoded HOs ────────────────────────────────────
   ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
@@ -9174,6 +9185,14 @@ async function _initAdminMap(){
   doInvalidate()
   setTimeout(doInvalidate, 100)
   setTimeout(doInvalidate, 400)
+
+  // Draw runner coverage overlay — default 'both' mode
+  if(window._adMapMode === 'both' || window._adMapMode === 'runners'){
+    _adDrawRunnerCoverage(window._adminMap)
+  }
+  // Sync toggle button styles to current mode
+  adMapToggle(window._adMapMode)
+  console.log('[Map] Init complete')
   setTimeout(doInvalidate, 900)
   console.log('[Map] Init complete ✅')
 }
@@ -11037,7 +11056,9 @@ async function renderRunnerHeatmap(){
   window._rnHeatLayers  = { active:[], demand:[], runner:[], open:[] }
   window._rnHeatHexMeta = {}
   window._rnHeatSelected.clear()
-  _rnUpdateClaimBar()
+  // Reset claim bar safely — hide existing one if present
+  const existingBar = document.getElementById('rn-heat-claim-bar')
+  if(existingBar) existingBar.style.display = 'none'
 
   const mapEl = document.getElementById('rn-heat-map')
   if(!mapEl) return
@@ -11518,8 +11539,19 @@ function _rnUpdateClaimBar(){
     bar = document.createElement('div')
     bar.id = 'rn-heat-claim-bar'
     bar.style.cssText = 'position:sticky;bottom:70px;left:0;right:0;margin:12px 0;background:linear-gradient(135deg,rgba(6,214,160,.15),rgba(99,102,241,.1));border:1.5px solid rgba(6,214,160,.4);border-radius:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;z-index:100;backdrop-filter:blur(8px)'
+    // Insert before the flag-an-area divider or append to scout page
     const scoutEl = document.getElementById('rn-scout')
-    if(scoutEl) scoutEl.insertBefore(bar, scoutEl.querySelector('#rn-scout-history'))
+    if(scoutEl){
+      // Try to insert before the "Flag an area" divider (safer than history-wrap)
+      const divider = scoutEl.querySelector('#rn-scout-history-wrap') ||
+                      scoutEl.querySelector('.btn-cyan[onclick*="submitScoutFlag"]')?.closest('div') ||
+                      null
+      if(divider && divider.parentNode === scoutEl){
+        scoutEl.insertBefore(bar, divider)
+      } else {
+        scoutEl.appendChild(bar)
+      }
+    }
   }
   if(count === 0){
     bar.style.display = 'none'
