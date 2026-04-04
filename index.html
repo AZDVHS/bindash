@@ -3676,6 +3676,24 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           </div>
 
           <!-- Map -->
+          <!-- Zone selection panel (shown when runner taps a res-6 zone) -->
+          <div id="rn-zone-select-panel" style="display:none;background:var(--surface);border:1.5px solid rgba(6,214,160,.3);border-radius:12px;padding:14px;margin-bottom:10px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div>
+                <div style="font-size:14px;font-weight:700;color:var(--cyan)" id="rn-zsp-title">Configuring Zone</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px" id="rn-zsp-sub">Tap res-8 hexes to include/exclude from your coverage</div>
+              </div>
+              <button onclick="_rnZspClose()" style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer">✕</button>
+            </div>
+            <div style="font-size:11px;color:var(--sub);margin-bottom:10px;line-height:1.6" id="rn-zsp-info"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-cyan btn-sm" onclick="_rnZspAccept()">✅ Accept Zone Coverage</button>
+              <button class="btn btn-ghost btn-sm" onclick="_rnZspSelectAll()">Select All</button>
+              <button class="btn btn-ghost btn-sm" onclick="_rnZspClearAll()">Clear All</button>
+              <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="_rnZspClose()">Cancel</button>
+            </div>
+          </div>
+
           <div style="border-radius:12px;overflow:hidden;border:1.5px solid var(--border2);margin-bottom:14px;position:relative">
             <div id="rn-heat-map" style="height:380px;width:100%;background:#0a0e18"></div>
             <div id="rn-heat-loading" style="position:absolute;inset:0;background:rgba(7,9,15,.8);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;z-index:500">
@@ -8814,6 +8832,28 @@ async function _adDrawRunnerCoverage(map){
       }
     }
     // Also derive from zone ZIP
+    // Draw ALL zones this runner covers (primary + additional from coverageZones)
+    const allRunnerZoneIds = [...new Set([r.zoneId, ...(r.coverageZones||[])].filter(Boolean))]
+    allRunnerZoneIds.slice(1).forEach(extraZoneId => {
+      if(extraZoneId === r.zoneId) return
+      const ez = ADMIN_ZONES.find(z=>z.id===extraZoneId)
+      const ezip = ez?.zips?.[0] || ez?.zip || ''
+      const ectr = ZIP_CENTROIDS[ezip]
+      if(!ectr) return
+      try {
+        const ea7 = h3.latLngToCell(ectr[0], ectr[1], 7)
+        const ea6 = h3.cellToParent(ea7, 6)
+        const eb6 = h3.cellToBoundary(ea6).map(([la,ln])=>[la,ln])
+        const eOutline = L.polygon(eb6, {
+          color:'#a78bfa', fillColor:'rgba(167,139,250,.07)', fillOpacity:1,
+          weight:2, dashArray:'4,3', opacity:0.75,
+        })
+        eOutline.bindTooltip('<div style="font-size:11px"><strong style="color:#a78bfa">🚐 '+name+'</strong><br>Additional zone: '+(ez?.name||ezip)+'</div>', { direction:'top', className:'h3-tip' })
+        eOutline.addTo(map)
+        layers.push(eOutline)
+      } catch(e){}
+    })
+
     if(!anchor6 && r.zoneId){
       const zone = ADMIN_ZONES.find(z=>z.id===r.zoneId)
       const zip  = zone?.zips?.[0] || zone?.zip || ''
@@ -10636,7 +10676,7 @@ window._rnHeatZones    = []   // raw classified zone objects
 //   anchor = res-7 hex containing home address (always selected)
 // ================================================================
 const RN_PICKER_RES_BOUNDARY  = 6   // res-6 defines outer limit
-const RN_PICKER_RES_SELECT    = 7   // res-7 hexes runner picks from
+const RN_PICKER_RES_SELECT    = 8   // res-8 hexes runner picks from (matches heatmap scale)
 
 // Shared state — used by onboarding AND My Zones editor
 window._rnPickerAnchorHex6   = null   // res-6 boundary hex
@@ -10733,7 +10773,8 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   window._rnPickerMapElId  = mapElId
 
   // Compute anchors
-  const anchor7 = h3.latLngToCell(lat, lng, RN_PICKER_RES_SELECT)
+  const anchor8 = h3.latLngToCell(lat, lng, RN_PICKER_RES_SELECT)  // now res-8
+  const anchor7 = anchor8  // alias kept for compat
   const anchor6 = h3.cellToParent(anchor7, RN_PICKER_RES_BOUNDARY)
   window._rnPickerAnchorHex7 = anchor7
   window._rnPickerAnchorHex6 = anchor6
@@ -10836,7 +10877,13 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   // Draw all res-7 children + a buffer ring outside (shown as locked)
   const allToDraw = new Set(selectableChildren)
   // Add 1-ring outside res-6 children so the boundary is visible
-  try { h3.gridDisk(anchor7, Math.ceil(selectableChildren.length / 6) + 2).forEach(h => allToDraw.add(h)) } catch(e){}
+  // Only draw selectable children + 1 thin ring outside for context
+
+  // Also add 1-ring outside the res-6 boundary for visual context (shown as locked)
+  try {
+    h3.gridDisk(h3.cellToParent(anchor8, RN_PICKER_RES_SELECT), 1)
+      .forEach(h => { if(!selectableSet.has(h)) allToDraw.add(h) })
+  } catch(e){}
 
   allToDraw.forEach(hexId => {
     _rnPickerDrawHex(map, hexId, selectableSet, opts)
@@ -11449,6 +11496,12 @@ function _rnDrawHex(map, hexId, opts){
 }
 
 function _rnHexTap(hexId, typeLabel, opts){
+  // Check if we're in zone-select mode — if so, delegate to zone selector
+  if(window._rnZspHex6){
+    // In zone selection mode — taps go to the zone overlay handler, not the main selector
+    return
+  }
+
   const isSelected = window._rnHeatSelected.has(hexId)
 
   if(isSelected){
@@ -11502,16 +11555,20 @@ function _rnHexTap(hexId, typeLabel, opts){
     claimBtn.onclick = function(){ _rnClaimSelected() }
     actions.appendChild(claimBtn)
   }
-  if(canRequest || (opts.dimmed && (opts.type==='demand'||opts.type==='open'))){
-    // Outside current boundary — runner can request to activate a new res-6 zone
-    const reqBtn = document.createElement('button')
-    reqBtn.className = 'btn btn-outline btn-sm'
-    reqBtn.style.color = '#fbbf24'
-    reqBtn.style.borderColor = 'rgba(251,191,36,.4)'
-    reqBtn.textContent = 'Request Zone Activation'
-    reqBtn.title = 'Ask admin to activate this area as a new service zone for you'
-    reqBtn.onclick = function(){ _rnRequestZoneActivation(hexId, opts.zone) }
-    actions.appendChild(reqBtn)
+  // "Select Zone" — opens the res-6 zone configurator
+  if(opts.type==='demand' || opts.type==='open' || opts.dimmed){
+    const hex6Btn = document.createElement('button')
+    hex6Btn.className = 'btn btn-outline btn-sm'
+    hex6Btn.style.cssText = 'color:#fbbf24;border-color:rgba(251,191,36,.4)'
+    hex6Btn.textContent = opts.inBoundary ? '🗺️ Configure Zone' : '🗺️ Request Zone'
+    hex6Btn.title = 'Select which res-8 hexes in this zone you want to cover'
+    hex6Btn.onclick = function(){
+      try {
+        const hex6 = h3.cellToParent(hexId, 6)
+        _rnZspOpen(hex6, opts.zone)
+      } catch(e){ showToast('Could not open zone selector', 'err') }
+    }
+    actions.appendChild(hex6Btn)
   }
   const clearBtn = document.createElement('button')
   clearBtn.className = 'btn btn-ghost btn-sm'
@@ -11584,6 +11641,177 @@ function rnHeatToggle(type){
   layers.forEach(l => { isOn ? l.addTo(map) : l.remove() })
   const leg = document.getElementById('rn-heat-leg-'+type)
   if(leg) leg.style.opacity = isOn ? '1' : '0.35'
+}
+
+// ── RES-6 ZONE SELECTION FLOW ────────────────────────────────────────────
+// When runner taps a res-6 cluster: show all res-8 children, default all selected
+// Runner can toggle individual res-8 hexes, then Accept to claim the whole zone
+
+window._rnZspHex6         = null    // current res-6 being configured
+window._rnZspChildren     = []      // all res-8 children of that hex6
+window._rnZspPendingHexes = new Set() // which res-8 hexes runner wants
+window._rnZspLayers       = {}      // hexId -> poly for the zone selection overlay
+
+async function _rnZspOpen(hex6, zone){
+  if(!hex6 || typeof h3 === 'undefined') return
+  window._rnZspHex6 = hex6
+
+  // Get all res-8 children
+  let children = []
+  try { children = h3.cellToChildren(hex6, 8) } catch(e){ return }
+  window._rnZspChildren = children
+
+  // Default: all selected
+  window._rnZspPendingHexes = new Set(children)
+
+  // Show panel
+  const panel = document.getElementById('rn-zone-select-panel')
+  const title = document.getElementById('rn-zsp-title')
+  const info  = document.getElementById('rn-zsp-info')
+  if(panel) panel.style.display = 'block'
+  if(title) title.textContent = zone?.zone_label || ('Zone ···'+hex6.slice(-6))
+
+  // Load HO data for these hexes
+  const hoMap = {}
+  try {
+    const { data: hos } = await _supa.from('homeowners').select('h3_index,status').limit(3000)
+    if(hos) hos.forEach(h => {
+      if(!h.h3_index) return
+      try {
+        const p8 = h3.getResolution(h.h3_index) === 8 ? h.h3_index : h3.cellToParent(h.h3_index, 8)
+        if(children.includes(p8)) hoMap[p8] = (hoMap[p8]||0)+1
+      } catch(e){}
+    })
+  } catch(e){}
+
+  const totalHOs = Object.values(hoMap).reduce((a,b)=>a+b,0)
+  if(info) info.innerHTML = children.length + ' res-8 hexes · ' + totalHOs + ' homeowner' + (totalHOs!==1?'s':'') + ' in area' +
+    (totalHOs > 0 ? ' <span style="color:var(--cyan)">· Demand confirmed ✅</span>' : '') +
+    '<br>Deselect any areas you do not want to cover, then tap Accept.'
+
+  // Draw the selection overlay on top of the heatmap
+  _rnZspDrawOverlay(children, hoMap)
+
+  // Scroll panel into view
+  panel?.scrollIntoView({ behavior:'smooth', block:'nearest' })
+}
+
+function _rnZspDrawOverlay(children, hoMap){
+  const map = window._rnHeatMap
+  if(!map || typeof L === 'undefined') return
+
+  // Clear previous overlays
+  Object.values(window._rnZspLayers).forEach(l => { try { l.remove() } catch(e){} })
+  window._rnZspLayers = {}
+
+  children.forEach(h8 => {
+    let bd
+    try { bd = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln]) } catch(e){ return }
+    const isSelected = window._rnZspPendingHexes.has(h8)
+    const hasHOs = (hoMap[h8]||0) > 0
+    const poly = L.polygon(bd, _rnZspStyle(isSelected, hasHOs))
+    poly.addTo(map)
+    poly.on('click', () => {
+      if(window._rnZspPendingHexes.has(h8)){
+        window._rnZspPendingHexes.delete(h8)
+      } else {
+        window._rnZspPendingHexes.add(h8)
+      }
+      poly.setStyle(_rnZspStyle(window._rnZspPendingHexes.has(h8), hasHOs))
+      _rnZspUpdateCount()
+    })
+    window._rnZspLayers[h8] = poly
+  })
+  _rnZspUpdateCount()
+
+  // Fit map to this hex6
+  try {
+    const b6 = h3.cellToBoundary(window._rnZspHex6).map(([la,ln])=>[la,ln])
+    map.fitBounds(L.polygon(b6).getBounds(), { padding:[20,20] })
+  } catch(e){}
+}
+
+function _rnZspStyle(isSelected, hasHOs){
+  if(isSelected && hasHOs)  return { color:'#22c55e', fillColor:'#22c55e',  fillOpacity:0.50, weight:2 }
+  if(isSelected)             return { color:'#06d6a0', fillColor:'#06d6a0',  fillOpacity:0.35, weight:2 }
+  return { color:'rgba(255,255,255,.3)', fillColor:'rgba(255,255,255,.04)', fillOpacity:1, weight:1, dashArray:'3,4' }
+}
+
+function _rnZspUpdateCount(){
+  const count = window._rnZspPendingHexes.size
+  const sub   = document.getElementById('rn-zsp-sub')
+  if(sub) sub.textContent = count + ' of ' + window._rnZspChildren.length + ' hexes selected'
+}
+
+function _rnZspSelectAll(){
+  window._rnZspChildren.forEach(h => window._rnZspPendingHexes.add(h))
+  Object.entries(window._rnZspLayers).forEach(([h8, poly]) => {
+    poly.setStyle(_rnZspStyle(true, false))
+  })
+  _rnZspUpdateCount()
+}
+
+function _rnZspClearAll(){
+  window._rnZspPendingHexes.clear()
+  window._rnPickerAnchorHex7 && window._rnZspPendingHexes.add(window._rnPickerAnchorHex7)
+  Object.entries(window._rnZspLayers).forEach(([h8, poly]) => {
+    poly.setStyle(_rnZspStyle(false, false))
+  })
+  _rnZspUpdateCount()
+}
+
+function _rnZspClose(){
+  Object.values(window._rnZspLayers).forEach(l => { try { l.remove() } catch(e){} })
+  window._rnZspLayers = {}
+  window._rnZspHex6 = null
+  window._rnZspPendingHexes.clear()
+  const panel = document.getElementById('rn-zone-select-panel')
+  if(panel) panel.style.display = 'none'
+}
+
+async function _rnZspAccept(){
+  const hexes = [...window._rnZspPendingHexes]
+  if(!hexes.length){ showToast('Select at least one hex', 'err'); return }
+
+  const runner  = window._rnRow || {}
+  const email   = runner.email || currentUser?.email
+  const name    = ((runner.first_name||'')+' '+(runner.last_name||'')).trim() || 'Runner'
+  if(!email){ showToast('Please log in first', 'err'); return }
+
+  const hex6    = window._rnZspHex6
+  const zone    = null  // zone will be resolved by admin
+
+  // Compute zip from hex6 centroid
+  let zip = ''
+  try {
+    const ctr = h3.cellToLatLng(hex6)
+    // Find nearest known ZIP
+    let bestDist = Infinity
+    Object.entries(ZIP_CENTROIDS).forEach(([z, [la, ln]]) => {
+      const d = Math.abs(la-ctr[0]) + Math.abs(ln-ctr[1])
+      if(d < bestDist){ bestDist=d; zip=z }
+    })
+  } catch(e){}
+
+  try {
+    await _supa.from('runner_zone_requests').insert({
+      runner_email:    email,
+      runner_name:     name,
+      zip_code:        zip,
+      zone_id:         null,
+      zone_name:       'Zone ···' + hex6.slice(-6),
+      status:          'pending',
+      type:            'zone_activation',
+      notes:           'Runner selected res-6 zone ' + hex6 + ' with ' + hexes.length + ' res-8 hexes',
+      requested_hexes: JSON.stringify(hexes),
+      created_at:      new Date().toISOString(),
+    })
+    showToast('Zone request submitted ✅ — admin will assign you to this area', 'ok', 5000)
+    _rnZspClose()
+    renderRunnerScoutPanel()
+  } catch(e){
+    showToast('Could not submit: '+String(e?.message||e), 'err')
+  }
 }
 
 async function _rnRequestZoneActivation(hexId, zone){
@@ -26331,6 +26559,91 @@ function _renderZoneGrid(){
   </div>`
 }
 
+async function assignRunnerFromRequest(zip, runnerEmailsCsv, zoneId, requestIdsCsv){
+  const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+  if(!zone){ showToast('Zone not found','err'); return }
+
+  const emails   = runnerEmailsCsv.split(',').filter(Boolean)
+  const reqIds   = requestIdsCsv.split(',').filter(Boolean)
+  const runners  = RUNNERS.filter(r => emails.includes(r.email))
+
+  if(!runners.length){ showToast('Runner not found in system — may need to be approved first','err'); return }
+
+  const names = runners.map(r=>r.name).join(', ')
+  if(!confirm('Assign '+names+' to zone "'+zone.name+'" (ZIP '+zip+')? They will be added to the dispatch pool for this zone.')){ return }
+
+  try {
+    for(const runner of runners){
+      // Update runners table — add this zone to their coverage
+      const existingCoverage = runner.coverageZones || (runner.zoneId ? [runner.zoneId] : [])
+      if(!existingCoverage.includes(zoneId)) existingCoverage.push(zoneId)
+
+      await _supa.from('runners').update({
+        zone_id:        runner.zoneId || zoneId,  // keep primary zone, add this as coverage
+        coverage_zones: JSON.stringify(existingCoverage),
+        updated_at:     new Date().toISOString(),
+      }).ilike('email', runner.email)
+
+      // Update in-memory
+      runner.coverageZones = existingCoverage
+      if(!runner.zoneId) runner.zoneId = zoneId
+
+      // Write approved zone request
+      await _supa.from('runner_zone_requests').upsert({
+        runner_email: runner.email,
+        runner_name:  runner.name,
+        zip_code:     zip,
+        zone_id:      zoneId,
+        zone_name:    zone.name,
+        status:       'approved',
+        zone_role:    'runner',
+        updated_at:   new Date().toISOString(),
+      }, { onConflict: 'runner_email,zone_id' })
+    }
+
+    // Mark original requests as approved
+    for(const reqId of reqIds){
+      await _supa.from('runner_zone_requests').update({
+        status:     'approved',
+        updated_at: new Date().toISOString(),
+      }).eq('id', reqId)
+    }
+
+    // Increment zone runner count
+    zone.runners = (zone.runners||0) + runners.length
+    syncZoneData()
+
+    // Email runners
+    for(const runner of runners){
+      if(runner.email) sendEmail(runner.email,
+        'You\'ve been assigned to ' + zone.name,
+        '<div style="font-family:sans-serif;padding:20px"><h2 style="color:#06d6a0">New Zone Assignment</h2><p>Hi '+runner.name.split(' ')[0]+',</p><p>You\'ve been added to the dispatch pool for <strong>'+zone.name+'</strong> (ZIP '+zip+'). You may now receive route offers for this area.</p><p>— The BinDash Team</p></div>',
+        'runner_zone_assigned'
+      )
+    }
+
+    showToast(names+' assigned to '+zone.name+' ✅', 'ok', 5000)
+    renderRunnerZoneRequests()
+    renderRunnerList()
+  } catch(e){
+    showToast('Assignment failed: '+String(e?.message||e), 'err')
+  }
+}
+
+function showZoneEditModal(zoneId){
+  const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+  if(!zone){ showToast('Zone not found','err'); return }
+  // Navigate to zones tab and highlight this zone
+  adNav(null,'ad-zones')
+  zonesTab('classic')
+  setTimeout(()=>{
+    const card = document.getElementById('zc-'+zoneId) || document.querySelector('[data-zone-id="'+zoneId+'"]')
+    if(card){ card.scrollIntoView({behavior:'smooth',block:'center'}); card.style.outline='2px solid var(--cyan)'; setTimeout(()=>card.style.outline='',2000) }
+    showToast('Zone: '+zone.name, 'info', 3000)
+  }, 300)
+}
+
+
 async function renderRunnerZoneRequests(){
   const el       = document.getElementById('rzr-list')
   const overview = document.getElementById('rzr-overview')
@@ -26443,8 +26756,13 @@ async function renderRunnerZoneRequests(){
             <button onclick="showCreateZone({zip:'${zip}',city:'${zip} Area',status:'live',hwCount:${hwWaiting}});dismissScoutFlags('${zip}')"
               class="btn btn-cyan btn-sm">
               ⚡ Create Live Zone
-            </button>`:`<button onclick="showZoneEditModal('${existingZone.id}')" class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3)">
-              ⚙ View Existing Zone
+            </button>`:`
+            <button onclick="showZoneEditModal('${existingZone.id}')" class="btn btn-sm" style="background:rgba(6,214,160,.1);color:var(--cyan);border:1px solid rgba(6,214,160,.3)">
+              ⚙ View Zone
+            </button>
+            <button onclick="assignRunnerFromRequest('${zip}','${group.map(r=>r.runner_email).join(',')}','${existingZone.id}','${group.map(r=>r.id).join(',')}')"
+              class="btn btn-green btn-sm">
+              ✅ Assign Runner(s) to Zone
             </button>`}
             <button onclick="dismissScoutFlags('${zip}')" class="btn btn-ghost btn-sm" style="color:var(--muted)">Dismiss</button>
           </div>
