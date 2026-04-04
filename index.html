@@ -3680,11 +3680,18 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             </div>
           </div>
 
-          <!-- Mode: Expand — context card -->
+          <!-- Mode: Expand — context card + anchor zone selector -->
           <div id="rn-scout-ctx-expand" style="display:none;margin-bottom:10px">
-            <div style="background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);border-radius:9px;padding:10px 13px;font-size:12px;color:var(--sub);line-height:1.6">
+            <div style="background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);border-radius:9px;padding:10px 13px;font-size:12px;color:var(--sub);line-height:1.6;margin-bottom:8px">
               <strong style="color:#fbbf24">Tap any greyed res-6 zone</strong> outside your area to request it. You will be added as a secondary runner once admin approves.
               Zones with 🟡 amber hexes have homeowner demand — good targets.
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:11px">
+              <span style="color:var(--muted);flex-shrink:0">Expand from:</span>
+              <select id="rn-scout-anchor-zone" onchange="renderRunnerHeatmap()"
+                style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:4px 8px;font-size:11px">
+                <option value="home">My Home Location</option>
+              </select>
             </div>
           </div>
 
@@ -11471,8 +11478,37 @@ async function renderRunnerHeatmap(){
 
   let anchorLat = null, anchorLng = null
 
-  // Try cached anchor hex first (set from address save)
-  if(window._rnAnchorHex6 && typeof h3 !== 'undefined'){
+  // Build anchor zone selector options from runner's approved zones
+  const anchorSel = document.getElementById('rn-scout-anchor-zone')
+  if(anchorSel && mode === 'expand'){
+    const currentVal = anchorSel.value || 'home'
+    const approvedZoneIds = (() => {
+      try {
+        const czRaw = rnRow.coverage_zones
+        return czRaw ? (typeof czRaw==='string'?JSON.parse(czRaw):czRaw) : (rnRow.zone_id ? [rnRow.zone_id] : [])
+      } catch(e){ return rnRow.zone_id ? [rnRow.zone_id] : [] }
+    })()
+    const opts = ['<option value="home">My Home Location</option>']
+    approvedZoneIds.forEach(zid => {
+      const z = ADMIN_ZONES.find(x=>x.id===zid)
+      if(!z) return
+      opts.push('<option value="'+zid+'"'+(currentVal===zid?' selected':'')+'>'+z.name+' ('+( z.zips?.[0]||z.zip||'--')+')</option>')
+    })
+    anchorSel.innerHTML = opts.join('')
+  }
+
+  // Determine anchor based on selected zone (in expand mode) or home (mine mode)
+  const selectedAnchorZoneId = mode==='expand' ? (anchorSel?.value||'home') : 'home'
+  if(selectedAnchorZoneId !== 'home'){
+    // Use selected zone's ZIP centroid as anchor
+    const selZone = ADMIN_ZONES.find(z=>z.id===selectedAnchorZoneId)
+    const selZip  = selZone?.zips?.[0] || selZone?.zip || ''
+    const selCtr  = ZIP_CENTROIDS[selZip]
+    if(selCtr){ anchorLat = selCtr[0]; anchorLng = selCtr[1] }
+  }
+
+  // Try cached anchor hex first (home location)
+  if(!anchorLat && window._rnAnchorHex6 && typeof h3 !== 'undefined'){
     try {
       const ctr = h3.cellToLatLng(window._rnAnchorHex6)
       anchorLat = ctr[0]; anchorLng = ctr[1]
@@ -13608,6 +13644,53 @@ function showAdminSetPriority(zoneId){
   openM()
 }
 
+// ── Auto-promote to lead if only runner in zone ──────────────────────────────
+// Called after any runner assignment. If this zone now has exactly 1 runner,
+// automatically set them as lead so dispatch always has a primary target.
+async function _autoLeadIfOnlyRunner(zoneId){
+  if(!zoneId) return
+  const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+  if(!zone) return
+
+  // Count runners assigned to this zone
+  const zoneRunners = RUNNERS.filter(r =>
+    r.status !== 'INACTIVE' && (r.zoneId===zoneId || r.coverageZones?.includes(zoneId))
+  )
+
+  if(zoneRunners.length === 1){
+    const r = zoneRunners[0]
+    const alreadyLead = r.zoneRoles?.[zoneId]?.role === 'lead' || r.isPriority
+    if(alreadyLead) return
+
+    console.log('[BinDash] Auto-promoting sole runner to lead:', r.name, '->', zone.name)
+
+    // Set in-memory
+    if(!r.zoneRoles) r.zoneRoles = {}
+    r.zoneRoles[zoneId] = { role:'lead', order:1, referrals:0 }
+    r.isPriority = true
+    zone.assignedRunner   = r.id
+    zone.priorityRunnerId = r.id
+
+    // Persist to DB
+    try {
+      await _supa.from('zones').update({
+        assigned_runner: r.id, updated_at: new Date().toISOString(),
+      }).eq('id', zoneId)
+
+      await _supa.from('runner_zone_requests').upsert({
+        runner_email: r.email, runner_name: r.name,
+        zone_id: zoneId, zone_name: zone.name, zip_code: r.zip||'',
+        status: 'approved', zone_role: 'lead', zone_order: 1,
+        promotion_reason: 'Auto-lead: only runner in zone',
+        updated_at: new Date().toISOString(), created_at: new Date().toISOString(),
+      }, { onConflict: 'runner_email,zone_id' })
+
+      dbSaveZone(zone)
+      console.log('[BinDash] Auto-lead set ✅', r.name, 'for', zone.name)
+    } catch(e){ console.warn('[BinDash] auto-lead persist:', e.message) }
+  }
+}
+
 async function adminUpdateZoneRole(zoneId, runnerId, newRole, newOrder){
   console.log('[BinDash] adminUpdateZoneRole called:', zoneId, runnerId, newRole, newOrder)
   const r = RUNNERS.find(x=>x.id===runnerId)
@@ -13706,17 +13789,23 @@ async function adminUpdateZoneRole(zoneId, runnerId, newRole, newOrder){
     }
   }
 
-  // CRITICAL: Persist zone assignment to DB (was missing — caused "doesn't save" bug)
+  // Persist to DB — always update zones table directly (most reliable path)
   if(zone) {
     dbSaveZone(zone)
-    // Also directly update zones table assigned_runner for instant dispatch
     if(newRole === 'lead' && r.id){
+      // Update zones.assigned_runner
       _supa.from('zones').update({
-        assigned_runner: r.id,
-        updated_at: new Date().toISOString(),
+        assigned_runner: r.id, updated_at: new Date().toISOString(),
       }).eq('id', zoneId).then(res => {
         if(res.error) console.warn('[BinDash] zones assigned_runner update:', res.error.message)
         else console.log('[BinDash] zones.assigned_runner updated ✅', r.name, '->', zone.name)
+      })
+      // Also update runners table so dispatch knows this runner owns this zone
+      _supa.from('runners').update({
+        zone_id: zoneId, updated_at: new Date().toISOString(),
+      }).ilike('email', r.email).then(res => {
+        if(res.error) console.warn('[BinDash] runners.zone_id update:', res.error.message)
+        else console.log('[BinDash] runners.zone_id set to', zone.name)
       })
     }
   }
@@ -27202,6 +27291,9 @@ async function assignRunnerFromRequest(zip, runnerEmailsCsv, zoneId, requestIdsC
         'runner_zone_assigned'
       )
     }
+
+    // Auto-promote to lead if this is the only runner in the zone
+    for(const runner of finalRunners) await _autoLeadIfOnlyRunner(zoneId)
 
     showToast(names+' assigned to '+zone.name+' ✅', 'ok', 5000)
     renderRunnerZoneRequests()
