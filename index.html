@@ -11522,118 +11522,143 @@ async function renderRunnerHeatmap(){
     } catch(e){}
   }
 
-  // ── 4. Build draw set — ALL zones shown, boundary used for styling only ──
-  // Distance limit: ~25 miles = ~40km from anchor
-  const MAX_KM = 40
-  const drawSet = new Map()  // res-8 hexId -> { hoCount, hasRunner, zone, inBoundary }
-
-  // Helper: distance check from anchor
-  const withinRange = (h8) => {
-    if(!anchorLat) return true  // no anchor = show all
-    try {
-      const ctr = h3.cellToLatLng(h8)
-      const dLat = (ctr[0]-anchorLat)*111
-      const dLng = (ctr[1]-anchorLng)*111*Math.cos(anchorLat*Math.PI/180)
-      return Math.sqrt(dLat*dLat+dLng*dLng) <= MAX_KM
-    } catch(e){ return true }
+  // ── 4. CONSTRAINED DRAW: runner's res-6 + 1-ring adjacent res-6 zones only ──
+  if(!hasBoundary){
+    if(loadEl){ loadEl.style.display='flex'; loadEl.innerHTML='<div style="text-align:center;padding:20px"><div style="font-size:20px;margin-bottom:8px">📍</div><div style="font-size:13px;color:#fbbf24">Add your home address in My Info to see your zone</div></div>' }
+    return
   }
 
-  // Seed from HO hexes
-  Object.entries(hoHexes).forEach(([h8, cnt]) => {
-    if(!withinRange(h8)) return
-    if(!drawSet.has(h8)) drawSet.set(h8, { hoCount:0, hasRunner:false, zone:null, runnerNames:[], inBoundary: boundarySet.has(h8) })
-    drawSet.get(h8).hoCount += cnt
-  })
+  // Compute the adjacent res-6 ring (1 ring of res-6 neighbours)
+  let adjacentRes6 = []
+  try { adjacentRes6 = h3.gridRing(boundary6Hex, 1) } catch(e){}
+  const adjacentRes6Set = new Set(adjacentRes6)
 
-  // Mark runner coverage
-  runnerHexes.forEach(h8 => {
-    if(!withinRange(h8)) return
-    if(!drawSet.has(h8)) drawSet.set(h8, { hoCount:0, hasRunner:false, zone:null, runnerNames:[], inBoundary: boundarySet.has(h8) })
-    const d = drawSet.get(h8)
-    d.hasRunner   = true
-    d.runnerNames = runnerZipMeta[h8] || []
-  })
-
-  // Merge micro_zones
+  // Get the runner's own coverage hexes (res-8) from their DB row
+  const myRes8Hexes = new Set()
   try {
-    const { data: mz } = await _supa.from('micro_zones')
-      .select('hex_id,status,member_count,waitlist_count,activation_threshold,zip_code,city,zone_label,trash_day,lat,lng')
-      .limit(500)
-    if(mz) mz.forEach(z => {
-      if(!z.hex_id) return
-      let h8 = z.hex_id
-      try {
-        const res = h3.getResolution(z.hex_id)
-        if(res !== RN_HEAT_RES) h8 = h3.cellToParent(z.hex_id, RN_HEAT_RES)
-      } catch(e){ return }
-      if(!withinRange(h8)) return
-      if(!drawSet.has(h8)) drawSet.set(h8, { hoCount:0, hasRunner:false, zone:null, runnerNames:[], inBoundary: boundarySet.has(h8) })
-      const d = drawSet.get(h8)
-      d.hoCount = Math.max(d.hoCount, (z.member_count||0)+(z.waitlist_count||0))
-      d.zone    = d.zone || z
-    })
+    const raw = (window._rnRow||{}).coverage_hexes
+    const hexes = raw ? (typeof raw==='string' ? JSON.parse(raw) : raw) : []
+    hexes.forEach(h => myRes8Hexes.add(h))
   } catch(e){}
+  // Also populate from boundarySet if no explicit coverage — means all hexes in res-6
+  if(myRes8Hexes.size === 0) boundarySet.forEach(h => myRes8Hexes.add(h))
 
-  // Fill in all boundary hexes as available even if no data
-  boundarySet.forEach(h8 => {
-    if(!drawSet.has(h8)) drawSet.set(h8, { hoCount:0, hasRunner:false, zone:null, runnerNames:[], inBoundary:true })
-  })
-
-  // ── 5. Classify and draw — only boundary hexes ──
   const counts = { active:0, demand:0, runner:0, open:0 }
 
-  drawSet.forEach((d, h8) => {
-    const isAnchor   = h8 === anchorHex7
-    const inBoundary = d.inBoundary !== false
-    const h7 = h8  // alias for clarity
-    const isMyHex    = d.hasRunner && inBoundary  // hex runner actively covers
+  // ── Draw runner's own res-6 — all res-8 hexes within ──
+  boundarySet.forEach(h8 => {
+    const isAnchor  = h8 === anchorHex7
+    const isCovered = myRes8Hexes.has(h8)
+    const hoNames   = (window._rnHeatHoNames||{})[h8] || []
+    const hoCount   = hoHexes[h8] || 0
+
     let type, fillColor, fillOpacity, borderColor, borderDash
 
     if(isAnchor){
-      type='active'; fillColor='#22c55e'; fillOpacity=0.85; borderColor='#06d6a0'; borderDash=null; counts.active++
+      type='active'; fillColor='#22c55e'; fillOpacity=0.90; borderColor='#06d6a0'; borderDash=null; counts.active++
     } else if(mode === 'mine'){
-      // MY ZONES mode: show runner's own coverage prominently
-      if(isMyHex){
-        type='runner'; fillColor='#06d6a0'; fillOpacity=0.45; borderColor='#06d6a0'; borderDash=null; counts.runner++
-      } else if(d.hoCount > 0 && inBoundary){
-        type='demand'; fillColor='#f59e0b'; fillOpacity=0.50; borderColor='#fbbf24'; borderDash=null; counts.demand++
-      } else if(inBoundary){
-        type='open'; fillColor='rgba(255,255,255,1)'; fillOpacity=0.06; borderColor='rgba(255,255,255,.2)'; borderDash='3,4'; counts.open++
+      if(isCovered && hoCount > 0){
+        type='active'; fillColor='#22c55e'; fillOpacity=0.50; borderColor='#06d6a0'; borderDash=null; counts.active++
+      } else if(isCovered){
+        type='runner'; fillColor='#06d6a0'; fillOpacity=0.30; borderColor='rgba(6,214,160,.7)'; borderDash=null; counts.runner++
+      } else if(hoCount > 0){
+        type='demand'; fillColor='#f59e0b'; fillOpacity=0.45; borderColor='#fbbf24'; borderDash=null; counts.demand++
       } else {
-        // Outside boundary — very dim in mine mode
-        type='open'; fillColor='rgba(255,255,255,1)'; fillOpacity=0.02; borderColor='rgba(255,255,255,.08)'; borderDash='2,6'; counts.open++
+        type='open'; fillColor='rgba(255,255,255,1)'; fillOpacity=0.04; borderColor='rgba(255,255,255,.15)'; borderDash='3,4'; counts.open++
       }
     } else {
-      // EXPAND mode: dim own zone, highlight expansion opportunities
-      if(inBoundary){
-        // Own zone — dimmed
-        type = isMyHex ? 'runner' : 'open'
-        fillColor='rgba(6,214,160,1)'; fillOpacity= isMyHex ? 0.15 : 0.03
-        borderColor= isMyHex ? 'rgba(6,214,160,.4)' : 'rgba(255,255,255,.1)'; borderDash= isMyHex ? null : '2,6'
-        if(isMyHex) counts.runner++; else counts.open++
-      } else if(d.hoCount > 0){
-        // Demand outside boundary — highlighted amber (good expansion target)
-        type='demand'; fillColor='#f59e0b'; fillOpacity=0.50; borderColor='#fbbf24'; borderDash=null; counts.demand++
-      } else if(d.hasRunner){
-        // Another runner outside boundary
-        type='runner'; fillColor='#3b82f6'; fillOpacity=0.30; borderColor='#60a5fa'; borderDash='4,3'; counts.runner++
-      } else {
-        // Open outside boundary — greyed but visible
-        type='open'; fillColor='rgba(255,255,255,1)'; fillOpacity=0.05; borderColor='rgba(255,255,255,.2)'; borderDash='3,4'; counts.open++
-      }
+      // Expand mode — dim own zone
+      type = isCovered ? 'runner' : 'open'
+      fillColor = isCovered ? 'rgba(6,214,160,1)' : 'rgba(255,255,255,1)'
+      fillOpacity = isCovered ? 0.12 : 0.03
+      borderColor = isCovered ? 'rgba(6,214,160,.3)' : 'rgba(255,255,255,.08)'
+      borderDash  = '2,5'
+      if(isCovered) counts.runner++; else counts.open++
     }
 
     const isPending = pendingClaimHexes.has(h8)
-    // Dim hexes outside runner's current res-6 boundary
-    const dimmed = hasBoundary && !inBoundary
-    _rnDrawHex(map, h8, { type,
-      fillColor:   dimmed ? 'rgba(255,255,255,1)' : fillColor,
-      fillOpacity: dimmed ? 0.03 : fillOpacity,
-      borderColor: dimmed ? 'rgba(255,255,255,.1)' : borderColor,
-      borderDash:  dimmed ? '2,6' : borderDash,
-      zone:d.zone, hoCount:d.hoCount, hasRunner:d.hasRunner,
-      runnerNames:d.runnerNames, isPending, isAnchor, inBoundary, dimmed })
+    _rnDrawHex(map, h8, {
+      type, fillColor, fillOpacity, borderColor, borderDash, isPending, isAnchor,
+      inBoundary:true, hoCount, runnerNames: d_runnerNames(h8), zone:null,
+      hasRunner: isCovered, isMine:true
+    })
   })
+
+  // ── Draw adjacent res-6 zones (1 ring) — shown as whole blocks ──
+  adjacentRes6.forEach(adj6 => {
+    // Get all res-8 children of this adjacent zone
+    let adjChildren = []
+    try { adjChildren = h3.cellToChildren(adj6, 8) } catch(e){ return }
+
+    // Count HOs and runners in this whole zone
+    let adjHoCount = 0
+    let adjHasRunner = false
+    adjChildren.forEach(h8 => {
+      adjHoCount  += hoHexes[h8] || 0
+      if(runnerHexes.has(h8)) adjHasRunner = true
+    })
+
+    // Draw the res-6 outline for this adjacent zone
+    try {
+      const b6pts = h3.cellToBoundary(adj6).map(([la,ln])=>[la,ln])
+      // Colour the outline based on demand
+      const outlineColor = adjHoCount > 0 ? '#f59e0b' : 'rgba(255,255,255,.25)'
+      const outlineFill  = adjHoCount > 0 ? 'rgba(245,158,11,.06)' : 'rgba(255,255,255,.02)'
+      const outlineWeight = adjHoCount > 0 ? 2 : 1.5
+
+      const outline = L.polygon(b6pts, {
+        color: outlineColor, fillColor: outlineFill, fillOpacity:1,
+        weight: outlineWeight, dashArray: mode==='mine' ? '4,6' : '6,3',
+        opacity: mode==='mine' ? 0.4 : 0.8,
+      })
+
+      // Tooltip on the outline
+      const hoText = adjHoCount > 0 ? adjHoCount+' HO'+(adjHoCount!==1?'s':'')+' · ' : ''
+      const runnerText = adjHasRunner ? 'Runner active' : 'No runner yet'
+      outline.bindTooltip(
+        '<div style="font-size:11px;line-height:1.6"><strong style="color:'+(mode==='expand'?'#fbbf24':'var(--muted)')+'">Adjacent zone</strong><br>'
+        +hoText+runnerText+(mode==='expand'?'<br><em style="color:var(--cyan)">Tap to request this zone</em>':'')+'</div>',
+        { direction:'top', className:'h3-tip' }
+      )
+
+      if(mode === 'expand'){
+        outline.on('click', () => {
+          // Open the res-6 zone configurator for this adjacent zone
+          _rnZspOpen(adj6, null, { hoCount: adjHoCount, hasRunner: adjHasRunner })
+        })
+        outline.setStyle({ cursor:'pointer' })
+      }
+
+      outline.addTo(map)
+      if(!window._rnHeatLayers.open) window._rnHeatLayers.open = []
+      window._rnHeatLayers.open.push(outline)
+
+      // In expand mode, also draw individual res-8 hexes inside with demand colouring
+      if(mode === 'expand'){
+        adjChildren.forEach(h8 => {
+          const hoC = hoHexes[h8] || 0
+          const hasRn = runnerHexes.has(h8)
+          if(hoC === 0 && !hasRn) return  // don't draw empty hexes in adjacent zones
+          _rnDrawHex(map, h8, {
+            type: hoC>0&&hasRn ? 'active' : hoC>0 ? 'demand' : 'runner',
+            fillColor: hoC>0&&hasRn ? '#22c55e' : hoC>0 ? '#f59e0b' : '#3b82f6',
+            fillOpacity: 0.40, borderColor: hoC>0 ? '#fbbf24' : '#60a5fa',
+            borderDash: null, isPending:false, isAnchor:false,
+            inBoundary:false, hoCount:hoC, hasRunner:hasRn,
+            runnerNames: d_runnerNames(h8), zone:null, isMine:false
+          })
+          if(hoC>0&&hasRn) counts.active++
+          else if(hoC>0) counts.demand++
+          else counts.runner++
+        })
+      }
+    } catch(e){ console.warn('[Scout] adjacent zone draw:', e.message) }
+  })
+
+  // Helper to get runner names for a hex
+  function d_runnerNames(h8){
+    return (runnerZipMeta[h8] || [])
+  }
 
   // Update stat pills
   const safe = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v }
@@ -11642,24 +11667,16 @@ async function renderRunnerHeatmap(){
   safe('rn-heat-ct-runner', counts.runner)
   safe('rn-heat-ct-open',   counts.open)
 
-  // Center on runner's exact anchor, zoom to fit res-6 boundary
-  if(anchorLat && anchorLng){
-    if(boundary6Hex){
-      try {
-        const b6pts = h3.cellToBoundary(boundary6Hex).map(([la,ln])=>[la,ln])
-        map.fitBounds(L.polygon(b6pts).getBounds(), { padding:[20,20] })
-      } catch(e){ map.setView([anchorLat, anchorLng], 12) }
-    } else {
-      map.setView([anchorLat, anchorLng], 12)
-    }
-  } else {
-    // No anchor — show Phoenix metro
-    const ctr = (rnZip && ZIP_CENTROIDS[rnZip]) ? ZIP_CENTROIDS[rnZip] : [33.53, -112.18]
-    map.setView(ctr, 11)
-    // Show a hint
-    const loadEl2 = document.getElementById('rn-heat-loading')
-    if(loadEl2){ loadEl2.style.display='flex'; loadEl2.innerHTML='<div style="text-align:center;padding:20px"><div style="font-size:14px;color:#fbbf24;margin-bottom:8px">⚠️ No home address on file</div><div style="font-size:12px;color:var(--muted)">Go to My Info and add your street address to see your service area boundary</div></div>' }
-    return
+  // Fit map to show runner's res-6 + adjacent ring
+  try {
+    const allHexes = [boundary6Hex, ...adjacentRes6].filter(Boolean)
+    const allPts = allHexes.flatMap(h6 => {
+      try { return h3.cellToBoundary(h6).map(([la,ln])=>[la,ln]) } catch(e){ return [] }
+    })
+    if(allPts.length) map.fitBounds(allPts, { padding:[16,16] })
+    else if(anchorLat) map.setView([anchorLat, anchorLng], 12)
+  } catch(e){
+    if(anchorLat) map.setView([anchorLat, anchorLng], 12)
   }
 
   if(loadEl) loadEl.style.display = 'none'
@@ -11814,9 +11831,13 @@ function _rnHexTap(hexId, typeLabel, opts){
     return
   }
 
-  // ── EXPAND MODE: tap outside res-6 to request zone ──
+  // ── EXPAND MODE: res-8 taps in adjacent zones open the res-6 configurator ──
   if(mode === 'expand' && !opts.inBoundary){
-    _rnRequestExpansionZone(hexId, opts)
+    // Find the parent res-6 and open the zone selector for it
+    try {
+      const adj6 = h3.cellToParent(hexId, 6)
+      _rnZspOpen(adj6, opts.zone, { hoCount: opts.hoCount, hasRunner: opts.hasRunner })
+    } catch(e){ _rnRequestExpansionZone(hexId, opts) }
     return
   }
 
@@ -11987,7 +12008,7 @@ window._rnZspChildren     = []      // all res-8 children of that hex6
 window._rnZspPendingHexes = new Set() // which res-8 hexes runner wants
 window._rnZspLayers       = {}      // hexId -> poly for the zone selection overlay
 
-async function _rnZspOpen(hex6, zone){
+async function _rnZspOpen(hex6, zone, previewOpts){
   if(!hex6 || typeof h3 === 'undefined') return
   window._rnZspHex6 = hex6
 
@@ -12113,14 +12134,16 @@ async function _rnZspAccept(){
   const name    = ((runner.first_name||'')+' '+(runner.last_name||'')).trim() || 'Runner'
   if(!email){ showToast('Please log in first', 'err'); return }
 
-  const hex6    = window._rnZspHex6
-  const zone    = null  // zone will be resolved by admin
+  const hex6 = window._rnZspHex6
 
-  // Compute zip from hex6 centroid
+  // Is this the runner's own res-6 boundary?
+  const myBoundary6 = window._rnAnchorHex6 || null
+  const isOwnZone   = hex6 === myBoundary6
+
+  // Compute ZIP for this hex6
   let zip = ''
   try {
     const ctr = h3.cellToLatLng(hex6)
-    // Find nearest known ZIP
     let bestDist = Infinity
     Object.entries(ZIP_CENTROIDS).forEach(([z, [la, ln]]) => {
       const d = Math.abs(la-ctr[0]) + Math.abs(ln-ctr[1])
@@ -12128,24 +12151,40 @@ async function _rnZspAccept(){
     })
   } catch(e){}
 
-  try {
-    await _supa.from('runner_zone_requests').insert({
-      runner_email:    email,
-      runner_name:     name,
-      zip_code:        zip,
-      zone_id:         null,
-      zone_name:       'Zone ···' + hex6.slice(-6),
-      status:          'pending',
-      type:            'zone_activation',
-      notes:           'Runner selected res-6 zone ' + hex6 + ' with ' + hexes.length + ' res-8 hexes',
-      requested_hexes: JSON.stringify(hexes),
-      created_at:      new Date().toISOString(),
-    })
-    showToast('Zone request submitted ✅ — admin will assign you to this area', 'ok', 5000)
-    _rnZspClose()
-    renderRunnerScoutPanel()
-  } catch(e){
-    showToast('Could not submit: '+String(e?.message||e), 'err')
+  const existingZone = ADMIN_ZONES.find(z=>(z.zips||[z.zip]).includes(zip))
+
+  if(isOwnZone){
+    // Saving changes to own zone — update coverage_hexes directly
+    const hexJson = JSON.stringify(hexes)
+    try {
+      await _supa.from('runners').update({
+        coverage_hexes: hexJson, updated_at: new Date().toISOString()
+      }).ilike('email', email)
+      if(window._rnRow) window._rnRow.coverage_hexes = hexJson
+      showToast('Your zone coverage saved — '+hexes.length+' hexes active ✅', 'ok', 4000)
+      _rnZspClose()
+      renderRunnerHeatmap()
+    } catch(e){ showToast('Could not save: '+String(e?.message||e), 'err') }
+  } else {
+    // Requesting an adjacent zone — submit for admin approval
+    try {
+      await _supa.from('runner_zone_requests').insert({
+        runner_email:    email,
+        runner_name:     name,
+        zip_code:        zip,
+        zone_id:         existingZone?.id || null,
+        zone_name:       existingZone?.name || ('ZIP '+zip+' area'),
+        status:          'pending',
+        type:            'zone_expansion',
+        zone_role:       'runner',
+        notes:           'Runner selected '+hexes.length+' res-8 hexes in adjacent zone '+hex6,
+        requested_hexes: JSON.stringify(hexes),
+        created_at:      new Date().toISOString(),
+      })
+      showToast('Zone request sent for '+(existingZone?.name||('ZIP '+zip))+' ✅ — admin will review', 'ok', 5000)
+      _rnZspClose()
+      _rnLoadPendingRequests()
+    } catch(e){ showToast('Could not submit: '+String(e?.message||e), 'err') }
   }
 }
 
