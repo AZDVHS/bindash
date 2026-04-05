@@ -10396,6 +10396,8 @@ async function submitLead(){
     })
     const _leadStatus = (!_leadZone || _leadZone.status === 'waitlist' || _leadZone.status === 'building')
       ? 'waitlist_pending' : 'pending_review'
+    // Note: if DB has CHECK constraint on status, 'waitlist_pending' may fail silently
+    // The fallback query in loadSignupsFromSupabase handles this by also checking 'pending_review'
     const _leadIsWl = _leadStatus === 'waitlist_pending'
 
     // Compute H3 index from ZIP centroid for heatmap
@@ -10431,8 +10433,27 @@ async function submitLead(){
       created_at:     new Date().toISOString(),
     })
     saveErr = res?.error?.message || null
-    if(saveErr) console.warn('[BinDash] Lead save error:', saveErr)
-    else console.log('[BinDash] Lead saved ✅ ZIP', zip)
+    if(saveErr){
+      console.error('[BinDash] Lead save FAILED:', saveErr, '| status attempted:', _leadStatus)
+      // If waitlist_pending fails (CHECK constraint), retry with pending_review
+      if(saveErr.includes('check') || saveErr.includes('violat') || saveErr.includes('status')){
+        console.warn('[BinDash] Retrying with pending_review status...')
+        const res2 = await _supa.from('homeowner_signups').insert({
+          first_name: fn, last_name: ln||'', email, phone: ph||null,
+          street_address: addr||null, city: city||null, zip_code: zip,
+          service_type: isSplit?'SPLIT':svcVal, collection_day: day,
+          status: 'pending_review', is_lead: true, is_waitlist: _leadIsWl,
+          zone_id: _leadZone?.id||null, h3_index: _leadH3||null,
+          h3_zone_res6: _leadH3z6||null, lat: _leadCtr?_leadCtr[0]:null, lng: _leadCtr?_leadCtr[1]:null,
+          created_at: new Date().toISOString(),
+        })
+        saveErr = res2?.error?.message || null
+        if(!saveErr) console.log('[BinDash] Lead saved with pending_review fallback ✅')
+        else console.error('[BinDash] Both inserts failed:', saveErr)
+      }
+    } else {
+      console.log('[BinDash] Lead saved ✅ ZIP', zip, 'status:', _leadStatus)
+    }
   } catch(e){
     saveErr = String(e?.message||e)
     console.warn('[BinDash] Lead exception:', saveErr)
@@ -26622,9 +26643,28 @@ async function loadSignupsFromSupabase(){
         .order('created_at', { ascending: false })
       data    = res?.data    || []
       loadErr = res?.error?.message || null
+      console.log('[BinDash] loadSignupsFromSupabase — query returned:', data.length, 'rows, error:', loadErr)
+      if(data.length) console.log('[BinDash] First row status:', data[0]?.status, 'name:', data[0]?.first_name)
     } catch(fetchErr){ loadErr = String(fetchErr?.message || fetchErr) }
     if(loadErr){ console.warn('[BinDash] Could not load signups:', loadErr); return }
-    if(!data.length) return
+
+    // If RLS returns 0 rows but no error, try without status filter (admin fallback)
+    if(!data.length){
+      console.warn('[BinDash] No signups returned — may be RLS issue. Trying unrestricted query...')
+      try {
+        const res2 = await _supa.from('homeowner_signups').select('*').order('created_at',{ascending:false}).limit(200)
+        if(!res2.error && res2.data?.length){
+          console.log('[BinDash] Unrestricted query got:', res2.data.length, 'rows')
+          // Filter in JS instead
+          data = (res2.data||[]).filter(r =>
+            ['pending_review','waitlist_pending','payment_pending','waitlisted','rejected','info_requested'].includes(r.status)
+          )
+          console.log('[BinDash] After JS filter:', data.length, 'relevant rows')
+        }
+      } catch(e2){ console.warn('[BinDash] Fallback query failed:', e2.message) }
+    }
+
+    if(!data.length){ console.warn('[BinDash] loadSignupsFromSupabase: still no data after fallback'); return }
 
     // Clear then repopulate in-memory arrays
     PENDING_HOMEOWNERS.length = 0
@@ -26685,6 +26725,10 @@ async function loadSignupsFromSupabase(){
 
     updateOverviewCounts()
     updateWaitlistBadge()
+    // Auto-refresh the pending HW list if it's currently visible
+    if(document.getElementById('pending-hw-list')?.offsetParent !== null){
+      renderPendingHWList()
+    }
     console.log('[BinDash] Signups loaded:', PENDING_HOMEOWNERS.length, 'pending,', WAITLIST_SIGNUPS.length, 'waitlisted')
   } catch(err){
     console.warn('[BinDash] Signup load failed:', String(err?.message || err))
