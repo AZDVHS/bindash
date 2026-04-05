@@ -209,32 +209,45 @@ async function sendEmail(to, subject, html, type){
   }
 
   const _supaUrl = (SUPABASE_URL && !SUPABASE_URL.includes('your-project'))
-    ? SUPABASE_URL
-    : 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
+    ? SUPABASE_URL : 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
   const _supaKey = (SUPABASE_ANON_KEY && !SUPABASE_ANON_KEY.includes('your-anon'))
-    ? SUPABASE_ANON_KEY
-    : ''
-  const _url = _supaUrl+'/functions/v1/send-email'
-  console.log('[BinDash] sendEmail CALLING:', _url, 'type:', type, 'to:', actualTo)
+    ? SUPABASE_ANON_KEY : ''
+
+  // ── Strategy 1: Try edge function directly ────────────────────────────
   try {
-    const res = await fetch(_url, {
+    const res = await fetch(_supaUrl+'/functions/v1/send-email', {
       method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'Authorization':'Bearer '+_supaKey,
-        'apikey': _supaKey,
-      },
-      body: JSON.stringify({to: actualTo, subject: actualSubject, html, type:type||'general'}),
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+_supaKey, 'apikey':_supaKey },
+      body: JSON.stringify({to:actualTo, subject:actualSubject, html, type:type||'general'}),
     })
     const d = await res.json()
-    console.log('[BinDash] sendEmail RESPONSE:', res.status, JSON.stringify(d))
-    if(res.status === 401){
-      console.warn('[BinDash] 401 on send-email — JWT auth issue. Edge function needs verify_jwt=false in config.toml')
+    if(res.ok && !d.error){
+      console.log('[BinDash] sendEmail OK via edge fn:', type, actualTo)
+      return
     }
-    if(d.error) console.warn('[BinDash] Email error:', d.error)
-    else if(res.ok) console.log('[BinDash] Email sent OK:', type, actualTo)
+    console.warn('[BinDash] sendEmail edge fn error:', d.error || res.status)
   } catch(e){
-    console.warn('[BinDash] sendEmail EXCEPTION:', String(e?.message||e))
+    console.warn('[BinDash] sendEmail edge fn CORS/fail — using queue fallback:', e.message)
+  }
+
+  // ── Strategy 2: Queue via Supabase table (no CORS — goes through JS client) ──
+  // The send-email edge function picks these up on next run, or pg_cron sends them
+  try {
+    const { error } = await _supa.from('pending_emails').insert({
+      to_address:   actualTo,
+      subject:      actualSubject,
+      html_body:    html,
+      email_type:   type || 'general',
+      status:       'pending',
+      created_at:   new Date().toISOString(),
+    })
+    if(error){
+      console.warn('[BinDash] pending_emails insert failed:', error.message)
+    } else {
+      console.log('[BinDash] sendEmail queued to pending_emails:', type, actualTo)
+    }
+  } catch(e2){
+    console.warn('[BinDash] sendEmail queue fallback failed:', e2.message)
   }
 }
 
