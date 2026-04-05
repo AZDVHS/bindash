@@ -8468,15 +8468,15 @@ const ZIP_CENTROIDS = {
   '85345':[33.5638,-112.2361],'85351':[33.6138,-112.2861],'85373':[33.6671,-112.2527],
   '85381':[33.6138,-112.2361],'85382':[33.6454,-112.2194],
   // Surprise / El Mirage
-  '85374':[33.6671,-112.3194],'85375':[33.7020,-112.3194],'85378':[33.6454,-112.3694],
-  '85379':[33.6454,-112.3694],'85387':[33.7654,-112.3194],'85388':[33.6454,-112.3027],
+  '85374':[33.6671,-112.3194],'85375':[33.6872,-112.3427],'85378':[33.6454,-112.3694],
+  '85379':[33.6454,-112.3694],'85387':[33.7354,-112.4194],'85388':[33.6454,-112.3027],
   // Vistancia / NW Peoria (Lake Pleasant area)
-  '85383':[33.7150,-112.2750],  // Vistancia — Happy Valley Rd & Lake Pleasant Pkwy
+  '85383':[33.7062,-112.3131],  // Vistancia — Happy Valley Rd & Lake Pleasant Pkwy
   // Verrado / Buckeye
-  '85395':[33.5070,-112.4027],'85396':[33.4700,-112.5200],
+  '85395':[33.4952,-112.3888],'85396':[33.4583,-112.5069],
   // Goodyear / Avondale / Litchfield
-  '85338':[33.4318,-112.3694],'85339':[33.3485,-112.1027],
-  '85340':[33.5303,-112.4361],'85353':[33.4485,-112.2527],
+  '85338':[33.4267,-112.3738],'85339':[33.3485,-112.1027],
+  '85340':[33.5303,-112.4361],'85353':[33.4354,-112.2655],
   '85354':[33.4318,-112.4027],'85355':[33.5303,-112.2861],
   '85361':[33.6387,-112.4361],'85363':[33.5303,-112.3194],'85390':[33.7387,-112.5027],
   // Mesa
@@ -8499,7 +8499,7 @@ const ZIP_CENTROIDS = {
   '85014':[33.5151,-112.0240],'85015':[33.5151,-112.0907],'85016':[33.5151,-111.9907],
   '85017':[33.5151,-112.1240],'85018':[33.5151,-111.9573],'85019':[33.5151,-112.1573],
   '85020':[33.5651,-112.0573],'85021':[33.5651,-112.0907],'85022':[33.6151,-112.0573],
-  '85023':[33.6151,-112.0907],'85024':[33.6651,-112.0573],'85027':[33.6651,-112.1240],
+  '85023':[33.6151,-112.0907],'85024':[33.6482,-112.0579],'85027':[33.6482,-112.1240],
   '85028':[33.5651,-111.9907],'85029':[33.5984,-112.1240],'85031':[33.4818,-112.1240],
   '85032':[33.5651,-111.9573],'85033':[33.4818,-112.1573],'85034':[33.4151,-112.0407],
   '85035':[33.4818,-112.1907],'85037':[33.4818,-112.2240],'85040':[33.3651,-112.0073],
@@ -8509,15 +8509,15 @@ const ZIP_CENTROIDS = {
   '85054':[33.6651,-111.9240],
   // Scottsdale
   '85250':[33.5151,-111.9240],'85251':[33.4818,-111.9240],'85252':[33.4818,-111.9240],
-  '85253':[33.5318,-111.9240],'85254':[33.5984,-111.9573],'85255':[33.6651,-111.8907],
+  '85253':[33.5318,-111.9240],'85254':[33.5984,-111.9573],'85255':[33.6782,-111.8649],
   '85256':[33.4651,-111.8907],'85257':[33.4651,-111.9240],'85258':[33.5651,-111.8573],
-  '85259':[33.5984,-111.8573],'85260':[33.6318,-111.8907],'85262':[33.7318,-111.8240],
+  '85259':[33.5984,-111.8573],'85260':[33.6318,-111.8907],'85262':[33.7487,-111.8060],
   '85266':[33.7318,-111.9240],'85268':[33.5984,-111.8240],
   // Tempe / Ahwatukee
   '85281':[33.4318,-111.9407],'85282':[33.3985,-111.9407],'85283':[33.3652,-111.9407],
   '85284':[33.3152,-111.9315],'85285':[33.3818,-111.9573],
   // Avondale / Tolleson / Laveen
-  '85323':[33.4318,-112.3027],'85326':[33.4152,-112.5027],'85392':[33.4818,-112.2861],
+  '85323':[33.4454,-112.3194],'85326':[33.3721,-112.5469],'85392':[33.4818,-112.2861],
 }
 
 async function geocodeAddress(address, city, state, zip){
@@ -8955,14 +8955,20 @@ async function _adDrawRunnerCoverage(map){
   const hoWaitlist = {}  // h8 -> count
   try {
     const { data: sigs } = await _supa.from('homeowner_signups')
-      .select('zip_code,status').limit(3000)
+      .select('zip_code,status,h3_index').limit(3000)
     ;(sigs||[]).forEach(s => {
-      const ctr = ZIP_CENTROIDS[s.zip_code]
-      if(!ctr) return
       try {
-        const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+        // Prefer stored h3_index for precision, fallback to ZIP centroid
+        let h8 = null
+        if(s.h3_index){
+          h8 = h3.getResolution(s.h3_index) === 8 ? s.h3_index : h3.cellToParent(s.h3_index, 8)
+        } else {
+          const ctr = ZIP_CENTROIDS[s.zip_code]
+          if(!ctr) return
+          h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+        }
+        if(!h8) return
         if(s.status === 'approved') hoActive[h8] = (hoActive[h8]||0) + 1
-        // ALL pending/waitlist statuses show as amber demand on admin map
         else if(['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)){
           hoWaitlist[h8] = (hoWaitlist[h8]||0) + 1
         }
@@ -11704,8 +11710,11 @@ async function renderRunnerHeatmap(){
     const ctr = ZIP_CENTROIDS[zip]
     if(!ctr) return
     try {
-      const anchor7 = h3.latLngToCell(ctr[0], ctr[1], RN_HEAT_RES)
-      h3.gridDisk(anchor7, 1).forEach(h => {
+      // Use the full res-6 zone children (all ~91 res-8 hexes) not just disk-1 (7 hexes)
+      // This ensures the runner's coverage shows the entire ZIP area, not a tiny cluster
+      const anchor8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+      const parent6 = h3.cellToParent(anchor8, 6)
+      h3.cellToChildren(parent6, 8).forEach(h => {
         runnerHexes.add(h)
         if(!runnerZipMeta[h]) runnerZipMeta[h] = []
         if(!runnerZipMeta[h].includes(name)) runnerZipMeta[h].push(name)
