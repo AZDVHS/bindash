@@ -8135,7 +8135,7 @@ async function initApp(){
       go('S-admin')
       setTimeout(() => adNav(null, 'ad-overview'), 80)
       await loadZonesFromSupabase()
-      loadSignupsFromSupabase()
+      await loadSignupsFromSupabase()   // await — pending panel needs this before render
       loadRunnerApplicationsFromSupabase()
       loadRunnerRequestsBadge()
       loadZoneWaitlistBadge()
@@ -10410,7 +10410,8 @@ async function submitLead(){
       } catch(e){}
     }
 
-    const res = await _supa.from('homeowner_signups').insert({
+    // Build insert with only guaranteed columns — optional new columns added via upsert
+    const _baseInsert = {
       first_name:     fn,
       last_name:      ln || '',
       email:          email,
@@ -10419,40 +10420,40 @@ async function submitLead(){
       city:           city || null,
       zip_code:       zip,
       service_type:   isSplit ? 'SPLIT' : svcVal,
-      collection_day: day,
-      day_recycling:  isSplit ? dayR : null,
-      day_waste:      isSplit ? dayW : null,
+      collection_day: day || null,
       status:         _leadStatus,
-      is_lead:        true,
-      is_waitlist:    _leadIsWl,
       zone_id:        _leadZone?.id || null,
-      h3_index:       _leadH3   || null,
-      h3_zone_res6:   _leadH3z6 || null,
-      lat:            _leadCtr ? _leadCtr[0] : null,
-      lng:            _leadCtr ? _leadCtr[1] : null,
       created_at:     new Date().toISOString(),
-    })
+    }
+    // Attempt insert with core fields first
+    const res = await _supa.from('homeowner_signups').insert(_baseInsert)
     saveErr = res?.error?.message || null
+
+    if(saveErr && (saveErr.includes('status') || saveErr.includes('check') || saveErr.includes('violat'))){
+      // Status constraint — retry with 'pending_review' which always exists
+      console.warn('[BinDash] Status constraint — retrying with pending_review')
+      const res2 = await _supa.from('homeowner_signups').insert({ ..._baseInsert, status: 'pending_review' })
+      saveErr = res2?.error?.message || null
+    }
+
     if(saveErr){
-      console.error('[BinDash] Lead save FAILED:', saveErr, '| status attempted:', _leadStatus)
-      // If waitlist_pending fails (CHECK constraint), retry with pending_review
-      if(saveErr.includes('check') || saveErr.includes('violat') || saveErr.includes('status')){
-        console.warn('[BinDash] Retrying with pending_review status...')
-        const res2 = await _supa.from('homeowner_signups').insert({
-          first_name: fn, last_name: ln||'', email, phone: ph||null,
-          street_address: addr||null, city: city||null, zip_code: zip,
-          service_type: isSplit?'SPLIT':svcVal, collection_day: day,
-          status: 'pending_review', is_lead: true, is_waitlist: _leadIsWl,
-          zone_id: _leadZone?.id||null, h3_index: _leadH3||null,
-          h3_zone_res6: _leadH3z6||null, lat: _leadCtr?_leadCtr[0]:null, lng: _leadCtr?_leadCtr[1]:null,
-          created_at: new Date().toISOString(),
-        })
-        saveErr = res2?.error?.message || null
-        if(!saveErr) console.log('[BinDash] Lead saved with pending_review fallback ✅')
-        else console.error('[BinDash] Both inserts failed:', saveErr)
-      }
+      console.error('[BinDash] Lead save FAILED:', saveErr)
     } else {
       console.log('[BinDash] Lead saved ✅ ZIP', zip, 'status:', _leadStatus)
+      // Patch optional columns that may not exist yet — ignore failures silently
+      ;(async () => {
+        const _patch = {}
+        if(_leadH3)    _patch.h3_index    = _leadH3
+        if(_leadH3z6)  _patch.h3_zone_res6= _leadH3z6
+        if(_leadCtr){  _patch.lat = _leadCtr[0]; _patch.lng = _leadCtr[1] }
+        if(_leadIsWl)  _patch.is_waitlist  = true
+        _patch.is_lead = true
+        if(Object.keys(_patch).length > 0){
+          await _supa.from('homeowner_signups').update(_patch).eq('email', email)
+            .then(r => { if(!r.error) console.log('[BinDash] Optional columns patched ✅') })
+            .catch(() => {})
+        }
+      })()
     }
   } catch(e){
     saveErr = String(e?.message||e)
@@ -13776,7 +13777,10 @@ function adNav(el, pg){
   if(pg === 'ad-payments')   setTimeout(renderPaymentsPage, 50)
   if(pg === 'ad-dispatch')   setTimeout(initDispatchPage, 50)
   if(pg === 'ad-homeowners') setTimeout(renderHomeownerList, 50)
-  if(pg === 'ad-pending-hw') setTimeout(renderPendingHWList, 50)
+  if(pg === 'ad-pending-hw'){
+    // Always reload from DB when navigating to this page — ensures freshest data
+    loadSignupsFromSupabase().then(() => renderPendingHWList())
+  }
   if(pg === 'ad-pending')    setTimeout(renderPendingRunnerList, 50)
   if(pg === 'ad-waitlist')         setTimeout(renderWaitlistPage, 50)
   if(pg === 'ad-zone-waitlist')       setTimeout(renderZoneWaitlist, 50)
@@ -21275,7 +21279,19 @@ function renderPendingHWList(){
     return
   }
 
-  el.innerHTML = list.map(app=>{
+  // Show waitlist count callout at top if any
+  const wlCount = list.filter(a => a.isWaitlist || a.status === 'waitlist_pending').length
+  const wlCallout = wlCount > 0
+    ? `<div style="background:rgba(245,158,11,.08);border:1.5px solid rgba(245,158,11,.3);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:18px">⏳</span>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#f59e0b">${wlCount} Waitlist Signup${wlCount!==1?'s':''}</div>
+          <div style="font-size:11px;color:#b45309">These customers are in unserviced ZIPs. Approve when their zone goes live.</div>
+        </div>
+       </div>`
+    : ''
+
+  el.innerHTML = wlCallout + list.map(app=>{
     const assignedZone = ADMIN_ZONES.find(z=>z.id===app.zoneId)
     const isWaitlistZone = app.status === 'waitlist_pending' || app.isWaitlist || (assignedZone && (assignedZone.status === 'waitlist' || assignedZone.status === 'building'))
     const waitlistBadge = isWaitlistZone
@@ -26656,9 +26672,11 @@ async function loadSignupsFromSupabase(){
         if(!res2.error && res2.data?.length){
           console.log('[BinDash] Unrestricted query got:', res2.data.length, 'rows')
           // Filter in JS instead
-          data = (res2.data||[]).filter(r =>
-            ['pending_review','waitlist_pending','payment_pending','waitlisted','rejected','info_requested'].includes(r.status)
-          )
+          data = (res2.data||[]).filter(r => {
+            // Include anything that isn't already approved/active/complete
+            const exclude = ['approved','active','complete','cancelled']
+            return !exclude.includes(r.status)
+          })
           console.log('[BinDash] After JS filter:', data.length, 'relevant rows')
         }
       } catch(e2){ console.warn('[BinDash] Fallback query failed:', e2.message) }
@@ -26673,8 +26691,12 @@ async function loadSignupsFromSupabase(){
     data.forEach(row => {
       // Skip blank records -- no name AND no email means it's a corrupted signup
       if(!row.first_name && !row.last_name && !row.email) return
-      // Skip if email looks invalid
+      // Skip truly invalid emails (no @) but keep @lead.bindash — those are real leads
       if(!row.email || !row.email.includes('@')) return
+      // Log @lead.bindash records so we know they're being processed
+      if(row.email.includes('@lead.bindash')){
+        console.log('[BinDash] Lead record (no real email):', row.first_name, row.zip_code, row.status)
+      }
 
       const initials = ((row.first_name?.[0]||'') + (row.last_name?.[0]||'')).toUpperCase() || '?'
       const name = (row.first_name + ' ' + row.last_name).trim() || row.email?.split('@')[0] || '--'
