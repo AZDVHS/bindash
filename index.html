@@ -4320,6 +4320,9 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             <button id="hwtab-rejected" onclick="switchHWTab('rejected')" class="btn btn-sm btn-ghost" style="border-radius:7px;border:none">
               ✕ Not Approved <span id="hwtab-rejected-count" style="background:rgba(255,255,255,.1);border-radius:99px;padding:1px 7px;font-size:10px;margin-left:4px">0</span>
             </button>
+            <button id="hwtab-waitlist" onclick="switchHWTab('waitlist')" class="btn btn-sm btn-ghost" style="border-radius:7px;border:none">
+              ⏳ Waitlist <span id="hwtab-waitlist-count" style="background:rgba(245,158,11,.3);border-radius:99px;padding:1px 7px;font-size:10px;margin-left:4px;color:#f59e0b">0</span>
+            </button>
           </div>
 
           <div id="pending-hw-list" style="display:flex;flex-direction:column;gap:12px">
@@ -9017,14 +9020,12 @@ async function _adDrawRunnerCoverage(map){
             opacity: 1,
           })
           ol.bindTooltip(
-            '<div style="font-size:11px;color:#1e293b">'
-            +'<strong style="color:#4338ca">🚐 '+name+'</strong>'
-            +'<br>'+(zone?.name||('ZIP '+zip))
+            '<div style="font-size:12px;font-weight:700;color:#f1f5f9">🚐 '+name+'</div>'
+            +'<div style="font-size:11px;color:#cbd5e1;margin-top:2px">'+(zone?.name||('ZIP '+zip))+'</div>'
             +(isPrimary
-              ? '<br><span style="color:#15803d;font-size:10px">● Lead zone</span>'
-              : '<br><span style="color:#64748b;font-size:10px">+ Additional zone</span>')
-            +'</div>',
-            { direction:'top', className:'h3-tip' }
+              ? '<div style="font-size:10px;color:#4ade80;margin-top:2px">● Lead zone</div>'
+              : '<div style="font-size:10px;color:#94a3b8;margin-top:2px">+ Additional zone</div>'),
+            { direction:'top', className:'h3-tip', sticky:false }
           )
           ol.addTo(map); layers.push(ol)
 
@@ -9041,10 +9042,9 @@ async function _adDrawRunnerCoverage(map){
               const pts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
               const hex = L.polygon(pts, { color:bc, fillColor:fc, fillOpacity:fo, weight:1.5, opacity:1 })
               hex.bindTooltip(
-                '<div style="font-size:10px;color:#1e293b">'
-                +(act>0?act+' active HO'+(act!==1?'s':''):'')
-                +(wl>0?(act>0?' · ':'')+wl+' waitlisted':'')
-                +'<br>'+name+' zone</div>',
+                '<div style="font-size:11px;font-weight:700;color:#f1f5f9">'
+                +(act>0?'🟢 '+act+' active HO'+(act!==1?'s':''):'🟡 '+wl+' waitlisted')
+                +'</div><div style="font-size:10px;color:#94a3b8">'+name+' zone</div>',
                 { className:'h3-tip', direction:'top', sticky:true }
               )
               hex.addTo(map); layers.push(hex)
@@ -20769,7 +20769,7 @@ function renderPendingRunnerList(){
   if(!el) return
 
   // Update tab counts
-  const counts = { pending:0, info:0, rejected:0 }
+  const counts = { pending:0, info:0, rejected:0, waitlist:0 }
   PENDING_RUNNERS.forEach(a => {
     if(a.status==='pending_review'||a.status==='pending') counts.pending++
     else if(a.status==='info_requested') counts.info++
@@ -21212,12 +21212,14 @@ let _rnActiveTab = 'pending'
 
 function switchHWTab(tab){
   _hwActiveTab = tab
-  const tabs = ['pending','info','rejected']
+  const tabs = ['pending','info','rejected','waitlist']
   tabs.forEach(t => {
     const btn = document.getElementById('hwtab-'+t)
     if(!btn) return
     if(t === tab){
-      btn.style.background = 'var(--cyan)'; btn.style.color = '#07090f'; btn.style.fontWeight = '700'
+      btn.style.background = t==='waitlist' ? '#b45309' : 'var(--cyan)'
+      btn.style.color = t==='waitlist' ? '#fff' : '#07090f'
+      btn.style.fontWeight = '700'
     } else {
       btn.style.background = 'transparent'; btn.style.color = 'var(--sub)'; btn.style.fontWeight = '400'
     }
@@ -21247,14 +21249,16 @@ function renderPendingHWList(){
   // Update tab counts
   const counts = { pending:0, info:0, rejected:0 }
   PENDING_HOMEOWNERS.forEach(a => {
-    if(a.status==='pending_review'||a.status==='payment_pending'||a.status==='waitlist_pending') counts.pending++
+    if(a.status==='waitlist_pending'||a.isWaitlist) counts.waitlist++
+    else if(a.status==='pending_review'||a.status==='payment_pending') counts.pending++
     else if(a.status==='info_requested') counts.info++
     else if(a.status==='rejected') counts.rejected++
   })
   const updateCount = (id, n) => { const el = document.getElementById(id); if(el) el.textContent = n }
-  updateCount('hwtab-pending-count', counts.pending)
-  updateCount('hwtab-info-count',    counts.info)
-  updateCount('hwtab-rejected-count',counts.rejected)
+  updateCount('hwtab-pending-count',  counts.pending)
+  updateCount('hwtab-info-count',     counts.info)
+  updateCount('hwtab-rejected-count', counts.rejected)
+  updateCount('hwtab-waitlist-count', counts.waitlist)
 
   // Badge for nav
   const badge = document.getElementById('hw-pcount')
@@ -21265,9 +21269,10 @@ function renderPendingHWList(){
 
   // Filter by active tab
   let list = []
-  if(_hwActiveTab === 'pending')  list = PENDING_HOMEOWNERS.filter(a=>a.status==='pending_review'||a.status==='payment_pending'||a.status==='waitlist_pending')
+  if(_hwActiveTab === 'pending')  list = PENDING_HOMEOWNERS.filter(a=>(a.status==='pending_review'||a.status==='payment_pending') && !a.isWaitlist)
   if(_hwActiveTab === 'info')     list = PENDING_HOMEOWNERS.filter(a=>a.status==='info_requested')
   if(_hwActiveTab === 'rejected') list = PENDING_HOMEOWNERS.filter(a=>a.status==='rejected')
+  if(_hwActiveTab === 'waitlist') list = PENDING_HOMEOWNERS.filter(a=>a.status==='waitlist_pending'||a.isWaitlist)
 
   if(!list.length){
     const msgs = {
@@ -21279,19 +21284,7 @@ function renderPendingHWList(){
     return
   }
 
-  // Show waitlist count callout at top if any
-  const wlCount = list.filter(a => a.isWaitlist || a.status === 'waitlist_pending').length
-  const wlCallout = wlCount > 0
-    ? `<div style="background:rgba(245,158,11,.08);border:1.5px solid rgba(245,158,11,.3);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
-        <span style="font-size:18px">⏳</span>
-        <div>
-          <div style="font-size:13px;font-weight:700;color:#f59e0b">${wlCount} Waitlist Signup${wlCount!==1?'s':''}</div>
-          <div style="font-size:11px;color:#b45309">These customers are in unserviced ZIPs. Approve when their zone goes live.</div>
-        </div>
-       </div>`
-    : ''
-
-  el.innerHTML = wlCallout + list.map(app=>{
+  el.innerHTML =  list.map(app=>{
     const assignedZone = ADMIN_ZONES.find(z=>z.id===app.zoneId)
     const isWaitlistZone = app.status === 'waitlist_pending' || app.isWaitlist || (assignedZone && (assignedZone.status === 'waitlist' || assignedZone.status === 'building'))
     const waitlistBadge = isWaitlistZone
@@ -21431,7 +21424,12 @@ function renderPendingHWList(){
           }
           <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="deleteApplicationHW('${app.id}','${app.name}')">🗑 Delete</button>
         ` : `
-          <button class="btn btn-green btn-sm" onclick="approveHW('${app.id}')">✅ Approve &amp; Activate</button>
+          ${isWaitlistZone ? `
+            <button class="btn btn-sm" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:#f59e0b" onclick="activateWaitlistZone('${app.zip}','${app.id}')">🚀 Activate Waitlist Zone</button>
+            <button class="btn btn-outline btn-sm" onclick="approveHW('${app.id}')">✅ Approve anyway</button>
+          ` : `
+            <button class="btn btn-green btn-sm" onclick="approveHW('${app.id}')">✅ Approve &amp; Activate</button>
+          `}
           <button class="btn btn-outline btn-sm" onclick="editPendingHW('${app.id}')">✏️ Edit Details</button>
           <button class="btn btn-outline btn-sm" onclick="requestInfoHW('${app.id}','${app.name}')">📧 Request Info</button>
           <button class="btn btn-red btn-sm" onclick="rejectHW('${app.id}','${app.name}')">✕ Reject</button>
@@ -21553,6 +21551,36 @@ function getZoneSuggestion(zip){
   const prefix = zip
   const match = ADMIN_ZONES.find(z=>z.zips?.includes(zip) || z.zip===zip)
   return match ? `suggested: ${match.name}` : 'no existing zone -- will create new'
+}
+
+async function activateWaitlistZone(zip, appId){
+  try {
+    let zone = ADMIN_ZONES.find(z => (z.zips||[z.zip||'']).includes(zip))
+    if(zone){
+      await _supa.from('zones').update({ status:'waitlist', updated_at:new Date().toISOString() }).eq('id', zone.id)
+      zone.status = 'waitlist'
+      showToast(zone.name+' activated as waitlist zone ✅', 'ok', 4000)
+    } else {
+      const zoneName = 'ZIP '+zip+' Area'
+      const { data: newZone, error } = await _supa.from('zones').insert({
+        name: zoneName, zip, zips: JSON.stringify([zip]),
+        status: 'waitlist', homeowners:1, runners:0, capacity:4, threshold:3,
+        created_at: new Date().toISOString(),
+      }).select().single()
+      if(error){ showToast('Zone create failed: '+error.message,'err'); return }
+      zone = { id:newZone.id, name:zoneName, zip, zips:[zip], status:'waitlist', homeowners:1, runners:0 }
+      ADMIN_ZONES.push(zone)
+      showToast('Waitlist zone created for ZIP '+zip+' ✅', 'ok', 4000)
+    }
+    if(appId && zone?.id){
+      await _supa.from('homeowner_signups').update({ zone_id:zone.id, updated_at:new Date().toISOString() }).eq('id', appId)
+      const entry = PENDING_HOMEOWNERS.find(a=>String(a.id)===String(appId))
+      if(entry){ entry.zoneId = zone.id; entry.isWaitlist = true }
+    }
+    renderPendingHWList()
+    if(typeof renderAdminZones==='function') renderAdminZones()
+    if(typeof syncZoneData==='function') syncZoneData()
+  } catch(e){ showToast('Error: '+e.message, 'err') }
 }
 
 async function approveHW(appId, directZoneId){
