@@ -5597,15 +5597,24 @@ async function _populateHWDashData(row, fn, ln, initials){
   const planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split Days · $54.99/mo', oan_a:'Bin Out As Needed — 1 Can · $19.99/mo+usage', oan_b:'Bin Out As Needed — 2 Cans Same Day · $19.99/mo+usage', oan_c:'Bin Out As Needed — 2 Cans Split · $19.99/mo+usage' }
   const planIcons  = { plan_a:'🗑️', plan_b:'🗑️🗑️', plan_c:'♻️🗑️' }
   const planKey = row.plan_id || 'plan_a'
-  safe('acct-plan-name', planLabels[planKey] || planLabels.plan_a)
-  safe('acct-plan-icon', planIcons[planKey]  || '🗑️')
+  // Derive plan from service_type if plan_id not set
+  const derivedPlanKey = (() => {
+    if(planLabels[planKey]) return planKey
+    const svc = (row.service_type||'').toLowerCase()
+    if(svc === 'split' || svc.includes('split') || row.collection_day_2) return 'plan_c'
+    if(svc === 'both') return 'plan_b'
+    return 'plan_a'
+  })()
+  const effectivePlanKey = planLabels[planKey] ? planKey : derivedPlanKey
+  safe('acct-plan-name', planLabels[effectivePlanKey] || planLabels.plan_a)
+  safe('acct-plan-icon', planIcons[effectivePlanKey] || planIcons[planKey] || '🗑️')
   const activeSince = row.created_at
     ? new Date(row.created_at).toLocaleDateString('en-US',{month:'short',year:'numeric'})
     : '--'
   safe('acct-plan-detail', (colDay || '--') + 's . Active since ' + activeSince)
 
   // Mark current plan card
-  const planLetter = (planKey || 'plan_a').replace('plan_','')
+  const planLetter = (effectivePlanKey || planKey || 'plan_a').replace('plan_','')
   document.querySelectorAll('.plan-card').forEach(c => {
     c.style.border = '2px solid var(--border2)'
     c.style.background = 'transparent'
@@ -5632,15 +5641,20 @@ async function _populateHWDashData(row, fn, ln, initials){
   safe('prop-gate',       row.gate_type ? row.gate_type + (row.gate_code ? ' . Code: ' + row.gate_code : '') : '--')
   safe('prop-pets',       row.pet_info       || 'None')
   safe('pref-service',    row.service_type   || 'Recycling')
-  safe('pref-day',        row.collection_day || '--')
+  safe('pref-day', row.collection_day_2
+    ? (row.collection_day||'--') + ' & ' + row.collection_day_2
+    : (row.collection_day || '--'))
   const prevDayName = colDayIdx >= 0 ? dayNames[(colDayIdx + 6) % 7] : '--'
   safe('pref-binout-night', prevDayName !== '--' ? prevDayName + ' evening' : '--')
-  safe('pref-plan',       planLabels[planKey] || '--')
+  safe('pref-plan',       planLabels[effectivePlanKey] || planLabels[planKey] || '--')
   safe('pref-notes',      row.service_notes  || '--')
 
   // Populate new card summary lines
   safe('hw-next-col-sub', colDayIdx>=0 ? (prevDayName+' evening Bin Out · '+colDay+' daytime Bin In') : 'No schedule set')
-  safe('hw-svc-summary',  (planLabels[planKey]||'--') + ' · ' + (row.collection_day||'--') + 's')
+  const dayDisplay = row.collection_day_2
+    ? (row.collection_day||'--') + ' & ' + row.collection_day_2
+    : (row.collection_day||'--')
+  safe('hw-svc-summary',  (planLabels[effectivePlanKey]||planLabels[planKey]||'--') + ' · ' + dayDisplay + 's')
 
   // Populate recent collections list in expandable card
   const recentEl = document.getElementById('hw-recent-list')
@@ -11612,62 +11626,107 @@ async function renderRunnerHeatmap(){
     anchorLng = ZIP_CENTROIDS[rnZip][1]
   }
 
-  // Compute res-6 boundary and the res-7 children inside it
-  let boundary6Hex   = null
-  let boundarySet    = new Set()   // res-7 hexIds within runner's res-6
-  let anchorHex7     = null
+  // ── 4. Build ALL of the runner's assigned zones + adjacent rings ──
+  // Collect all zone zips from coverage_zones + zone_id + runner_zone_requests
+  const myZoneZips = new Set()
+  const myZone6Hexes = new Set()   // all res-6 hexes the runner owns
+  const allBoundaryH8s = new Set() // all res-8 hexes across ALL runner zones
+
+  try {
+    const row = window._rnRow || {}
+    // All assigned zone IDs
+    const czRaw = row.coverage_zones
+    const czIds = czRaw ? (typeof czRaw==='string'?JSON.parse(czRaw):czRaw) : (row.zone_id?[row.zone_id]:[])
+    // Also from _runnerZoneRoles (loaded from runner_zone_requests)
+    const roleZoneIds = Object.keys(window._runnerZoneRoles||{})
+    const allZoneIds  = [...new Set([...czIds, ...roleZoneIds].filter(Boolean))]
+
+    allZoneIds.forEach(zid => {
+      const zone = ADMIN_ZONES.find(z=>z.id===zid)
+      const zips = zone?.zips || (zone?.zip ? [zone.zip] : [])
+      zips.forEach(zip => myZoneZips.add(zip))
+    })
+    // Also add runner's home ZIP
+    if(row.zip_code) myZoneZips.add(row.zip_code)
+
+    // Convert each ZIP to a res-6 hex and collect all children
+    myZoneZips.forEach(zip => {
+      const ctr = ZIP_CENTROIDS[zip]
+      if(!ctr) return
+      try {
+        const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+        const h6 = h3.cellToParent(h8, 6)
+        myZone6Hexes.add(h6)
+        h3.cellToChildren(h6, 8).forEach(child => allBoundaryH8s.add(child))
+      } catch(e){}
+    })
+  } catch(e){ console.warn('[Scout] zone collection:', e.message) }
+
+  // Fallback to single anchor if no zones found
+  let anchorHex7 = null
+  let boundary6Hex = null
+  let boundarySet = new Set()
 
   if(anchorLat && typeof h3 !== 'undefined'){
     try {
-      anchorHex7  = h3.latLngToCell(anchorLat, anchorLng, RN_HEAT_RES)
+      anchorHex7   = h3.latLngToCell(anchorLat, anchorLng, RN_HEAT_RES)
       boundary6Hex = h3.cellToParent(anchorHex7, 6)
-      h3.cellToChildren(boundary6Hex, RN_HEAT_RES).forEach(h => boundarySet.add(h))
+      myZone6Hexes.add(boundary6Hex)
+      h3.cellToChildren(boundary6Hex, 8).forEach(h => { allBoundaryH8s.add(h); boundarySet.add(h) })
     } catch(e){}
   }
+
+  // boundarySet = ALL h8s across all zones (for inBoundary check)
+  allBoundaryH8s.forEach(h => boundarySet.add(h))
 
   const hasBoundary = boundarySet.size > 0
 
-  // Draw the res-6 boundary outline on the map
-  if(boundary6Hex){
-    try {
-      const b6pts = h3.cellToBoundary(boundary6Hex).map(([la,ln])=>[la,ln])
-      L.polygon(b6pts, { color:'#0d9488', fillColor:'transparent', weight:2.5, dashArray:'6,4', opacity:0.9 }).addTo(map)
-    } catch(e){}
-  }
-
-  // ── 4. CONSTRAINED DRAW: runner's res-6 + 1-ring adjacent res-6 zones only ──
   if(!hasBoundary){
     if(loadEl){ loadEl.style.display='flex'; loadEl.innerHTML='<div style="text-align:center;padding:20px"><div style="font-size:20px;margin-bottom:8px">📍</div><div style="font-size:13px;color:#fbbf24">Add your home address in My Info to see your zone</div></div>' }
     return
   }
 
-  // Compute the adjacent res-6 ring (1 ring of res-6 neighbours)
-  let adjacentRes6 = []
-  try {
-    // gridDisk returns center + ring; filter center out to get just the 6 neighbours
-    // Works in both H3 v3 (kRing) and v4 (gridDisk)
-    const disk = h3.gridDisk(boundary6Hex, 1)
-    adjacentRes6 = disk.filter(h => h !== boundary6Hex)
-  } catch(e){ console.warn('[Scout] gridDisk failed:', e.message) }
-  const adjacentRes6Set = new Set(adjacentRes6)
+  // Draw outline for each of the runner's res-6 zones
+  myZone6Hexes.forEach(h6 => {
+    try {
+      const b6pts = h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
+      const isAnchorZone = h6 === boundary6Hex
+      L.polygon(b6pts, {
+        color: isAnchorZone ? '#0d9488' : '#4338ca',
+        fillColor: 'transparent',
+        weight: 2.5, dashArray: isAnchorZone ? '6,4' : '5,3', opacity: 0.9
+      })
+      .bindTooltip('<div style="font-size:11px;font-weight:700;color:#1e293b">'+(isAnchorZone?'Primary zone':'Additional zone')+'</div>', { className:'h3-tip', direction:'top' })
+      .addTo(map)
+    } catch(e){}
+  })
 
-  // Get the runner's own coverage hexes (res-8) from their DB row
+  // Compute adjacent ring from ALL runner zones (not just anchor)
+  let adjacentRes6 = []
+  const adjacentRes6Set = new Set()
+  try {
+    myZone6Hexes.forEach(h6 => {
+      h3.gridDisk(h6, 1).filter(h => h !== h6 && !myZone6Hexes.has(h)).forEach(adj => {
+        if(!adjacentRes6Set.has(adj)){ adjacentRes6Set.add(adj); adjacentRes6.push(adj) }
+      })
+    })
+  } catch(e){ console.warn('[Scout] adjacentRes6 failed:', e.message) }
+
+  // Get the runner's own coverage hexes (res-8)
   const myRes8Hexes = new Set()
   try {
     const raw = (window._rnRow||{}).coverage_hexes
     const hexes = raw ? (typeof raw==='string' ? JSON.parse(raw) : raw) : []
     hexes.forEach(h => myRes8Hexes.add(h))
   } catch(e){}
-  // Also populate from boundarySet if no explicit coverage — means all hexes in res-6
   if(myRes8Hexes.size === 0) boundarySet.forEach(h => myRes8Hexes.add(h))
 
   const counts = { active:0, demand:0, runner:0, open:0 }
 
-  // ── Draw runner's own res-6 — all res-8 hexes within ──
+  // ── Draw ALL of runner's res-8 hexes across all zones ──
   boundarySet.forEach(h8 => {
     const isAnchor  = h8 === anchorHex7
-    const isCovered = myRes8Hexes.has(h8)
-    const hoNames   = (window._rnHeatHoNames||{})[h8] || []
+    const isCovered = myRes8Hexes.has(h8) || myRes8Hexes.size === 0
     const hoCount   = hoHexes[h8] || 0
 
     let type, fillColor, fillOpacity, borderColor, borderDash
@@ -11685,7 +11744,6 @@ async function renderRunnerHeatmap(){
         type='open'; fillColor='rgba(100,116,139,1)'; fillOpacity=0.08; borderColor='rgba(71,85,105,.4)'; borderDash='3,4'; counts.open++
       }
     } else {
-      // Expand mode — dim own zone
       type = isCovered ? 'runner' : 'open'
       fillColor = isCovered ? 'rgba(6,214,160,1)' : 'rgba(100,116,139,1)'
       fillOpacity = isCovered ? 0.18 : 0.05
@@ -11819,15 +11877,14 @@ async function renderRunnerHeatmap(){
   safe('rn-heat-ct-runner', counts.runner)
   safe('rn-heat-ct-open',   counts.open)
 
-  // Fit map to show runner's res-6 + adjacent ring — with zoom cap
+  // Fit map to show ALL runner zones + adjacent ring
   try {
-    const allHexes = [boundary6Hex, ...adjacentRes6].filter(Boolean)
+    const allHexes = [...myZone6Hexes, ...adjacentRes6].filter(Boolean)
     const allPts = allHexes.flatMap(h6 => {
       try { return h3.cellToBoundary(h6).map(([la,ln])=>[la,ln]) } catch(e){ return [] }
     })
     if(allPts.length){
       map.fitBounds(allPts, { padding:[20,20], maxZoom:12, animate:false })
-      // If zoomed too far out, pull in — res-6 ring should be visible at z11+
       setTimeout(() => { if(map.getZoom() < 10) map.setZoom(11) }, 100)
     } else if(anchorLat){
       map.setView([anchorLat, anchorLng], 11)
@@ -14927,22 +14984,50 @@ function confirmRemoveRunner(rId, name){
   openM()
 }
 
-function removeRunner(rId){
-  const idx = RUNNERS.findIndex(r=>r.id===rId)
-  const name = idx>=0 ? RUNNERS[idx].name : rId
+async function removeRunner(rId){
+  const idx  = RUNNERS.findIndex(r=>r.id===rId)
+  const r    = idx>=0 ? RUNNERS[idx] : null
+  const name = r?.name || rId
+  try {
+    // Remove from all DB tables
+    await _supa.from('runners').delete().eq('id', rId)
+    await _supa.from('runner_zone_requests').delete().eq('runner_email', r?.email||'')
+    // Unassign from any zones
+    await _supa.from('zones').update({ assigned_runner: null, updated_at: new Date().toISOString() })
+      .eq('assigned_runner', rId)
+    // Unassign from any homeowners
+    await _supa.from('homeowner_signups').update({ assigned_runner: null })
+      .eq('assigned_runner', rId)
+  } catch(e){ console.warn('[BinDash] removeRunner DB:', e.message) }
   if(idx>=0) RUNNERS.splice(idx,1)
   renderRunnerList()
+  renderAdminZones()
   showToast(name + ' removed from system','err')
 }
 
-function deactivateRunner(rId){
+async function deactivateRunner(rId){
   const r = RUNNERS.find(x=>x.id===rId)
-  if(r){ r.status='INACTIVE'; renderRunnerList(); showToast(r.name + ' deactivated','info') }
+  if(!r) return
+  r.status = 'INACTIVE'
+  try {
+    await _supa.from('runners').update({ status:'inactive', updated_at: new Date().toISOString() }).eq('id', rId)
+    // Unassign as lead from zones but keep record
+    await _supa.from('zones').update({ assigned_runner: null, updated_at: new Date().toISOString() })
+      .eq('assigned_runner', rId)
+  } catch(e){ console.warn('[BinDash] deactivateRunner DB:', e.message) }
+  renderRunnerList()
+  showToast(r.name + ' deactivated — removed from dispatch','info')
 }
 
-function reactivateRunner(rId){
+async function reactivateRunner(rId){
   const r = RUNNERS.find(x=>x.id===rId)
-  if(r){ r.status='AVAILABLE'; renderRunnerList(); showToast(r.name + ' reactivated ✅','ok') }
+  if(!r) return
+  r.status = 'AVAILABLE'
+  try {
+    await _supa.from('runners').update({ status:'active', updated_at: new Date().toISOString() }).eq('id', rId)
+  } catch(e){ console.warn('[BinDash] reactivateRunner DB:', e.message) }
+  renderRunnerList()
+  showToast(r.name + ' reactivated ✅','ok')
 }
 
 function showPrequeueInfo(){
@@ -15589,6 +15674,13 @@ function showEditProperty(){
     <div class="field"><label>Curb placement / special notes</label>
       <textarea id="ep-notes" placeholder="e.g. Place bins left of driveway behind mailbox">${document.getElementById('pref-notes')?.textContent||''}</textarea>
     </div>
+    <div class="sec-h">Property Photos <span style="font-size:10px;font-weight:400;color:var(--muted)">Help your runner identify your bins and access</span></div>
+    <div id="ep-photos-wrap" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
+    <label style="display:flex;align-items:center;gap:8px;background:rgba(6,214,160,.06);border:1.5px dashed rgba(6,214,160,.35);border-radius:9px;padding:10px 14px;cursor:pointer;font-size:12px;color:var(--cyan)">
+      📷 Add photo
+      <input type="file" id="ep-photo-input" accept="image/*" multiple style="display:none" onchange="epAddPhotos(this.files)">
+    </label>
+    <div style="font-size:10px;color:var(--muted);margin-top:5px">Tap existing photos to remove. Max 5 photos.</div>
     <div id="ep-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:4px"></div>
   </div>
   <div class="mf">
@@ -15596,6 +15688,60 @@ function showEditProperty(){
     <button class="btn btn-cyan btn-sm" id="ep-save-btn" onclick="saveEditProperty()">Save Changes</button>
   </div>`
   openM()
+  // Load existing photos
+  _epLoadExistingPhotos()
+}
+
+async function _epLoadExistingPhotos(){
+  const wrap = document.getElementById('ep-photos-wrap')
+  if(!wrap) return
+  const row = window._hwProfileRow || {}
+  const email = row.email || currentUser?.email
+  if(!email) return
+  try {
+    // List files in storage bucket for this user
+    const folder = email.replace('@','_at_').replace(/[^a-zA-Z0-9_]/g,'-')
+    const { data: files } = await _supa.storage.from('property-photos').list(folder, { limit:20 })
+    if(!files?.length){ wrap.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:4px 0">No photos yet</div>'; return }
+    wrap.innerHTML = files.slice(0,5).map(f => {
+      const { data: { publicUrl } } = _supa.storage.from('property-photos').getPublicUrl(folder+'/'+f.name)
+      return '<div style="position:relative;flex-shrink:0" onclick="_epRemovePhoto(\'' + folder + '\',\'' + f.name + '\',this)">'
+        + '<img src="' + publicUrl + '" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1.5px solid var(--border2)">'
+        + '<div style="position:absolute;top:2px;right:2px;background:rgba(239,68,68,.85);color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:flex;align-items:center;justify-content:center;cursor:pointer">✕</div>'
+        + '</div>'
+    }).join('')
+  } catch(e){ wrap.innerHTML = '<div style="font-size:11px;color:var(--muted)">Could not load photos</div>' }
+}
+
+async function epAddPhotos(files){
+  const wrap  = document.getElementById('ep-photos-wrap')
+  const row   = window._hwProfileRow || {}
+  const email = row.email || currentUser?.email
+  if(!email || !files?.length) return
+  const folder = email.replace('@','_at_').replace(/[^a-zA-Z0-9_]/g,'-')
+  const existing = wrap?.querySelectorAll('img').length || 0
+  let added = 0
+  for(const file of files){
+    if(existing + added >= 5){ showToast('Max 5 photos','err'); break }
+    try {
+      // Compress before upload
+      const compressed = await _compressImage(file, 800, 0.75)
+      const fname = folder+'/prop_'+Date.now()+'_'+added+'.jpg'
+      const { error } = await _supa.storage.from('property-photos').upload(fname, compressed, { upsert:true, contentType:'image/jpeg' })
+      if(!error) added++
+      else console.warn('[Photo] upload:', error.message)
+    } catch(e){ console.warn('[Photo] compress:', e.message) }
+  }
+  if(added > 0){ showToast(added+' photo'+(added!==1?'s':'')+' saved ✅','ok',3000); _epLoadExistingPhotos() }
+}
+
+async function _epRemovePhoto(folder, fname, wrapEl){
+  if(!confirm('Remove this photo?')) return
+  try {
+    await _supa.storage.from('property-photos').remove([folder+'/'+fname])
+    wrapEl?.remove()
+    showToast('Photo removed','info',2000)
+  } catch(e){ showToast('Could not remove photo','err') }
 }
 
 async function saveEditProperty(){
