@@ -3665,6 +3665,20 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
               <button class="btn btn-cyan btn-sm" onclick="rnSaveServiceArea()" id="rn-area-save-btn">Save Changes</button>
             </div>
           </div>
+          <!-- Multi-zone overview map -->
+          <div style="border:1.5px solid var(--border2);border-radius:12px;overflow:hidden;margin-bottom:14px;position:relative">
+            <div id="rn-zones-map" style="height:280px;width:100%;background:#f1f5f9"></div>
+            <div id="rn-zones-map-loading" style="position:absolute;inset:0;background:rgba(241,245,249,.85);display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;color:#475569">
+              <span>⬡</span> Loading your zone map...
+            </div>
+            <!-- Legend -->
+            <div style="position:absolute;bottom:8px;left:8px;background:rgba(255,255,255,.92);border-radius:7px;padding:5px 9px;display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:#475569;box-shadow:0 1px 4px rgba(0,0,0,.1)">
+              <span style="display:flex;align-items:center;gap:3px"><span style="width:9px;height:9px;background:#0d9488;border-radius:2px;flex-shrink:0"></span>Your zone</span>
+              <span style="display:flex;align-items:center;gap:3px"><span style="width:9px;height:9px;background:#16a34a;border-radius:2px;flex-shrink:0"></span>Active HOs</span>
+              <span style="display:flex;align-items:center;gap:3px"><span style="width:9px;height:9px;background:#d97706;border-radius:2px;flex-shrink:0"></span>Waitlist nearby</span>
+              <span style="display:flex;align-items:center;gap:3px"><span style="width:9px;height:9px;border:1.5px dashed #64748b;border-radius:2px;flex-shrink:0"></span>Unclaimed zone</span>
+            </div>
+          </div>
           <div id="rn-zones-content">
             <div style="text-align:center;padding:32px;color:var(--muted)">Loading zones...</div>
           </div>
@@ -12679,6 +12693,190 @@ function copyReferralLink(){
   navigator.clipboard?.writeText(link).then(()=>showToast('Link copied ✅','ok')).catch(()=>showToast('Copy failed — select manually','err'))
 }
 
+async function _renderRnZonesMap(myZones, myHomeowners, waitlistedHOs){
+  await _loadMapLibs()
+  if(typeof L === 'undefined' || typeof h3 === 'undefined') return
+
+  const mapEl  = document.getElementById('rn-zones-map')
+  const loadEl = document.getElementById('rn-zones-map-loading')
+  if(!mapEl) return
+
+  // Destroy previous instance
+  if(window._rnZonesMapInstance){ try{ window._rnZonesMapInstance.remove() }catch(e){} }
+
+  const map = L.map('rn-zones-map', { zoomControl:true, attributionControl:false })
+  window._rnZonesMapInstance = map
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
+  setTimeout(() => map.invalidateSize(), 120)
+
+  const allBounds = []
+
+  // ── 1. Draw each of the runner's own zones ──
+  for(const zone of myZones){
+    const zips = zone.zips || (zone.zip ? [zone.zip] : [])
+    const isLive     = zone.status === 'live'
+    const isWaitlist = zone.status === 'waitlist'
+    const zoneCol    = isLive ? '#0d9488' : '#d97706'
+    const zoneFill   = isLive ? 'rgba(13,148,136,.1)' : 'rgba(217,119,6,.08)'
+
+    for(const zip of zips){
+      const ctr = ZIP_CENTROIDS[zip]
+      if(!ctr) continue
+      try {
+        const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+        const h6 = h3.cellToParent(h8, 6)
+
+        // Res-6 boundary outline
+        const b6pts = h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
+        L.polygon(b6pts, {
+          color: zoneCol, fillColor: zoneFill, fillOpacity:1,
+          weight:2.5, opacity:0.9
+        })
+        .bindTooltip('<div style="font-size:11px;font-weight:700;color:#1e293b">'+zone.name+'</div><div style="font-size:10px;color:#475569">ZIP '+zip+' · '+(isLive?'Live':'Building')+'</div>', { className:'h3-tip', direction:'top' })
+        .addTo(map)
+        allBounds.push(...b6pts)
+
+        // Draw all res-8 hexes inside — colour by HO status
+        const children = h3.cellToChildren(h6, 8)
+
+        // Build HO hex map for this zone
+        const hoByHex = {}
+        myHomeowners.filter(h => h.zip_code === zip).forEach(h => {
+          const hctr = ZIP_CENTROIDS[h.zip_code]
+          if(!hctr) return
+          try {
+            const hh = h3.latLngToCell(hctr[0], hctr[1], 8)
+            hoByHex[hh] = (hoByHex[hh]||0) + 1
+          } catch(e){}
+        })
+        waitlistedHOs.filter(h => h.zip_code === zip).forEach(h => {
+          const hctr = ZIP_CENTROIDS[h.zip_code]
+          if(!hctr) return
+          try {
+            const hh = h3.latLngToCell(hctr[0], hctr[1], 8)
+            hoByHex['wl_'+hh] = (hoByHex['wl_'+hh]||0) + 1
+          } catch(e){}
+        })
+
+        children.forEach(h8c => {
+          const pts = h3.cellToBoundary(h8c).map(([la,ln])=>[la,ln])
+          const activeCount    = hoByHex[h8c] || 0
+          const waitlistCount  = hoByHex['wl_'+h8c] || 0
+          let fc, fo, bc
+          if(activeCount > 0){
+            fc='#16a34a'; fo=0.40; bc='#15803d'
+          } else if(waitlistCount > 0){
+            fc='#f59e0b'; fo=0.35; bc='#d97706'
+          } else {
+            fc='rgba(13,148,136,1)'; fo=0.08; bc='rgba(13,148,136,.35)'
+          }
+          const poly = L.polygon(pts, { color:bc, fillColor:fc, fillOpacity:fo, weight:1.5, opacity:1 }).addTo(map)
+          if(activeCount > 0 || waitlistCount > 0){
+            poly.bindTooltip(
+              '<div style="font-size:10px;color:#1e293b">'+(activeCount?activeCount+' active':'')+(waitlistCount?' '+waitlistCount+' waitlisted':'')+'</div>',
+              { className:'h3-tip', direction:'top', sticky:true }
+            )
+          }
+        })
+      } catch(e){ console.warn('[ZoneMap]', e.message) }
+    }
+  }
+
+  // ── 2. Draw nearby zones not yet assigned — waitlist zones within 1 res-6 ring ──
+  const myH6s = new Set()
+  myZones.forEach(z => {
+    const zips = z.zips || (z.zip ? [z.zip] : [])
+    zips.forEach(zip => {
+      const ctr = ZIP_CENTROIDS[zip]
+      if(!ctr) return
+      try {
+        const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+        myH6s.add(h3.cellToParent(h8, 6))
+      } catch(e){}
+    })
+  })
+
+  // Get all adjacent res-6 to runner's zones
+  const adjH6s = new Set()
+  myH6s.forEach(h6 => {
+    try {
+      h3.gridDisk(h6, 1).filter(h=>h!==h6).forEach(adj => adjH6s.add(adj))
+    } catch(e){}
+  })
+  // Remove ones runner already covers
+  myH6s.forEach(h6 => adjH6s.delete(h6))
+
+  // Find ADMIN_ZONES that fall in adjacent res-6s
+  const nearbyZones = ADMIN_ZONES.filter(z => {
+    if(myZones.find(mz=>mz.id===z.id)) return false // skip own zones
+    const zips = z.zips || (z.zip ? [z.zip] : [])
+    return zips.some(zip => {
+      const ctr = ZIP_CENTROIDS[zip]
+      if(!ctr) return false
+      try {
+        const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+        const h6 = h3.cellToParent(h8, 6)
+        return adjH6s.has(h6)
+      } catch(e){ return false }
+    })
+  })
+
+  nearbyZones.forEach(z => {
+    const zips = z.zips || (z.zip ? [z.zip] : [])
+    const isWl = z.status === 'waitlist'
+    const hoCt = z.homeowners || 0
+    zips.forEach(zip => {
+      const ctr = ZIP_CENTROIDS[zip]
+      if(!ctr) return
+      try {
+        const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+        const h6 = h3.cellToParent(h8, 6)
+        const pts = h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
+        const col  = isWl ? '#d97706' : 'rgba(100,116,139,.6)'
+        const fill = isWl ? 'rgba(217,119,6,.06)' : 'rgba(100,116,139,.04)'
+        L.polygon(pts, { color:col, fillColor:fill, fillOpacity:1, weight:1.5, dashArray:'5,4', opacity: isWl?0.85:0.5 })
+          .bindTooltip(
+            '<div style="font-size:11px;font-weight:700;color:#1e293b">'+z.name+'</div>'
+            +'<div style="font-size:10px;color:#475569">'+hoCt+' HO'+(hoCt!==1?'s':'')+' · '+(isWl?'Building':'No zone yet')
+            +'</div><div style="font-size:10px;color:#0d9488;margin-top:2px">→ Go to Scout Area to request</div>',
+            { className:'h3-tip', direction:'top' }
+          )
+          .addTo(map)
+      } catch(e){}
+    })
+  })
+
+  // Also draw unclaimed adjacent res-6s with no zone
+  adjH6s.forEach(h6 => {
+    const alreadyDrawn = nearbyZones.some(z => {
+      const zips = z.zips || (z.zip ? [z.zip] : [])
+      return zips.some(zip => {
+        const ctr = ZIP_CENTROIDS[zip]
+        if(!ctr) return false
+        try { return h3.cellToParent(h3.latLngToCell(ctr[0],ctr[1],8),6)===h6 } catch(e){ return false }
+      })
+    })
+    if(alreadyDrawn) return
+    try {
+      const pts = h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
+      L.polygon(pts, { color:'rgba(100,116,139,.3)', fillColor:'rgba(100,116,139,.02)', fillOpacity:1, weight:1, dashArray:'3,5', opacity:0.4 }).addTo(map)
+    } catch(e){}
+  })
+
+  // Fit bounds to show all runner zones + adjacent ring
+  if(allBounds.length){
+    try { map.fitBounds(allBounds, { padding:[16,16], maxZoom:13 }) } catch(e){}
+  } else if(myZones.length === 0){
+    // Fallback to runner's home ZIP
+    const row = window._rnRow || {}
+    const ctr = ZIP_CENTROIDS[row.zip_code||row.zip||'']
+    if(ctr) map.setView([ctr[0],ctr[1]], 11)
+    else map.setView([33.45,-112.07], 10)
+  }
+
+  if(loadEl) loadEl.style.display = 'none'
+}
+
 async function loadRNZones(){
   const el = document.getElementById('rn-zones-content')
   if(!el) return
@@ -12901,6 +13099,9 @@ async function loadRNZones(){
         </div>` : ''}
       </div>`
     }).join('')
+
+    // Render the multi-zone overview map
+    _renderRnZonesMap(myZones, myHomeowners, waitlistedHOs)
 
     el.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
@@ -15438,16 +15639,17 @@ async function saveEditProperty(){
 }
 function showEditPreferences(){
   // Read current values from populated elements
-  const curDay     = document.getElementById('pref-day')?.textContent?.trim()     || 'Monday'
-  const curSvc     = document.getElementById('pref-service')?.textContent?.trim() || 'Recycling'
-  const curPlan    = document.getElementById('acct-plan-name')?.textContent?.trim()|| ''
-  const curNotes   = document.getElementById('pref-notes')?.textContent?.trim()   || ''
-  const curBinout  = document.getElementById('pref-binout-night')?.textContent?.trim() || ''
+  // Always read from DB row — DOM text can be formatted differently than raw values
   const row        = window._hwProfileRow || {}
+  const curDay     = row.collection_day    || document.getElementById('pref-day')?.textContent?.trim()     || 'Monday'
+  const curDay2    = row.collection_day_2  || ''
+  const curSvc     = row.service_type      || document.getElementById('pref-service')?.textContent?.trim() || 'recycling'
+  const curPlan    = row.plan_id           || document.getElementById('acct-plan-name')?.dataset?.planId   || ''
+  const curNotes   = row.service_notes     || document.getElementById('pref-notes')?.textContent?.trim()   || ''
+  const curBinout  = row.binout_night      || document.getElementById('pref-binout-night')?.textContent?.trim() || ''
 
-  // Detect split-day service
-  const isSplitCurrent = curSvc.toLowerCase().includes('split') || row.collection_day_2
-  const curDay2   = row.collection_day_2 || ''
+  // Detect split-day service from raw DB value
+  const isSplitCurrent = (row.plan_id==='plan_c' || row.plan_id==='oan_c') || !!row.collection_day_2 || curSvc.toLowerCase().includes('split')
 
   // Plan pricing for change notification
   const planPrices = {
@@ -15466,21 +15668,26 @@ function showEditPreferences(){
   <div class="mb" style="max-height:70vh;overflow-y:auto">
     <div class="sec-h" style="margin-top:0">Which bins does your runner handle?</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
-      <div id="ep-svc-recycling" onclick="epSelectSvc('recycling')" style="border:1.5px solid ${!curSvc.includes('Waste')&&!curSvc.includes('Split')?'var(--cyan)':'var(--border2)'};background:${!curSvc.includes('Waste')&&!curSvc.includes('Split')?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+      <div id="ep-svc-recycling" onclick="epSelectSvc('recycling')" style="border:1.5px solid ${(curSvc||'').toLowerCase()==='recycling'?'var(--cyan)':'var(--border2)'};background:${(curSvc||'').toLowerCase()==='recycling'?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
         <div style="font-size:20px">♻️</div><div style="font-size:12px;font-weight:700;margin-top:4px">Recycling only</div>
       </div>
-      <div id="ep-svc-waste" onclick="epSelectSvc('waste')" style="border:1.5px solid ${curSvc.includes('General')?'var(--cyan)':'var(--border2)'};background:${curSvc.includes('General')&&!curSvc.includes('Split')?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+      <div id="ep-svc-waste" onclick="epSelectSvc('waste')" style="border:1.5px solid ${(curSvc||'').toLowerCase()==='waste'?'var(--cyan)':'var(--border2)'};background:${(curSvc||'').toLowerCase()==='waste'?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
         <div style="font-size:20px">🗑️</div><div style="font-size:12px;font-weight:700;margin-top:4px">General Waste only</div>
       </div>
-      <div id="ep-svc-both" onclick="epSelectSvc('both')" style="border:1.5px solid ${curSvc.includes('Both')||curSvc.includes('both')?'var(--cyan)':'var(--border2)'};background:${curSvc.includes('Both')?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+      <div id="ep-svc-both" onclick="epSelectSvc('both')" style="border:1.5px solid ${(curSvc||'').toLowerCase()==='both'?'var(--cyan)':'var(--border2)'};background:${(curSvc||'').toLowerCase()==='both'?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
         <div style="font-size:20px">♻️🗑️</div><div style="font-size:12px;font-weight:700;margin-top:4px">Both — same day</div>
       </div>
-      <div id="ep-svc-split" onclick="epSelectSvc('split')" style="border:1.5px solid ${isSplitCurrent?'var(--cyan)':'var(--border2)'};background:${isSplitCurrent?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+      <div id="ep-svc-split" onclick="epSelectSvc('split')" style="border:1.5px solid ${isSplitCurrent||(curSvc||'').toLowerCase()==='split'?'var(--cyan)':'var(--border2)'};background:${isSplitCurrent||(curSvc||'').toLowerCase()==='split'?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
         <div style="font-size:20px">📅</div><div style="font-size:12px;font-weight:700;margin-top:4px">Both — split days</div>
         <div style="font-size:10px;color:var(--muted);margin-top:2px">Different days for each bin</div>
       </div>
     </div>
-    <input type="hidden" id="ep-svc-val" value="${isSplitCurrent?'split':curSvc.includes('General')&&!curSvc.includes('Both')?'waste':curSvc.includes('Both')?'both':'recycling'}">
+    <input type="hidden" id="ep-svc-val" value="${
+      isSplitCurrent ? 'split'
+      : (curSvc||'').toLowerCase()==='both' ? 'both'
+      : (curSvc||'').toLowerCase()==='waste' ? 'waste'
+      : 'recycling'
+    }">
     <div id="ep-plan-notice" style="display:none;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#fbbf24"></div>
     <div class="sec-h">Collection schedule</div>
     <div id="ep-day-single" style="${isSplitCurrent?'display:none':''}">
@@ -28033,7 +28240,9 @@ async function dismissScoutFlags(zip, btnEl, reqIdsCsv){
   if(error){ console.warn('[BinDash] dismissScoutFlags:', error.message); if(card){ card.style.opacity='1'; card.style.pointerEvents='' } }
   else {
     showToast('Flags dismissed','info')
-    setTimeout(() => renderRunnerZoneRequests(), 400)
+    // Hide the card immediately rather than waiting for re-render
+    if(card) card.remove()
+    setTimeout(() => { renderRunnerZoneRequests(); loadRunnerZoneRequestsBadge() }, 400)
   }
 }
 
@@ -28267,12 +28476,16 @@ async function loadZoneWaitlistBadge(){
 async function loadRunnerZoneRequestsBadge(){
   try {
     // Only count meaningful pending flags — not homeowner waitlist or null-ZIP entries
-    const res = await _supa.from('runner_zone_requests')
-      .select('id',{count:'exact'})
+    // Count only real pending flags — exclude null-ZIP entries and homeowner waitlist
+    const { data: pendingRows } = await _supa.from('runner_zone_requests')
+      .select('id,zip_code,type')
       .eq('status','pending')
-      .neq('type','homeowner_waitlist')
-      .not('zip_code','is',null)
-    const count = res?.count || res?.data?.length || 0
+    const count = (pendingRows||[]).filter(r =>
+      r.type !== 'homeowner_waitlist' &&
+      r.zip_code && r.zip_code.trim() !== ''
+    ).length
+    // Replaced .count query below — keep variable name for compatibility
+    const res = { count }
     const badge = document.getElementById('rzr-badge')
     if(badge){ badge.textContent=count; badge.style.display=count?'inline':'none' }
   } catch(e){}
