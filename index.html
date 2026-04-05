@@ -8955,14 +8955,17 @@ async function _adDrawRunnerCoverage(map){
   const hoWaitlist = {}  // h8 -> count
   try {
     const { data: sigs } = await _supa.from('homeowner_signups')
-      .select('zip_code,status').limit(2000)
+      .select('zip_code,status').limit(3000)
     ;(sigs||[]).forEach(s => {
       const ctr = ZIP_CENTROIDS[s.zip_code]
       if(!ctr) return
       try {
         const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
         if(s.status === 'approved') hoActive[h8] = (hoActive[h8]||0) + 1
-        else if(s.status === 'waitlisted') hoWaitlist[h8] = (hoWaitlist[h8]||0) + 1
+        // ALL pending/waitlist statuses show as amber demand on admin map
+        else if(['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)){
+          hoWaitlist[h8] = (hoWaitlist[h8]||0) + 1
+        }
       } catch(e){}
     })
   } catch(e){ console.warn('[AdminMap] HO:', e.message) }
@@ -9307,13 +9310,16 @@ async function _initAdminMap(){
   // ── ALSO draw homeowner_signups from DB (waitlisted + approved without geocode) ──
   try {
     const { data: sigs } = await _supa.from('homeowner_signups')
-      .select('zip_code,status,first_name,last_name').limit(1000)
+      .select('zip_code,status,first_name,last_name,lat,lng').limit(2000)
     const sigsByZip = {}
     ;(sigs||[]).forEach(s => {
       if(!s.zip_code) return
       if(!sigsByZip[s.zip_code]) sigsByZip[s.zip_code] = { active:0, waitlist:0, names:[] }
+      // approved/active = green; ANY pending/waitlist status = amber demand dot
       if(s.status==='approved') sigsByZip[s.zip_code].active++
-      else if(s.status==='waitlisted') sigsByZip[s.zip_code].waitlist++
+      else if(['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)){
+        sigsByZip[s.zip_code].waitlist++
+      }
       sigsByZip[s.zip_code].names.push(((s.first_name||'')+' '+(s.last_name||'')).trim())
     })
     Object.entries(sigsByZip).forEach(([zip, data]) => {
@@ -10438,6 +10444,42 @@ async function submitLead(){
       'admin_lead_alert'
     )
 
+    // Alert nearby runners of new lead in their area
+    try {
+      const { data: nearbyRunners } = await _supa.from('runners')
+        .select('email,first_name,zip_code,coverage_zones,zone_id')
+        .not('status','eq','inactive')
+      const matchRunners = (nearbyRunners||[]).filter(r => {
+        if(r.zip_code === zip) return true
+        const czRaw = r.coverage_zones
+        const czIds = czRaw ? (typeof czRaw==='string'?JSON.parse(czRaw):czRaw) : []
+        return czIds.some(zid => {
+          const z = ADMIN_ZONES.find(az=>az.id===zid)
+          return (z?.zips||[z?.zip]).includes(zip)
+        })
+      })
+      matchRunners.forEach(r => {
+        if(!r.email) return
+        sendEmail(r.email,
+          `🏠 New BinDash Lead in ZIP ${zip}`,
+          `<div style="font-family:sans-serif;padding:20px;max-width:520px">
+            <div style="font-size:20px;font-weight:900;color:#06d6a0;margin-bottom:16px">BIN<span style="color:#6366f1">DASH</span></div>
+            <h2 style="color:#0f172a;margin:0 0 8px">New Lead in Your Area! 🏠</h2>
+            <p style="color:#475569;margin:0 0 16px">A homeowner in <strong>ZIP ${zip}</strong> just joined the BinDash waitlist.
+            Once enough neighbours sign up, this area will go live — and you'll be first to get the route offer.</p>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px;margin-bottom:16px">
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-weight:700;margin-bottom:8px">Lead Details</div>
+              <div style="font-size:13px;color:#0f172a"><strong>ZIP:</strong> ${zip}</div>
+              <div style="font-size:13px;color:#0f172a;margin-top:4px"><strong>Service:</strong> ${svcDisplay||'Recycling'}</div>
+            </div>
+            <p style="color:#475569;font-size:13px">Share your referral link to bring in more neighbours and launch service sooner.</p>
+            <a href="https://www.bindash.shop" style="display:inline-block;background:#06d6a0;color:#07090f;font-weight:800;padding:12px 24px;border-radius:8px;text-decoration:none">View My Dashboard →</a>
+          </div>`,
+          'runner_lead_alert'
+        )
+      })
+    } catch(e){ console.warn('[BinDash] Runner lead alert:', e) }
+
     // Create zone request so it appears in admin Scout panel
     try {
       await _supa.from('runner_zone_requests').insert({
@@ -10447,7 +10489,7 @@ async function submitLead(){
         zone_name:    'ZIP '+zip,
         status:       'pending',
         type:         'homeowner_waitlist',
-        notes:        `Homeowner waitlist: ${fn} ${ln}, ${svcDisplay}, ${addr||zip}`,
+        notes:        `Homeowner waitlist: ${fn} ${ln}, ${svcDisplay||''}, ${addr||zip}`,
         created_at:   new Date().toISOString(),
       })
       loadZoneWaitlistBadge?.()
@@ -10585,7 +10627,23 @@ async function hSubmit(){
       lng:               window._hwGeoLng  || null,
       h3_index:          window._hwGeoHex8 || null,  // Res 8 — cluster-level precision
       h3_zone_res6:      window._hwGeoHex6 || null,  // Res 6 — zone containment check
-      status:            'pending_review',
+      // Detect if this ZIP is in an active zone or waitlist zone
+      status: (() => {
+        const matchedZone = ADMIN_ZONES.find(z => {
+          const zips = z.zips || (z.zip ? [z.zip] : [])
+          return zips.includes(zip) && z.status !== 'inactive'
+        })
+        if(!matchedZone) return 'waitlist_pending'   // no zone at all — waitlist
+        if(matchedZone.status === 'waitlist' || matchedZone.status === 'building') return 'waitlist_pending'
+        return 'pending_review'  // active/live zone — normal pending
+      })(),
+      is_waitlist: (() => {
+        const matchedZone = ADMIN_ZONES.find(z => {
+          const zips = z.zips || (z.zip ? [z.zip] : [])
+          return zips.includes(zip) && z.status !== 'inactive'
+        })
+        return !matchedZone || matchedZone.status === 'waitlist' || matchedZone.status === 'building'
+      })(),
       created_at:        new Date().toISOString(),
     })
     console.log('[BinDash] Homeowner signup saved to Supabase ✅')
@@ -10605,6 +10663,33 @@ async function hSubmit(){
     ? (document.getElementById('h-day-recycling')?.value||'Tuesday')
     : (document.getElementById('h-day')?.value||'Tuesday')
   sendEmail(em, 'Your BinDash application is under review', EMAIL.signupPending(fn, dayForEmail, window._hwMatchedZone?.name||'Pending assignment'), 'signup_pending')
+
+  // Alert nearby runners if this is a waitlist/building zone signup
+  const _fullSvcDisplay = window._obSvcLabel || 'Recycling'
+  const _matchedZone = ADMIN_ZONES.find(z => (z.zips||[z.zip]).includes(zip) && z.status !== 'inactive')
+  if(!_matchedZone || _matchedZone.status === 'waitlist' || _matchedZone.status === 'building'){
+    try {
+      const { data: nearbyRunners } = await _supa.from('runners')
+        .select('email,first_name,zip_code').not('status','eq','inactive')
+      ;(nearbyRunners||[]).filter(r => r.zip_code === zip).forEach(r => {
+        if(!r.email) return
+        sendEmail(r.email,
+          `🏠 New BinDash Lead in ZIP ${zip}`,
+          `<div style="font-family:sans-serif;padding:20px;max-width:520px">
+            <div style="font-size:20px;font-weight:900;color:#06d6a0;margin-bottom:16px">BIN<span style="color:#6366f1">DASH</span></div>
+            <h2 style="color:#0f172a;margin:0 0 8px">New Lead in Your Area! 🏠</h2>
+            <p style="color:#475569;margin:0 0 16px">A homeowner in <strong>ZIP ${zip}</strong> just signed up for BinDash.
+            Once enough neighbours join, this area launches — you'll be first offered the route.</p>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px">
+              <div style="font-size:13px;color:#0f172a"><strong>ZIP:</strong> ${zip} · <strong>Service:</strong> ${_fullSvcDisplay}</div>
+            </div>
+          </div>`,
+          'runner_lead_alert'
+        )
+      })
+    } catch(e){ console.warn('[BinDash] Runner lead alert (full signup):', e) }
+  }
+
   routeAfterSignup({ email:em, zip })
 }
 
@@ -10992,13 +11077,13 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
     const { data: hos, error: hosErr } = await _supa.from('homeowners')
       .select('h3_index,lat,lng,status').limit(5000)
     const rows = (!hosErr && hos) ? hos : []
-    // Also pull homeowner_signups as fallback
+    // Always fetch homeowner_signups — waitlist_pending shows as amber demand without approval
     let sigRows = []
-    if(!rows.length || hosErr){
+    try {
       const { data: sigs } = await _supa.from('homeowner_signups')
-        .select('zip_code,status').limit(2000)
+        .select('zip_code,status').limit(3000)
       sigRows = sigs || []
-    }
+    } catch(e){}
     rows.forEach(h => {
       let hexId = h.h3_index || null
       if(!hexId && h.lat && h.lng && typeof h3 !== 'undefined'){
@@ -11022,7 +11107,9 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
         if(!selectableSet.has(p7)) return
         if(!window._rnPickerHoHexes[p7]) window._rnPickerHoHexes[p7] = { active:0, waitlist:0 }
         if(s.status === 'approved') window._rnPickerHoHexes[p7].active++
-        else window._rnPickerHoHexes[p7].waitlist++
+        else if(['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)){
+          window._rnPickerHoHexes[p7].waitlist++
+        }
       } catch(e){}
     })
   } catch(e){}
@@ -11529,7 +11616,7 @@ async function renderRunnerHeatmap(){
   try {
     const { data: sigs } = await _supa.from('homeowner_signups')
       .select('zip_code,first_name,last_name,status')
-      .in('status',['approved','waitlisted','pending_review']).limit(2000)
+      .in('status',['approved','waitlisted','waitlist_pending','pending_review','payment_pending']).limit(3000)
     if(sigs) sigs.forEach(s => {
       const ctr = ZIP_CENTROIDS[s.zip_code]
       if(!ctr) return
@@ -13182,8 +13269,8 @@ async function loadRNZones(){
     // Waitlisted HOs in runner's area (growth opportunities)
     if(myZips.length){
       const res = await safeQuery(_supa.from('homeowner_signups')
-        .select('id,first_name,last_name,zip_code,service_type,collection_day,created_at')
-        .in('zip_code', myZips).eq('status','waitlisted').limit(20))
+        .select('id,first_name,last_name,zip_code,service_type,collection_day,created_at,status')
+        .in('zip_code', myZips).in('status',['waitlisted','waitlist_pending','pending_review']).limit(50))
       waitlistedHOs = res?.data || []
     }
 
@@ -21056,7 +21143,7 @@ function renderPendingHWList(){
   // Update tab counts
   const counts = { pending:0, info:0, rejected:0 }
   PENDING_HOMEOWNERS.forEach(a => {
-    if(a.status==='pending_review'||a.status==='payment_pending') counts.pending++
+    if(a.status==='pending_review'||a.status==='payment_pending'||a.status==='waitlist_pending') counts.pending++
     else if(a.status==='info_requested') counts.info++
     else if(a.status==='rejected') counts.rejected++
   })
@@ -21074,7 +21161,7 @@ function renderPendingHWList(){
 
   // Filter by active tab
   let list = []
-  if(_hwActiveTab === 'pending')  list = PENDING_HOMEOWNERS.filter(a=>a.status==='pending_review'||a.status==='payment_pending')
+  if(_hwActiveTab === 'pending')  list = PENDING_HOMEOWNERS.filter(a=>a.status==='pending_review'||a.status==='payment_pending'||a.status==='waitlist_pending')
   if(_hwActiveTab === 'info')     list = PENDING_HOMEOWNERS.filter(a=>a.status==='info_requested')
   if(_hwActiveTab === 'rejected') list = PENDING_HOMEOWNERS.filter(a=>a.status==='rejected')
 
@@ -21090,16 +21177,22 @@ function renderPendingHWList(){
 
   el.innerHTML = list.map(app=>{
     const assignedZone = ADMIN_ZONES.find(z=>z.id===app.zoneId)
-    const isWaitlistZone = app.isWaitlist || (assignedZone && assignedZone.status === 'waitlist')
+    const isWaitlistZone = app.status === 'waitlist_pending' || app.isWaitlist || (assignedZone && (assignedZone.status === 'waitlist' || assignedZone.status === 'building'))
+    const waitlistBadge = isWaitlistZone
+      ? `<span class="badge" style="background:rgba(245,158,11,.18);color:#f59e0b;margin-left:6px;font-size:10px;font-weight:800">⏳ WAITLIST</span>`
+      : ''
     const zoneBadge = assignedZone
-      ? `<span class="badge" style="background:${isWaitlistZone?'rgba(245,158,11,.12)':'rgba(6,214,160,.1)'};color:${isWaitlistZone?'#fbbf24':'var(--cyan)'};margin-left:8px">
-           ${isWaitlistZone?'⏳':'📍'} ${assignedZone.name}${isWaitlistZone?' (waitlist)':''}
+      ? `<span class="badge" style="background:${isWaitlistZone?'rgba(245,158,11,.08)':'rgba(6,214,160,.1)'};color:${isWaitlistZone?'#fbbf24':'var(--cyan)'};margin-left:8px">
+           ${isWaitlistZone?'⏳':'📍'} ${assignedZone.name}
          </span>`
-      : `<span class="badge" style="background:rgba(239,68,68,.1);color:#ef4444;margin-left:8px">⚠️ No zone</span>`
+      : isWaitlistZone
+        ? `<span class="badge" style="background:rgba(245,158,11,.08);color:#fbbf24;margin-left:8px">📍 ZIP ${app.zip}</span>`
+        : `<span class="badge" style="background:rgba(239,68,68,.1);color:#ef4444;margin-left:8px">⚠️ No zone</span>`
 
     // Plan label -- human readable
     const planLabels = { plan_a:'1 Can ($34.99/mo)', plan_b:'2 Cans Same Day ($44.99/mo)', plan_c:'2 Cans Split Days ($54.99/mo)', w1:'1 Can ($34.99/mo)', w2:'2 Cans Same Day ($44.99/mo)', w3:'2 Cans Split Days ($54.99/mo)' }
     const planDisplay = planLabels[app.plan] || app.plan || '--'
+    // waitlistBadge is set above — injected next to name in card
 
     // Payment status -- drives urgency
     const isPaid      = app.stripeSessionId && app.status !== 'payment_pending'
@@ -21149,11 +21242,13 @@ function renderPendingHWList(){
           <div style="display:flex;align-items:center;gap:10px">
             <div class="avatar" style="width:44px;height:44px;font-size:16px;background:linear-gradient(135deg,var(--cyan),var(--blue))">${app.initials}</div>
             <div>
-              <div style="font-size:15px;font-weight:700">${app.name} ${zoneBadge}${payBadge}</div>
+              <div style="font-size:15px;font-weight:700">${app.name}${waitlistBadge} ${zoneBadge}${payBadge}</div>
               <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">${String(app.id).slice(0,8)} . ${app.submittedAt}</div>
             </div>
           </div>
-          <span class="badge" style="background:#f59e0b22;color:#f59e0b">⏳ Pending Review</span>
+          <span class="badge" style="background:${isWaitlistZone?'rgba(245,158,11,.13)':'rgba(245,158,11,.13)'};color:${isWaitlistZone?'#f59e0b':'#f59e0b'}">
+            ${isWaitlistZone ? '⏳ Waitlist Signup' : '⏳ Pending Review'}
+          </span>
         </div>
 
         <div class="cc-grid" style="margin-bottom:12px">
@@ -26444,7 +26539,7 @@ async function loadSignupsFromSupabase(){
       const res = await _supa
         .from('homeowner_signups')
         .select('*')
-        .in('status', ['pending_review', 'payment_pending', 'waitlisted', 'rejected', 'info_requested'])
+        .in('status', ['pending_review', 'waitlist_pending', 'payment_pending', 'waitlisted', 'rejected', 'info_requested'])
         .order('created_at', { ascending: false })
       data    = res?.data    || []
       loadErr = res?.error?.message || null
@@ -26498,16 +26593,15 @@ async function loadSignupsFromSupabase(){
         // Waitlist zone flag — pending_review but in a waitlist zone
         isWaitlist:      row.is_waitlist === true || row.status === 'waitlisted',
       }
-      // ALL non-waitlisted records go to PENDING_HOMEOWNERS so admin can see and act on them
-      // 'waitlisted' (old) AND 'pending_review' with is_waitlist=true both show in pending panel with waitlist badge
-      if(row.status === 'waitlisted' && !row.is_waitlist){
-        // Legacy waitlisted — still show in pending panel so admin doesn't miss them
-        entry.status = 'pending_review'
+      // Route ALL signups into PENDING_HOMEOWNERS — waitlist_pending shows with WAITLIST badge
+      if(row.status === 'waitlisted'){
+        // Legacy 'waitlisted' status — normalize to waitlist_pending with flag
+        entry.status     = 'waitlist_pending'
         entry.isWaitlist = true
-        PENDING_HOMEOWNERS.push(entry)
-      } else {
-        PENDING_HOMEOWNERS.push(entry)
+      } else if(row.status === 'waitlist_pending'){
+        entry.isWaitlist = true
       }
+      PENDING_HOMEOWNERS.push(entry)
     })
 
     updateOverviewCounts()
