@@ -23117,8 +23117,10 @@ async function triggerDispatchEdgeFunction(){
     // ── FALLBACK: send directly from browser when edge function fails (CORS) ──
     try {
       const today = new Date().toISOString().slice(0,10)
+      // Only send routes scheduled for TODAY — never future dates
+      // BIN OUT night = the pill date = today's date
       const { data: queuedRows } = await _supa.from('dispatch_queue')
-        .select('*').eq('status','queued').gte('scheduled_date', today).limit(20)
+        .select('*').eq('status','queued').eq('scheduled_date', today).limit(20)
       if(!queuedRows?.length){
         showToast('No queued routes to send', 'info', 3000)
       } else {
@@ -23151,11 +23153,13 @@ async function triggerDispatchEdgeFunction(){
           sent++
         }
         showToast(`📤 Sent ${sent} route offer${sent!==1?'s':''} directly — edge function bypassed`, 'ok', 6000)
-        // Immediately advance generatedBatches status from queued → sent
+        // Immediately advance both in-memory and DB status
+        const _nowSent = new Date().toISOString()
         generatedBatches.forEach(b => {
           if(b.status === 'queued'){
-            b.status  = 'sent'
-            b.sentAt  = new Date().toISOString()
+            b.status = 'sent'
+            b.sentAt = _nowSent
+            b.offerExpiresAt = new Date(Date.now() + (b.windowMins||45)*60*1000).toISOString()
           }
         })
         edgeFnWorked = true
@@ -23421,7 +23425,7 @@ function renderDispatchPipeline(){
     queued: (()=>{
       const now9 = new Date(); now9.setHours(9,0,0,0)
       const ms = now9 - Date.now()
-      if(ms <= 0) return '🕐 Approved — sending now...'
+      if(ms <= 0) return '📤 Sending...'
       const h = Math.floor(ms/3600000), m = Math.floor((ms%3600000)/60000)
       return h > 0 ? `🕐 Approved · sends in ${h}h ${m}m` : `🕐 Approved · sends in ${m}m`
     })(),
@@ -24088,7 +24092,7 @@ async function _autoTriggerIfQueued(){
   // Only skip if already successfully sent today (check dispatch_queue, not just sessionStorage)
   try {
     const { data } = await _supa.from('dispatch_queue')
-      .select('id,status').eq('status','queued').gte('scheduled_date', today).limit(1)
+      .select('id,status').eq('status','queued').eq('scheduled_date', today).limit(1)
     if(data?.length){
       // Only auto-trigger once per session — but clear if previous attempt failed
       if(sessionStorage.getItem(todayKey+'_ok')) return
@@ -24126,12 +24130,17 @@ async function loadLiveJobsIntoPipeline(){
           const dqDate = dq.scheduled_date || ''
           if(bDate === dqDate || bDate.startsWith(dqDate) || dqDate.startsWith(bDate)){
             // Only advance status — never go backwards
-            const statusRank = { draft:0, change_detected:1, queued:2, sent:3, offered:3, accepted:4, in_progress:5, complete:6 }
+            const statusRank = { draft:0, change_detected:1, queued:2, sent:3, offered:4, accepted:5, in_progress:6, complete:7 }
             const currentRank = statusRank[b.status] || 0
             const newRank     = statusRank[dq.status] || 0
             if(newRank > currentRank){
               b.status  = dq.status
-              b.sentAt  = new Date().toISOString()
+              b.sentAt  = b.sentAt || new Date().toISOString()
+            }
+            // queued → sent/offered: always advance regardless of rank
+            if(b.status === 'queued' && (dq.status === 'sent' || dq.status === 'offered')){
+              b.status = 'sent'
+              b.sentAt = b.sentAt || new Date().toISOString()
             }
             // Also update earnOut from DB if it was 0
             if(dq.earn_out && (!b.earnOut || b.earnOut === '0.00')){
