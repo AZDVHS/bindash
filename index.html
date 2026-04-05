@@ -23093,6 +23093,7 @@ async function sendDirectTestEmail(){
 async function triggerDispatchEdgeFunction(){
   const btn = document.querySelector('[onclick="triggerDispatchEdgeFunction()"]')
   if(btn){ btn.textContent = '📡 Triggering...'; btn.disabled = true }
+  let edgeFnWorked = false
   try {
     const supaUrl = (typeof SUPABASE_URL !== 'undefined' && SUPABASE_URL) || 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
     const supaKey = (typeof SUPABASE_ANON_KEY !== 'undefined' && SUPABASE_ANON_KEY) || ''
@@ -23102,6 +23103,7 @@ async function triggerDispatchEdgeFunction(){
       body: JSON.stringify({ trigger: 'manual', timestamp: new Date().toISOString() }),
     })
     const data = await res.json()
+    edgeFnWorked = true
     if(data.emails_sent > 0){
       showToast(`✅ Edge function ran — ${data.emails_sent} email${data.emails_sent!==1?'s':''} sent`, 'ok', 6000)
     } else if(data.queued_found === 0){
@@ -23110,13 +23112,56 @@ async function triggerDispatchEdgeFunction(){
       showToast(`📡 Ran — ${data.queued_found} queued, ${data.emails_sent} sent. Check runner emails.`, 'info', 6000)
     }
     console.log('[BinDash] Edge function result:', data)
-    // Refresh pipeline
-    await loadLiveJobsIntoPipeline()
-    renderDispatchPipeline()
   } catch(e){
-    showToast('Edge function error: ' + e.message, 'err', 6000)
-    console.error('[BinDash] triggerDispatchEdgeFunction:', e)
+    console.warn('[BinDash] Edge function CORS/network error — using browser fallback:', e.message)
+    // ── FALLBACK: send directly from browser when edge function fails (CORS) ──
+    try {
+      const today = new Date().toISOString().slice(0,10)
+      const { data: queuedRows } = await _supa.from('dispatch_queue')
+        .select('*').eq('status','queued').gte('scheduled_date', today).limit(20)
+      if(!queuedRows?.length){
+        showToast('No queued routes to send', 'info', 3000)
+      } else {
+        let sent = 0
+        for(const row of queuedRows){
+          if(!row.runner_email) continue
+          const stops = (() => { try { return JSON.parse(row.stops_json||'[]') } catch(e){ return [] } })()
+          const earnOut = parseFloat(row.earn_out || 0).toFixed(2)
+          await sendEmail(
+            row.runner_email,
+            `New route: ${row.stop_count} stop${row.stop_count!==1?'s':''} · $${earnOut} available`,
+            EMAIL.batchOffer(
+              row.runner_name?.split(' ')?.[0] || 'Runner',
+              row.stop_count, earnOut, row.collection_day, row.zone_name,
+              stops
+            ),
+            'batch_offer'
+          )
+          // Mark as sent in dispatch_queue
+          await _supa.from('dispatch_queue')
+            .update({ status:'sent', sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .eq('id', row.id)
+          // Mark jobs as offered
+          const jobDate = row.scheduled_date
+          if(row.zone_id && jobDate){
+            await _supa.from('jobs')
+              .update({ status:'offered', updated_at: new Date().toISOString() })
+              .eq('zone_id', row.zone_id).eq('scheduled_date', jobDate).eq('status','offered')
+          }
+          sent++
+        }
+        showToast(`📤 Sent ${sent} route offer${sent!==1?'s':''} directly — edge function bypassed`, 'ok', 6000)
+        edgeFnWorked = true
+      }
+    } catch(fallbackErr){
+      showToast('Send failed: ' + fallbackErr.message + ' — check edge function CORS config', 'err', 8000)
+      console.error('[BinDash] Fallback send failed:', fallbackErr)
+    }
   } finally {
+    if(edgeFnWorked){
+      await loadLiveJobsIntoPipeline()
+      renderDispatchPipeline()
+    }
     if(btn){ btn.textContent = '📡 Send Queued'; btn.disabled = false }
   }
 }
@@ -23366,7 +23411,13 @@ function renderDispatchPipeline(){
     preview:'👁 Preview',
     draft:'🕐 Awaiting approval',
     change_detected:'⚠️ Change detected',
-    queued:'🕐 Queued · auto-sends at 9am',
+    queued: (()=>{
+      const now9 = new Date(); now9.setHours(9,0,0,0)
+      const ms = now9 - Date.now()
+      if(ms <= 0) return '🕐 Queued · sending now...'
+      const h = Math.floor(ms/3600000), m = Math.floor((ms%3600000)/60000)
+      return h > 0 ? `🕐 Queued · sends in ${h}h ${m}m` : `🕐 Queued · sends in ${m}m`
+    })(),
     sent:'📤 Offer sent · awaiting runner',
     accepted:'✓ Accepted',
     in_progress:'🔄 In progress',
@@ -23389,7 +23440,7 @@ function renderDispatchPipeline(){
   function _renderOfferTimeline(b){
     const statusKey = b.status || 'unassigned'
     // Only show for active/sent/offered/accepted states
-    const showStates = ['sent','offered','broadcast','accepted','in_progress','complete','expired']
+    const showStates = ['queued','sent','offered','broadcast','accepted','in_progress','complete','expired']
     if(!showStates.includes(statusKey) && !b.sentAt) return ''
 
     const now      = Date.now()
@@ -23401,7 +23452,22 @@ function renderDispatchPipeline(){
     const windowMins = b.windowMins || 45
 
     // Build stage list
-    const stages = [
+    // For queued routes, compute time until 9am send
+    const now9am = new Date(); now9am.setHours(9,0,0,0)
+    const msToSend = now9am - Date.now()
+    const minsToSend = msToSend > 0 ? Math.round(msToSend/60000) : 0
+    const sendTimeStr = msToSend > 0
+      ? (minsToSend > 60 ? Math.floor(minsToSend/60)+'h '+( minsToSend%60)+'m' : minsToSend+'m')
+      : 'now'
+
+    const isQueued = statusKey === 'queued'
+    const stages = isQueued ? [
+      { key:'approved', label:'Approved',     done: true,  time: 'Admin queued' },
+      { key:'scheduled',label:'Auto-sends',   done: false, time: msToSend > 0 ? 'in '+sendTimeStr : 'sending now', warn: msToSend <= 0 },
+      { key:'sent',     label:'Offer Sent',   done: false, time: null },
+      { key:'accepted', label:'Accepted',     done: false, time: null },
+      { key:'complete', label:'Complete',     done: false, time: null },
+    ] : [
       { key:'sent',     label:'Offer Sent',   done: !!sentAt,                        time: sentAt ? new Date(sentAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : null },
       { key:'pending',  label:'Awaiting Accept', done: ['accepted','in_progress','complete'].includes(statusKey), time: minsLeft !== null && !isExpired ? minsLeft+'m remaining' : isExpired ? 'Expired' : null, warn: isExpired },
       { key:'accepted', label:'Accepted',     done: ['accepted','in_progress','complete'].includes(statusKey), time: null },
