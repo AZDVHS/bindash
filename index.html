@@ -8861,167 +8861,134 @@ async function _adDrawRunnerCoverage(map){
   if(typeof h3 === 'undefined' || typeof L === 'undefined') return
   const layers = window._adMapRunnerLayers
 
-  // ── Fetch fresh runner data from DB so map always reflects latest assignments ──
-  let freshRunners = RUNNERS.filter(r => r.status !== 'INACTIVE')
-  try {
-    const { data: dbRunners } = await _supa.from('runners')
-      .select('id,first_name,last_name,email,zip_code,zone_id,coverage_zones,coverage_hexes,anchor_hex6,status')
-      .not('status','eq','inactive')
-    if(dbRunners?.length){
-      // Merge DB data into RUNNERS array for freshest coverage_zones
-      dbRunners.forEach(dbR => {
-        const inMem = RUNNERS.find(r=>r.id===dbR.id)
-        if(inMem){
-          // Update coverage zones from DB
-          try {
-            const czRaw = dbR.coverage_zones
-            inMem.coverageZones = czRaw ? (typeof czRaw==='string'?JSON.parse(czRaw):czRaw) : (dbR.zone_id?[dbR.zone_id]:[])
-          } catch(e){}
-          try {
-            const chRaw = dbR.coverage_hexes
-            inMem.coverageHexes = chRaw ? (typeof chRaw==='string'?JSON.parse(chRaw):chRaw) : []
-          } catch(e){}
-          inMem.anchorHex6 = dbR.anchor_hex6 || inMem.anchorHex6
-          if(!inMem.zoneId && dbR.zone_id) inMem.zoneId = dbR.zone_id
-        }
-      })
-      freshRunners = RUNNERS.filter(r => r.status !== 'INACTIVE')
-    }
-  } catch(e){ console.warn('[AdminMap] fresh runner fetch:', e.message) }
-
-  // Also fetch approved zone requests to catch zones not yet in coverage_zones column
-  const runnerZoneMap = {}  // runnerId -> Set of zone IDs
+  // ── 1. Fresh approved zone assignments from DB ─────────────────────────
+  const runnerZoneMap = {}  // runner_email (lower) -> Set of zone_ids
   try {
     const { data: reqs } = await _supa.from('runner_zone_requests')
-      .select('runner_email,zone_id,zone_role').eq('status','approved')
-    if(reqs?.length){
-      reqs.forEach(req => {
-        if(!req.zone_id) return
-        const runner = RUNNERS.find(r=>r.email?.toLowerCase()===req.runner_email?.toLowerCase())
-        if(!runner) return
-        if(!runnerZoneMap[runner.id]) runnerZoneMap[runner.id] = new Set()
-        runnerZoneMap[runner.id].add(req.zone_id)
-      })
-    }
-  } catch(e){ console.warn('[AdminMap] zone requests fetch:', e.message) }
+      .select('runner_email,zone_id').eq('status','approved').not('zone_id','is',null)
+    ;(reqs||[]).forEach(r => {
+      const em = (r.runner_email||'').toLowerCase().trim()
+      if(!em || !r.zone_id) return
+      if(!runnerZoneMap[em]) runnerZoneMap[em] = new Set()
+      runnerZoneMap[em].add(r.zone_id)
+    })
+  } catch(e){ console.warn('[AdminMap] reqs:', e.message) }
 
-  // Each runner gets a distinct colour — [stroke, fillRgba, lightFill]
-  const runnerColorDefs = [
-    { stroke:'#4338ca', fill:'rgba(67,56,202,0.20)',  light:'rgba(67,56,202,0.08)'  },
-    { stroke:'#0d9488', fill:'rgba(13,148,136,0.20)', light:'rgba(13,148,136,0.08)' },
-    { stroke:'#d97706', fill:'rgba(217,119,6,0.20)',  light:'rgba(217,119,6,0.08)'  },
-    { stroke:'#7c3aed', fill:'rgba(124,58,237,0.20)', light:'rgba(124,58,237,0.08)' },
-    { stroke:'#059669', fill:'rgba(5,150,105,0.20)',  light:'rgba(5,150,105,0.08)'  },
-    { stroke:'#b45309', fill:'rgba(180,83,9,0.20)',   light:'rgba(180,83,9,0.08)'   },
-  ]
+  // Merge DB coverage_zones into in-memory RUNNERS
+  try {
+    const { data: dbR } = await _supa.from('runners')
+      .select('id,email,zone_id,coverage_zones').not('status','eq','inactive')
+    ;(dbR||[]).forEach(row => {
+      const r = RUNNERS.find(x=>x.id===row.id)
+      if(!r) return
+      try {
+        const raw = row.coverage_zones
+        const ids = raw ? (typeof raw==='string'?JSON.parse(raw):raw) : []
+        if(ids.length) r.coverageZones = ids
+      } catch(e){}
+      if(row.zone_id && !r.zoneId) r.zoneId = row.zone_id
+      const em = (row.email||'').toLowerCase()
+      if(em && runnerZoneMap[em]){
+        const merged = new Set([...(r.coverageZones||[]), r.zoneId||'', ...runnerZoneMap[em]].filter(Boolean))
+        r.coverageZones = [...merged]
+      }
+    })
+  } catch(e){ console.warn('[AdminMap] runner refresh:', e.message) }
 
-  freshRunners.forEach((r, ri) => {
-    const name  = r.name || 'Runner'
-    const colorDef   = runnerColorDefs[ri % runnerColorDefs.length]
-    const color      = colorDef.stroke
-    const lightColor = colorDef.light
-    const fillColor  = colorDef.fill
+  // ── 2. HO demand by res-8 hex ──────────────────────────────────────────
+  const hoActive   = {}  // h8 -> count
+  const hoWaitlist = {}  // h8 -> count
+  try {
+    const { data: sigs } = await _supa.from('homeowner_signups')
+      .select('zip_code,status').limit(2000)
+    ;(sigs||[]).forEach(s => {
+      const ctr = ZIP_CENTROIDS[s.zip_code]
+      if(!ctr) return
+      try {
+        const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+        if(s.status === 'approved') hoActive[h8] = (hoActive[h8]||0) + 1
+        else if(s.status === 'waitlisted') hoWaitlist[h8] = (hoWaitlist[h8]||0) + 1
+      } catch(e){}
+    })
+  } catch(e){ console.warn('[AdminMap] HO:', e.message) }
 
-    // ── Build complete set of zones for this runner ──
-    const zoneIdSet = new Set()
-    // From coverage_zones column
-    ;(r.coverageZones||[]).forEach(zid => zoneIdSet.add(zid))
-    // From zone_id (primary)
-    if(r.zoneId) zoneIdSet.add(r.zoneId)
-    // From runner_zone_requests approved entries
-    ;(runnerZoneMap[r.id]||new Set()).forEach(zid => zoneIdSet.add(zid))
-    // If still empty, fall back to home ZIP derived res-6
-    if(zoneIdSet.size === 0){
-      // Will handle via ZIP fallback below
-    }
+  // ── 3. Draw each runner ────────────────────────────────────────────────
+  const STROKE = '#4f46e5'
+  const FILL   = 'rgba(79,70,229,0.08)'
 
-    // ── For each assigned zone, draw res-6 outline + res-8 hexes ──
-    let zoneDrawn = false
-    zoneIdSet.forEach(zid => {
+  RUNNERS.filter(r => r.status !== 'INACTIVE').forEach(r => {
+    const name = r.name || 'Runner'
+    const em   = (r.email||'').toLowerCase()
+
+    // All zone IDs for this runner
+    const zoneIds = new Set([
+      ...(r.coverageZones||[]),
+      r.zoneId||'',
+      ...(runnerZoneMap[em]||[]),
+    ].filter(Boolean))
+
+    // No zones — skip (no phantom outlines)
+    if(zoneIds.size === 0) return
+
+    zoneIds.forEach(zid => {
       const zone = ADMIN_ZONES.find(z=>z.id===zid)
-      const zips  = zone?.zips || (zone?.zip ? [zone.zip] : [])
+      const zips = zone?.zips || (zone?.zip ? [zone.zip] : [])
       if(!zips.length) return
 
       zips.forEach(zip => {
         const ctr = ZIP_CENTROIDS[zip]
         if(!ctr) return
         try {
-          const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
-          const h6 = h3.cellToParent(h8, 6)
+          // Anchor: zone ZIP centroid → res-8 → res-6
+          const anchorH8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+          const anchorH6 = h3.cellToParent(anchorH8, 6)
 
-          // Res-6 boundary
-          const b6pts = h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
+          // Draw res-6 outline
+          const b6 = h3.cellToBoundary(anchorH6).map(([la,ln])=>[la,ln])
           const isPrimary = zid === r.zoneId
-          const outline = L.polygon(b6pts, {
-            color: color, fillColor: lightColor, fillOpacity: 1,
+          const ol = L.polygon(b6, {
+            color: STROKE, fillColor: FILL, fillOpacity: 1,
             weight: isPrimary ? 2.5 : 1.5,
-            dashArray: isPrimary ? null : '5,3',
-            opacity: 1.0,
+            dashArray: isPrimary ? null : '6,4',
+            opacity: 1,
           })
-          outline.bindTooltip(
-            '<div style="font-size:11px;color:#1e293b"><strong style="color:'+color+'">🚐 '+name+'</strong>'
-            +(isPrimary ? '<br><span style="color:#15803d;font-size:10px">Lead zone</span>' : '<br><span style="color:#64748b;font-size:10px">Additional zone</span>')
-            +'<br>'+( zone?.name||('ZIP '+zip))+'</div>',
+          ol.bindTooltip(
+            '<div style="font-size:11px;color:#1e293b">'
+            +'<strong style="color:#4338ca">🚐 '+name+'</strong>'
+            +'<br>'+(zone?.name||('ZIP '+zip))
+            +(isPrimary
+              ? '<br><span style="color:#15803d;font-size:10px">● Lead zone</span>'
+              : '<br><span style="color:#64748b;font-size:10px">+ Additional zone</span>')
+            +'</div>',
             { direction:'top', className:'h3-tip' }
           )
-          outline.addTo(map)
-          layers.push(outline)
-          zoneDrawn = true
+          ol.addTo(map); layers.push(ol)
 
-          // Res-8 coverage hexes for this zone
-          // Use coverage_hexes if available, else draw all children
-          const covHexes = r.coverageHexes || []
-          const children = h3.cellToChildren(h6, 8)
-          const toDraw = covHexes.length
-            ? covHexes.filter(h => { try { return h3.cellToParent(h,6)===h6 }catch(e){ return false } })
-            : children
+          // Draw only res-8 hexes that have HO activity
+          h3.cellToChildren(anchorH6, 8).forEach(h8 => {
+            const act = hoActive[h8]   || 0
+            const wl  = hoWaitlist[h8] || 0
+            if(act === 0 && wl === 0) return
 
-          toDraw.forEach(hex => {
+            const fc = act > 0 ? '#16a34a' : '#d97706'
+            const bc = act > 0 ? '#15803d' : '#b45309'
+            const fo = act > 0 ? 0.55 : 0.35
             try {
-              const bd = h3.cellToBoundary(hex).map(([la,ln])=>[la,ln])
-              const poly = L.polygon(bd, {
-                color: color, fillColor: fillColor,
-                fillOpacity: 1, weight: 1, opacity: 0.8,
-              }).addTo(map)
-              layers.push(poly)
+              const pts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
+              const hex = L.polygon(pts, { color:bc, fillColor:fc, fillOpacity:fo, weight:1.5, opacity:1 })
+              hex.bindTooltip(
+                '<div style="font-size:10px;color:#1e293b">'
+                +(act>0?act+' active HO'+(act!==1?'s':''):'')
+                +(wl>0?(act>0?' · ':'')+wl+' waitlisted':'')
+                +'<br>'+name+' zone</div>',
+                { className:'h3-tip', direction:'top', sticky:true }
+              )
+              hex.addTo(map); layers.push(hex)
             } catch(e){}
           })
-        } catch(e){ console.warn('[AdminMap] zone draw:', e.message) }
+        } catch(e){ console.warn('[AdminMap]', zip, e.message) }
       })
     })
-
-    // ── Fallback: zip-derived zone if no coverage_zones set yet ──
-    if(!zoneDrawn){
-      const zip = r.zip || ''
-      const ctr = ZIP_CENTROIDS[zip]
-      if(ctr){
-        try {
-          const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
-          const h6 = h3.cellToParent(h8, 6)
-          const b6pts = h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
-          const outline = L.polygon(b6pts, {
-            color: color, fillColor: lightColor, fillOpacity:1,
-            weight:1.5, dashArray:'4,6', opacity:0.7,
-          })
-          outline.bindTooltip('<div style="font-size:11px;color:#1e293b"><strong style="color:'+color+'">🚐 '+name+'</strong><br>Home ZIP '+zip+' (no zone assigned)</div>', { direction:'top', className:'h3-tip' })
-          outline.addTo(map)
-          layers.push(outline)
-        } catch(e){}
-      }
-    }
-
-    // ── Home pin ──
-    if(r.lat && r.lng){
-      try {
-        const homePin = L.circleMarker([r.lat, r.lng], {
-          radius:7, color:'#fff', fillColor: color,
-          fillOpacity:1, weight:2
-        })
-        .bindPopup('<div style="font-size:12px;color:#1e293b"><strong>'+name+'</strong><br>Home: '+r.zip+'</div>')
-        .addTo(map)
-        layers.push(homePin)
-      } catch(e){}
-    }
   })
 }
 
