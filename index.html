@@ -8853,7 +8853,7 @@ function adMapToggle(mode){
   window._adMapRunnerLayers = []
 
   if(mode === 'runners' || mode === 'both'){
-    _adDrawRunnerCoverage(map)
+    _refreshAdminMapRunners()
   }
 }
 
@@ -8905,12 +8905,22 @@ async function _adDrawRunnerCoverage(map){
     }
   } catch(e){ console.warn('[AdminMap] zone requests fetch:', e.message) }
 
-  const runnerColors = ['#4338ca','#0d9488','#d97706','#dc2626','#7c3aed','#059669']
+  // Each runner gets a distinct colour — [stroke, fillRgba, lightFill]
+  const runnerColorDefs = [
+    { stroke:'#4338ca', fill:'rgba(67,56,202,0.20)',  light:'rgba(67,56,202,0.08)'  },
+    { stroke:'#0d9488', fill:'rgba(13,148,136,0.20)', light:'rgba(13,148,136,0.08)' },
+    { stroke:'#d97706', fill:'rgba(217,119,6,0.20)',  light:'rgba(217,119,6,0.08)'  },
+    { stroke:'#7c3aed', fill:'rgba(124,58,237,0.20)', light:'rgba(124,58,237,0.08)' },
+    { stroke:'#059669', fill:'rgba(5,150,105,0.20)',  light:'rgba(5,150,105,0.08)'  },
+    { stroke:'#b45309', fill:'rgba(180,83,9,0.20)',   light:'rgba(180,83,9,0.08)'   },
+  ]
 
   freshRunners.forEach((r, ri) => {
     const name  = r.name || 'Runner'
-    const color = runnerColors[ri % runnerColors.length]
-    const lightColor = color + '22'
+    const colorDef   = runnerColorDefs[ri % runnerColorDefs.length]
+    const color      = colorDef.stroke
+    const lightColor = colorDef.light
+    const fillColor  = colorDef.fill
 
     // ── Build complete set of zones for this runner ──
     const zoneIdSet = new Set()
@@ -8946,7 +8956,7 @@ async function _adDrawRunnerCoverage(map){
             color: color, fillColor: lightColor, fillOpacity: 1,
             weight: isPrimary ? 2.5 : 1.5,
             dashArray: isPrimary ? null : '5,3',
-            opacity: isPrimary ? 0.9 : 0.7,
+            opacity: 1.0,
           })
           outline.bindTooltip(
             '<div style="font-size:11px;color:#1e293b"><strong style="color:'+color+'">🚐 '+name+'</strong>'
@@ -8970,8 +8980,8 @@ async function _adDrawRunnerCoverage(map){
             try {
               const bd = h3.cellToBoundary(hex).map(([la,ln])=>[la,ln])
               const poly = L.polygon(bd, {
-                color: color, fillColor: color,
-                fillOpacity: 0.18, weight: 1.2, opacity: 0.7,
+                color: color, fillColor: fillColor,
+                fillOpacity: 1, weight: 1, opacity: 0.8,
               }).addTo(map)
               layers.push(poly)
             } catch(e){}
@@ -8991,7 +9001,7 @@ async function _adDrawRunnerCoverage(map){
           const b6pts = h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
           const outline = L.polygon(b6pts, {
             color: color, fillColor: lightColor, fillOpacity:1,
-            weight:1.5, dashArray:'4,6', opacity:0.5,
+            weight:1.5, dashArray:'4,6', opacity:0.7,
           })
           outline.bindTooltip('<div style="font-size:11px;color:#1e293b"><strong style="color:'+color+'">🚐 '+name+'</strong><br>Home ZIP '+zip+' (no zone assigned)</div>', { direction:'top', className:'h3-tip' })
           outline.addTo(map)
@@ -14168,13 +14178,29 @@ async function _addZoneToRunnerCoverage(runner, zoneId){
 }
 
 // ── Refresh admin map runner layers without full reload ──────────────────────
-function _refreshAdminMapRunners(){
+async function _refreshAdminMapRunners(){
   const map = window._adminMap
   if(!map) return
   if(window._adMapMode === 'runners' || window._adMapMode === 'both'){
     ;(window._adMapRunnerLayers||[]).forEach(l=>{ try{l.remove()}catch(e){} })
     window._adMapRunnerLayers = []
-    _adDrawRunnerCoverage(map)
+    await _adDrawRunnerCoverage(map)
+    // After runner layers load, extend fitBounds to show them too
+    try {
+      const allPts = []
+      ;(window._adMapRunnerLayers||[]).forEach(l => {
+        try {
+          const bounds = l.getBounds ? l.getBounds() : null
+          if(bounds) { allPts.push(bounds.getNorthEast()); allPts.push(bounds.getSouthWest()) }
+          else if(l.getLatLng) allPts.push(l.getLatLng())
+        } catch(e){}
+      })
+      if(allPts.length > 2){
+        const current = map.getBounds()
+        const extended = L.latLngBounds([...allPts, current.getNorthEast(), current.getSouthWest()])
+        map.fitBounds(extended, { padding:[30,30], maxZoom:14, animate:true })
+      }
+    } catch(e){}
   }
 }
 
