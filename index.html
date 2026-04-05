@@ -10383,6 +10383,25 @@ async function submitLead(){
 
   let saveErr = null
   try {
+    // Detect zone for this ZIP — determines status
+    const _leadZone = ADMIN_ZONES.find(z => {
+      const zips = z.zips || (z.zip ? [z.zip] : [])
+      return zips.includes(zip) && z.status !== 'inactive'
+    })
+    const _leadStatus = (!_leadZone || _leadZone.status === 'waitlist' || _leadZone.status === 'building')
+      ? 'waitlist_pending' : 'pending_review'
+    const _leadIsWl = _leadStatus === 'waitlist_pending'
+
+    // Compute H3 index from ZIP centroid for heatmap
+    let _leadH3 = null, _leadH3z6 = null
+    const _leadCtr = ZIP_CENTROIDS[zip]
+    if(_leadCtr && typeof h3 !== 'undefined'){
+      try {
+        _leadH3   = h3.latLngToCell(_leadCtr[0], _leadCtr[1], 8)
+        _leadH3z6 = h3.cellToParent(_leadH3, 6)
+      } catch(e){}
+    }
+
     const res = await _supa.from('homeowner_signups').insert({
       first_name:     fn,
       last_name:      ln || '',
@@ -10395,8 +10414,14 @@ async function submitLead(){
       collection_day: day,
       day_recycling:  isSplit ? dayR : null,
       day_waste:      isSplit ? dayW : null,
-      status:         'pending_review',   // ← admin must review, not just waitlisted
+      status:         _leadStatus,
       is_lead:        true,
+      is_waitlist:    _leadIsWl,
+      zone_id:        _leadZone?.id || null,
+      h3_index:       _leadH3   || null,
+      h3_zone_res6:   _leadH3z6 || null,
+      lat:            _leadCtr ? _leadCtr[0] : null,
+      lng:            _leadCtr ? _leadCtr[1] : null,
       created_at:     new Date().toISOString(),
     })
     saveErr = res?.error?.message || null
@@ -10416,6 +10441,33 @@ async function submitLead(){
 
   if(!saveErr){
     showToast('You\'re on the list for ZIP '+zip+' 🎉','ok')
+
+    // Immediately add to PENDING_HOMEOWNERS so admin sees it without reload
+    const _wlEntry = {
+      id:          Date.now(),  // temp id until DB refresh
+      name:        (fn+' '+(ln||'')).trim(),
+      initials:    ((fn[0]||'')+(ln?.[0]||'')).toUpperCase()||'?',
+      email:       email,
+      phone:       ph || '--',
+      address:     addr || '--',
+      city:        city || '--',
+      zip:         zip,
+      service:     isSplit ? 'SPLIT' : svcVal,
+      day:         day || '--',
+      plan:        'plan_a',
+      zoneId:      _leadZone?.id || null,
+      submittedAt: new Date().toLocaleString(),
+      status:      _leadStatus,
+      isWaitlist:  _leadIsWl,
+      storage:'--', gate:'--', gateCode:'', pets:'None', curb:'--', svcNotes:'', binPhotos:[],
+      stripeSessionId: null,
+    }
+    PENDING_HOMEOWNERS.unshift(_wlEntry)
+    if(typeof renderPendingHWList === 'function') renderPendingHWList()
+    if(typeof updateWaitlistBadge === 'function') updateWaitlistBadge()
+    if(typeof updateOverviewCounts === 'function') updateOverviewCounts()
+    // Full reload after 2s to get real DB id
+    setTimeout(() => loadSignupsFromSupabase?.(), 2000)
 
     // Email confirmation to homeowner
     if(em && !em.includes('@lead.bindash')){
@@ -11615,13 +11667,21 @@ async function renderRunnerHeatmap(){
   // Always also try homeowner_signups — more reliable, has zip_code
   try {
     const { data: sigs } = await _supa.from('homeowner_signups')
-      .select('zip_code,first_name,last_name,status')
+      .select('zip_code,first_name,last_name,status,h3_index')
       .in('status',['approved','waitlisted','waitlist_pending','pending_review','payment_pending']).limit(3000)
     if(sigs) sigs.forEach(s => {
-      const ctr = ZIP_CENTROIDS[s.zip_code]
-      if(!ctr) return
       try {
-        const p8 = h3.latLngToCell(ctr[0], ctr[1], RN_HEAT_RES)
+        // Use stored h3_index if available (precise), else ZIP centroid
+        let p8 = null
+        if(s.h3_index){
+          const res = h3.getResolution(s.h3_index)
+          p8 = res === RN_HEAT_RES ? s.h3_index : h3.cellToParent(s.h3_index, RN_HEAT_RES)
+        } else {
+          const ctr = ZIP_CENTROIDS[s.zip_code]
+          if(!ctr) return
+          p8 = h3.latLngToCell(ctr[0], ctr[1], RN_HEAT_RES)
+        }
+        if(!p8) return
         hoHexes[p8] = (hoHexes[p8]||0) + 1
         const name = ((s.first_name||'')+' '+(s.last_name||'')).trim() || 'Homeowner'
         if(!hoNamesByHex[p8]) hoNamesByHex[p8] = []
@@ -19885,7 +19945,7 @@ function updateOverviewCounts(){
   const activeHW  = HOMEOWNERS.filter(h=>h.status==='active').length
   const activeRN  = RUNNERS.filter(r=>r.status!=='INACTIVE').length
   const availRN   = RUNNERS.filter(r=>r.status==='AVAILABLE').length
-  const pendingHW = PENDING_HOMEOWNERS.filter(a => a.status==='pending_review' || a.status==='payment_pending').length
+  const pendingHW = PENDING_HOMEOWNERS.filter(a => ['pending_review','waitlist_pending','payment_pending'].includes(a.status)).length
   const pendingRN = PENDING_RUNNERS.length
   pc = pendingRN
   const totalPending = pendingHW + pendingRN
@@ -20198,11 +20258,21 @@ async function routeAfterSignup(appData){
 
     // Update zone_id link but preserve pending_review status
     try {
+      // Compute H3 for heatmap if not already set
+      let _rH3 = null, _rH3z6 = null
+      const _rCtr = ZIP_CENTROIDS[zip]
+      if(_rCtr && typeof h3 !== 'undefined'){
+        try { _rH3 = h3.latLngToCell(_rCtr[0],_rCtr[1],8); _rH3z6 = h3.cellToParent(_rH3,6) } catch(e){}
+      }
       await _supa.from('homeowner_signups').update({
-        zone_id:    matchedZone?.id || null,
-        is_waitlist: true,   // flag so admin knows this is a waitlist signup
-        updated_at: new Date().toISOString(),
-        // DO NOT overwrite status — keep pending_review so admin sees it
+        zone_id:      matchedZone?.id || null,
+        is_waitlist:  true,
+        status:       'waitlist_pending',   // ensure status is correct
+        h3_index:     _rH3   || null,
+        h3_zone_res6: _rH3z6 || null,
+        lat:          _rCtr ? _rCtr[0] : null,
+        lng:          _rCtr ? _rCtr[1] : null,
+        updated_at:   new Date().toISOString(),
       }).ilike('email', email)
     } catch(err){ console.warn('[BinDash] routeAfterSignup waitlist update:', err) }
 
@@ -20306,7 +20376,7 @@ async function routeAfterSignup(appData){
 }
 
 function updateWaitlistBadge(){
-  const count = WAITLIST_SIGNUPS.filter(s=>s.status==='waitlist').length
+  const count = PENDING_HOMEOWNERS.filter(s=>s.isWaitlist||s.status==='waitlist_pending'||s.status==='waitlisted').length
   const b = document.getElementById('waitlist-badge')
   const ov = document.getElementById('ov-waitlist-count')
   if(b){
@@ -21205,7 +21275,7 @@ function renderPendingHWList(){
     const cardBorder  = isPaid
       ? 'border:1.5px solid rgba(34,197,94,.4);box-shadow:0 0 0 1px rgba(34,197,94,.1)'
       : 'border:1.5px solid rgba(245,158,11,.3)'
-    const urgencyBar  = isWaitlistZone
+    const urgencyBar  = (isWaitlistZone || app.status === 'waitlist_pending' || app.isWaitlist)
       ? `<div style="background:linear-gradient(90deg,rgba(245,158,11,.1),transparent);border-radius:8px 8px 0 0;padding:6px 14px;font-size:11px;font-weight:600;color:#f59e0b;display:flex;align-items:center;gap:6px">
            ⏳ Waitlist zone — save this application. Approve when zone goes live.
          </div>`
