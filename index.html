@@ -23151,6 +23151,13 @@ async function triggerDispatchEdgeFunction(){
           sent++
         }
         showToast(`📤 Sent ${sent} route offer${sent!==1?'s':''} directly — edge function bypassed`, 'ok', 6000)
+        // Immediately advance generatedBatches status from queued → sent
+        generatedBatches.forEach(b => {
+          if(b.status === 'queued'){
+            b.status  = 'sent'
+            b.sentAt  = new Date().toISOString()
+          }
+        })
         edgeFnWorked = true
       }
     } catch(fallbackErr){
@@ -23406,25 +23413,25 @@ function renderDispatchPipeline(){
     if(badgeEl) badgeEl.textContent = batches.length+' batch'+(batches.length!==1?'es':'')+' · '+RUNNERS.filter(r=>r.status==='AVAILABLE').length+' runners available'
   }
 
-  const sc = { preview:'#a5b4fc', draft:'#f59e0b', change_detected:'#ef4444', queued:'#3b82f6', sent:'#f59e0b', accepted:'#22c55e', in_progress:'#06d6a0', offered:'#f59e0b', broadcast:'#3b82f6', unassigned:'#ef4444', complete:'#64748b' }
+  const sc = { preview:'#a5b4fc', draft:'#f59e0b', change_detected:'#ef4444', queued:'#3b82f6', sent:'#f59e0b', offered:'#f59e0b', broadcast:'#3b82f6', accepted:'#22c55e', in_progress:'#06d6a0', unassigned:'#ef4444', complete:'#64748b' }
   const si = {
-    preview:'👁 Preview',
-    draft:'🕐 Awaiting approval',
-    change_detected:'⚠️ Change detected',
+    preview:         '👁 Preview — pending approval',
+    draft:           '🕐 Awaiting approval',
+    change_detected: '⚠️ Change detected — re-approve',
     queued: (()=>{
       const now9 = new Date(); now9.setHours(9,0,0,0)
       const ms = now9 - Date.now()
-      if(ms <= 0) return '🕐 Queued · sending now...'
+      if(ms <= 0) return '🕐 Approved — sending now...'
       const h = Math.floor(ms/3600000), m = Math.floor((ms%3600000)/60000)
-      return h > 0 ? `🕐 Queued · sends in ${h}h ${m}m` : `🕐 Queued · sends in ${m}m`
+      return h > 0 ? `🕐 Approved · sends in ${h}h ${m}m` : `🕐 Approved · sends in ${m}m`
     })(),
-    sent:'📤 Offer sent · awaiting runner',
-    accepted:'✓ Accepted',
-    in_progress:'🔄 In progress',
-    offered:'⏳ Offer sent',
-    broadcast:'📡 Broadcast',
-    unassigned:'🚨 Unassigned',
-    complete:'✓ Complete',
+    sent:            '📤 Offer sent · awaiting accept',
+    offered:         '📤 Offer sent · awaiting accept',
+    broadcast:       '📡 Broadcast · awaiting accept',
+    accepted:        '✅ Accepted · ready to start',
+    in_progress:     '🔄 In progress',
+    unassigned:      '🚨 Unassigned — assign runner',
+    complete:        '✓ Complete',
   }
 
   // Section header for BIN_OUT / BIN_IN grouping
@@ -24045,6 +24052,23 @@ async function initDispatchPage(){
 
   // Auto-fire edge function if queued routes exist after 9am (catches overnight approvals)
   _autoTriggerIfQueued().catch(e => console.warn('[BinDash] autoTrigger:', e.message))
+
+  // Start periodic status refresh — poll every 30s so badge advances without page reload
+  _startDispatchStatusPoll()
+}
+
+let _dispatchPollTimer = null
+function _startDispatchStatusPoll(){
+  if(_dispatchPollTimer) clearInterval(_dispatchPollTimer)
+  _dispatchPollTimer = setInterval(async () => {
+    const dispatchVisible = document.getElementById('ad-dispatch')?.offsetParent !== null
+    if(!dispatchVisible){ clearInterval(_dispatchPollTimer); _dispatchPollTimer = null; return }
+    try {
+      // Sync dispatch_queue status into generatedBatches
+      await loadLiveJobsIntoPipeline()
+      renderDispatchPipeline()
+    } catch(e){}
+  }, 30000)  // every 30 seconds
 }
 
 // Load active (non-complete) jobs from Supabase for the selected day
@@ -24061,17 +24085,23 @@ async function _autoTriggerIfQueued(){
   if(hhmm < 900) return  // before 9am, don't trigger
   const today = now.toISOString().slice(0,10)
   const todayKey = '_autoTriggered_' + today
-  if(sessionStorage.getItem(todayKey)) return  // already triggered today
+  // Only skip if already successfully sent today (check dispatch_queue, not just sessionStorage)
   try {
     const { data } = await _supa.from('dispatch_queue')
-      .select('id').eq('status','queued').gte('scheduled_date', today).limit(1)
+      .select('id,status').eq('status','queued').gte('scheduled_date', today).limit(1)
     if(data?.length){
-      sessionStorage.setItem(todayKey, '1')
+      // Only auto-trigger once per session — but clear if previous attempt failed
+      if(sessionStorage.getItem(todayKey+'_ok')) return
+      sessionStorage.setItem(todayKey+'_ok', '1')
       console.log('[BinDash] Queued routes found post-9am — auto-triggering edge function')
-      showToast('📡 Dispatching queued routes...', 'info', 3000)
+      console.log('[BinDash] Queued routes found post-9am — auto-triggering (with fallback)')
       await triggerDispatchEdgeFunction()
     }
-  } catch(e){ console.warn('[BinDash] _autoTriggerIfQueued:', e.message) }
+  } catch(e){ 
+    // Clear ok flag so next poll retries
+    sessionStorage.removeItem(today+'_ok')
+    console.warn('[BinDash] _autoTriggerIfQueued:', e.message) 
+  }
 }
 
 async function loadLiveJobsIntoPipeline(){
