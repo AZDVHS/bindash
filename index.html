@@ -23453,6 +23453,11 @@ function renderDispatchPipeline(){
     // Only show for active/sent/offered/accepted states
     const showStates = ['queued','sent','offered','broadcast','accepted','in_progress','complete','expired']
     if(!showStates.includes(statusKey) && !b.sentAt) return ''
+    // Don't show misleading timeline for future batches
+    const _tlBatchDate = b.date ? new Date(b.date+'T12:00:00') : null
+    const _tlToday = new Date(); _tlToday.setHours(0,0,0,0)
+    const _tlFuture = _tlBatchDate && _tlBatchDate > _tlToday && _tlBatchDate.toDateString() !== new Date().toDateString()
+    if(_tlFuture && statusKey === 'queued') return ''  // future queued — badge shows the info, no timeline needed
 
     const now      = Date.now()
     const sentAt   = b.sentAt || b._sentAt
@@ -23514,15 +23519,30 @@ function renderDispatchPipeline(){
 
   function renderBatchCard(b){
     const isMissed  = b._missed === true
-    const isPreview = b.status==='preview'||b.status==='draft'||b.status==='queued'
     const isBinIn   = b.visitType==='BIN_IN'||b.id?.endsWith('-IN')
-    const statusKey = b.status||'unassigned'
-    // Missed overrides normal color
+
+    // ── DATE-AWARE STATUS CAP ──────────────────────────────────────────────
+    // A future batch cannot be 'sent' — cap status by scheduled date
+    const _batchDate   = b.date ? new Date(b.date+'T12:00:00') : null
+    const _todayMid    = new Date(); _todayMid.setHours(0,0,0,0)
+    const _isFuture    = _batchDate && _batchDate > _todayMid && _batchDate.toDateString() !== new Date().toDateString()
+    const _isToday     = _batchDate && _batchDate.toDateString() === new Date().toDateString()
+    const _isPast      = _batchDate && _batchDate < _todayMid
+
+    // Effective status — future batches can only be queued/draft/preview
+    let effectiveStatus = b.status || 'unassigned'
+    if(_isFuture && ['sent','offered','sending'].includes(effectiveStatus)){
+      effectiveStatus = 'queued'  // reset poisoned future status
+    }
+
+    const isPreview = effectiveStatus==='preview'||effectiveStatus==='draft'||effectiveStatus==='queued'
+    const statusKey = effectiveStatus
     const borderCol = isMissed ? '#ef4444' : isBinIn ? '#06d6a0' : (sc[statusKey]||'#64748b')
+
     // --- Rich offer status ---
-    const now_ms = Date.now()
-    const expiresAt  = b.offerExpiresAt || b._offerExpiresAt || null
-    const sentAt     = b.sentAt || b._sentAt || null
+    const now_ms     = Date.now()
+    const expiresAt  = (!_isFuture && (b.offerExpiresAt || b._offerExpiresAt)) || null
+    const sentAt     = (!_isFuture && (b.sentAt || b._sentAt)) || null
     const minsLeft   = expiresAt ? Math.max(0, Math.round((new Date(expiresAt).getTime() - now_ms) / 60000)) : null
     const isExpired  = expiresAt && new Date(expiresAt).getTime() < now_ms
     const sentAgo    = sentAt ? Math.round((now_ms - new Date(sentAt).getTime()) / 60000) : null
@@ -23530,6 +23550,15 @@ function renderDispatchPipeline(){
     let badgeTxt, badgeCol
     if(isMissed){
       badgeTxt = '🚨 MISSED'; badgeCol = '#ef4444'
+    } else if(_isFuture){
+      // Future date — always show countdown to 9am on that day
+      const sendDate = new Date(b.date+'T09:00:00')
+      const msUntil  = sendDate - Date.now()
+      const hUntil   = Math.floor(msUntil / 3600000)
+      const mUntil   = Math.floor((msUntil % 3600000) / 60000)
+      const dayLabel = _batchDate.toLocaleDateString('en-US',{weekday:'short'})
+      badgeTxt = `🕐 Approved · sends ${dayLabel} at 9am` + (hUntil > 0 ? ` (in ${hUntil}h ${mUntil}m)` : '')
+      badgeCol = '#3b82f6'
     } else if((statusKey==='offered'||statusKey==='sent') && isExpired){
       badgeTxt = '⏰ Offer expired'; badgeCol = '#ef4444'
     } else if((statusKey==='offered'||statusKey==='sent') && minsLeft !== null){
@@ -23557,7 +23586,7 @@ function renderDispatchPipeline(){
       if(h.storage&&h.storage!=='--') alerts.push('📦 '+h.storage)
       const otherBatches = generatedBatches.filter(ob=>ob.id!==b.id)
       const moveOpts = otherBatches.map(ob=>'<option value="'+ob.id+'">'+(ob.runner?.name||'Unassigned')+' · '+(ob.zoneName||'')+'</option>').join('')
-      const _isDraggable = (isPreview||b.status==='queued'||b.status==='change_detected'||b.status==='draft') ? 'true' : 'false'
+      const _isDraggable = (isPreview||effectiveStatus==='queued'||effectiveStatus==='change_detected'||effectiveStatus==='draft') ? 'true' : 'false'
       return '<div class="bd-stop-row" data-batch-id="'+b.id+'" data-stop-idx="'+idx+'" draggable="'+_isDraggable+'" ondragstart="batchStopDragStart(event,this)" ondragover="batchStopDragOver(event,this)" ondragleave="batchStopDragLeave(this)" ondrop="batchStopDrop(event,this)" style="padding:8px 0;border-bottom:'+(idx===b.stops.length-1?'none':'1px solid var(--border)')+';">'
         +'<div style="display:flex;align-items:center;gap:8px">'
         +((isPreview||b.status==='queued'||b.status==='change_detected'||b.status==='draft')?'<div style="cursor:grab;color:var(--muted);font-size:14px;flex-shrink:0;padding:0 4px 0 0;user-select:none" title="Drag to reorder">⠿</div>':'')
@@ -24298,6 +24327,18 @@ async function loadLiveJobsIntoPipeline(){
     })
 
     window._livePipelineBatches = Object.values(batchMap)
+
+  // ── Sanitise generatedBatches — clear poisoned future status ──────────────
+  const _todayStr = new Date().toISOString().slice(0,10)
+  generatedBatches.forEach(b => {
+    if(!b.date) return
+    const bDate = b.date.slice(0,10)
+    if(bDate > _todayStr && ['sent','offered'].includes(b.status)){
+      b.status = 'queued'   // future batch can't be sent yet
+      b.sentAt = null
+      b.offerExpiresAt = null
+    }
+  })
 
       // Admin-side overdue detection — flag any BIN_OUT batches from past dates still in open status
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0)
