@@ -1322,16 +1322,20 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
 
 /* Leaflet tooltip overrides — dark text on white Leaflet tooltip */
 .h3-tip {
-  background: rgba(15, 23, 42, 0.92) !important;
-  border: 1px solid rgba(255,255,255,.12) !important;
-  color: #e2e8f0 !important;
+  background: rgba(15,23,42,0.95) !important;
+  border: 1px solid rgba(255,255,255,.15) !important;
+  color: #f1f5f9 !important;
   font-family: inherit !important;
-  border-radius: 6px !important;
-  padding: 5px 9px !important;
+  border-radius: 7px !important;
+  padding: 6px 10px !important;
   font-size: 11px !important;
-  box-shadow: none !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25) !important;
+  max-width: 220px !important;
 }
-.h3-tip::before { border-top-color: rgba(15,23,42,.92) !important; }
+.h3-tip::before { border-top-color: rgba(15,23,42,.95) !important; }
+.h3-tip .leaflet-tooltip-top::before { border-top-color: rgba(15,23,42,.95) !important; }
+/* Force all text inside h3-tip to be light */
+.h3-tip div, .h3-tip span, .h3-tip strong { color: inherit !important; }
 
 /* Leaflet popup — ensure dark text on white background */
 .leaflet-popup-content { color: #0f172a !important; font-family: inherit !important; }
@@ -5862,8 +5866,10 @@ async function populateRNDashboard(){
     }
 
     // Store for later use
+    // Normalise loyalty rate so it's accessible consistently
+    merged.loyaltyRate = parseFloat(merged.loyalty_rate || merged.loyaltyRate || 3.25)
     window._rnRow = merged
-    if(rnRow?.id) window._currentRunnerRow = rnRow // keep in sync
+    if(rnRow?.id) window._currentRunnerRow = { ...rnRow, loyaltyRate: merged.loyaltyRate }
 
     // Determine approval: in runners table = approved
     const isApproved = (rnRow !== null) || (merged.status === 'approved')
@@ -5903,6 +5909,7 @@ async function populateRNDashboard(){
         if(grEl) grEl.textContent = 'Account active · Zone assignment pending — check back soon'
       }
       await loadRunnerRoutes(merged)
+      _startOfferPoll(merged)
     } else if(isRejected){
       if(grEl) grEl.textContent = 'Application not approved — contact support for details'
     } else {
@@ -6828,10 +6835,15 @@ async function loadRunnerRoutes(runnerRow){
     const runnerName = ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim()
 
     // Fetch active jobs for this runner
+    const runnerEmail = (runnerRow.email||'').toLowerCase().trim()
+    // Build OR filter — include email match for edge-function-sent offers
+    const orFilter = [`runner_id.eq.${rid}`, `runner_name.eq."${runnerName}"`]
+    if(runnerEmail) orFilter.push(`runner_email.eq.${runnerEmail}`)
+
     const { data: jobs, error } = await _supa
       .from('jobs')
       .select('*')
-      .or(`runner_id.eq.${rid},runner_name.eq."${runnerName}"`)
+      .or(orFilter.join(','))
       .in('status', ['offered','accepted','in_progress','scheduled'])
       .order('scheduled_date', { ascending: true })
 
@@ -6921,7 +6933,7 @@ async function loadRunnerRoutes(runnerRow){
     if(pendingOffers.length > 0 && offerBanner){
       const offer = pendingOffers[0]
       const batchJobs = pendingOffers.filter(j => (j.batch_id||j.id) === (offer.batch_id||offer.id))
-      const earn = (batchJobs.length * 3.25).toFixed(2)
+      const earn = batchJobs.reduce((s,j)=>s+(parseFloat(j.amount)||3.25),0).toFixed(2)
       const stopCount = batchJobs.length
       const offerType = offer.offer_type || 'zone'
       const windowMins = offerType === 'broadcast' ? 30 : offerType === 'zone' ? 45 : 25
@@ -7373,12 +7385,15 @@ async function acceptOffer(){
     }
 
     // 3. Accept the new offer
+    const runnerRate = parseFloat(runnerRow.loyalty_rate || runnerRow.loyaltyRate || 3.25)
     const { error } = await _supa.from('jobs')
       .update({
         status:          'accepted',
         runner_accepted: true,
         runner_id:       runnerRow.id,
         runner_name:     ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim(),
+        runner_email:    (runnerRow.email||'').toLowerCase(),
+        amount:          runnerRate,
         updated_at:      new Date().toISOString()
       })
       .eq('batch_id', offerId)
@@ -7539,6 +7554,33 @@ async function resumeBatch(batchId){
     console.error('[resumeBatch]', e)
     showToast('Error loading route: ' + e.message, 'err')
   }
+}
+
+// ── Poll for new route offers every 2 minutes while runner is on dashboard ──
+let _rnOfferPollTimer = null
+function _stopOfferPoll(){ if(_rnOfferPollTimer){ clearInterval(_rnOfferPollTimer); _rnOfferPollTimer=null } }
+function _startOfferPoll(runnerRow){
+  if(_rnOfferPollTimer) clearInterval(_rnOfferPollTimer)
+  _rnOfferPollTimer = setInterval(async () => {
+    // Only poll if runner dashboard is visible and banner is hidden
+    const banner = document.getElementById('offer-banner')
+    const dashVisible = document.getElementById('rn-home')?.offsetParent !== null
+    if(!dashVisible) return
+    if(banner?.style.display !== 'none') return  // already showing offer
+    const row = runnerRow || window._currentRunnerRow
+    if(!row?.id) return
+    try {
+      const rEmail = (row.email||'').toLowerCase()
+      const orF    = [`runner_id.eq.${row.id}`, `runner_name.eq."${((row.first_name||'')+' '+(row.last_name||'')).trim()}"`, `runner_email.eq.${rEmail}`]
+      const { data: offered } = await _supa.from('jobs')
+        .select('id').or(orF.join(',')).eq('status','offered').limit(1)
+      if(offered?.length){
+        // New offer found — reload routes to show banner
+        await loadRunnerRoutes(row)
+        console.log('[OfferPoll] New offer detected — banner shown')
+      }
+    } catch(e){}
+  }, 120000)  // every 2 minutes
 }
 
 async function startBatch(batchId){
@@ -9232,13 +9274,14 @@ async function _initAdminMap(){
 
       // HO count dot marker
       const count = cell.hos.length
-      const dotColor = cell.status==='active' ? '#22c55e' : cell.status==='waitlist' ? '#f59e0b' : '#64748b'
-      const rnBadge = cell.runnerName
-        ? '<div style="position:absolute;bottom:-2px;right:-2px;width:12px;height:12px;background:#06d6a0;border:1.5px solid #07090f;border-radius:50%;font-size:7px;display:flex;align-items:center;justify-content:center">🚐</div>'
+      const dotColor = cell.status==='active' ? '#15803d' : cell.status==='waitlist' ? '#b45309' : '#475569'
+      const dotBg    = cell.status==='active' ? '#dcfce7' : cell.status==='waitlist' ? '#fef3c7' : '#f1f5f9'
+      const rnBadge  = cell.runnerName
+        ? '<div style="position:absolute;bottom:-2px;right:-2px;width:12px;height:12px;background:#4f46e5;border:1.5px solid #fff;border-radius:50%;font-size:7px;display:flex;align-items:center;justify-content:center;color:#fff">R</div>'
         : ''
       const pin = L.divIcon({
-        html: '<div style="position:relative"><div style="width:22px;height:22px;background:'+dotColor+';border:2px solid #07090f;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#07090f;box-shadow:0 0 6px '+dotColor+'88">'+count+'</div>'+rnBadge+'</div>',
-        className: '', iconAnchor:[11,11],
+        html: '<div style="position:relative"><div style="width:24px;height:24px;background:'+dotBg+';border:2px solid '+dotColor+';border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:'+dotColor+';box-shadow:0 2px 4px rgba(0,0,0,.15)">'+count+'</div>'+rnBadge+'</div>',
+        className: '', iconAnchor:[12,12],
       })
       const m = L.marker([cell.lat, cell.lng], { icon:pin })
       _bindHexPopup(m, { ...cell, homeowners:cell.hos }, 'pin:'+key)
@@ -9248,25 +9291,75 @@ async function _initAdminMap(){
   })
   console.log('[Map] Drew', window._adminHexLayers.length, 'HO layers at res-8')
 
-  // ── ZONE FALLBACK — no geocoded HOs ────────────────────────────────────
+  // ── ALSO draw homeowner_signups from DB (waitlisted + approved without geocode) ──
+  try {
+    const { data: sigs } = await _supa.from('homeowner_signups')
+      .select('zip_code,status,first_name,last_name').limit(1000)
+    const sigsByZip = {}
+    ;(sigs||[]).forEach(s => {
+      if(!s.zip_code) return
+      if(!sigsByZip[s.zip_code]) sigsByZip[s.zip_code] = { active:0, waitlist:0, names:[] }
+      if(s.status==='approved') sigsByZip[s.zip_code].active++
+      else if(s.status==='waitlisted') sigsByZip[s.zip_code].waitlist++
+      sigsByZip[s.zip_code].names.push(((s.first_name||'')+' '+(s.last_name||'')).trim())
+    })
+    Object.entries(sigsByZip).forEach(([zip, data]) => {
+      if(data.active === 0 && data.waitlist === 0) return
+      const ctr = ZIP_CENTROIDS[zip]
+      if(!ctr) return
+      try {
+        const h8  = h3.latLngToCell(ctr[0], ctr[1], 8)
+        const pts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
+        const fc  = data.active > 0 ? '#16a34a' : '#d97706'
+        const bc  = data.active > 0 ? '#15803d' : '#b45309'
+        const fo  = data.active > 0 ? 0.45 : 0.30
+        const poly = L.polygon(pts, { color:bc, fillColor:fc, fillOpacity:fo, weight:1.5, opacity:1 })
+        poly.bindTooltip(
+          '<div style="font-size:11px;font-weight:700;color:#1e293b">ZIP '+zip+'</div>'
+          +'<div style="font-size:10px;color:#475569">'
+          +(data.active>0?data.active+' active':'')
+          +(data.waitlist>0?(data.active>0?' · ':'')+data.waitlist+' waitlisted':'')
+          +(data.names.length?'<br>'+data.names.slice(0,3).join(', ')+(data.names.length>3?' +more':''):'')
+          +'</div>',
+          { className:'h3-tip', direction:'top', sticky:true }
+        )
+        poly.addTo(window._adminMap)
+        window._adminHexLayers.push(poly)
+        bounds.push(ctr)
+      } catch(e){}
+    })
+    console.log('[Map] Drew signup HOs from DB for', Object.keys(sigsByZip).length, 'ZIPs')
+  } catch(e){ console.warn('[Map] signup draw:', e.message) }
+
+  // ── ZONE OUTLINES — draw res-6 hex for every active zone ────────────────
   ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
     const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
-    const hasDrawn = Object.values(window.homeownerData).some(c=>c.zone?.id===z.id)
-    if(hasDrawn) return
-    const zip = zips[0]||''
-    const zc = ZIP_CENTROIDS?.[zip] || ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]
+    const zip  = zips[0]||''
+    const zc   = ZIP_CENTROIDS?.[zip] || ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]
     if(!zc) return
     const [lat,lng] = zc
-    const st = z.status==='live'?'active':z.status==='waitlist'?'waitlist':'no activity'
-    const sty = getZoneStyleGlobal(st, false)
-    const circle = L.circle([lat,lng], {
-      radius:1800, color:sty.color, fillColor:sty.fillColor, fillOpacity:sty.fillOpacity*.7,
-      weight:1.5, dashArray:'6 4',
-    }).bindPopup(`<div style="font-family:system-ui;color:#0f172a"><b>${z.name}</b><br>ZIP ${zip}<br>No geocoded addresses yet — click 📍 Geocode HOs</div>`)
-    circle.addTo(window._adminMap)
-    window._adminHexLayers.push(circle)
-    bounds.push([lat,lng])
-    console.log('[Map] Zone fallback circle:', z.name)
+    const isLive = z.status==='live'
+    const isWait = z.status==='waitlist'
+    const strokeCol = isLive ? '#15803d' : isWait ? '#b45309' : '#64748b'
+    const fillCol   = isLive ? 'rgba(21,128,61,0.06)' : isWait ? 'rgba(180,83,9,0.06)' : 'rgba(100,116,139,0.04)'
+    try {
+      const h8 = h3.latLngToCell(lat, lng, 8)
+      const h6 = h3.cellToParent(h8, 6)
+      const pts = h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
+      const ol = L.polygon(pts, {
+        color: strokeCol, fillColor: fillCol, fillOpacity: 1,
+        weight: isLive ? 2 : 1.5, dashArray: isLive ? null : '6,4', opacity: 0.85,
+      })
+      ol.bindTooltip(
+        '<div style="font-size:12px;font-weight:700;color:#1e293b">'+z.name+'</div>'
+        +'<div style="font-size:11px;color:#475569">ZIP '+zip+' · '+(isLive?'Live':'Building')+'</div>',
+        { className:'h3-tip', direction:'top' }
+      )
+      ol.addTo(window._adminMap)
+      window._adminHexLayers.push(ol)
+      bounds.push(...pts)
+      console.log('[Map] Zone outline:', z.name)
+    } catch(e){ console.warn('[Map] zone outline:', e.message) }
   })
 
   // ── FIT BOUNDS ─────────────────────────────────────────────────────────
@@ -9292,15 +9385,29 @@ async function _initAdminMap(){
   setTimeout(doInvalidate, 100)
   setTimeout(doInvalidate, 400)
 
-  // Draw runner coverage overlay — default 'both' mode
+  // Draw runner coverage overlay — await so bounds can be extended
   if(window._adMapMode === 'both' || window._adMapMode === 'runners'){
-    _adDrawRunnerCoverage(window._adminMap)
+    await _adDrawRunnerCoverage(window._adminMap)
+    // Extend fitBounds to include runner zones
+    try {
+      const rPts = []
+      ;(window._adMapRunnerLayers||[]).forEach(l => {
+        try {
+          if(l.getBounds) { const b=l.getBounds(); rPts.push(b.getNorthEast(),b.getSouthWest()) }
+          else if(l.getLatLng) rPts.push(l.getLatLng())
+        } catch(e){}
+      })
+      if(rPts.length && bounds.length){
+        const allPts = [...bounds.map(b=>Array.isArray(b)?b:null).filter(Boolean), ...rPts]
+        window._adminMap.fitBounds(allPts, { padding:[30,30], maxZoom:13, animate:false })
+      } else if(rPts.length){
+        window._adminMap.fitBounds(rPts, { padding:[30,30], maxZoom:13, animate:false })
+      }
+    } catch(e){}
   }
-  // Sync toggle button styles to current mode
   adMapToggle(window._adMapMode)
-  console.log('[Map] Init complete')
-  setTimeout(doInvalidate, 900)
   console.log('[Map] Init complete ✅')
+  setTimeout(doInvalidate, 500)
 }
 
 // ── assignRunner — update hex colour when runner assigned ──────────────────
@@ -9334,9 +9441,9 @@ function assignRunner(h3Index, runnerName, runnerId){
 // Global getZoneStyle (needed by assignRunner outside _initAdminMap scope)
 function getZoneStyleGlobal(status, assigned){
   const s = {
-    active:        { color:'#2ecc71', fillColor:'#2ecc71', fillOpacity:.18, weight:1.5, opacity:.9 },
-    waitlist:      { color:'#f1c40f', fillColor:'#f1c40f', fillOpacity:.13, weight:1.5, opacity:.85 },
-    'no activity': { color:'#95a5a6', fillColor:'#95a5a6', fillOpacity:.09, weight:1,   opacity:.6 },
+    active:        { color:'#15803d', fillColor:'rgba(21,128,61,0.35)',  fillOpacity:1, weight:2,   opacity:1 },
+    waitlist:      { color:'#b45309', fillColor:'rgba(180,83,9,0.25)',   fillOpacity:1, weight:1.5, opacity:1 },
+    'no activity': { color:'#64748b', fillColor:'rgba(100,116,139,0.1)', fillOpacity:1, weight:1,   opacity:0.7 },
   }
   const base = { ...(s[status] || s['no activity']) }
   if(assigned) base.fillOpacity = Math.min(.32, base.fillOpacity + .08)
@@ -13159,7 +13266,7 @@ async function loadRNZones(){
     el.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div style="font-size:13px;color:var(--sub)">Your service zones, homeowners, and route progress.</div>
-      <button class="btn btn-cyan btn-sm" onclick="showRequestZoneExpansion()">+ Request a Zone</button>
+      <button class="btn btn-outline btn-sm" onclick="rnNav(null,'rn-scout');rnScoutSetMode('expand')" style="font-size:11px">📡 Expand Coverage →</button>
     </div>
 
     ${myZones.length ? zoneCards : `<div style="background:var(--surface2);border:1px dashed var(--border);border-radius:12px;padding:32px;text-align:center;color:var(--muted)">
@@ -13167,7 +13274,7 @@ async function loadRNZones(){
       <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No zones found</div>
       <div style="font-size:12px;margin-bottom:4px">ZIP: <strong>${runnerZip||'unknown'}</strong> · ID: <strong>${runnerId||'not found'}</strong></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Ask admin to assign you via the Runners tab, or request a zone below.</div>
-      <button class="btn btn-cyan btn-sm" onclick="showRequestZoneExpansion()">+ Request a Zone</button>
+      <button class="btn btn-outline btn-sm" onclick="rnNav(null,'rn-scout');rnScoutSetMode('expand')" style="font-size:11px">📡 Go to Scout Area →</button>
     </div>`}
 
     ${pendingReqs.length ? `<div style="margin-top:16px">
@@ -13313,56 +13420,9 @@ function _renderRNWaitlistCard(req, zone){
 }
 
 function showRequestZoneExpansion(){
-  const row  = window._rnRow
-  if(!row){ showToast('Session error','err'); return }
-  // Build list of zones runner isn't already in
-  const primaryZoneId = row.zone_id || null
-  const preferredIds  = (() => { try { return row.preferred_zones ? JSON.parse(row.preferred_zones) : [] } catch(e){ return [] } })()
-  const myZoneIds     = [primaryZoneId, ...preferredIds].filter(Boolean)
-  const available     = ADMIN_ZONES.filter(z=>z.status!=='inactive' && !myZoneIds.includes(z.id))
-
-  document.getElementById('modal-box').innerHTML = `
-  <div class="mh">
-    <div>
-      <div style="font-size:15px;font-weight:700">📍 Request a New Zone</div>
-      <div style="font-size:11px;color:var(--sub);margin-top:2px">Admin reviews all zone expansions</div>
-    </div>
-    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
-  </div>
-  <div class="mb">
-    ${available.length ? `
-    <div style="font-size:12px;color:var(--sub);margin-bottom:12px">Select a zone you'd like to work in. Your request goes to admin for approval — once approved you'll be added to the dispatch pool for that zone.</div>
-    <div style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto;margin-bottom:14px">
-      ${available.map(z=>{
-        const isWait = z.status==='waitlist'
-        const dayLabels = (z.collection||[]).map(d=>typeof d==='object'?d.day||d:d).join(', ')||'--'
-        return `<div onclick="this.closest('.mb').querySelectorAll('.zone-req-opt').forEach(x=>x.style.borderColor='var(--border2)');this.style.borderColor='var(--cyan)';document.getElementById('rzexp-zone-id').value='${z.id}';document.getElementById('rzexp-zone-name').value='${z.name}'"
-          class="zone-req-opt"
-          style="border:1.5px solid var(--border2);border-radius:10px;padding:12px 14px;cursor:pointer;transition:border-color .15s">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-            <span style="font-weight:600;font-size:13px">${z.name}</span>
-            <span class="badge" style="${isWait?'background:rgba(245,158,11,.15);color:#fbbf24':'background:#22c55e22;color:#22c55e'};font-size:10px">${isWait?'⏳ Waitlist':'● Live'}</span>
-          </div>
-          <div style="font-size:11px;color:var(--muted)">ZIP ${z.zips?.join(', ')||z.zip} · ${dayLabels} · ${z.homeowners||0} homeowners · ${z.runners||0}/${z.capacity||20} runners</div>
-        </div>`
-      }).join('')}
-    </div>` : ''}
-    <div style="margin-bottom:12px">
-      <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:6px">Or request a ZIP code not listed above</div>
-      <input id="rzexp-zip" placeholder="e.g. 85308" maxlength="5" style="font-size:13px;margin-bottom:6px">
-    </div>
-    <div class="field" style="margin:0">
-      <label style="font-size:11px">Why do you want to work this area? <span style="color:var(--muted)">(optional)</span></label>
-      <textarea id="rzexp-notes" placeholder="e.g. I live nearby, familiar with the neighbourhood..." rows="2" style="resize:none;font-size:12px"></textarea>
-    </div>
-    <input type="hidden" id="rzexp-zone-id" value="">
-    <input type="hidden" id="rzexp-zone-name" value="">
-  </div>
-  <div class="mf">
-    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
-    <button class="btn btn-cyan" onclick="submitZoneExpansionRequest()">📋 Submit Request</button>
-  </div>`
-  openM()
+  // Redirect to Scout Area → Expand Coverage tab instead of separate modal
+  rnNav(null, 'rn-scout')
+  setTimeout(() => rnScoutSetMode('expand'), 100)
 }
 
 async function submitZoneExpansionRequest(){
@@ -21858,6 +21918,13 @@ function approvePendingRoute(zoneId, day, permanent=true){
   // The scheduled auto-send (9am) or the explicit "Send now →" / Launch button
   // are the only triggers that call _launchSingleBatch.
   pending.status    = 'queued'
+  // Ensure earnOut is set using runner's actual rate
+  if(!pending.earnOut || pending.earnOut === '0.00'){
+    const rate = pending.runner?.loyaltyRate || 3.25
+    pending.earnOut   = ((pending.stops||[]).length * rate).toFixed(2)
+    pending.earnIn    = pending.earnOut
+    pending.earnTotal = pending.earnOut
+  }
   pending.approvedAt = now.toISOString()
   pending.permanent  = permanent
   if(!permanent) pending.oneTime = true
@@ -21931,7 +21998,8 @@ function approvePendingRoute(zoneId, day, permanent=true){
       runner_name:    pending.runner?.name || null,
       stop_count:     (pending.stops||[]).length,
       zone_name:      pending.zoneName || '',
-      earn_out:       pending.earnOut || 0,
+      earn_out:       pending.earnOut
+                    || ((pending.stops||[]).length * (pending.runner?.loyaltyRate || 3.25)),
       collection_day: pending.day || '',
       stops_json:     JSON.stringify((pending.stops||[]).map(s=>({
         name: s.name, email: s.email,
@@ -22200,7 +22268,8 @@ async function sendRouteNow(zoneId, day){
     if(memBatch._fromDB){
       // Live DB batch — only send the email, DON'T insert new jobs
       if(memBatch.runner?.email){
-        const earnOut = (memBatch.stops.length * 3.25).toFixed(2)
+        const _rnRate2 = RUNNERS.find(r=>r.id===memBatch.runner?.id)?.loyaltyRate || 3.25
+        const earnOut = (memBatch.stops.length * _rnRate2).toFixed(2)
         const expiresAt = memBatch.offerExpiresAt
         await sendEmail(memBatch.runner.email,
           `🎯 Route re-sent — ${memBatch.stops.length} stops · $${earnOut}`,
@@ -23128,8 +23197,9 @@ async function launchDispatchRoutes(){
         jobRows.push({
           batch_id:         batch.id,
           homeowner_email:  hw.email,
-          runner_id:        batch.runner?.id   || null,
-          runner_name:      batch.runner?.name || null,
+          runner_id:        batch.runner?.id    || null,
+          runner_name:      batch.runner?.name  || null,
+          runner_email:     batch.runner?.email?.toLowerCase() || null,
           visit_type:       'BIN_OUT',
           job_type:         'subscription',
           service_type:     serviceType,
@@ -23137,7 +23207,7 @@ async function launchDispatchRoutes(){
           offer_type:       batch.offerType || 'zone',
           offer_expires_at: expiresAt,
           scheduled_date:   scheduledDate,
-          amount:           3.25,
+          amount:           (batch.runner?.loyaltyRate || 3.25),
           zone_id:          batch.zoneId || null,
           created_at:       now.toISOString(),
           updated_at:       now.toISOString(),
@@ -23296,8 +23366,8 @@ function renderDispatchPipeline(){
     preview:'👁 Preview',
     draft:'🕐 Awaiting approval',
     change_detected:'⚠️ Change detected',
-    queued:'🕐 Queued · sends at 9am',
-    sent:'📤 Offer sent',
+    queued:'🕐 Queued · auto-sends at 9am',
+    sent:'📤 Offer sent · awaiting runner',
     accepted:'✓ Accepted',
     in_progress:'🔄 In progress',
     offered:'⏳ Offer sent',
@@ -23939,6 +24009,45 @@ async function _autoTriggerIfQueued(){
 }
 
 async function loadLiveJobsIntoPipeline(){
+  // ── Sync generatedBatches status from dispatch_queue DB ──────────────────
+  // The edge function updates dispatch_queue.status = 'sent' when email fires
+  // but generatedBatches is in-memory and still shows 'queued'
+  try {
+    const today = new Date(); today.setHours(0,0,0,0)
+    const dateRange = []
+    for(let i=-1; i<=2; i++){
+      const d = new Date(today); d.setDate(today.getDate()+i)
+      dateRange.push(d.toISOString().slice(0,10))
+    }
+    const { data: dqRows } = await _supa.from('dispatch_queue')
+      .select('zone_id,scheduled_date,status,earn_out,runner_id,runner_name')
+      .in('scheduled_date', dateRange)
+    ;(dqRows||[]).forEach(dq => {
+      // Update matching generatedBatch status
+      generatedBatches.forEach(b => {
+        if(b.zoneId === dq.zone_id){
+          const bDate = b.date || ''
+          const dqDate = dq.scheduled_date || ''
+          if(bDate === dqDate || bDate.startsWith(dqDate) || dqDate.startsWith(bDate)){
+            // Only advance status — never go backwards
+            const statusRank = { draft:0, change_detected:1, queued:2, sent:3, offered:3, accepted:4, in_progress:5, complete:6 }
+            const currentRank = statusRank[b.status] || 0
+            const newRank     = statusRank[dq.status] || 0
+            if(newRank > currentRank){
+              b.status  = dq.status
+              b.sentAt  = new Date().toISOString()
+            }
+            // Also update earnOut from DB if it was 0
+            if(dq.earn_out && (!b.earnOut || b.earnOut === '0.00')){
+              b.earnOut   = parseFloat(dq.earn_out).toFixed(2)
+              b.earnTotal = b.earnOut
+            }
+          }
+        }
+      })
+    })
+  } catch(e){ console.warn('[Pipeline] dispatch_queue sync:', e.message) }
+
   const dayFilterVal = document.getElementById('dispatch-day-filter')?.value || ''
   const dayPillVal   = document.getElementById('dispatch-day-val')?.value || ''
   const effectiveDay = dayFilterVal !== '' ? dayFilterVal
@@ -24058,6 +24167,7 @@ async function loadLiveJobsIntoPipeline(){
         bins:          hw?.bins || 1,
         gate:          hw?.gate || '--',
         gateCode:      hw?.gateCode || '',
+        _jobAmount:    parseFloat(j.amount) || 3.25,
         pets:          hw?.pets || '--',
         svcNotes:      hw?.svcNotes || '',
         assignedRunner:hw?.assignedRunner,
@@ -24075,7 +24185,14 @@ async function loadLiveJobsIntoPipeline(){
     // Otherwise replace pipeline with live DB batches
     if(!generatedBatches.length) {
       // Show live batches in pipeline without replacing generatedBatches
-      window._livePipelineBatches = Object.values(batchMap)
+      // Compute earnTotal from actual job amounts
+    Object.values(batchMap).forEach(b => {
+      const total = b.stops.reduce((s, stop) => s + parseFloat(stop._jobAmount || 3.25), 0)
+      b.earnTotal = total.toFixed(2)
+      b.earnOut   = b.earnTotal
+    })
+
+    window._livePipelineBatches = Object.values(batchMap)
 
       // Admin-side overdue detection — flag any BIN_OUT batches from past dates still in open status
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0)
