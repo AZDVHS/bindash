@@ -21555,32 +21555,64 @@ function getZoneSuggestion(zip){
 
 async function activateWaitlistZone(zip, appId){
   try {
-    let zone = ADMIN_ZONES.find(z => (z.zips||[z.zip||'']).includes(zip))
+    // Use zoneToRow column names — zones table uses zip_prefix and zip_codes, not zip/zips
+    let zone = ADMIN_ZONES.find(z => (z.zips||[]).includes(zip) || z.zip===zip)
+
     if(zone){
+      // Update existing zone to waitlist
       await _supa.from('zones').update({ status:'waitlist', updated_at:new Date().toISOString() }).eq('id', zone.id)
       zone.status = 'waitlist'
-      showToast(zone.name+' activated as waitlist zone ✅', 'ok', 4000)
+      showToast(zone.name+' → waitlist zone ✅', 'ok', 4000)
     } else {
+      // Build a proper zone object then use zoneToRow for correct column names
       const zoneName = 'ZIP '+zip+' Area'
-      const { data: newZone, error } = await _supa.from('zones').insert({
-        name: zoneName, zip, zips: JSON.stringify([zip]),
-        status: 'waitlist', homeowners:1, runners:0, capacity:4, threshold:3,
-        created_at: new Date().toISOString(),
-      }).select().single()
-      if(error){ showToast('Zone create failed: '+error.message,'err'); return }
-      zone = { id:newZone.id, name:zoneName, zip, zips:[zip], status:'waitlist', homeowners:1, runners:0 }
+      const tempZone = {
+        id:             undefined,  // let DB generate
+        name:           zoneName,
+        zip:            zip,
+        zips:           [zip],
+        status:         'waitlist',
+        pilot:          false,
+        overridden:     false,
+        capacity:       20,
+        threshold:      3,
+        collection:     [],
+        assignedRunner: null,
+        homeowners:     1,
+        runners:        0,
+        notes:          'Auto-created from waitlist signup',
+        area:           'A1',
+      }
+      // Use zoneToRow to get correct column names, then remove undefined id
+      const row = zoneToRow(tempZone)
+      delete row.id  // let Supabase generate UUID
+
+      const { data: newZone, error } = await _supa.from('zones').insert(row).select().single()
+      if(error){ showToast('Zone create failed: '+error.message, 'err'); console.error('[BinDash] Zone insert error:', error); return }
+
+      zone = { id:newZone.id, name:zoneName, zip, zips:[zip], status:'waitlist',
+               homeowners:1, runners:0, capacity:20, threshold:3 }
       ADMIN_ZONES.push(zone)
       showToast('Waitlist zone created for ZIP '+zip+' ✅', 'ok', 4000)
     }
+
+    // Link homeowner to zone
     if(appId && zone?.id){
-      await _supa.from('homeowner_signups').update({ zone_id:zone.id, updated_at:new Date().toISOString() }).eq('id', appId)
+      await _supa.from('homeowner_signups')
+        .update({ zone_id:zone.id, updated_at:new Date().toISOString() })
+        .eq('id', appId)
       const entry = PENDING_HOMEOWNERS.find(a=>String(a.id)===String(appId))
       if(entry){ entry.zoneId = zone.id; entry.isWaitlist = true }
     }
+
+    syncZoneData()
+    renderAdminZones?.()
     renderPendingHWList()
-    if(typeof renderAdminZones==='function') renderAdminZones()
-    if(typeof syncZoneData==='function') syncZoneData()
-  } catch(e){ showToast('Error: '+e.message, 'err') }
+    showToast('Zone activated — will now show on all heatmaps as demand area', 'ok', 5000)
+  } catch(e){
+    console.error('[BinDash] activateWaitlistZone error:', e)
+    showToast('Error: '+e.message, 'err')
+  }
 }
 
 async function approveHW(appId, directZoneId){
