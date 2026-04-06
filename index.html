@@ -1334,21 +1334,28 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
 .adj-zone-expand { cursor: pointer !important; }
 
 /* Leaflet tooltip overrides — dark text on white Leaflet tooltip */
-.h3-tip {
-  background: rgba(15,23,42,0.95) !important;
-  border: 1px solid rgba(255,255,255,.15) !important;
+.h3-tip,
+.leaflet-tooltip.h3-tip {
+  background: #0f172a !important;
+  border: 1px solid rgba(255,255,255,.2) !important;
   color: #f1f5f9 !important;
   font-family: inherit !important;
-  border-radius: 7px !important;
-  padding: 6px 10px !important;
-  font-size: 11px !important;
-  box-shadow: 0 2px 8px rgba(0,0,0,.25) !important;
-  max-width: 220px !important;
+  border-radius: 8px !important;
+  padding: 7px 11px !important;
+  font-size: 12px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,.4) !important;
+  max-width: 240px !important;
+  line-height: 1.5 !important;
+  white-space: normal !important;
 }
-.h3-tip::before { border-top-color: rgba(15,23,42,.95) !important; }
-.h3-tip .leaflet-tooltip-top::before { border-top-color: rgba(15,23,42,.95) !important; }
-/* Force all text inside h3-tip to be light */
-.h3-tip div, .h3-tip span, .h3-tip strong { color: inherit !important; }
+.h3-tip::before,
+.leaflet-tooltip.h3-tip::before { border-top-color: #0f172a !important; }
+/* Force ALL descendant text light — Leaflet resets to black */
+.h3-tip *,
+.leaflet-tooltip.h3-tip * {
+  color: #f1f5f9 !important;
+  background: transparent !important;
+}
 
 /* Leaflet popup — ensure dark text on white background */
 .leaflet-popup-content { color: #0f172a !important; font-family: inherit !important; }
@@ -9006,8 +9013,15 @@ async function _adDrawRunnerCoverage(map){
         const ctr = ZIP_CENTROIDS[zip]
         if(!ctr) return
         try {
-          // Anchor: zone ZIP centroid → res-8 → res-6
-          const anchorH8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+          // Anchor priority: runner real address > first active HO in zip > ZIP centroid
+          let _aLat = ctr[0], _aLng = ctr[1]
+          const _rnMem = RUNNERS.find(rx => rx.id === r.id)
+          if(_rnMem?.lat && _rnMem?.lng){ _aLat = parseFloat(_rnMem.lat); _aLng = parseFloat(_rnMem.lng) }
+          else {
+            const _firstHO = HOMEOWNERS.find(h => h.zip === zip && h.lat && h.lng)
+            if(_firstHO){ _aLat = parseFloat(_firstHO.lat); _aLng = parseFloat(_firstHO.lng) }
+          }
+          const anchorH8 = h3.latLngToCell(_aLat, _aLng, 8)
           const anchorH6 = h3.cellToParent(anchorH8, 6)
 
           // Draw res-6 outline
@@ -9286,7 +9300,15 @@ async function _initAdminMap(){
           fillOpacity: style.fillOpacity + 0.15,
           weight: 2, opacity: 1,
         })
-        // Build popup manually (cell structure compatible with _bindHexPopup)
+        // Hover tooltip — quick summary
+        const _tipNames = cell.hos.slice(0,3).map(h=>h.name).join(', ') + (cell.hos.length>3?' +more':'')
+        poly.bindTooltip(
+          '<div style="font-weight:700">' + cell.hos.length + ' HO' + (cell.hos.length!==1?'s':'') + ' · ' + (cell.status==='active'?'✅ Active':'⏳ Waitlist') + '</div>'
+          + '<div style="opacity:.8;margin-top:2px">' + _tipNames + '</div>'
+          + '<div style="opacity:.6;font-size:10px;margin-top:2px">Click for details</div>',
+          { className:'h3-tip', direction:'top', sticky:false }
+        )
+        // Click popup — full detail
         const fakeCellForPopup = { ...cell, homeowners: cell.hos, zone: ADMIN_ZONES.find(z=>z.id===cell.hos[0]?.zoneId)||null }
         _bindHexPopup(poly, fakeCellForPopup, key)
         poly.addTo(window._adminMap)
@@ -9340,13 +9362,9 @@ async function _initAdminMap(){
         const fo  = data.active > 0 ? 0.45 : 0.30
         const poly = L.polygon(pts, { color:bc, fillColor:fc, fillOpacity:fo, weight:1.5, opacity:1 })
         poly.bindTooltip(
-          '<div style="font-size:11px;font-weight:700;color:#1e293b">ZIP '+zip+'</div>'
-          +'<div style="font-size:10px;color:#475569">'
-          +(data.active>0?data.active+' active':'')
-          +(data.waitlist>0?(data.active>0?' · ':'')+data.waitlist+' waitlisted':'')
-          +(data.names.length?'<br>'+data.names.slice(0,3).join(', ')+(data.names.length>3?' +more':''):'')
-          +'</div>',
-          { className:'h3-tip', direction:'top', sticky:true }
+          '<div style="font-weight:700">ZIP '+zip+' · '+(data.active>0?data.active+' active':'')+(data.waitlist>0?(data.active>0?' · ':'')+data.waitlist+' waitlisted':'')+'</div>'
+          +(data.names.length?'<div style="opacity:.8;margin-top:2px">'+data.names.slice(0,3).join(', ')+(data.names.length>3?' +more':'')+'</div>':''),
+          { className:'h3-tip', direction:'top', sticky:false }
         )
         poly.addTo(window._adminMap)
         window._adminHexLayers.push(poly)
@@ -11728,13 +11746,14 @@ async function renderRunnerHeatmap(){
   const runnerHexes   = new Set()  // res-7 hexIds covered by any runner
   const runnerZipMeta = {}         // zip -> runner name (for tooltip)
 
-  const addZipCoverage = (zip, name) => {
+  const addZipCoverage = (zip, name, anchorOverrideLat=null, anchorOverrideLng=null) => {
     const ctr = ZIP_CENTROIDS[zip]
-    if(!ctr) return
+    if(!ctr && !anchorOverrideLat) return
     try {
-      // Use the full res-6 zone children (all ~91 res-8 hexes) not just disk-1 (7 hexes)
-      // This ensures the runner's coverage shows the entire ZIP area, not a tiny cluster
-      const anchor8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+      // Use real address coordinates if provided, else ZIP centroid
+      const lat = anchorOverrideLat || ctr[0]
+      const lng = anchorOverrideLng || ctr[1]
+      const anchor8 = h3.latLngToCell(lat, lng, 8)
       const parent6 = h3.cellToParent(anchor8, 6)
       h3.cellToChildren(parent6, 8).forEach(h => {
         runnerHexes.add(h)
@@ -11758,8 +11777,11 @@ async function renderRunnerHeatmap(){
         const zips = zone?.zips || (zone?.zip ? [zone.zip] : [])
         zips.forEach(zip => addZipCoverage(zip, name))
       }
-      // C: direct zip_code (always available)
-      if(r.zip_code) addZipCoverage(r.zip_code, name)
+      // C: direct zip_code — use runner's real geocoded address if available
+      if(r.zip_code){
+        const _rn = RUNNERS.find(rx=>rx.id===r.id)
+        addZipCoverage(r.zip_code, name, _rn?.lat||null, _rn?.lng||null)
+      }
     })
   } catch(e){ console.warn('[Heatmap] runners fetch:', e) }
 
@@ -11804,8 +11826,12 @@ async function renderRunnerHeatmap(){
     })
   } catch(e){}
   // From zip directly
-  if(currentRunnerRow.zip_code) addZipCoverage(currentRunnerRow.zip_code, currentRunnerName)
-  if(currentRunnerRow.zip) addZipCoverage(currentRunnerRow.zip, currentRunnerName)
+  // Use runner's real geocoded address for anchor, not ZIP centroid
+  const _rnLat = currentRunnerRow.lat || null
+  const _rnLng = currentRunnerRow.lng || null
+  if(currentRunnerRow.zip_code) addZipCoverage(currentRunnerRow.zip_code, currentRunnerName, _rnLat, _rnLng)
+  if(currentRunnerRow.zip && currentRunnerRow.zip !== currentRunnerRow.zip_code)
+    addZipCoverage(currentRunnerRow.zip, currentRunnerName, _rnLat, _rnLng)
   // From new hex columns if already saved
   try {
     const ch = currentRunnerRow.coverage_hexes
