@@ -5998,18 +5998,12 @@ async function populateRNDashboard(){
 
     // Restore active route if runner had one in progress (back button / crash recovery)
     if(_restoreNavState()){
-      showToast('Route resumed ▶', 'ok', 3000)
-      // Show resume banner on home screen
+      showToast('Route resumed ▶ — tap My Routes to continue', 'ok', 4000)
+      // Show resume banner on home screen instead of auto-switching
       const resumeBanner = document.getElementById('rn-resume-banner')
       if(resumeBanner) resumeBanner.style.display = 'block'
-      // Auto-switch to active tab and open the route
-      setTimeout(() => {
-        switchRouteTab('active')
-        rnNav(null, 'rn-routes')
-        renderActiveRouteTab()
-        openM()
-        _renderNavModal()
-      }, 600)
+      // Don't auto-navigate away from home — let runner tap to resume
+      // This prevents blank screen when nav_state is stale
     }
 
     const fn = merged.first_name || currentUser.user_metadata?.first_name || currentUser.email?.split('@')[0] || 'Runner'
@@ -16820,7 +16814,8 @@ function _saveNavState(){
     sessionStorage.setItem('nav_state', JSON.stringify({
       navStop, navPhase, navBatchId, navBatchZoneId, navVisitType, navRouteActive,
       stops: NAV_STOPS,
-      savedAt: Date.now()
+      savedAt:  Date.now(),
+      savedDate: new Date().toISOString().slice(0,10),
     }))
   } catch(e){}
 }
@@ -16832,6 +16827,16 @@ function _restoreNavState(){
     // Only restore if saved within last 4 hours and route was active
     if(!s.navRouteActive || !s.stops?.length) return false
     if(Date.now() - s.savedAt > 4 * 60 * 60 * 1000) return false
+    // Extra guard: don't restore if the scheduled date is in the past
+    const today = new Date().toISOString().slice(0,10)
+    if(s.navBatchId && s.stops?.[0]?.jobId){
+      // Check if these stops are from a past date — if so, clear stale state
+      const savedDate = s.savedDate || ''
+      if(savedDate && savedDate < today){
+        sessionStorage.removeItem('nav_state')
+        return false
+      }
+    }
     NAV_STOPS = s.stops
     navStop = s.navStop || 0
     navPhase = s.navPhase || 'travelling'
@@ -22627,6 +22632,20 @@ function startRouteScheduler(){
     }
   }, 2000)
   window._lastSchedulerCheck = {}
+// Clear stale nav_state from previous session to prevent blank runner screen
+;(()=>{
+  try {
+    const _ns = sessionStorage.getItem('nav_state')
+    if(_ns){
+      const _nsp = JSON.parse(_ns)
+      const _today = new Date().toISOString().slice(0,10)
+      if(!_nsp.savedDate || _nsp.savedDate < _today){
+        sessionStorage.removeItem('nav_state')
+        console.log('[BinDash] Cleared stale nav_state from previous session')
+      }
+    }
+  } catch(e){}
+})()
 
   // 60-second ticker to update offer countdown badges in real time
   setInterval(()=>{
