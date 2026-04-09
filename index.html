@@ -7320,6 +7320,24 @@ async function loadRunnerRoutes(runnerRow){
 
     if(batchArea) batchArea.innerHTML = batchCards
 
+    // Update missed tab badge
+    try {
+      const _missedBadge = document.getElementById('rtab-missed-count')
+      if(_missedBadge){
+        const _today = new Date().toISOString().slice(0,10)
+        const _sevenAgo = new Date(Date.now()-7*24*60*60*1000).toISOString().slice(0,10)
+        const _rn = runnerRow
+        const _orF = [`runner_id.eq.${_rn.id}`]
+        const { data: _missed } = await _supa.from('jobs')
+          .select('id').or(_orF.join(','))
+          .in('status',['declined','missed','expired'])
+          .gte('scheduled_date', _sevenAgo).limit(20)
+        const _missedCount = (_missed||[]).length
+        _missedBadge.textContent = _missedCount || ''
+        _missedBadge.style.display = _missedCount ? 'inline' : 'none'
+      }
+    } catch(e){}
+
     // Also populate the My Routes > Upcoming tab with the same cards
     const upcomingList = document.getElementById('upcoming-batch-list')
     if(upcomingList) upcomingList.innerHTML = batchCards || `
@@ -10410,7 +10428,11 @@ async function hCheckService(){
       console.log('[BinDash] Address probe saved:', zip, addr||'(zip only)')
     } catch(e){
       // Fail silently — probe saving must never block signup
-      console.warn('[BinDash] Address probe failed:', e.message)
+      if(e.message?.includes('relation') || e.message?.includes('does not exist')){
+        console.warn('[BinDash] address_probes table not yet created — run SQL migration')
+      } else {
+        console.warn('[BinDash] Address probe failed:', e.message)
+      }
     }
   }
 
@@ -10775,7 +10797,7 @@ async function submitLead(){
     if(zip){
       _supa.from('address_probes')
         .update({ status:'waitlist', converted_at:new Date().toISOString(), updated_at:new Date().toISOString() })
-        .eq('zip_code', zip).eq('status','not_enrolled')
+        .eq('zip_code', zip).in('status',['not_enrolled'])
         .then(() => console.log('[BinDash] Probe marked as waitlist'))
         .catch(() => {})
     }
@@ -22635,15 +22657,22 @@ function startRouteScheduler(){
 // Clear stale nav_state from previous session to prevent blank runner screen
 ;(()=>{
   try {
-    const _ns = sessionStorage.getItem('nav_state')
-    if(_ns){
-      const _nsp = JSON.parse(_ns)
-      const _today = new Date().toISOString().slice(0,10)
-      if(!_nsp.savedDate || _nsp.savedDate < _today){
-        sessionStorage.removeItem('nav_state')
-        console.log('[BinDash] Cleared stale nav_state from previous session')
-      }
+    // Clear stale nav_state from both session and local storage
+    const _clearStale = (store) => {
+      try {
+        const _ns = store.getItem('nav_state')
+        if(_ns){
+          const _nsp = JSON.parse(_ns)
+          const _today = new Date().toISOString().slice(0,10)
+          if(!_nsp.savedDate || _nsp.savedDate < _today){
+            store.removeItem('nav_state')
+          }
+        }
+      } catch(e){}
     }
+    _clearStale(sessionStorage)
+    _clearStale(localStorage)
+    console.log('[BinDash] Stale nav_state check complete')
   } catch(e){}
 })()
 
