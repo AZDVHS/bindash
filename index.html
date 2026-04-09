@@ -6432,6 +6432,7 @@ function filterAdminJobs(){
           ${['accepted','in_progress','offered'].includes(b.routeStatus)?`<button class="btn btn-ghost btn-sm" style="font-size:11px;color:#fbbf24" onclick="flagBatchLate('${b.batchId}')">⚠️ Flag All Late</button>`:''}
         </div>
       </div>
+      ${_isWlCard ? '</div>' : ''}
     </div>`
   }).join('')
 }
@@ -7750,10 +7751,26 @@ async function startBatch(batchId){
       navRouteActive = true
       _saveNavState()
 
-      // Switch to active tab and render — no modal needed
-      switchRouteTab('active')
-      renderActiveRouteTab()
-      showToast('▶ Route started — ' + jobsToUse.length + ' stops · $' + (jobsToUse.length * 3.25).toFixed(2), 'ok', 3500)
+      // Show confirmation modal before going active
+      const _earn = (jobsToUse.length * (window._rnRow?.loyaltyRate || 3.25)).toFixed(2)
+      const _vt   = navVisitType === 'BIN_IN' ? '☀️ Bin In' : '🌙 Bin Out'
+      document.getElementById('modal-box').innerHTML = `
+        <div class="mh" style="background:rgba(6,214,160,.06)">
+          <div style="font-size:15px;font-weight:700;color:var(--cyan)">${_vt} Route — Ready to start?</div>
+          <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+        </div>
+        <div class="mb" style="text-align:center;padding:20px">
+          <div style="font-size:36px;margin-bottom:12px">${navVisitType==='BIN_IN'?'☀️':'🌙'}</div>
+          <div style="font-size:22px;font-weight:800;color:var(--cyan);margin-bottom:4px">${jobsToUse.length} stop${jobsToUse.length!==1?'s':''}</div>
+          <div style="font-size:16px;color:#22c55e;font-weight:700;margin-bottom:16px">$\${_earn} earned on completion</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:4px">First stop: <strong style="color:var(--text)">${NAV_STOPS[0]?.name||'--'}</strong></div>
+          <div style="font-size:12px;color:var(--muted)">${NAV_STOPS[0]?.address||'--'}</div>
+        </div>
+        <div class="mf">
+          <button class="btn btn-ghost btn-sm" onclick="closeM()">Not yet</button>
+          <button class="btn btn-cyan" onclick="closeM();switchRouteTab('active');renderActiveRouteTab();showToast('▶ Route started — good luck!','ok',3000)">▶ Start Route</button>
+        </div>`
+      openM()
 
     } else {
       showToast('No stops found for this route — try refreshing', 'err')
@@ -8968,15 +8985,11 @@ async function _adDrawRunnerCoverage(map){
       .select('zip_code,status,h3_index').limit(3000)
     ;(sigs||[]).forEach(s => {
       try {
-        // Prefer stored h3_index for precision, fallback to ZIP centroid
-        let h8 = null
-        if(s.h3_index){
-          h8 = h3.getResolution(s.h3_index) === 8 ? s.h3_index : h3.cellToParent(s.h3_index, 8)
-        } else {
-          const ctr = ZIP_CENTROIDS[s.zip_code]
-          if(!ctr) return
-          h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
-        }
+        // Always use ZIP centroid for consistency — h3_index may have bad geocodes
+        // that place dots in wrong zip areas (e.g. 85383 when they're in 85207)
+        const ctr = ZIP_CENTROIDS[s.zip_code]
+        if(!ctr) return
+        const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
         if(!h8) return
         if(s.status === 'approved') hoActive[h8] = (hoActive[h8]||0) + 1
         else if(['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)){
@@ -9272,7 +9285,12 @@ async function _initAdminMap(){
   const hoByHex8 = {}
   geoHOs.forEach(ho => {
     try {
-      const h8 = h3Ready ? h3.latLngToCell(ho.lat, ho.lng, 8) : null
+      // Use ZIP centroid for hex placement to keep dots aligned with zone grid
+      // (geocoded lat/lng may land in adjacent res-8 hex causing misalignment)
+      const zipCtr = ZIP_CENTROIDS[ho.zip]
+      const placeLat = zipCtr ? zipCtr[0] : ho.lat
+      const placeLng = zipCtr ? zipCtr[1] : ho.lng
+      const h8 = h3Ready ? h3.latLngToCell(placeLat, placeLng, 8) : null
       const key = h8 || (ho.lat.toFixed(4)+','+ho.lng.toFixed(4))
       if(!hoByHex8[key]) hoByHex8[key] = { h8, lat:ho.lat, lng:ho.lng, hos:[], status:'no activity', runnerId:null, runnerName:null }
       const zone   = ADMIN_ZONES.find(z => z.id === ho.zoneId)
@@ -11260,6 +11278,10 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
     _rnPickerDrawHex(map, hexId, selectableSet, opts)
   })
 
+  // Critical: force map to recalculate size in case container was hidden
+  setTimeout(() => { try { map.invalidateSize(true) } catch(e){} }, 80)
+  setTimeout(() => { try { map.invalidateSize(true) } catch(e){} }, 300)
+
   if(opts.onUpdate) opts.onUpdate()
 }
 
@@ -11299,19 +11321,20 @@ function _rnPickerDrawHex(map, hexId, selectableSet, opts){
 }
 
 function _rnPickerHexStyle(isAnchor, isSelected, isSelectable, isAssigned, hasActiveHO, hasWaitHO){
-  if(isAnchor)     return { color:'#06d6a0', weight:3, fillColor:'#06d6a0', fillOpacity:0.80 }
-  if(!isSelectable)return { color:'rgba(239,68,68,.45)', weight:1, fillColor:'rgba(239,68,68,.07)', fillOpacity:1, dashArray:'4,4' }
+  // All fillOpacity values are low so the Voyager map tiles show through clearly
+  if(isAnchor)     return { color:'#0d9488', weight:3,   fillColor:'#06d6a0', fillOpacity:0.45 }
+  if(!isSelectable)return { color:'rgba(100,116,139,.4)', weight:1, fillColor:'rgba(100,116,139,.06)', fillOpacity:1, dashArray:'4,4' }
   if(isSelected){
-    if(isAssigned)   return { color:'#818cf8', weight:2.5, fillColor:'#818cf8', fillOpacity:0.38 }
-    if(hasActiveHO)  return { color:'#22c55e', weight:2, fillColor:'#06d6a0', fillOpacity:0.38 }
-    if(hasWaitHO)    return { color:'#fbbf24', weight:2, fillColor:'#f59e0b', fillOpacity:0.35 }
-    return { color:'#06d6a0', weight:1.5, fillColor:'#06d6a0', fillOpacity:0.28 }
+    if(isAssigned)   return { color:'#4f46e5', weight:2.5, fillColor:'rgba(79,70,229,.22)', fillOpacity:1 }
+    if(hasActiveHO)  return { color:'#15803d', weight:2,   fillColor:'rgba(21,128,61,.25)',  fillOpacity:1 }
+    if(hasWaitHO)    return { color:'#b45309', weight:2,   fillColor:'rgba(180,83,9,.22)',   fillOpacity:1 }
+    return { color:'#0d9488', weight:1.5, fillColor:'rgba(13,148,136,.18)', fillOpacity:1 }
   }
-  // Not selected
-  if(isAssigned)   return { color:'#6366f1', weight:1.5, fillColor:'rgba(99,102,241,.12)', fillOpacity:1, dashArray:'3,3' }
-  if(hasActiveHO)  return { color:'rgba(34,197,94,.6)', weight:1, fillColor:'rgba(34,197,94,.15)', fillOpacity:1 }
-  if(hasWaitHO)    return { color:'rgba(251,191,36,.6)', weight:1, fillColor:'rgba(251,191,36,.12)', fillOpacity:1 }
-  return { color:'rgba(255,255,255,.18)', weight:1, fillColor:'rgba(255,255,255,.04)', fillOpacity:1 }
+  // Not selected — very transparent so map shows through
+  if(isAssigned)   return { color:'rgba(79,70,229,.5)',  weight:1.5, fillColor:'rgba(79,70,229,.06)',  fillOpacity:1, dashArray:'3,3' }
+  if(hasActiveHO)  return { color:'rgba(21,128,61,.6)',  weight:1,   fillColor:'rgba(21,128,61,.10)',  fillOpacity:1 }
+  if(hasWaitHO)    return { color:'rgba(180,83,9,.6)',   weight:1,   fillColor:'rgba(180,83,9,.08)',   fillOpacity:1 }
+  return { color:'rgba(100,116,139,.25)', weight:1, fillColor:'rgba(100,116,139,.04)', fillOpacity:1 }
 }
 
 // ── Onboarding callbacks ──
@@ -21326,7 +21349,15 @@ function renderPendingHWList(){
 
     // Plan label -- human readable
     const planLabels = { plan_a:'1 Can ($34.99/mo)', plan_b:'2 Cans Same Day ($44.99/mo)', plan_c:'2 Cans Split Days ($54.99/mo)', w1:'1 Can ($34.99/mo)', w2:'2 Cans Same Day ($44.99/mo)', w3:'2 Cans Split Days ($54.99/mo)' }
-    const planDisplay = planLabels[app.plan] || app.plan || '--'
+    // Derive plan from service_type when plan_id is missing (lead form signups)
+    const _svcLower = (app.service||'').toLowerCase()
+    const _derivedPlan = planLabels[app.plan]
+      ? planLabels[app.plan]
+      : _svcLower.includes('split') ? '2 Cans Split Days'
+      : _svcLower === 'both' || _svcLower.includes('both') ? '2 Cans Same Day'
+      : _svcLower === 'general' || _svcLower.includes('waste') ? '1 Can - General Waste'
+      : app.plan || '--'
+    const planDisplay = _derivedPlan
     // waitlistBadge is set above — injected next to name in card
 
     // Payment status -- drives urgency
@@ -21376,9 +21407,31 @@ function renderPendingHWList(){
          </div>`
       : ''
 
+    // Waitlist cards use a compact pill with expand toggle
+    const _isWlCard = _hwActiveTab === 'waitlist'
+    const _cardId = 'hwpc-'+app.id
+    const _detailId = 'hwpc-detail-'+app.id
+
     return `
-    <div class="pc" id="hwpc-${app.id}" style="${cardBorder};border-radius:10px;overflow:hidden;margin-bottom:14px">
+    <div class="pc" id="${_cardId}" style="${cardBorder};border-radius:10px;overflow:hidden;margin-bottom:8px">
       ${urgencyBar}
+      ${_isWlCard ? `
+      <!-- Compact pill header — always visible -->
+      <div style="padding:10px 14px;display:flex;align-items:center;gap:10px;cursor:pointer" onclick="const d=document.getElementById('${_detailId}');if(d)d.style.display=d.style.display==='none'?'block':'none'">
+        <div class="avatar" style="width:36px;height:36px;font-size:13px;flex-shrink:0;background:linear-gradient(135deg,var(--cyan),var(--blue))">${app.initials}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700">${app.name}${waitlistBadge}</div>
+          <div style="font-size:11px;color:var(--muted)">ZIP ${app.zip} · ${_derivedPlan} · ${app.day||'--'}</div>
+        </div>
+        ${app.zoneId
+          ? `<span style="font-size:10px;background:rgba(34,197,94,.12);color:#4ade80;border-radius:6px;padding:2px 8px;font-weight:700;flex-shrink:0">✅ Zone Created</span>`
+          : `<span style="font-size:10px;background:rgba(245,158,11,.12);color:#f59e0b;border-radius:6px;padding:2px 8px;font-weight:700;flex-shrink:0">⚡ Needs Zone</span>`
+        }
+        <span style="color:var(--muted);font-size:12px">▼</span>
+      </div>
+      <!-- Expandable detail -->
+      <div id="${_detailId}" style="display:none;border-top:1px solid var(--border)">
+      ` : `
       <div style="padding:14px">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
           <div style="display:flex;align-items:center;gap:10px">
@@ -21388,10 +21441,14 @@ function renderPendingHWList(){
               <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace">${String(app.id).slice(0,8)} . ${app.submittedAt}</div>
             </div>
           </div>
-          <span class="badge" style="background:${isWaitlistZone?'rgba(245,158,11,.13)':'rgba(245,158,11,.13)'};color:${isWaitlistZone?'#f59e0b':'#f59e0b'}">
+          <span class="badge" style="background:rgba(245,158,11,.13);color:#f59e0b">
             ${isWaitlistZone ? '⏳ Waitlist Signup' : '⏳ Pending Review'}
           </span>
         </div>
+      `}
+        <div style="padding:${_isWlCard?'12px 14px':'0'}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:10px">
 
         <div class="cc-grid" style="margin-bottom:12px">
           <div class="dl"><div class="dl-l">Email</div><div>${app.email}</div></div>
@@ -26532,6 +26589,14 @@ async function _linkHomeownersToNewZone(zone){
       .eq('type', 'homeowner_waitlist')
 
     zone.homeowners = pending.length
+    // Also count waitlist_pending entries for this zone
+    try {
+      const { count } = await _supa.from('homeowner_signups')
+        .select('id', { count:'exact', head:true })
+        .eq('zone_id', zone.id)
+        .in('status', ['pending_review','waitlist_pending','waitlisted','approved'])
+      if(count !== null) zone.homeowners = count
+    } catch(e){}
     dbSaveZone(zone)
     renderAdminZones()
 
