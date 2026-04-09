@@ -5188,6 +5188,27 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log('[BinDash] ✅ JS loaded OK -- go() is defined:', typeof go)
 })
 
+// ── Clear stale nav_state immediately on script load ──────────────────────
+// This MUST run before auth listener fires to prevent blank runner dashboard
+// nav_state from a previous day causes _restoreNavState() to redirect to empty page
+;(function _clearStaleNavState(){
+  try {
+    const today = new Date().toISOString().slice(0,10)
+    ;[sessionStorage, localStorage].forEach(store => {
+      try {
+        const raw = store.getItem('nav_state')
+        if(!raw) return
+        const s = JSON.parse(raw)
+        // Clear if: no savedDate, savedDate is past, or navRouteActive but no stops
+        if(!s.savedDate || s.savedDate < today || !s.stops?.length){
+          store.removeItem('nav_state')
+          console.log('[BinDash] Cleared stale nav_state (' + (s.savedDate||'no date') + ')')
+        }
+      } catch(e){ try { store.removeItem('nav_state') } catch(_){} }
+    })
+  } catch(e){}
+})()
+
 // -- CURRENT USER STATE ----------------------------
 // Set on login/session restore, cleared on logout
 let currentUser = null  // { id, email, role, first_name, last_name, zone_id, ... }
@@ -22656,24 +22677,7 @@ function startRouteScheduler(){
   window._lastSchedulerCheck = {}
 // Clear stale nav_state from previous session to prevent blank runner screen
 ;(()=>{
-  try {
-    // Clear stale nav_state from both session and local storage
-    const _clearStale = (store) => {
-      try {
-        const _ns = store.getItem('nav_state')
-        if(_ns){
-          const _nsp = JSON.parse(_ns)
-          const _today = new Date().toISOString().slice(0,10)
-          if(!_nsp.savedDate || _nsp.savedDate < _today){
-            store.removeItem('nav_state')
-          }
-        }
-      } catch(e){}
-    }
-    _clearStale(sessionStorage)
-    _clearStale(localStorage)
-    console.log('[BinDash] Stale nav_state check complete')
-  } catch(e){}
+  // nav_state cleared at script init (see _clearStaleNavState IIFE)
 })()
 
   // 60-second ticker to update offer countdown badges in real time
