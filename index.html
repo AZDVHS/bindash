@@ -17973,6 +17973,30 @@ function getHWDayLabel(hw){
   return hw.day || '--'
 }
 
+function _hwSendZoneLaunchEmail(hwId){
+  const hw = HOMEOWNERS.find(h=>h.id===hwId); if(!hw) return
+  if(!hw.email || hw.email.includes('@lead.bindash')){
+    showToast('No valid email for this homeowner', 'err'); return
+  }
+  const zone = ADMIN_ZONES.find(z=>z.id===hw.zoneId)
+  const zoneName = zone?.name || 'your area'
+  sendEmail(
+    hw.email,
+    '🚀 BinDash is launching in your area — complete your signup!',
+    `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+    <body style="margin:0;padding:0;font-family:-apple-system,sans-serif">
+    <div style="max-width:540px;margin:0 auto;padding:36px 24px">
+      <div style="font-size:20px;font-weight:900;color:#06d6a0;margin-bottom:28px">BIN<span style="color:#6366f1">DASH</span></div>
+      <h1 style="font-size:20px;font-weight:800;color:#0f172a;margin:0 0 12px">Great news — your zone is launching! 🚀</h1>
+      <p style="font-size:14px;color:#475569;margin:0 0 20px">Hi ${hw.name.split(' ')[0]}, ${zoneName} now has runners available. Click below to complete your payment and activate your BinDash service.</p>
+      <a href="https://www.bindash.shop" style="display:block;background:#06d6a0;color:#07090f;font-weight:800;font-size:16px;padding:16px;border-radius:12px;text-decoration:none;text-align:center;margin-bottom:16px">Complete My Signup →</a>
+      <p style="font-size:12px;color:#94a3b8">— The BinDash Team</p>
+    </div></body></html>`,
+    'zone_launch_individual'
+  )
+  showToast('Launch email sent to '+hw.name+' ✅', 'ok', 3000)
+}
+
 function renderHomeownerCard(hw){
   const runner   = RUNNERS.find(r=>r.id===hw.assignedRunner||r.name===hw.assignedRunner||r.email===hw.assignedRunner)
   const zone     = getHWZoneName(hw)
@@ -17992,7 +18016,13 @@ function renderHomeownerCard(hw){
   const totalPaid= hwJobs.filter(j=>j.status==='complete').reduce((s,j)=>s+(parseFloat(j.amount)||3.25),0)
   const planLabels={ plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans · $44.99/mo', plan_c:'Split · $54.99/mo',
     oan_a:'OAN 1 Can · $19.99+usage', oan_b:'OAN 2 Cans · $19.99+usage', oan_c:'OAN Split · $19.99+usage' }
-  const mrr = hw.plan==='plan_b'?44.99:hw.plan==='plan_c'?54.99:hw.plan?.startsWith('oan')?19.99:34.99
+  const _hwSvc = (hw.service||'').toUpperCase()
+  const mrr = hw.plan==='plan_b'?44.99
+    : hw.plan==='plan_c'?54.99
+    : hw.plan?.startsWith('oan')?19.99
+    : _hwSvc==='SPLIT'?54.99
+    : (_hwSvc==='BOTH'||_hwSvc.includes('BOTH'))?44.99
+    : 34.99
   const schedLabel = hw.service==='SPLIT'
     ? `♻️ ${hw.dayRecycling||'--'} / 🗑️ ${hw.dayWaste||'--'}`
     : hw.day||'--'
@@ -18016,12 +18046,20 @@ function renderHomeownerCard(hw){
           <span style="color:var(--muted)">${getHWServiceLabel(hw)}</span>
         </div>
       </div>
-      <div style="text-align:right;flex-shrink:0;min-width:70px">
-        <div style="font-size:13px;font-weight:700;color:var(--cyan)">$${mrr.toFixed(0)}<span style="font-size:10px;color:var(--muted)">/mo</span></div>
-        <div style="font-size:11px;color:var(--muted);margin-top:1px">${runner?runner.name.split(' ')[0]:'No runner'}</div>
+      <div style="text-align:right;flex-shrink:0;min-width:80px">
+        ${_isWlHW ? `
+          <div style="font-size:11px;font-weight:700;color:#f59e0b">No payment yet</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:1px">Zone not live</div>
+        ` : `
+          <div style="font-size:13px;font-weight:700;color:var(--cyan)">$${mrr.toFixed(0)}<span style="font-size:10px;color:var(--muted)">/mo</span></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:1px">${runner?runner.name.split(' ')[0]:'No runner'}</div>
+        `}
       </div>
       <span style="background:${scol}22;color:${scol};font-size:10px;font-weight:700;padding:2px 9px;border-radius:99px;flex-shrink:0">${slbl}</span>
       <div style="display:flex;gap:5px;flex-shrink:0">
+        ${_isWlHW ? `
+          <button class="btn btn-sm" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:#f59e0b;font-size:11px" onclick="event.stopPropagation();_hwSendZoneLaunchEmail('${hw.id}')">📧 Send Launch Email</button>
+        ` : ''}
         <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="event.stopPropagation();showHWDetail('${hw.id}')">✏️ Edit</button>
         <button class="btn btn-ghost btn-sm" style="color:#ef4444;padding:4px 7px" onclick="event.stopPropagation();confirmRemoveHW('${hw.id}','${hwSafeName}')" >✕</button>
       </div>
@@ -21367,12 +21405,13 @@ function renderPendingHWList(){
     const planLabels = { plan_a:'1 Can ($34.99/mo)', plan_b:'2 Cans Same Day ($44.99/mo)', plan_c:'2 Cans Split Days ($54.99/mo)', w1:'1 Can ($34.99/mo)', w2:'2 Cans Same Day ($44.99/mo)', w3:'2 Cans Split Days ($54.99/mo)' }
     // Derive plan from service_type when plan_id is missing (lead form signups)
     const _svcLower = (app.service||'').toLowerCase()
-    const _derivedPlan = planLabels[app.plan]
+    const _derivedPlan = (app.plan && planLabels[app.plan])
       ? planLabels[app.plan]
-      : _svcLower.includes('split') ? '2 Cans Split Days'
-      : _svcLower === 'both' || _svcLower.includes('both') ? '2 Cans Same Day'
+      : _svcLower === 'split' || _svcLower.includes('split') ? '2 Cans Split Days ($54.99/mo)'
+      : _svcLower === 'both'  || _svcLower.includes('both')  ? '2 Cans Same Day ($44.99/mo)'
+      : _svcLower === 'recycling' || _svcLower === 'general_waste'  ? '1 Can ($34.99/mo)'
       : _svcLower === 'general' || _svcLower.includes('waste') ? '1 Can - General Waste'
-      : app.plan || '--'
+      : '1 Can ($34.99/mo)'
     const planDisplay = _derivedPlan
     // waitlistBadge is set above — injected next to name in card
 
@@ -21880,7 +21919,32 @@ async function approveHW(appId, directZoneId){
     oan_c:'Bin Out As Needed — 2 Cans Split Days · $19.99/mo+usage',
   }
   const _planLabel = _planLabels[app.plan] || STRIPE_PRICES[app.plan]?.name || app.plan || ''
-  sendEmail(app.email, 'Welcome to BinDash -- your account is active! 🎉', EMAIL.hwApproved(app.name.split(' ')[0], app.day||'Tuesday', _approveZoneName, autoRunner?.name||null, _planLabel, _binOutNight), 'hw_approved')
+  // Send appropriate email based on whether this is waitlist or full approval
+  const _appFn = app.name.split(' ')[0]
+  if(app.isWaitlist || app.status === 'waitlist_pending'){
+    sendEmail(app.email,
+      '✅ You\'re on the BinDash waitlist for '+_approveZoneName,
+      `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+      <body style="margin:0;padding:0;font-family:-apple-system,sans-serif">
+      <div style="max-width:540px;margin:0 auto;padding:36px 24px">
+        <div style="font-size:20px;font-weight:900;color:#06d6a0;margin-bottom:28px">BIN<span style="color:#6366f1">DASH</span></div>
+        <h1 style="font-size:20px;font-weight:800;color:#0f172a;margin:0 0 12px">You're officially on the waitlist 🎉</h1>
+        <p style="font-size:14px;color:#475569;margin:0 0 20px">Hi ${_appFn}, we've reviewed your application and saved your spot in <strong>${_approveZoneName}</strong>. No action needed from you right now.</p>
+        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:16px;margin-bottom:20px">
+          <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:6px">⏳ What happens next</div>
+          <ul style="margin:0;padding-left:18px;font-size:13px;color:#78350f;line-height:1.8">
+            <li>We're recruiting runners for your neighborhood</li>
+            <li>Once a runner is confirmed, your zone goes live</li>
+            <li>You'll get an email to complete payment and activate service</li>
+          </ul>
+        </div>
+        <p style="font-size:12px;color:#94a3b8">Questions? Reply to this email. — The BinDash Team</p>
+      </div></body></html>`,
+      'waitlist_confirmed'
+    )
+  } else {
+    sendEmail(app.email, 'Welcome to BinDash -- your account is active! 🎉', EMAIL.hwApproved(_appFn, app.day||'Tuesday', _approveZoneName, autoRunner?.name||null, _planLabel, _binOutNight), 'hw_approved')
+  }
 
   // Reload from Supabase to sync and remove from pending
   setTimeout(()=>{ loadHomeownersFromSupabase(); loadSignupsFromSupabase() }, 1000)
@@ -26941,7 +27005,7 @@ async function loadSignupsFromSupabase(){
         zip:             row.zip_code || '',
         service:         row.service_type || 'Recycling',
         freq:            row.frequency || 'weekly',
-        plan:            row.plan_id || 'w1',
+        plan:            row.plan_id || null,   // null triggers service_type derivation in card
         day:             row.collection_day || '--',
         svcNotes:        row.service_notes || '',
         cardLast4:       row.card_last4 || '----',
