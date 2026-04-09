@@ -941,6 +941,12 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 /* Modal */
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;align-items:center;justify-content:center;padding:20px}
 .modal-bg.open{display:flex}.modal{background:var(--surface);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:540px;max-height:90vh;overflow-y:auto;animation:popIn .25s ease}
+/* Safe area for iPhone notch + home indicator */
+@supports (padding: max(0px)){
+  .sidebar { padding-bottom: max(0px, env(safe-area-inset-bottom)) !important; }
+  .modal { padding-bottom: max(0px, env(safe-area-inset-bottom)); }
+  .pg { padding-bottom: max(80px, calc(80px + env(safe-area-inset-bottom))) !important; }
+}
 .mh{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .mb{padding:22px}.mf{padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
 
@@ -1254,6 +1260,76 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
   /* Hide non-essential columns in tight layouts */
   .hide-mobile { display: none !important; }
+}
+
+/* ============================================================
+   MOBILE-FIRST ADDITIONS — HW & RUNNER app shell
+   Admin uses laptop; HW/Runner optimized for phone
+============================================================ */
+
+/* HW/Runner screens: constrain width on large screens for phone-app feel */
+@media (min-width: 701px) {
+  .screen.active:not(#S-admin):not(#S-land):not(#S-rn-dash) {
+    max-width: 500px;
+    margin: 0 auto;
+  }
+}
+
+/* Primary CTA buttons: always at least 48px touch target */
+.btn-cyan, .btn-green, .btn-red {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-sm.btn-cyan, .btn-sm.btn-green, .btn-sm.btn-red {
+  min-height: 36px;
+}
+
+/* All inputs/selects: 16px prevents iOS auto-zoom */
+input, select, textarea {
+  font-size: 16px !important;
+}
+/* Allow smaller font in explicitly small contexts */
+.btn, label, .badge, .tc, .dl-l {
+  font-size: revert;
+}
+
+/* Maps: min 50% viewport height on mobile */
+@media (max-width: 700px) {
+  #rn-heat-map,
+  #rn-zones-map,
+  #h3-signup-map,
+  #rn-area-map,
+  #mz-admin-map,
+  #cz-preview-map {
+    min-height: 50vh !important;
+  }
+  /* Signup map slightly smaller so form is visible */
+  #h3-signup-map {
+    min-height: 40vh !important;
+  }
+  /* Force full-width on all primary action buttons in HW/runner screens */
+  #S-hw-ob .btn-cyan,
+  #S-hw-s .btn-cyan,
+  #S-rn-dash .btn-cyan,
+  .screen:not(#S-admin):not(#S-land) .btn-cyan.btn-lg {
+    width: 100% !important;
+    min-height: 52px !important;
+    font-size: 16px !important;
+    border-radius: 14px !important;
+  }
+  /* Step nav buttons (Back/Continue) stay side by side */
+  #h-s1 .btn, #h-s2 .btn, #h-s3 .btn, #h-s4 .btn, #h-s5 .btn, #h-lead .btn {
+    min-height: 48px !important;
+    font-size: 15px !important;
+    flex: 1;
+  }
+  /* Card grids in HW/runner: always single column */
+  #S-hw-ob .g2, #S-hw-ob .g3,
+  #S-hw-s .g2, #S-hw-s .g3 {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 /* Tablet: sidebar narrows but stays */
@@ -1916,8 +1992,8 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           </div>
           <div id="h3-signup-map" style="height:240px;width:100%"></div>
         </div>
-        <div style="display:flex;justify-content:flex-end;margin-top:6px">
-          <button class="btn btn-cyan" onclick="hNext(1)">Continue -></button>
+        <div style="margin-top:16px">
+          <button class="btn btn-cyan btn-full" style="min-height:52px;font-size:16px;border-radius:14px" onclick="hNext(1)">Continue →</button>
         </div>
       </div>
 
@@ -1925,19 +2001,28 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <!-- PATH A: Active zone -- full signup                         -->
       <!-- ========================================================== -->
 
-      <!-- STEP 2: Account details -->
+      <!-- STEP 2: Account details — split into 2 sub-steps on mobile -->
       <div id="h-s2" style="display:none">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Create your account 🏠</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">BinDash services your area! Set up your account to get started.</div>
-        <div class="g2">
-          <div class="field"><label>First Name *</label><input id="h-fn" placeholder="Jane"></div>
-          <div class="field"><label>Last Name</label><input id="h-ln" placeholder="Smith"></div>
+
+        <!-- Sub-step A: Name + Email (shown first) -->
+        <div id="h-s2a">
+          <div class="g2">
+            <div class="field"><label>First Name *</label><input id="h-fn" placeholder="Jane" autocomplete="given-name"></div>
+            <div class="field"><label>Last Name</label><input id="h-ln" placeholder="Smith" autocomplete="family-name"></div>
+          </div>
+          <div class="field"><label>Email Address *</label><input type="email" id="h-em" placeholder="jane@example.com" autocomplete="email"></div>
+          <div style="display:flex;gap:10px;margin-top:16px">
+            <button class="btn btn-outline" style="min-height:48px;flex:1" onclick="hBack(2)">← Back</button>
+            <button class="btn btn-cyan" style="min-height:48px;flex:2;font-size:15px;border-radius:12px" onclick="_hS2aNext()">Continue →</button>
+          </div>
         </div>
-        <div class="field"><label>Email Address *</label><input type="email" id="h-em" placeholder="jane@example.com"></div>
-        <div class="g2">
-          <div class="field"><label>Phone</label><input id="h-ph" placeholder="(555) 000-0000"></div>
-          <div class="field"><label>Password *</label><input type="password" id="h-pw" placeholder="Min. 8 characters"></div>
-        </div>
+
+        <!-- Sub-step B: Phone + Password (shown after email confirmed) -->
+        <div id="h-s2b" style="display:none">
+          <div class="field"><label>Phone</label><input id="h-ph" placeholder="(555) 000-0000" type="tel" autocomplete="tel"></div>
+          <div class="field"><label>Password *</label><input type="password" id="h-pw" placeholder="Min. 8 characters" autocomplete="new-password"></div>
         <!-- Referral code from a runner -->
         <div style="border:1.5px solid var(--border2);border-radius:10px;padding:12px 14px;margin-bottom:4px">
           <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px">🔗 Got a referral code from a runner? <span style="color:var(--muted);font-weight:400">(optional)</span></div>
@@ -1948,11 +2033,12 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             </div>
           </div>
         </div>
-        <div style="display:flex;justify-content:space-between;margin-top:14px">
-          <button class="btn btn-outline" onclick="hBack(2)"><- Back</button>
-          <button class="btn btn-cyan" onclick="hNext(2)">Next: Service -></button>
-        </div>
-      </div>
+          <div style="display:flex;gap:10px;margin-top:16px">
+            <button class="btn btn-outline" style="min-height:48px;flex:1" onclick="document.getElementById('h-s2b').style.display='none';document.getElementById('h-s2a').style.display='block'">← Back</button>
+            <button class="btn btn-cyan" style="min-height:48px;flex:2;font-size:15px;border-radius:12px" onclick="hNext(2)">Next: Service →</button>
+          </div>
+        </div><!-- end h-s2b -->
+      </div><!-- end h-s2 -->
 
       <!-- STEP 3: Service + Plan (rich, with plan advertising + split-day) -->
       <div id="h-s3" style="display:none">
@@ -2148,8 +2234,8 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         </div><!-- /ob-plan-section -->
 
         <div style="display:flex;justify-content:space-between;margin-top:6px">
-          <button class="btn btn-outline" onclick="hBack(3)"><- Back</button>
-          <button class="btn btn-cyan" onclick="hNext(3)">Next: Property Info -></button>
+          <button class="btn btn-outline" style="min-height:48px;flex:1" onclick="hBack(3)">← Back</button>
+          <button class="btn btn-cyan" style="min-height:48px;flex:2" onclick="hNext(3)">Next: Property Info →</button>
         </div>
       </div>
 
@@ -2292,7 +2378,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         </div>
 
         <div style="display:flex;justify-content:space-between;margin-top:6px">
-          <button class="btn btn-outline" onclick="hBack(4)"><- Back</button>
+          <button class="btn btn-outline" style="min-height:48px;flex:1" onclick="hBack(4)">← Back</button>
           <button class="btn btn-cyan" onclick="hNext(4)">Next: Payment -></button>
         </div>
       </div>
@@ -2350,7 +2436,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:6px">
           <button class="btn btn-outline" onclick="hBack(6)"><- Back</button>
-          <button class="btn btn-cyan" onclick="hSubmit()">🚀 Activate My Account</button>
+          <button class="btn btn-cyan btn-full" style="min-height:52px;font-size:16px;border-radius:14px" onclick="hSubmit()">🚀 Activate My Account</button>
         </div>
       </div>
 
@@ -2408,7 +2494,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           <input type="checkbox" id="lead-comms" checked>
           <div style="font-size:13px;color:var(--sub)">Notify me by email/text when BinDash launches in my area</div>
         </div>
-        <button class="btn btn-cyan btn-full btn-lg" style="margin-top:16px" onclick="submitLead()">✅ Save My Spot -- Notify Me</button>
+        <button class="btn btn-cyan btn-full btn-lg" style="margin-top:16px;min-height:52px;font-size:16px;border-radius:14px" onclick="submitLead()">✅ Save My Spot — Notify Me</button>
         <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:10px">No payment required . Cancel anytime</div>
       </div>
 
@@ -6954,7 +7040,10 @@ async function loadRunnerRoutes(runnerRow){
 
     const batchArea    = document.getElementById('rn-home-batch-area')
     const offerBanner  = document.getElementById('offer-banner')
-    const pendingOffers = enriched.filter(j => j.status === 'offered')
+    // Include all offered jobs — those without expiry are still valid
+    const pendingOffers = enriched.filter(j => j.status === 'offered' && (
+      !j.offer_expires_at || new Date(j.offer_expires_at).getTime() > Date.now()
+    ))
     const activeJobs    = enriched.filter(j => j.status !== 'offered')
 
     // -- PENDING OFFERS --------------------------------------
@@ -7008,11 +7097,13 @@ async function loadRunnerRoutes(runnerRow){
         </div>`).join('')}
         ${stopCount>3?`<div style="font-size:10px;color:var(--muted);margin-top:4px">+ ${stopCount-3} more stops</div>`:''}
       </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-cyan btn-sm" style="flex:1" onclick="acceptOffer()">✓ Accept -- $${earn}</button>
-        <button class="btn btn-outline btn-sm" onclick="showCurrentOfferDetail()">View Details</button>
-        <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="declineOffer()">✕ Decline</button>
-      </div>`
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+        <button class="btn btn-cyan btn-full" style="min-height:52px;font-size:16px;font-weight:800;border-radius:14px" onclick="acceptOffer()">✓ Accept — $${earn}</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-outline btn-sm" style="flex:1;min-height:40px" onclick="showCurrentOfferDetail()">View Details</button>
+          <button class="btn btn-ghost btn-sm" style="color:#ef4444;min-height:40px;flex:1" onclick="declineOffer()">✕ Decline</button>
+        </div>
+      </div>\``
     } else if(offerBanner){
       offerBanner.style.display = 'none'
     }
@@ -7147,7 +7238,7 @@ async function loadRunnerRoutes(runnerRow){
             if(lockCheck.locked){
               return `<button onclick="startBatch('${batch.id}')" style="display:inline-flex;align-items:center;gap:6px;background:rgba(100,116,139,.2);border:1px solid rgba(100,116,139,.3);color:var(--muted);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer">🔒 ${lockCheck.state==='TOO_EARLY'?'Start on '+new Date(batch.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}):lockCheck.state==='LOCKED_LATE'?'Too late to start':'Locked'}</button>`
             }
-            return `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>`
+            return `<button class="btn btn-cyan btn-full" style="min-height:48px;font-size:15px;border-radius:12px" onclick="startBatch('${batch.id}')">▶ Start Route</button>`
           })() : ''}
           ${batch.status==='in_progress' ? (() => {
             const _r = win ? getRouteLockState(batch.date, batch.stops.length) : {locked:false,state:'OPEN'}
@@ -7608,7 +7699,7 @@ function _startOfferPoll(runnerRow){
         console.log('[OfferPoll] New offer detected — banner shown')
       }
     } catch(e){}
-  }, 120000)  // every 2 minutes
+  }, 30000)  // every 30 seconds — was 2min, faster detection
 }
 
 async function startBatch(batchId){
@@ -7949,8 +8040,8 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
       <div id="bin-in-countdown" style="font-size:11px;color:#fbbf24;font-weight:700;margin-top:6px">⏳ 25:00 remaining</div>
     </div>
     <div class="mf">
-      <button class="btn btn-ghost btn-sm" onclick="_declineBinIn('${inBatchId}')">✕ Decline — pass to zone</button>
-      <button class="btn btn-cyan" onclick="_acceptBinIn('${inBatchId}')">☀️ Accept Bin In — $${earn}</button>
+      <button class="btn btn-ghost btn-sm" style="min-height:44px" onclick="_declineBinIn('${inBatchId}')">✕ Decline</button>
+      <button class="btn btn-cyan" style="flex:1;min-height:52px;font-size:16px;border-radius:14px" onclick="_acceptBinIn('${inBatchId}')">☀️ Accept Bin In — $${earn}</button>
     </div>`
     openM()
 
@@ -9120,7 +9211,7 @@ async function _initSignupMap(lat, lng, zones){
       }
       _signupMap = L.map('h3-signup-map', {
         center: [lat, lng], zoom: 15,
-        zoomControl: true, scrollWheelZoom: true, attributionControl: false,
+        zoomControl: true, scrollWheelZoom: false, attributionControl: false,
       })
       L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
         maxZoom: 20, subdomains: 'abcd',
@@ -9270,6 +9361,8 @@ async function _initAdminMap(){
     zoomControl: true,
     attributionControl: true,
     preferCanvas: false,
+    tap: true,
+    tapTolerance: 15,
   })
   console.log('[Map] L.map created')
 
@@ -10201,6 +10294,18 @@ function requireCard(){
 }
 
 // -- HOMEOWNER ONBOARDING --------------------------
+function _hS2aNext(){
+  const fn = (document.getElementById('h-fn')?.value||'').trim()
+  const em = (document.getElementById('h-em')?.value||'').trim()
+  if(!fn){ showToast('Please enter your first name','err'); return }
+  if(!em || !em.includes('@')){ showToast('Please enter a valid email','err'); return }
+  const s2a = document.getElementById('h-s2a')
+  const s2b = document.getElementById('h-s2b')
+  if(s2a) s2a.style.display = 'none'
+  if(s2b) s2b.style.display = 'block'
+  setTimeout(() => document.getElementById('h-ph')?.focus(), 150)
+}
+
 async function hNext(s){
   obSave() // save progress before moving forward
   if(s===1){
@@ -11256,7 +11361,7 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   // Init Leaflet map
   const mapEl = document.getElementById(mapElId)
   if(!mapEl) return
-  const map = L.map(mapElId, { zoomControl:true, attributionControl:false })
+  const map = L.map(mapElId, { zoomControl:true, attributionControl:false, scrollWheelZoom:false, tap:true })
   window._rnPickerMap = map
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
@@ -11707,7 +11812,7 @@ async function renderRunnerHeatmap(){
   const mapEl = document.getElementById('rn-heat-map')
   if(!mapEl) return
 
-  const map = L.map('rn-heat-map', { zoomControl:true, attributionControl:false })
+  const map = L.map('rn-heat-map', { zoomControl:true, attributionControl:false, scrollWheelZoom:false, tap:true })
   window._rnHeatMap = map
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
@@ -13108,7 +13213,7 @@ async function _renderRnZonesMap(myZones, myHomeowners, waitlistedHOs){
   // Destroy previous instance
   if(window._rnZonesMapInstance){ try{ window._rnZonesMapInstance.remove() }catch(e){} }
 
-  const map = L.map('rn-zones-map', { zoomControl:true, attributionControl:false })
+  const map = L.map('rn-zones-map', { zoomControl:true, attributionControl:false, scrollWheelZoom:false, tap:true })
   window._rnZonesMapInstance = map
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
   setTimeout(() => map.invalidateSize(), 120)
@@ -22210,6 +22315,15 @@ function detectRouteChanges(zoneId, day, newStops, newRunnerId){
 function startRouteScheduler(){
   if(window._routeSchedulerRunning) return
   window._routeSchedulerRunning = true
+  // Immediately check on startup — catches cases where admin opens app after 9am
+  // and routes were approved but not sent (browser was closed at 9am)
+  setTimeout(async () => {
+    const now = new Date()
+    if(now.getHours() >= 9){
+      console.log('[Scheduler] Startup check — looking for unsent queued routes')
+      await _autoTriggerIfQueued()
+    }
+  }, 2000)
   window._lastSchedulerCheck = {}
 
   // 60-second ticker to update offer countdown badges in real time
@@ -22478,7 +22592,7 @@ function approvePendingRoute(zoneId, day, permanent=true){
       status:         'queued',
       approved_at:    now.toISOString(),
       runner_id:      pending.runner?.id || null,
-      runner_email:   pending.runner?.email || null,
+      runner_email:   (pending.runner?.email || '').toLowerCase() || null,
       runner_name:    pending.runner?.name || null,
       stop_count:     (pending.stops||[]).length,
       zone_name:      pending.zoneName || '',
@@ -22495,12 +22609,12 @@ function approvePendingRoute(zoneId, day, permanent=true){
     if(existing) {
       const { error } = await _supa.from('dispatch_queue').update(payload).eq('id', existing.id)
       if(error) console.warn('[BinDash] dispatch_queue update:', error.message)
-      else console.log('[BinDash] dispatch_queue updated with full payload ✅')
+      else { console.log('[BinDash] dispatch_queue updated ✅ — runner_email:', payload.runner_email) }
     } else {
       const { error } = await _supa.from('dispatch_queue')
         .insert({ zone_id:zoneId, scheduled_date:_dqDate, created_at:now.toISOString(), ...payload })
       if(error) console.warn('[BinDash] dispatch_queue insert:', error.message)
-      else console.log('[BinDash] dispatch_queue inserted with full payload ✅')
+      else { console.log('[BinDash] dispatch_queue inserted ✅ — zone:', zoneId, 'date:', _dqDate, 'runner_email:', payload.runner_email) }
     }
   })()
 
@@ -22510,13 +22624,41 @@ function approvePendingRoute(zoneId, day, permanent=true){
   })
 
   const isPast9am = now.getHours() >= 9
-  const releaseMsg = isPast9am
-    ? 'Route approved — queued. Press "Send now →" to dispatch immediately.'
-    : 'Route approved — will auto-send at 9am ✅'
-  showToast(releaseMsg, 'ok', 5000)
+
+  // If approved after 9am — auto-send immediately (no manual step required)
+  if(isPast9am){
+    showToast('Route approved ✅ — sending to runner now...', 'ok', 3000)
+    // Short delay so dispatch_queue write completes first
+    setTimeout(async () => {
+      try {
+        await triggerDispatchEdgeFunction()
+      } catch(e){
+        console.warn('[BinDash] post-approval auto-send failed:', e.message)
+      }
+      renderDispatchPipeline()
+    }, 1500)
+  } else {
+    showToast('Route approved ✅ — will auto-send at 9am tomorrow', 'ok', 5000)
+  }
 
   renderDispatchPipeline()
   loadPendingApprovalsIntoDispatch()
+}
+
+async function _sendQueuedBatchNow(batchId, zoneId, day){
+  // Find the batch in generatedBatches or load from dispatch_queue
+  const batch = generatedBatches.find(b => b.id === batchId || (b.zoneId === zoneId && b.day === day))
+  if(batch && batch.runner?.email){
+    // Full launch flow
+    await _launchSingleBatch(batch)
+    batch.status = 'sent'
+    renderDispatchPipeline()
+    showToast('Route sent to '+batch.runner.name+' ✅', 'ok', 4000)
+  } else {
+    // Fallback: trigger edge function which reads dispatch_queue
+    showToast('Sending route...', 'info', 2000)
+    await triggerDispatchEdgeFunction()
+  }
 }
 
 async function _launchSingleBatch(batch){
@@ -22540,7 +22682,7 @@ async function _launchSingleBatch(batch){
       service_type: hw.service==='BOTH'?'Recycling + General Waste':hw.service==='GENERAL'?'General Waste':'Recycling',
       status: batch.runner?'offered':'unassigned', offer_type: batch.offerType||'zone',
       offer_expires_at: expiresAt, scheduled_date: scheduledDate,
-      amount: 3.25, zone_id: batch.zoneId||null,
+      amount: batch.runner?.loyaltyRate || 3.25, zone_id: batch.zoneId||null,
       created_at: now.toISOString(), updated_at: now.toISOString()
     }))
     if(jobRows.length){
@@ -22549,7 +22691,30 @@ async function _launchSingleBatch(batch){
         console.warn('[BinDash] single batch launch:', error.message)
         showToast('Error launching route: ' + error.message.slice(0,60), 'err')
       } else {
-        // Mark dispatch_queue row as sent
+        // ── Send route offer email directly — no edge function dependency ──
+        if(batch.runner?.email){
+          const _earnOut = (batch.stops.length * (batch.runner?.loyaltyRate||3.25)).toFixed(2)
+          const _stopDetails = (batch.stops||[]).map(s=>({
+            name:s.name, email:s.email, address:s.address||s.zip||'--',
+            service:s.service, plan:s.plan
+          }))
+          sendEmail(
+            batch.runner.email,
+            'New route offer: '+batch.stops.length+' stop'+(batch.stops.length!==1?'s':'')+' · $'+_earnOut,
+            EMAIL.batchOffer(
+              (batch.runner.name||'Runner').split(' ')[0],
+              batch.stops.length, _earnOut,
+              batch.day,
+              (batch.zoneName||'Your zone').replace(/ [·☀️🌙].*$/,''),
+              _stopDetails
+            ),
+            'batch_offer'
+          ).catch(e => console.warn('[BinDash] batch offer email:', e.message))
+          console.log('[BinDash] Route offer email sent to', batch.runner.email, '— stops:', batch.stops.length)
+        } else {
+          console.warn('[BinDash] No runner email — job inserted but no offer email sent')
+        }
+        // Mark dispatch_queue as sent
         _supa.from('dispatch_queue')
           .update({ status: 'sent', sent_at: now.toISOString() })
           .eq('zone_id', batch.zoneId)
@@ -23613,26 +23778,25 @@ async function triggerDispatchEdgeFunction(){
           if(!row.runner_email) continue
           const stops = (() => { try { return JSON.parse(row.stops_json||'[]') } catch(e){ return [] } })()
           const earnOut = parseFloat(row.earn_out || 0).toFixed(2)
+          const _fn = (row.runner_name||'Runner').split(' ')[0]
+          const _zoneName = (row.zone_name||'Your zone').replace(/ [·☀️🌙].*$/,'')
           await sendEmail(
             row.runner_email,
-            `New route: ${row.stop_count} stop${row.stop_count!==1?'s':''} · $${earnOut} available`,
-            EMAIL.batchOffer(
-              row.runner_name?.split(' ')?.[0] || 'Runner',
-              row.stop_count, earnOut, row.collection_day, row.zone_name,
-              stops
-            ),
+            'Route offer: '+row.stop_count+' stop'+(row.stop_count!==1?'s':'')+' · $'+earnOut,
+            EMAIL.batchOffer(_fn, row.stop_count, earnOut, row.collection_day, _zoneName, stops),
             'batch_offer'
           )
           // Mark as sent in dispatch_queue
           await _supa.from('dispatch_queue')
             .update({ status:'sent', sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
             .eq('id', row.id)
-          // Mark jobs as offered
+          // Mark jobs as offered (from queued/unassigned → offered)
           const jobDate = row.scheduled_date
           if(row.zone_id && jobDate){
             await _supa.from('jobs')
               .update({ status:'offered', updated_at: new Date().toISOString() })
-              .eq('zone_id', row.zone_id).eq('scheduled_date', jobDate).eq('status','offered')
+              .eq('zone_id', row.zone_id).eq('scheduled_date', jobDate)
+              .in('status', ['queued','unassigned','scheduled'])
           }
           sent++
         }
@@ -24146,6 +24310,7 @@ function renderDispatchPipeline(){
       +((statusKey==='offered'||statusKey==='sent')&&sentAt&&!isMissed?'<span style="font-size:10px;color:var(--muted);flex-shrink:0;white-space:nowrap">sent '+sentAgo+'m ago</span>':'')
       +((statusKey==='offered'||statusKey==='sent')&&isExpired?'<button onclick="event.stopPropagation();sendRouteNow(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0;white-space:nowrap">↻ Re-send</button>':'')
       +((b.status==='change_detected'||b.status==='draft')?'<button onclick="event.stopPropagation();showRouteApprovalModal(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.4);color:#06d6a0;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0">✓ Approve</button>':'')
+      +(b.status==='queued'&&!_isFuture?'<button onclick="event.stopPropagation();_sendQueuedBatchNow(\''+b.id+'\',\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);color:#a5b4fc;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0">📤 Send now</button>':'')
       +(isPreview?'<button onclick="event.stopPropagation();deleteBatchFromPreview(\''+b.id+'\')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;flex-shrink:0">🗑</button>':'')
       +'<span id="dbc-chev-'+b.id+'" style="font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0;'+(isOpen?'transform:rotate(180deg)':'')+'">▼</span>'
       +'</div>'
@@ -24607,9 +24772,11 @@ async function _autoTriggerIfQueued(){
     const { data } = await _supa.from('dispatch_queue')
       .select('id,status').eq('status','queued').eq('scheduled_date', today).limit(1)
     if(data?.length){
-      // Only auto-trigger once per session — but clear if previous attempt failed
-      if(sessionStorage.getItem(todayKey+'_ok')) return
-      sessionStorage.setItem(todayKey+'_ok', '1')
+      // Re-trigger if last attempt was more than 2h ago (handles failed sends)
+      const lastTrigger = sessionStorage.getItem(todayKey+'_ts')
+      const twoHoursAgo = Date.now() - 2*60*60*1000
+      if(lastTrigger && parseInt(lastTrigger) > twoHoursAgo) return
+      sessionStorage.setItem(todayKey+'_ts', String(Date.now()))
       console.log('[BinDash] Queued routes found post-9am — auto-triggering edge function')
       console.log('[BinDash] Queued routes found post-9am — auto-triggering (with fallback)')
       await triggerDispatchEdgeFunction()
@@ -26282,7 +26449,7 @@ async function _czPreviewZone(zip){
   if(window._czPreviewMapInstance){ window._czPreviewMapInstance.remove(); window._czPreviewMapInstance = null }
   mapEl.innerHTML = ''
 
-  const map = L.map('cz-preview-map', { zoomControl:true, attributionControl:false })
+  const map = L.map('cz-preview-map', { zoomControl:true, attributionControl:false, scrollWheelZoom:false, tap:true })
   window._czPreviewMapInstance = map
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
@@ -28098,7 +28265,7 @@ function showOfferDetail(){
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM();declineOffer()">✕ Decline</button>
-    <button class="btn btn-cyan" onclick="closeM();acceptOffer()">✓ Accept -- $${earn}</button>
+    <button class="btn btn-cyan btn-full" style="min-height:52px;font-size:16px;border-radius:14px" onclick="closeM();acceptOffer()">✓ Accept — $${earn}</button>
   </div>`
   openM()
 
