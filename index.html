@@ -1276,14 +1276,19 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 }
 
 /* Primary CTA buttons: always at least 48px touch target */
+/* Touch targets — min-height only, no display override (btn class handles that) */
 .btn-cyan, .btn-green, .btn-red {
-  min-height: 48px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  min-height: 44px;
 }
 .btn-sm.btn-cyan, .btn-sm.btn-green, .btn-sm.btn-red {
   min-height: 36px;
+}
+/* Full-width primary buttons get flex centering */
+.btn-full.btn-cyan, .btn-full.btn-green {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
 }
 
 /* All inputs/selects: 16px prevents iOS auto-zoom */
@@ -1309,11 +1314,11 @@ input, select, textarea {
   #h3-signup-map {
     min-height: 40vh !important;
   }
-  /* Force full-width on all primary action buttons in HW/runner screens */
-  #S-hw-ob .btn-cyan,
-  #S-hw-s .btn-cyan,
-  #S-rn-dash .btn-cyan,
-  .screen:not(#S-admin):not(#S-land) .btn-cyan.btn-lg {
+  /* Full-width on explicit btn-full only — don't force all btn-cyan */
+  .btn-full.btn-cyan,
+  .btn-full.btn-green,
+  #S-hw-ob .btn-cyan.btn-lg,
+  #S-hw-s .btn-cyan.btn-lg {
     width: 100% !important;
     min-height: 52px !important;
     font-size: 16px !important;
@@ -6199,7 +6204,18 @@ async function populateRNDashboard(){
     loadRNInterestList(merged)
 
   } catch(err){
-    console.warn('[BinDash] RN profile load failed:', String(err?.message||err))
+    console.error('[BinDash] RN profile load FAILED:', String(err?.message||err), err)
+    // Show error state so screen isn't just blank
+    const grEl = document.getElementById('rn-home-subtitle')
+    if(grEl) grEl.textContent = 'Error loading dashboard — pull down to refresh'
+    const batchArea = document.getElementById('rn-home-batch-area')
+    if(batchArea) batchArea.innerHTML = `
+      <div style="text-align:center;padding:32px 20px;color:var(--muted)">
+        <div style="font-size:32px;margin-bottom:12px">⚠️</div>
+        <div style="font-size:14px;font-weight:600;color:#ef4444;margin-bottom:8px">Dashboard failed to load</div>
+        <div style="font-size:12px;margin-bottom:16px">${String(err?.message||err)}</div>
+        <button class="btn btn-outline btn-sm" onclick="populateRNDashboard()">↻ Retry</button>
+      </div>`
   }
 }
 
@@ -6818,7 +6834,7 @@ async function loadRNEarnings(){
       .select('visit_type, amount, status, scheduled_date, completed_at')
       .eq('runner_id', row.id)
       .eq('status', 'complete')
-      .order('completed_at', { ascending: false })
+      .order('scheduled_date', { ascending: false })
 
     const completed = jobs || []
 
@@ -20371,8 +20387,8 @@ async function renderCompletedRoutes(){
   container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted)">Loading...</div>'
 
   const range = document.getElementById('completed-range')?.value || 'today'
-  const runnerRow = window._rnRow
-  if(!runnerRow){ container.innerHTML = '<div style="padding:20px;color:var(--muted)">No runner session</div>'; return }
+  const runnerRow = window._rnRow || window._currentRunnerRow
+  if(!runnerRow?.id){ container.innerHTML = '<div style="padding:20px;color:var(--muted);text-align:center">Log in to see completed routes</div>'; return }
 
   try {
     // Date filter
@@ -20388,8 +20404,8 @@ async function renderCompletedRoutes(){
       .select('*')
       .or(`runner_id.eq.${runnerRow.id},runner_name.eq."${((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).trim()}"`)
       .eq('status', 'complete')
-      .gte('completed_at', fromDate.toISOString())
-      .order('completed_at', { ascending: false })
+      .gte('scheduled_date', fromDate.toISOString().slice(0,10))
+      .order('scheduled_date', { ascending: false })
 
     if(!jobs?.length){
       container.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted)">
