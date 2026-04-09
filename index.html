@@ -18135,9 +18135,16 @@ function renderHomeownerList(){
     if(q && !hw.name.toLowerCase().includes(q) && !hw.address.toLowerCase().includes(q) && !hw.email.toLowerCase().includes(q)) return false
     return true
   })
+  // Sort: waitlist first (needs attention), then active, then paused/inactive
+  const _statusOrder = { waitlist:0, active:1, paused:2, inactive:3 }
+  filtered.sort((a,b) => (_statusOrder[a.status]??1) - (_statusOrder[b.status]??1))
 
   const countEl = document.getElementById('hw-count')
-  if(countEl) countEl.textContent = filtered.length+' homeowner'+(filtered.length!==1?'s':'')
+  if(countEl){
+    const _wl = filtered.filter(h=>h.status==='waitlist').length
+    const _act = filtered.filter(h=>h.status==='active').length
+    countEl.textContent = filtered.length+' homeowner'+(filtered.length!==1?'s':'')+(_wl?' · '+_wl+' waitlist':'')
+  }
   list.innerHTML = filtered.length ? filtered.map(renderHomeownerCard).join('') :
     '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No homeowners match the current filters.</div>'
 
@@ -21462,8 +21469,8 @@ function renderPendingHWList(){
          </div>`
       : ''
 
-    // Waitlist cards use a compact pill with expand toggle
-    const _isWlCard = _hwActiveTab === 'waitlist'
+    // Waitlist cards use a compact pill with expand toggle (only in Pending panel waitlist tab)
+    const _isWlCard = (typeof _hwActiveTab !== 'undefined') && _hwActiveTab === 'waitlist'
     const _cardId = 'hwpc-'+app.id
     const _detailId = 'hwpc-detail-'+app.id
 
@@ -27123,7 +27130,7 @@ async function loadHomeownersFromSupabase(){
     let hwData = [], signupData = []
     const [hwRes, sigRes] = await Promise.all([
       safeQuery(_supa.from('homeowners').select('*').in('status',['active','waitlist']).order('created_at',{ascending:false})),
-      safeQuery(_supa.from('homeowner_signups').select('*').in('status',['approved','waitlist_approved']).order('created_at',{ascending:false})),
+      safeQuery(_supa.from('homeowner_signups').select('*').in('status',['approved','waitlist_approved','waitlist_pending']).order('created_at',{ascending:false})),
     ])
     hwData     = hwRes?.data     || []
     signupData = sigRes?.data    || []
@@ -27170,7 +27177,7 @@ async function loadHomeownersFromSupabase(){
         assignedRunner: row.assigned_runner||null,
         referredBy:     row.referred_by||row.referred_by_runner||null,
         referredByEmail:row.referred_by_email||null,
-        status:         (row.status==='waitlist_approved'||row.status==='waitlist') ? 'waitlist' : 'active',
+        status:         (['waitlist_approved','waitlist','waitlist_pending'].includes(row.status)) ? 'waitlist' : 'active',
         bins:           isSplit || service==='BOTH' ? 2 : 1,
         storage:        row.bin_location  || '--',
         gate:           row.gate_type     || '--',
@@ -27222,10 +27229,14 @@ async function loadHomeownersFromSupabase(){
       HOMEOWNERS.push(toRow(row, true))
     })
 
+    const _wlCount = HOMEOWNERS.filter(h=>h.status==='waitlist').length
     console.log('[BinDash] Homeowners loaded:', HOMEOWNERS.length,
       '(', hwData.length, 'from homeowners table,', signupData.length, 'from signups,',
-      HOMEOWNERS.length, 'total after dedup)')
+      HOMEOWNERS.length, 'total after dedup,', _wlCount, 'waitlist)')
     updateOverviewCounts()
+    if(document.getElementById('hw-card-list')?.offsetParent !== null){
+      renderHomeownerList()
+    }
     renderHomeownerList()
 
     // Background: geocode any HO that has an address but no lat/lng
