@@ -18070,14 +18070,20 @@ function renderHomeownerCard(hw){
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
           <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:700;color:#22c55e">${completed}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Routes Done</div></div>
           <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center"><div style="font-size:15px;font-weight:700;color:var(--cyan)">${runner?runner.name.split(' ')[0]:'None'}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Runner</div></div>
-          <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:700;color:var(--green)">$${mrr.toFixed(0)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">MRR</div></div>
+          <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center"><div style="font-size:${_isWlHW?'13':'18'}px;font-weight:700;color:${_isWlHW?'#f59e0b':'var(--green)'}">${_isWlHW?'No payment':('$'+mrr.toFixed(0))}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">${_isWlHW?'Waitlist':'MRR'}</div></div>
           <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:700;color:#a5b4fc">$${totalPaid.toFixed(0)}</div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Runner Paid</div></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">
           <div>
             <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Service & schedule</div>
             <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
-              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Plan</span><span>${planLabels[hw.plan]||hw.plan||'--'}</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Plan</span><span>${
+                planLabels[hw.plan] ||
+                (hw.service==='SPLIT'?'Split Days · $54.99/mo':
+                 hw.service==='BOTH'?'2 Cans · $44.99/mo':
+                 hw.service==='GENERAL'?'1 Can (General) · $34.99/mo':
+                 hw.plan||'1 Can · $34.99/mo')
+              }</span></div>
               <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Collection</span><span>${schedLabel}</span></div>
               <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Service</span><span>${getHWServiceLabel(hw)}</span></div>
               <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Zone</span><span style="display:flex;align-items:center;gap:4px">${zone} <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="showReassignZone('${hw.id}')">↔</button></span></div>
@@ -21381,7 +21387,14 @@ function renderPendingHWList(){
   if(_hwActiveTab === 'pending')  list = PENDING_HOMEOWNERS.filter(a=>(a.status==='pending_review'||a.status==='payment_pending') && !a.isWaitlist)
   if(_hwActiveTab === 'info')     list = PENDING_HOMEOWNERS.filter(a=>a.status==='info_requested')
   if(_hwActiveTab === 'rejected') list = PENDING_HOMEOWNERS.filter(a=>a.status==='rejected')
-  if(_hwActiveTab === 'waitlist') list = PENDING_HOMEOWNERS.filter(a=>a.status==='waitlist_pending'||a.isWaitlist)
+  if(_hwActiveTab === 'waitlist'){
+    // Only show entries NOT already in HOMEOWNERS management section
+    const _managedEmails = new Set(HOMEOWNERS.map(h=>(h.email||'').toLowerCase()))
+    list = PENDING_HOMEOWNERS.filter(a =>
+      (a.status==='waitlist_pending'||a.isWaitlist) &&
+      !_managedEmails.has((a.email||'').toLowerCase())
+    )
+  }
 
   if(!list.length){
     const msgs = {
@@ -27012,7 +27025,7 @@ async function loadSignupsFromSupabase(){
         zip:             row.zip_code || '',
         service:         row.service_type || 'Recycling',
         freq:            row.frequency || 'weekly',
-        plan:            row.plan_id || null,   // null triggers service_type derivation in card
+        plan:            row.plan_id || null,   // null → service type used for display
         day:             row.collection_day || '--',
         svcNotes:        row.service_notes || '',
         cardLast4:       row.card_last4 || '----',
@@ -27046,9 +27059,20 @@ async function loadSignupsFromSupabase(){
       PENDING_HOMEOWNERS.push(entry)
     })
 
+    // Remove any waitlist_pending entries that are already in HOMEOWNERS
+    // (they show in Homeowners section instead of Pending panel)
+    const _hoEmails = new Set(HOMEOWNERS.map(h => (h.email||'').toLowerCase()))
+    const _beforeLen = PENDING_HOMEOWNERS.length
+    for(let i = PENDING_HOMEOWNERS.length-1; i >= 0; i--){
+      const p = PENDING_HOMEOWNERS[i]
+      if(p.status === 'waitlist_pending' && _hoEmails.has((p.email||'').toLowerCase())){
+        PENDING_HOMEOWNERS.splice(i, 1)
+      }
+    }
+    console.log('[BinDash] Removed', _beforeLen - PENDING_HOMEOWNERS.length, 'waitlist entries already in Homeowners')
+
     updateOverviewCounts()
     updateWaitlistBadge()
-    // Auto-refresh the pending HW list if it's currently visible
     if(document.getElementById('pending-hw-list')?.offsetParent !== null){
       renderPendingHWList()
     }
@@ -27173,7 +27197,7 @@ async function loadHomeownersFromSupabase(){
         day:            day || '--',
         dayRecycling:   isSplit ? (day  || null) : null,
         dayWaste:       isSplit ? (day2 || null) : null,
-        plan:           row.plan_id||'plan_a',
+        plan:           row.plan_id || null,   // null → service type derived for display
         assignedRunner: row.assigned_runner||null,
         referredBy:     row.referred_by||row.referred_by_runner||null,
         referredByEmail:row.referred_by_email||null,
