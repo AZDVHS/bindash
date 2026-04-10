@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- BinDash v67 build:20260409-2 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -963,7 +964,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .main{flex:1;overflow-y:auto;background:var(--bg)}
 .topbar{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg);position:sticky;top:0;z-index:20}
 .pg-title{font-family:'Syne',sans-serif;font-size:19px;font-weight:800}
-.body{padding:22px}.pg{display:none}.pg.on{display:block;animation:fadeUp .3s ease}
+.body{padding:22px}.pg{display:none}.pg.on{display:block;animation:fadeUp .3s ease forwards}
 
 .sc2{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px}
 .sn{font-family:'Syne',sans-serif;font-size:26px;font-weight:800;line-height:1}.sl2{font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-top:4px}
@@ -5069,14 +5070,6 @@ function go(id){
   if(!target){ console.error('[BinDash] go() -- screen not found:', id); return }
   target.classList.add('active')
   window.scrollTo(0,0)
-  // When navigating to runner dash, always show rn-home by default
-  if(id === 'S-rn-dash'){
-    document.querySelectorAll('#S-rn-dash .pg').forEach(p => p.classList.remove('on'))
-    const homeEl = document.getElementById('rn-home')
-    if(homeEl) homeEl.classList.add('on')
-    const homeNav = document.querySelector('#S-rn-dash .nav-i')
-    if(homeNav){ document.querySelectorAll('#S-rn-dash .nav-i').forEach(n=>n.classList.remove('on')); homeNav.classList.add('on') }
-  }
   if(id === 'S-rn-ob' && window._runnerInviteName){
     const parts = (window._runnerInviteName || '').split(' ')
     const fnEl = document.getElementById('r-fn')
