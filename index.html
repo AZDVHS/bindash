@@ -19302,12 +19302,17 @@ async function _loadAndRenderActiveRoute(){
     // Query ALL in_progress jobs for this runner — no batch_id needed
     const today = new Date().toISOString().slice(0,10)
     const rEmail = (row.email||'').toLowerCase()
+    const runnerName = ((row.first_name||'')+ ' '+(row.last_name||'')).trim()
+    const orParts = ['runner_id.eq.'+row.id]
+    if(rEmail) orParts.push('runner_email.eq.'+rEmail)
+    if(runnerName) orParts.push('runner_name.eq."'+runnerName+'"')
+    console.log('[_loadAndRenderActiveRoute] querying for runner:', row.id, rEmail, runnerName)
     const { data: jobs, error } = await _supa.from('jobs')
       .select('*')
-      .or('runner_id.eq.'+row.id+',runner_email.eq.'+rEmail)
+      .or(orParts.join(','))
       .eq('status','in_progress')
-      .gte('scheduled_date', today)
-      .order('scheduled_date', {ascending:true})
+      .order('scheduled_date', {ascending:false})
+      .limit(10)
 
     if(error) throw error
 
@@ -19362,7 +19367,7 @@ async function _loadAndRenderActiveRoute(){
     navBatchId     = jobs[0].batch_id || jobs[0].id
     navVisitType   = jobs[0].visit_type || 'BIN_OUT'
     navRouteActive = true
-    navPhase       = navPhase || 'travelling'
+    navPhase       = (navPhase && navPhase !== 'idle') ? navPhase : 'travelling'
     navStop        = navStop  || 0
     _saveNavState()
 
