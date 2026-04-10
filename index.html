@@ -1303,7 +1303,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
   word-break: break-word;
 }
 /* Smooth tab transitions */
-#rn-routes-upcoming, #rn-routes-active, #rn-routes-completed {
+#rn-routes-upcoming, #rn-routes-active, #rn-routes-completed, #rn-routes-missed {
   animation: fadeIn .15s ease;
 }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -6140,21 +6140,14 @@ async function populateRNDashboard(){
 
     console.log('[BinDash] ✅ populateRNDashboard complete — status:', isApproved?'approved':isPending?'pending':'other')
 
-    // Explicitly ensure rn-home is visible — guards against any state that stripped .on
-    const _homeEl = document.getElementById('rn-home')
-    if(_homeEl && !_homeEl.classList.contains('on')){
-      console.warn('[BinDash] rn-home missing .on — forcing visibility')
-      rnNav(null, 'rn-home')
-    }
-    // Belt-and-suspenders: delayed check in case something else removes .on after us
-    setTimeout(() => {
-      const _h = document.getElementById('rn-home')
-      const _active = document.querySelector('#S-rn-dash.active')
-      if(_active && _h && !_h.classList.contains('on')){
-        console.warn('[BinDash] rn-home still missing .on after 300ms — forcing')
+    // Ensure rn-home is visible if S-rn-dash is currently active
+    if(document.querySelector('#S-rn-dash.active')){
+      const _homeEl = document.getElementById('rn-home')
+      if(_homeEl && !_homeEl.classList.contains('on')){
+        console.warn('[BinDash] rn-home missing .on — restoring')
         rnNav(null, 'rn-home')
       }
-    }, 300)
+    }
 
   } catch(err){
     console.error('[BinDash] RN profile load FAILED:', String(err?.message||err), err)
@@ -7286,7 +7279,8 @@ async function loadRunnerRoutes(runnerRow){
         const _today = new Date().toISOString().slice(0,10)
         const _sevenAgo = new Date(Date.now()-7*24*60*60*1000).toISOString().slice(0,10)
         const _rn = runnerRow
-        const _orF = [`runner_id.eq.${_rn.id}`]
+        const _rEmail = (_rn.email||'').toLowerCase()
+        const _orF = [`runner_id.eq.${_rn.id}`, `runner_email.eq.${_rEmail}`].filter(Boolean)
         const { data: _missed } = await _supa.from('jobs')
           .select('id').or(_orF.join(','))
           .in('status',['declined','missed','expired'])
