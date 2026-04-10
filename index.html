@@ -7163,30 +7163,59 @@ async function loadRunnerRoutes(runnerRow){
             if(lockCheck.locked){
               return `<button onclick="startBatch('${batch.id}')" style="display:inline-flex;align-items:center;gap:6px;background:rgba(100,116,139,.2);border:1px solid rgba(100,116,139,.3);color:var(--muted);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer">🔒 ${lockCheck.state==='TOO_EARLY'?'Start on '+new Date(batch.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}):lockCheck.state==='LOCKED_LATE'?'Too late to start':'Locked'}</button>`
             }
-            return `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>`
+            return `<button class="btn btn-cyan btn-full" onclick="startBatch('${batch.id}')" style="min-height:52px;font-size:15px;font-weight:800;border-radius:12px">▶ Start Route</button>`
           })() : ''}
           ${batch.status==='in_progress' ? (() => {
             const _r = win ? getRouteLockState(batch.date, batch.stops.length) : {locked:false,state:'OPEN'}
             if(_r.locked && _r.state === 'OVERDUE'){
               return `<span style="background:rgba(239,68,68,.12);color:#ef4444;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700">⛔ Route Expired</span>`
             }
-            return `<button class="btn btn-cyan btn-sm" onclick="resumeBatch('${batch.id}')" style="min-height:48px;padding:10px 20px">↺ Resume Route</button>`
+            return `<button class="btn btn-cyan btn-full" onclick="resumeBatch('${batch.id}')" style="min-height:52px;font-size:15px;font-weight:800;border-radius:12px">▶ Continue Route →</button>`
           })() : ''}
           <span style="margin-left:auto;font-size:12px;color:var(--green);font-weight:600">$${earn}</span>
         </div>
       </div>`
     }).join('')
 
-    if(batchArea) batchArea.innerHTML = batchCards
+    // Split: in_progress batches go to Active tab, others to Upcoming
+    const _allBatches    = Object.values(deduped)
+    const _activeBatches = _allBatches.filter(b => b.status === 'in_progress')
+    const _upcomingBatches = _allBatches.filter(b => b.status !== 'in_progress')
 
-    // Also populate the My Routes > Upcoming tab with the same cards
+    // Render upcoming cards (accepted, offered, scheduled)
+    const upcomingCardHtml = _upcomingBatches.map(batch => {
+      // find the card html from batchCards by matching batch id
+      return batchCards.split('<div class="batch-card"').find((c,i) => i > 0 && c.includes(batch.id))
+        ? '<div class="batch-card"' + batchCards.split('<div class="batch-card"').find(c => c.includes(batch.id))
+        : ''
+    }).join('')
+
+    if(batchArea) batchArea.innerHTML = upcomingCardHtml || batchCards
+
+    // Also populate the My Routes > Upcoming tab
     const upcomingList = document.getElementById('upcoming-batch-list')
-    if(upcomingList) upcomingList.innerHTML = batchCards || `
+    if(upcomingList) upcomingList.innerHTML = upcomingCardHtml || (_activeBatches.length ? '' : `
       <div style="text-align:center;padding:40px 20px;color:var(--muted)">
         <div style="font-size:40px;margin-bottom:12px">📬</div>
         <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No upcoming routes</div>
         <div style="font-size:13px">Batch offers will appear here before each collection day.</div>
-      </div>`
+      </div>`)
+
+    // If there are in_progress routes, auto-populate active tab content and switch to it
+    if(_activeBatches.length && !navRouteActive){
+      // Route is in_progress in DB but NAV_STOPS not loaded — auto-resume
+      const _inProg = _activeBatches[0]
+      console.log('[BinDash] in_progress batch found on load — auto-resuming:', _inProg.id)
+      resumeBatch(_inProg.id).then(() => {
+        // Update active tab badge
+        const activeBadge = document.getElementById('rtab-active-count')
+        if(activeBadge){ activeBadge.textContent = '!'; activeBadge.style.display = 'inline' }
+      }).catch(e => console.warn('[BinDash] auto-resume:', e.message))
+    } else if(_activeBatches.length && navRouteActive){
+      // NAV_STOPS already loaded, just update the active badge
+      const activeBadge = document.getElementById('rtab-active-count')
+      if(activeBadge){ activeBadge.textContent = '!'; activeBadge.style.display = 'inline' }
+    }
 
     // Update badge counts on route tabs
     const upcomingBadge = document.getElementById('rtab-upcoming-count')
