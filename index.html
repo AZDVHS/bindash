@@ -1894,12 +1894,12 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <!-- -- STEP 1: Address + ZIP -- -->
       <div id="h-s1">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Let's check your area 📍</div>
-        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Enter your address to see if BinDash is available near you.</div>
-        <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street" oninput="obSave();if(document.getElementById('h-zip')?.value?.length===5){clearTimeout(window._h3Timer);window._h3Timer=setTimeout(_h3CheckAddress,1000)}" onblur="if(document.getElementById('h-zip')?.value?.length===5)_h3CheckAddress()"></div>
+        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Enter your address and we'll check if BinDash serves your neighborhood.</div>
+        <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street" autocomplete="street-address" oninput="obSave()"></div>
         <div class="g3">
           <div class="field"><label>City</label><input id="h-city" placeholder="Glendale" oninput="obSave()"></div>
           <div class="field"><label>State</label><input id="h-state" placeholder="AZ" oninput="obSave()"></div>
-          <div class="field"><label>ZIP *</label><input id="h-zip" placeholder="85301" maxlength="5" oninput="checkZipCoverage(this.value);obSave();if(this.value.length===5){clearTimeout(window._h3Timer);window._h3Timer=setTimeout(_h3CheckAddress,600)}"></div>
+          <div class="field"><label>ZIP *</label><input id="h-zip" placeholder="85301" maxlength="5" autocomplete="postal-code" oninput="obSave()"></div>
         </div>
         <div id="zip-coverage-result" style="display:none;border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:8px"></div>
         <div id="h3-fomo-banner"></div>
@@ -1917,8 +1917,14 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           </div>
           <div id="h3-signup-map" style="height:240px;width:100%"></div>
         </div>
-        <div style="display:flex;justify-content:flex-end;margin-top:6px">
-          <button class="btn btn-cyan" onclick="hNext(1)">Continue -></button>
+        <!-- Check button — shown first -->
+        <div id="h-s1-check-wrap" style="margin-top:16px">
+          <button class="btn btn-cyan btn-full" id="h-check-btn" onclick="hCheckService()" style="min-height:52px;font-size:16px;border-radius:14px">🔍 Check Service Availability</button>
+        </div>
+        <!-- Continue button — shown after check -->
+        <div id="h-s1-continue-wrap" style="display:none;margin-top:12px">
+          <button class="btn btn-cyan btn-full" onclick="hNext(1)" style="min-height:52px;font-size:16px;border-radius:14px">Continue →</button>
+          <button class="btn btn-ghost btn-full btn-sm" style="margin-top:8px" onclick="_hResetCheck()">← Try a different address</button>
         </div>
       </div>
 
@@ -7480,6 +7486,21 @@ async function declineOffer(batchId){
   if(runnerRow) await loadRunnerRoutes(runnerRow)
 }
 
+function _executeStartRoute(){
+  // Save nav state THEN switch tab — order matters
+  _saveNavState()
+  switchRouteTab('active')
+  renderActiveRouteTab()
+  showToast('▶ Route started — good luck! 🚀', 'ok', 3000)
+  // Ensure jobs marked in_progress
+  if(navBatchId){
+    _supa.from('jobs')
+      .update({ status:'in_progress', updated_at:new Date().toISOString() })
+      .eq('batch_id', navBatchId)
+      .catch(function(e){ console.warn('[BinDash] in_progress update:', e.message) })
+  }
+}
+
 async function resumeBatch(batchId){
   showToast('Loading route...', 'info', 2000)
 
@@ -7776,13 +7797,13 @@ async function startBatch(batchId){
         <div class="mb" style="text-align:center;padding:20px">
           <div style="font-size:36px;margin-bottom:12px">${navVisitType==='BIN_IN'?'☀️':'🌙'}</div>
           <div style="font-size:22px;font-weight:800;color:var(--cyan);margin-bottom:4px">${jobsToUse.length} stop${jobsToUse.length!==1?'s':''}</div>
-          <div style="font-size:16px;color:#22c55e;font-weight:700;margin-bottom:16px">$\${_earn} earned on completion</div>
+          <div style="font-size:16px;color:#22c55e;font-weight:700;margin-bottom:16px">${_earn} earned on completion</div>
           <div style="font-size:12px;color:var(--muted);margin-bottom:4px">First stop: <strong style="color:var(--text)">${NAV_STOPS[0]?.name||'--'}</strong></div>
           <div style="font-size:12px;color:var(--muted)">${NAV_STOPS[0]?.address||'--'}</div>
         </div>
         <div class="mf">
           <button class="btn btn-ghost btn-sm" onclick="closeM()">Not yet</button>
-          <button class="btn btn-cyan" onclick="closeM();switchRouteTab('active');renderActiveRouteTab();showToast('▶ Route started — good luck!','ok',3000)">▶ Start Route</button>
+          <button class="btn btn-cyan" onclick="closeM();_executeStartRoute()">▶ Start Route</button>
         </div>`
       openM()
 
@@ -10211,7 +10232,40 @@ function requireCard(){
 }
 
 // -- HOMEOWNER ONBOARDING --------------------------
-async function hNext(s){
+async function hCheckService(){
+  const addr  = (document.getElementById('h-addr')?.value||'').trim()
+  const zip   = (document.getElementById('h-zip')?.value||'').trim()
+  const city  = (document.getElementById('h-city')?.value||'').trim()
+  const state = (document.getElementById('h-state')?.value||'AZ').trim()
+  if(!zip || zip.length < 5){ showToast('Please enter your 5-digit ZIP code first','err'); document.getElementById('h-zip')?.focus(); return }
+  const btn = document.getElementById('h-check-btn')
+  if(btn){ btn.disabled=true; btn.textContent='🔍 Checking...' }
+  // Save address probe immediately
+  const _pKey = '_probe_' + zip + addr.slice(0,10)
+  if(!sessionStorage.getItem(_pKey)){
+    try {
+      await _supa.from('address_probes').insert({ street_address:addr||null, city:city||null, state:state||'AZ', zip_code:zip, source:'signup_check', status:'not_enrolled', created_at:new Date().toISOString() })
+      sessionStorage.setItem(_pKey,'1')
+      console.log('[BinDash] Address probe saved:', zip)
+    } catch(e){ console.warn('[BinDash] probe save:', e.message) }
+  }
+  // Coverage check + map
+  await checkZipCoverage(zip)
+  if(addr && addr.length > 3){ clearTimeout(window._h3Timer); await _h3CheckAddress() }
+  else if(window.ZIP_CENTROIDS && ZIP_CENTROIDS[zip]){ const [la,ln] = ZIP_CENTROIDS[zip]; await _initSignupMap(la,ln,[]) }
+  // Swap buttons
+  const cw = document.getElementById('h-s1-check-wrap'), kw = document.getElementById('h-s1-continue-wrap')
+  if(cw) cw.style.display='none'; if(kw) kw.style.display='block'
+  if(btn){ btn.disabled=false; btn.textContent='🔍 Check Service Availability' }
+}
+function _hResetCheck(){
+  const cw=document.getElementById('h-s1-check-wrap'), kw=document.getElementById('h-s1-continue-wrap')
+  const mw=document.getElementById('h3-signup-map-wrap'), re=document.getElementById('zip-coverage-result'), fe=document.getElementById('h3-fomo-banner')
+  if(cw) cw.style.display='block'; if(kw) kw.style.display='none'
+  if(mw) mw.style.display='none'; if(re){re.style.display='none';re.innerHTML=''}; if(fe) fe.innerHTML=''
+  window._hwMatchedZone=null; window._hwZipHasCoverage=null
+}
+function hNext(s){
   obSave() // save progress before moving forward
   if(s===1){
     const zip = document.getElementById('h-zip')?.value.trim() || ''
