@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- BinDash v67 build:20260409-2 -->
+<!-- BinDash v67-clean build:20260409-final -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -964,7 +964,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .main{flex:1;overflow-y:auto;background:var(--bg)}
 .topbar{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg);position:sticky;top:0;z-index:20}
 .pg-title{font-family:'Syne',sans-serif;font-size:19px;font-weight:800}
-.body{padding:22px}.pg{display:none}.pg.on{display:block;animation:fadeUp .3s ease forwards}
+.body{padding:22px}.pg{display:none}.pg.on{display:block;animation:fadeUp .3s ease}
 
 .sc2{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px}
 .sn{font-family:'Syne',sans-serif;font-size:26px;font-weight:800;line-height:1}.sl2{font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-top:4px}
@@ -1303,7 +1303,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
   word-break: break-word;
 }
 /* Smooth tab transitions */
-#rn-routes-upcoming, #rn-routes-active, #rn-routes-completed, #rn-routes-missed {
+#rn-routes-upcoming, #rn-routes-active, #rn-routes-completed {
   animation: fadeIn .15s ease;
 }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -1894,14 +1894,13 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <!-- -- STEP 1: Address + ZIP -- -->
       <div id="h-s1">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Let's check your area 📍</div>
-        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Enter your address and we'll check if BinDash is available in your neighborhood.</div>
-        <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street" autocomplete="street-address" oninput="obSave()"></div>
+        <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Enter your address to see if BinDash is available near you.</div>
+        <div class="field"><label>Street Address</label><input id="h-addr" placeholder="123 Main Street" oninput="obSave();if(document.getElementById('h-zip')?.value?.length===5){clearTimeout(window._h3Timer);window._h3Timer=setTimeout(_h3CheckAddress,1000)}" onblur="if(document.getElementById('h-zip')?.value?.length===5)_h3CheckAddress()"></div>
         <div class="g3">
           <div class="field"><label>City</label><input id="h-city" placeholder="Glendale" oninput="obSave()"></div>
           <div class="field"><label>State</label><input id="h-state" placeholder="AZ" oninput="obSave()"></div>
-          <div class="field"><label>ZIP *</label><input id="h-zip" placeholder="85301" maxlength="5" autocomplete="postal-code" oninput="obSave()"></div>
+          <div class="field"><label>ZIP *</label><input id="h-zip" placeholder="85301" maxlength="5" oninput="checkZipCoverage(this.value);obSave();if(this.value.length===5){clearTimeout(window._h3Timer);window._h3Timer=setTimeout(_h3CheckAddress,600)}"></div>
         </div>
-        <!-- Result area — hidden until button pressed -->
         <div id="zip-coverage-result" style="display:none;border-radius:9px;padding:10px 13px;font-size:13px;margin-bottom:8px"></div>
         <div id="h3-fomo-banner"></div>
         <div id="h3-signup-map-wrap" style="display:none;margin:12px 0;border-radius:12px;overflow:hidden;border:1px solid var(--border2)">
@@ -1916,22 +1915,10 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
               <span><span style="display:inline-block;width:8px;height:8px;background:#06d6a0;border-radius:50%;margin-right:3px"></span>You</span>
             </div>
           </div>
-          <div id="h3-signup-map" style="height:240px;width:100%;touch-action:none"></div>
+          <div id="h3-signup-map" style="height:240px;width:100%"></div>
         </div>
-        <!-- Check button — triggers map + coverage check + saves probe ──>
-        <div style="margin-top:16px" id="h-s1-check-wrap">
-          <button class="btn btn-cyan btn-full" style="min-height:52px;font-size:16px;border-radius:14px" id="h-check-btn" onclick="hCheckService()">
-            🔍 Check Service Availability
-          </button>
-        </div>
-        <!-- Continue button — shown after check ──>
-        <div style="margin-top:12px;display:none" id="h-s1-continue-wrap">
-          <button class="btn btn-cyan btn-full" style="min-height:52px;font-size:16px;border-radius:14px" onclick="hNext(1)">
-            Continue →
-          </button>
-          <button class="btn btn-ghost btn-full btn-sm" style="margin-top:8px" onclick="_hResetCheck()">
-            ← Try a different address
-          </button>
+        <div style="display:flex;justify-content:flex-end;margin-top:6px">
+          <button class="btn btn-cyan" onclick="hNext(1)">Continue -></button>
         </div>
       </div>
 
@@ -1939,28 +1926,19 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <!-- PATH A: Active zone -- full signup                         -->
       <!-- ========================================================== -->
 
-      <!-- STEP 2: Account details — split into 2 sub-steps on mobile -->
+      <!-- STEP 2: Account details -->
       <div id="h-s2" style="display:none">
         <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:5px">Create your account 🏠</div>
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">BinDash services your area! Set up your account to get started.</div>
-
-        <!-- Sub-step A: Name + Email (shown first) -->
-        <div id="h-s2a">
-          <div class="g2">
-            <div class="field"><label>First Name *</label><input id="h-fn" placeholder="Jane" autocomplete="given-name"></div>
-            <div class="field"><label>Last Name</label><input id="h-ln" placeholder="Smith" autocomplete="family-name"></div>
-          </div>
-          <div class="field"><label>Email Address *</label><input type="email" id="h-em" placeholder="jane@example.com" autocomplete="email"></div>
-          <div style="display:flex;gap:10px;margin-top:16px">
-            <button class="btn btn-outline" style="min-height:48px;flex:1" onclick="hBack(2)">← Back</button>
-            <button class="btn btn-cyan" style="min-height:48px;flex:2;font-size:15px;border-radius:12px" onclick="_hS2aNext()">Continue →</button>
-          </div>
+        <div class="g2">
+          <div class="field"><label>First Name *</label><input id="h-fn" placeholder="Jane"></div>
+          <div class="field"><label>Last Name</label><input id="h-ln" placeholder="Smith"></div>
         </div>
-
-        <!-- Sub-step B: Phone + Password (shown after email confirmed) -->
-        <div id="h-s2b" style="display:none">
-          <div class="field"><label>Phone</label><input id="h-ph" placeholder="(555) 000-0000" type="tel" autocomplete="tel"></div>
-          <div class="field"><label>Password *</label><input type="password" id="h-pw" placeholder="Min. 8 characters" autocomplete="new-password"></div>
+        <div class="field"><label>Email Address *</label><input type="email" id="h-em" placeholder="jane@example.com"></div>
+        <div class="g2">
+          <div class="field"><label>Phone</label><input id="h-ph" placeholder="(555) 000-0000"></div>
+          <div class="field"><label>Password *</label><input type="password" id="h-pw" placeholder="Min. 8 characters"></div>
+        </div>
         <!-- Referral code from a runner -->
         <div style="border:1.5px solid var(--border2);border-radius:10px;padding:12px 14px;margin-bottom:4px">
           <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px">🔗 Got a referral code from a runner? <span style="color:var(--muted);font-weight:400">(optional)</span></div>
@@ -1971,12 +1949,11 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             </div>
           </div>
         </div>
-          <div style="display:flex;gap:10px;margin-top:16px">
-            <button class="btn btn-outline" style="min-height:48px;flex:1" onclick="document.getElementById('h-s2b').style.display='none';document.getElementById('h-s2a').style.display='block'">← Back</button>
-            <button class="btn btn-cyan" style="min-height:48px;flex:2;font-size:15px;border-radius:12px" onclick="hNext(2)">Next: Service →</button>
-          </div>
-        </div><!-- end h-s2b -->
-      </div><!-- end h-s2 -->
+        <div style="display:flex;justify-content:space-between;margin-top:14px">
+          <button class="btn btn-outline" onclick="hBack(2)"><- Back</button>
+          <button class="btn btn-cyan" onclick="hNext(2)">Next: Service -></button>
+        </div>
+      </div>
 
       <!-- STEP 3: Service + Plan (rich, with plan advertising + split-day) -->
       <div id="h-s3" style="display:none">
@@ -2172,8 +2149,8 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         </div><!-- /ob-plan-section -->
 
         <div style="display:flex;justify-content:space-between;margin-top:6px">
-          <button class="btn btn-outline" style="min-height:48px;flex:1" onclick="hBack(3)">← Back</button>
-          <button class="btn btn-cyan" style="min-height:48px;flex:2" onclick="hNext(3)">Next: Property Info →</button>
+          <button class="btn btn-outline" onclick="hBack(3)"><- Back</button>
+          <button class="btn btn-cyan" onclick="hNext(3)">Next: Property Info -></button>
         </div>
       </div>
 
@@ -2316,7 +2293,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         </div>
 
         <div style="display:flex;justify-content:space-between;margin-top:6px">
-          <button class="btn btn-outline" style="min-height:48px;flex:1" onclick="hBack(4)">← Back</button>
+          <button class="btn btn-outline" onclick="hBack(4)"><- Back</button>
           <button class="btn btn-cyan" onclick="hNext(4)">Next: Payment -></button>
         </div>
       </div>
@@ -2374,7 +2351,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:6px">
           <button class="btn btn-outline" onclick="hBack(6)"><- Back</button>
-          <button class="btn btn-cyan btn-full" style="min-height:52px;font-size:16px;border-radius:14px" onclick="hSubmit()">🚀 Activate My Account</button>
+          <button class="btn btn-cyan" onclick="hSubmit()">🚀 Activate My Account</button>
         </div>
       </div>
 
@@ -2382,18 +2359,10 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <!-- PATH B: No zone -- lean lead capture                       -->
       <!-- ========================================================== -->
       <div id="h-lead" style="display:none">
-        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:8px">Join the waitlist 📍</div>
-
-        <!-- Hero callout -->
-        <div style="background:linear-gradient(135deg,rgba(6,214,160,.1),rgba(99,102,241,.08));border:1.5px solid rgba(6,214,160,.25);border-radius:14px;padding:18px;margin-bottom:20px">
-          <div style="font-size:15px;font-weight:700;color:var(--cyan);margin-bottom:6px">BinDash is building in <span id="lead-zip-display" style="color:var(--text)">your area</span>!</div>
-          <div style="font-size:13px;color:var(--sub);line-height:1.7">Sign up now and we'll notify runners in your neighborhood. <strong style="color:var(--text)">No payment until service launches.</strong></div>
-          <!-- Referral discount callout -->
-          <div style="margin-top:14px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:10px;padding:12px 14px">
-            <div style="font-size:13px;font-weight:700;color:#f59e0b;margin-bottom:4px">🎁 Waitlist Bonus</div>
-            <div style="font-size:12px;color:var(--sub);line-height:1.6">Share your personal referral link and get <strong style="color:#fbbf24">$5 off your first month</strong> for every neighbor who signs up before service launches. The more neighbors, the faster service starts — and the more you save.</div>
-            <div id="lead-referral-preview" style="display:none;margin-top:10px;background:rgba(0,0,0,.2);border-radius:8px;padding:8px 12px;font-size:11px;font-family:monospace;color:var(--cyan)"></div>
-          </div>
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:8px">Be first in your area 🚀</div>
+        <div style="background:rgba(6,214,160,.07);border:1.5px solid rgba(6,214,160,.25);border-radius:12px;padding:16px 18px;margin-bottom:20px">
+          <div style="font-size:14px;font-weight:700;color:var(--cyan);margin-bottom:6px">BinDash is coming to your ZIP!</div>
+          <div style="font-size:13px;color:var(--sub);line-height:1.6">We're not in <strong id="lead-zip-display" style="color:var(--text)">your area</strong> yet but you're on the list. As soon as a runner signs up nearby, you'll be the first to know. No payment needed.</div>
         </div>
         <div class="field">
           <label>Your Name *</label>
@@ -2440,11 +2409,8 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           <input type="checkbox" id="lead-comms" checked>
           <div style="font-size:13px;color:var(--sub)">Notify me by email/text when BinDash launches in my area</div>
         </div>
-        <button class="btn btn-cyan btn-full" style="margin-top:16px;min-height:56px;font-size:16px;font-weight:800;border-radius:14px" onclick="submitLead()">🚀 Join Waitlist — Save My Spot</button>
-        <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6">
-          No payment until service launches · Cancel anytime<br>
-          <span style="color:#f59e0b">🎁 Share with neighbors to earn $5 off per referral</span>
-        </div>
+        <button class="btn btn-cyan btn-full btn-lg" style="margin-top:16px" onclick="submitLead()">✅ Save My Spot -- Notify Me</button>
+        <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:10px">No payment required . Cancel anytime</div>
       </div>
 
     </div>
@@ -3632,9 +3598,6 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             <button id="rtab-completed" onclick="switchRouteTab('completed')" style="flex:1;background:transparent;border:none;border-radius:7px;padding:9px 6px;font-size:12px;font-weight:700;color:var(--muted);cursor:pointer;transition:all .2s">
               ✅ Completed <span id="rtab-completed-count" style="display:none"></span>
             </button>
-            <button id="rtab-missed" onclick="switchRouteTab('missed')" style="flex:1;background:transparent;border:none;border-radius:7px;padding:9px 6px;font-size:12px;font-weight:700;color:var(--muted);cursor:pointer;transition:all .2s">
-              ⚠️ Missed <span id="rtab-missed-count" style="background:rgba(239,68,68,.2);color:#ef4444;border-radius:99px;font-size:9px;padding:1px 6px;margin-left:3px;display:none"></span>
-            </button>
           </div>
 
           <!-- UPCOMING TAB -->
@@ -3682,7 +3645,6 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
 
             <div id="completed-route-container"></div>
           </div>
-          <div id="rn-routes-missed" style="display:none;padding:8px 0"></div>
 
         </div><!-- end rn-routes -->
 
@@ -4090,7 +4052,6 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <div class="nav-i" onclick="adNav(this,'ad-payments')"><span class="ic">💳</span> Payments <span id="pay-alert-badge" style="background:#ef4444;color:#fff;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">!</span></div>
       <div class="nav-i" onclick="adNav(this,'ad-jobs')"><span class="ic">📋</span> Jobs</div>
       <div class="nav-i" onclick="adNav(this,'ad-zones')"><span class="ic">📍</span> Zones</div>
-    <div class="nav-i" onclick="adNav(this,'ad-probes')"><span class="ic">🔍</span> Not Enrolled</div>
       <div class="nav-i" onclick="adNav(this,'ad-rules')"><span class="ic">⚙️</span> Dispatch Rules</div>
       <div class="s-bot">
         <div class="u-chip" style="margin-bottom:10px"><div class="avatar" style="background:linear-gradient(135deg,var(--red),var(--amber))">AD</div><div><div class="u-name" id="ad-sidebar-name">Admin</div><div class="u-role">Super Admin</div></div></div>
@@ -4294,34 +4255,6 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         </div>
 
         <!-- AD PENDING -->
-        <!-- AD ADDRESS PROBES — Checked Not Enrolled -->
-        <div class="pg" id="ad-probes">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
-            <div>
-              <div style="font-size:18px;font-weight:800">🔍 Checked Not Enrolled</div>
-              <div style="font-size:12px;color:var(--muted);margin-top:2px">Addresses that checked service availability but didn't complete signup. Use to drive targeted advertising.</div>
-            </div>
-            <button class="btn btn-outline btn-sm" onclick="loadAddressProbes()">↻ Refresh</button>
-          </div>
-          <!-- Filter bar -->
-          <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-            <select id="probe-filter-status" onchange="renderProbeList()" style="font-size:12px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;color:var(--text)">
-              <option value="">All Status</option>
-              <option value="not_enrolled">Not Enrolled</option>
-              <option value="waitlist">Converted → Waitlist</option>
-              <option value="enrolled">Converted → Active</option>
-            </select>
-            <input placeholder="Search ZIP or address..." id="probe-search" oninput="renderProbeList()" style="flex:1;min-width:160px;font-size:12px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;color:var(--text)">
-            <span id="probe-count" style="font-size:12px;color:var(--muted);align-self:center"></span>
-          </div>
-          <!-- Stats bar -->
-          <div id="probe-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px"></div>
-          <!-- List -->
-          <div id="probe-list">
-            <div style="text-align:center;padding:40px;color:var(--muted)">Loading...</div>
-          </div>
-        </div>
-
         <!-- AD ZONE WAITLIST -->
         <div class="pg" id="ad-zone-waitlist">
           <div style="color:var(--sub);font-size:13px;margin-bottom:16px">
@@ -5108,23 +5041,20 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log('[BinDash] ✅ JS loaded OK -- go() is defined:', typeof go)
 })
 
-// ── Clear stale nav_state immediately on script load ──────────────────────
-// This MUST run before auth listener fires to prevent blank runner dashboard
-// nav_state from a previous day causes _restoreNavState() to redirect to empty page
+// Clear stale nav_state immediately — prevents blank runner dashboard on login
 ;(function _clearStaleNavState(){
   try {
-    const today = new Date().toISOString().slice(0,10)
-    ;[sessionStorage, localStorage].forEach(store => {
+    const _today = new Date().toISOString().slice(0,10)
+    ;[sessionStorage, localStorage].forEach(function(store){
       try {
-        const raw = store.getItem('nav_state')
-        if(!raw) return
-        const s = JSON.parse(raw)
-        // Clear if: no savedDate, savedDate is past, or navRouteActive but no stops
-        if(!s.savedDate || s.savedDate < today || !s.stops?.length){
+        const _raw = store.getItem('nav_state')
+        if(!_raw) return
+        const _s = JSON.parse(_raw)
+        if(!_s.savedDate || _s.savedDate < _today || !_s.stops || !_s.stops.length){
           store.removeItem('nav_state')
-          console.log('[BinDash] Cleared stale nav_state (' + (s.savedDate||'no date') + ')')
+          console.log('[BinDash] Cleared stale nav_state')
         }
-      } catch(e){ try { store.removeItem('nav_state') } catch(_){} }
+      } catch(e){ try{ store.removeItem('nav_state') }catch(_){} }
     })
   } catch(e){}
 })()
@@ -5940,11 +5870,9 @@ async function populateRNDashboard(){
     // Restore active route if runner had one in progress (back button / crash recovery)
     if(_restoreNavState()){
       showToast('Route resumed ▶ — tap My Routes to continue', 'ok', 4000)
-      // Show resume banner on home screen instead of auto-switching
       const resumeBanner = document.getElementById('rn-resume-banner')
       if(resumeBanner) resumeBanner.style.display = 'block'
-      // Don't auto-navigate away from home — let runner tap to resume
-      // This prevents blank screen when nav_state is stale
+      // Don't auto-navigate — prevents blank screen from stale nav state
     }
 
     const fn = merged.first_name || currentUser.user_metadata?.first_name || currentUser.email?.split('@')[0] || 'Runner'
@@ -6138,30 +6066,8 @@ async function populateRNDashboard(){
     // Load homeowner interest list for this runner's area
     loadRNInterestList(merged)
 
-    console.log('[BinDash] ✅ populateRNDashboard complete — status:', isApproved?'approved':isPending?'pending':'other')
-
-    // Ensure rn-home is visible if S-rn-dash is currently active
-    if(document.querySelector('#S-rn-dash.active')){
-      const _homeEl = document.getElementById('rn-home')
-      if(_homeEl && !_homeEl.classList.contains('on')){
-        console.warn('[BinDash] rn-home missing .on — restoring')
-        rnNav(null, 'rn-home')
-      }
-    }
-
   } catch(err){
-    console.error('[BinDash] RN profile load FAILED:', String(err?.message||err), err)
-    // Show error state so screen isn't just blank
-    const grEl = document.getElementById('rn-home-subtitle')
-    if(grEl) grEl.textContent = 'Error loading dashboard — pull down to refresh'
-    const batchArea = document.getElementById('rn-home-batch-area')
-    if(batchArea) batchArea.innerHTML = `
-      <div style="text-align:center;padding:32px 20px;color:var(--muted)">
-        <div style="font-size:32px;margin-bottom:12px">⚠️</div>
-        <div style="font-size:14px;font-weight:600;color:#ef4444;margin-bottom:8px">Dashboard failed to load</div>
-        <div style="font-size:12px;margin-bottom:16px">${String(err?.message||err)}</div>
-        <button class="btn btn-outline btn-sm" onclick="populateRNDashboard()">↻ Retry</button>
-      </div>`
+    console.warn('[BinDash] RN profile load failed:', String(err?.message||err))
   }
 }
 
@@ -6780,7 +6686,7 @@ async function loadRNEarnings(){
       .select('visit_type, amount, status, scheduled_date, completed_at')
       .eq('runner_id', row.id)
       .eq('status', 'complete')
-      .order('scheduled_date', { ascending: false })
+      .order('completed_at', { ascending: false })
 
     const completed = jobs || []
 
@@ -7058,10 +6964,7 @@ async function loadRunnerRoutes(runnerRow){
 
     const batchArea    = document.getElementById('rn-home-batch-area')
     const offerBanner  = document.getElementById('offer-banner')
-    // Include all offered jobs — those without expiry are still valid
-    const pendingOffers = enriched.filter(j => j.status === 'offered' && (
-      !j.offer_expires_at || new Date(j.offer_expires_at).getTime() > Date.now()
-    ))
+    const pendingOffers = enriched.filter(j => j.status === 'offered')
     const activeJobs    = enriched.filter(j => j.status !== 'offered')
 
     // -- PENDING OFFERS --------------------------------------
@@ -7115,13 +7018,11 @@ async function loadRunnerRoutes(runnerRow){
         </div>`).join('')}
         ${stopCount>3?`<div style="font-size:10px;color:var(--muted);margin-top:4px">+ ${stopCount-3} more stops</div>`:''}
       </div>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
-        <button class="btn btn-cyan btn-full" style="min-height:52px;font-size:16px;font-weight:800;border-radius:14px" onclick="acceptOffer()">✓ Accept — $${earn}</button>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-outline btn-sm" style="flex:1;min-height:40px" onclick="showCurrentOfferDetail()">View Details</button>
-          <button class="btn btn-ghost btn-sm" style="color:#ef4444;min-height:40px;flex:1" onclick="declineOffer()">✕ Decline</button>
-        </div>
-      </div>\``
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-cyan btn-sm" style="flex:1" onclick="acceptOffer()">✓ Accept -- $${earn}</button>
+        <button class="btn btn-outline btn-sm" onclick="showCurrentOfferDetail()">View Details</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="declineOffer()">✕ Decline</button>
+      </div>`
     } else if(offerBanner){
       offerBanner.style.display = 'none'
     }
@@ -7256,7 +7157,7 @@ async function loadRunnerRoutes(runnerRow){
             if(lockCheck.locked){
               return `<button onclick="startBatch('${batch.id}')" style="display:inline-flex;align-items:center;gap:6px;background:rgba(100,116,139,.2);border:1px solid rgba(100,116,139,.3);color:var(--muted);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer">🔒 ${lockCheck.state==='TOO_EARLY'?'Start on '+new Date(batch.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}):lockCheck.state==='LOCKED_LATE'?'Too late to start':'Locked'}</button>`
             }
-            return `<button class="btn btn-cyan btn-full" style="min-height:48px;font-size:15px;border-radius:12px" onclick="startBatch('${batch.id}')">▶ Start Route</button>`
+            return `<button class="btn btn-cyan btn-sm" onclick="startBatch('${batch.id}')">▶ Start Route</button>`
           })() : ''}
           ${batch.status==='in_progress' ? (() => {
             const _r = win ? getRouteLockState(batch.date, batch.stops.length) : {locked:false,state:'OPEN'}
@@ -7271,25 +7172,6 @@ async function loadRunnerRoutes(runnerRow){
     }).join('')
 
     if(batchArea) batchArea.innerHTML = batchCards
-
-    // Update missed tab badge
-    try {
-      const _missedBadge = document.getElementById('rtab-missed-count')
-      if(_missedBadge){
-        const _today = new Date().toISOString().slice(0,10)
-        const _sevenAgo = new Date(Date.now()-7*24*60*60*1000).toISOString().slice(0,10)
-        const _rn = runnerRow
-        const _rEmail = (_rn.email||'').toLowerCase()
-        const _orF = [`runner_id.eq.${_rn.id}`, `runner_email.eq.${_rEmail}`].filter(Boolean)
-        const { data: _missed } = await _supa.from('jobs')
-          .select('id').or(_orF.join(','))
-          .in('status',['declined','missed','expired'])
-          .gte('scheduled_date', _sevenAgo).limit(20)
-        const _missedCount = (_missed||[]).length
-        _missedBadge.textContent = _missedCount || ''
-        _missedBadge.style.display = _missedCount ? 'inline' : 'none'
-      }
-    } catch(e){}
 
     // Also populate the My Routes > Upcoming tab with the same cards
     const upcomingList = document.getElementById('upcoming-batch-list')
@@ -7592,11 +7474,10 @@ async function declineOffer(batchId){
   clearInterval(window._offerCountdownTimer)
   document.getElementById('offer-banner').style.display = 'none'
   window._currentOfferId = null
-  showToast('Offer declined — visible in Missed tab if within time window', 'info', 4000)
+  showToast('Offer declined — batch sent to next runner','info')
 
-  // Reload routes and switch to missed tab so runner can re-accept
+  // Reload routes to remove the declined card
   if(runnerRow) await loadRunnerRoutes(runnerRow)
-  switchRouteTab('missed')
 }
 
 async function resumeBatch(batchId){
@@ -7737,22 +7618,7 @@ function _startOfferPoll(runnerRow){
         console.log('[OfferPoll] New offer detected — banner shown')
       }
     } catch(e){}
-  }, 30000)  // every 30 seconds — was 2min, faster detection
-}
-
-function _executeStartRoute(){
-  // Called from the start confirmation modal — actually begins the route
-  _saveNavState()
-  switchRouteTab('active')
-  renderActiveRouteTab()
-  showToast('▶ Route started — good luck out there! 🚀', 'ok', 3000)
-  // Mark jobs as in_progress if not already done
-  if(navBatchId){
-    _supa.from('jobs')
-      .update({ status:'in_progress', updated_at:new Date().toISOString() })
-      .eq('batch_id', navBatchId)
-      .catch(e => console.warn('[BinDash] in_progress update:', e.message))
-  }
+  }, 120000)  // every 2 minutes
 }
 
 async function startBatch(batchId){
@@ -7834,11 +7700,10 @@ async function startBatch(batchId){
   }
 
   try {
-    // Pre-mark as in_progress (also done in _executeStartRoute after confirm)
-    _supa.from('jobs')
+    await _supa.from('jobs')
       .update({ status:'in_progress', updated_at:new Date().toISOString() })
       .eq('batch_id', batchId)
-      .catch(e => console.warn('[BinDash] pre-start update:', e.message))
+    showToast('Route started ▶ — good luck out there!', 'ok')
 
     // Build stop list — try _rnBatchMap first (instant, already in memory from card render)
     // Fall back to _lastEnrichedJobs, then today's jobs
@@ -7911,13 +7776,13 @@ async function startBatch(batchId){
         <div class="mb" style="text-align:center;padding:20px">
           <div style="font-size:36px;margin-bottom:12px">${navVisitType==='BIN_IN'?'☀️':'🌙'}</div>
           <div style="font-size:22px;font-weight:800;color:var(--cyan);margin-bottom:4px">${jobsToUse.length} stop${jobsToUse.length!==1?'s':''}</div>
-          <div style="font-size:16px;color:#22c55e;font-weight:700;margin-bottom:16px">${_earn} earned on completion</div>
+          <div style="font-size:16px;color:#22c55e;font-weight:700;margin-bottom:16px">$\${_earn} earned on completion</div>
           <div style="font-size:12px;color:var(--muted);margin-bottom:4px">First stop: <strong style="color:var(--text)">${NAV_STOPS[0]?.name||'--'}</strong></div>
           <div style="font-size:12px;color:var(--muted)">${NAV_STOPS[0]?.address||'--'}</div>
         </div>
         <div class="mf">
           <button class="btn btn-ghost btn-sm" onclick="closeM()">Not yet</button>
-          <button class="btn btn-cyan" style="min-height:52px;font-size:16px;padding:0 24px" onclick="closeM();_executeStartRoute()">▶ Start Route</button>
+          <button class="btn btn-cyan" onclick="closeM();switchRouteTab('active');renderActiveRouteTab();showToast('▶ Route started — good luck!','ok',3000)">▶ Start Route</button>
         </div>`
       openM()
 
@@ -8094,8 +7959,8 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
       <div id="bin-in-countdown" style="font-size:11px;color:#fbbf24;font-weight:700;margin-top:6px">⏳ 25:00 remaining</div>
     </div>
     <div class="mf">
-      <button class="btn btn-ghost btn-sm" style="min-height:44px" onclick="_declineBinIn('${inBatchId}')">✕ Decline</button>
-      <button class="btn btn-cyan" style="flex:1;min-height:52px;font-size:16px;border-radius:14px" onclick="_acceptBinIn('${inBatchId}')">☀️ Accept Bin In — $${earn}</button>
+      <button class="btn btn-ghost btn-sm" onclick="_declineBinIn('${inBatchId}')">✕ Decline — pass to zone</button>
+      <button class="btn btn-cyan" onclick="_acceptBinIn('${inBatchId}')">☀️ Accept Bin In — $${earn}</button>
     </div>`
     openM()
 
@@ -8338,16 +8203,6 @@ async function initApp(){
         console.warn('[BinDash] runner load:', e)
         populateRNDashboard() // try anyway
       })
-      // Safety net: if something strips rn-home.on during async load, restore it
-      setTimeout(() => {
-        if(document.querySelector('#S-rn-dash.active')){
-          const _h = document.getElementById('rn-home')
-          if(_h && !_h.classList.contains('on')){
-            console.warn('[BinDash] Restoring rn-home visibility (500ms safety net)')
-            rnNav(null, 'rn-home')
-          }
-        }
-      }, 500)
       if(window._showConnectReturnToast){
         window._showConnectReturnToast = false
         setTimeout(()=>showToast('Stripe payout setup complete ✅ You\'re ready to get paid!','ok',5000),800)
@@ -9275,7 +9130,7 @@ async function _initSignupMap(lat, lng, zones){
       }
       _signupMap = L.map('h3-signup-map', {
         center: [lat, lng], zoom: 15,
-        zoomControl: true, scrollWheelZoom: false, attributionControl: false,
+        zoomControl: true, scrollWheelZoom: true, attributionControl: false,
       })
       L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
         maxZoom: 20, subdomains: 'abcd',
@@ -9425,8 +9280,6 @@ async function _initAdminMap(){
     zoomControl: true,
     attributionControl: true,
     preferCanvas: false,
-    tap: true,
-    tapTolerance: 15,
   })
   console.log('[Map] L.map created')
 
@@ -10358,95 +10211,6 @@ function requireCard(){
 }
 
 // -- HOMEOWNER ONBOARDING --------------------------
-async function hCheckService(){
-  const addr = (document.getElementById('h-addr')?.value||'').trim()
-  const zip  = (document.getElementById('h-zip')?.value||'').trim()
-  const city = (document.getElementById('h-city')?.value||'').trim()
-  const state= (document.getElementById('h-state')?.value||'AZ').trim()
-
-  if(!zip || zip.length < 5){
-    showToast('Please enter your ZIP code first','err')
-    document.getElementById('h-zip')?.focus()
-    return
-  }
-
-  const btn = document.getElementById('h-check-btn')
-  if(btn){ btn.disabled=true; btn.textContent='🔍 Checking...' }
-
-  // ── 1. Save as address probe (entered-not-enrolled) ──
-  // Do this FIRST before any async work — captures the intent regardless of outcome
-  const _probeKey = addr + '|' + zip
-  if(!sessionStorage.getItem('_probe_saved_' + _probeKey)){
-    try {
-      await _supa.from('address_probes').insert({
-        street_address: addr || null,
-        city:           city || null,
-        state:          state || 'AZ',
-        zip_code:       zip,
-        source:         'signup_check',
-        status:         'not_enrolled',
-        created_at:     new Date().toISOString(),
-      })
-      sessionStorage.setItem('_probe_saved_' + _probeKey, '1')
-      console.log('[BinDash] Address probe saved:', zip, addr||'(zip only)')
-    } catch(e){
-      // Fail silently — probe saving must never block signup
-      if(e.message?.includes('relation') || e.message?.includes('does not exist')){
-        console.warn('[BinDash] address_probes table not yet created — run SQL migration')
-      } else {
-        console.warn('[BinDash] Address probe failed:', e.message)
-      }
-    }
-  }
-
-  // ── 2. Check coverage (existing logic) ──
-  await checkZipCoverage(zip)
-
-  // ── 3. Trigger the map ──
-  if(addr && addr.length > 3){
-    clearTimeout(window._h3Timer)
-    await _h3CheckAddress()
-  } else if(ZIP_CENTROIDS[zip]){
-    const [lat, lng] = ZIP_CENTROIDS[zip]
-    await _initSignupMap(lat, lng, [])
-  }
-
-  // ── 4. Show Continue button, hide Check button ──
-  const checkWrap    = document.getElementById('h-s1-check-wrap')
-  const continueWrap = document.getElementById('h-s1-continue-wrap')
-  if(checkWrap)    checkWrap.style.display    = 'none'
-  if(continueWrap) continueWrap.style.display = 'block'
-  if(btn){ btn.disabled=false; btn.textContent='🔍 Check Service Availability' }
-}
-
-function _hResetCheck(){
-  // Let user try a different address
-  const checkWrap    = document.getElementById('h-s1-check-wrap')
-  const continueWrap = document.getElementById('h-s1-continue-wrap')
-  const mapWrap      = document.getElementById('h3-signup-map-wrap')
-  const resultEl     = document.getElementById('zip-coverage-result')
-  const fomoEl       = document.getElementById('h3-fomo-banner')
-  if(checkWrap)    checkWrap.style.display    = 'block'
-  if(continueWrap) continueWrap.style.display = 'none'
-  if(mapWrap)      mapWrap.style.display      = 'none'
-  if(resultEl)     { resultEl.style.display='none'; resultEl.innerHTML='' }
-  if(fomoEl)       fomoEl.innerHTML = ''
-  window._hwMatchedZone    = null
-  window._hwZipHasCoverage = null
-}
-
-function _hS2aNext(){
-  const fn = (document.getElementById('h-fn')?.value||'').trim()
-  const em = (document.getElementById('h-em')?.value||'').trim()
-  if(!fn){ showToast('Please enter your first name','err'); return }
-  if(!em || !em.includes('@')){ showToast('Please enter a valid email','err'); return }
-  const s2a = document.getElementById('h-s2a')
-  const s2b = document.getElementById('h-s2b')
-  if(s2a) s2a.style.display = 'none'
-  if(s2b) s2b.style.display = 'block'
-  setTimeout(() => document.getElementById('h-ph')?.focus(), 150)
-}
-
 async function hNext(s){
   obSave() // save progress before moving forward
   if(s===1){
@@ -10754,27 +10518,7 @@ async function submitLead(){
   go('S-hw-waitlist')
 
   if(!saveErr){
-    showToast('You\'re on the list for ZIP '+zip+' 🎉 — share with neighbors to earn discounts!','ok',6000)
-
-    // Mark address probe as converted so admin knows this lead signed up
-    if(zip){
-      _supa.from('address_probes')
-        .update({ status:'waitlist', converted_at:new Date().toISOString(), updated_at:new Date().toISOString() })
-        .eq('zip_code', zip).in('status',['not_enrolled'])
-        .then(() => console.log('[BinDash] Probe marked as waitlist'))
-        .catch(() => {})
-    }
-
-    // Generate personal referral code for this waitlist HO
-    const _refBase = (fn||'').slice(0,3).toUpperCase() + (zip||'').slice(-3)
-    const _wlRef = 'WL-'+_refBase+'-'+(Math.random().toString(36).slice(2,5).toUpperCase())
-    const _refUrl = 'https://bindash.shop/?ref='+_wlRef+'&zip='+zip
-    const _refPreview = document.getElementById('lead-referral-preview')
-    if(_refPreview){
-      _refPreview.style.display = 'block'
-      _refPreview.innerHTML = '🔗 Your referral link:<br><span style="color:#06d6a0">'+_refUrl+'</span><br>'
-        +'<button onclick="navigator.clipboard.writeText(\''+_refUrl+'\').then(()=>showToast(\'Copied!\',\'ok\',2000))" style="margin-top:6px;background:rgba(6,214,160,.2);border:1px solid rgba(6,214,160,.4);color:#06d6a0;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer">Copy Link</button>'
-    }
+    showToast('You\'re on the list for ZIP '+zip+' 🎉','ok')
 
     // Immediately add to PENDING_HOMEOWNERS so admin sees it without reload
     const _wlEntry = {
@@ -11522,7 +11266,7 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   // Init Leaflet map
   const mapEl = document.getElementById(mapElId)
   if(!mapEl) return
-  const map = L.map(mapElId, { zoomControl:true, attributionControl:false, scrollWheelZoom:false, tap:true })
+  const map = L.map(mapElId, { zoomControl:true, attributionControl:false })
   window._rnPickerMap = map
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
@@ -11973,7 +11717,7 @@ async function renderRunnerHeatmap(){
   const mapEl = document.getElementById('rn-heat-map')
   if(!mapEl) return
 
-  const map = L.map('rn-heat-map', { zoomControl:true, attributionControl:false, scrollWheelZoom:false, tap:true })
+  const map = L.map('rn-heat-map', { zoomControl:true, attributionControl:false })
   window._rnHeatMap = map
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
@@ -13374,7 +13118,7 @@ async function _renderRnZonesMap(myZones, myHomeowners, waitlistedHOs){
   // Destroy previous instance
   if(window._rnZonesMapInstance){ try{ window._rnZonesMapInstance.remove() }catch(e){} }
 
-  const map = L.map('rn-zones-map', { zoomControl:true, attributionControl:false, scrollWheelZoom:false, tap:true })
+  const map = L.map('rn-zones-map', { zoomControl:true, attributionControl:false })
   window._rnZonesMapInstance = map
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
   setTimeout(() => map.invalidateSize(), 120)
@@ -14095,16 +13839,12 @@ function adNav(el, pg){
   if(pg === 'ad-runners')    setTimeout(renderRunnerList, 50)
   if(pg === 'ad-payments')   setTimeout(renderPaymentsPage, 50)
   if(pg === 'ad-dispatch')   setTimeout(initDispatchPage, 50)
-  if(pg === 'ad-homeowners'){
-    // Reload from DB each time to catch new waitlist entries
-    loadHomeownersFromSupabase().then(() => renderHomeownerList())
-  }
+  if(pg === 'ad-homeowners'){ loadHomeownersFromSupabase().then(function(){ renderHomeownerList() }) }
   if(pg === 'ad-pending-hw'){
     // Always reload from DB when navigating to this page — ensures freshest data
     loadSignupsFromSupabase().then(() => renderPendingHWList())
   }
   if(pg === 'ad-pending')    setTimeout(renderPendingRunnerList, 50)
-  if(pg === 'ad-probes')           setTimeout(loadAddressProbes, 50)
   if(pg === 'ad-waitlist')         setTimeout(renderWaitlistPage, 50)
   if(pg === 'ad-zone-waitlist')       setTimeout(renderZoneWaitlist, 50)
   if(pg === 'ad-runner-zone-requests') setTimeout(renderRunnerZoneRequests, 50)
@@ -16812,16 +16552,6 @@ function _restoreNavState(){
     // Only restore if saved within last 4 hours and route was active
     if(!s.navRouteActive || !s.stops?.length) return false
     if(Date.now() - s.savedAt > 4 * 60 * 60 * 1000) return false
-    // Extra guard: don't restore if the scheduled date is in the past
-    const today = new Date().toISOString().slice(0,10)
-    if(s.navBatchId && s.stops?.[0]?.jobId){
-      // Check if these stops are from a past date — if so, clear stale state
-      const savedDate = s.savedDate || ''
-      if(savedDate && savedDate < today){
-        sessionStorage.removeItem('nav_state')
-        return false
-      }
-    }
     NAV_STOPS = s.stops
     navStop = s.navStop || 0
     navPhase = s.navPhase || 'travelling'
@@ -18419,7 +18149,6 @@ function renderHomeownerList(){
     if(zoneFil && hw.zoneId !== zoneFil) return false
     if(dayFil && hw.day !== dayFil && hw.dayRecycling !== dayFil && hw.dayWaste !== dayFil) return false
     if(statusFil && hw.status !== statusFil) return false
-    // Never filter out waitlist entries when statusFil is blank — they should always show
     if(q && !hw.name.toLowerCase().includes(q) && !hw.address.toLowerCase().includes(q) && !hw.email.toLowerCase().includes(q)) return false
     return true
   })
@@ -19443,7 +19172,7 @@ let currentRouteTab = 'upcoming'
 
 function switchRouteTab(tab){
   currentRouteTab = tab
-  const tabs = ['upcoming','active','completed','missed']
+  const tabs = ['upcoming','active','completed']
   tabs.forEach(t => {
     const btn = document.getElementById('rtab-'+t)
     const pane = document.getElementById('rn-routes-'+t)
@@ -19458,7 +19187,6 @@ function switchRouteTab(tab){
   // Update active tab badge if route is running
   if(tab === 'active') renderActiveRouteTab()
   if(tab === 'completed') renderCompletedRoutes()
-  if(tab === 'missed') renderMissedRoutes()
 }
 
 function renderActiveRouteTab(){
@@ -20262,123 +19990,14 @@ function initRoutesTabs(){
 
 const COMPLETED_ROUTES = [] // Populated from Supabase completed jobs
 
-async function renderMissedRoutes(){
-  const el = document.getElementById('rn-routes-missed')
-  if(!el) return
-  const row = window._currentRunnerRow || window._rnRow
-  if(!row?.id){ el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">Log in to see missed routes</div>'; return }
-
-  el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">Loading...</div>'
-  try {
-    const sevenDaysAgo = new Date(Date.now() - 7*24*60*60*1000).toISOString().slice(0,10)
-    const rEmail = (row.email||'').toLowerCase()
-    // Fetch declined and expired/missed jobs
-    const { data: missedJobs } = await _supa.from('jobs')
-      .select('id,batch_id,scheduled_date,status,homeowner_email,zone_id,visit_type,offer_expires_at,amount')
-      .or(`runner_id.eq.${row.id},runner_email.eq.${rEmail}`)
-      .in('status',['declined','missed','expired'])
-      .gte('scheduled_date', sevenDaysAgo)
-      .order('scheduled_date',{ascending:false}).limit(50)
-
-    // Also get offered-but-expired jobs (no status change yet)
-    const { data: expiredJobs } = await _supa.from('jobs')
-      .select('id,batch_id,scheduled_date,status,homeowner_email,zone_id,visit_type,offer_expires_at,amount')
-      .or(`runner_id.eq.${row.id},runner_email.eq.${rEmail}`)
-      .eq('status','offered')
-      .lt('offer_expires_at', new Date().toISOString())
-      .gte('scheduled_date', sevenDaysAgo)
-      .order('scheduled_date',{ascending:false}).limit(20)
-
-    const allMissed = [...(missedJobs||[]), ...(expiredJobs||[])]
-    const badge = document.getElementById('rtab-missed-count')
-    if(badge){
-      badge.textContent = allMissed.length || ''
-      badge.style.display = allMissed.length ? 'inline' : 'none'
-    }
-
-    if(!allMissed.length){
-      el.innerHTML = `<div style="text-align:center;padding:60px 20px">
-        <div style="font-size:48px;margin-bottom:12px">✅</div>
-        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px">No missed routes</div>
-        <div style="font-size:13px;color:var(--muted)">All your routes from the past 7 days are accounted for.</div>
-      </div>`
-      return
-    }
-
-    // Group by batch
-    const batches = {}
-    allMissed.forEach(j => {
-      const key = j.batch_id || j.id
-      if(!batches[key]) batches[key] = { jobs:[], date:j.scheduled_date, type:j.visit_type||'BIN_OUT', batchId:key, status:j.status, expiresAt:j.offer_expires_at }
-      batches[key].jobs.push(j)
-    })
-
-    el.innerHTML = '<div style="padding:8px 0">'
-      + Object.values(batches).map(b => {
-        const isExpired = b.status==='offered'
-        const isDeclined = b.status==='declined'
-        const col = isDeclined ? '#f59e0b' : '#ef4444'
-        const label = isDeclined ? '⚠️ Declined' : isExpired ? '⏰ Offer expired' : '🚨 Missed'
-        const dateStr = b.date ? new Date(b.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : '--'
-        const vtLabel = b.type==='BIN_IN' ? '☀️ Bin In' : '🌙 Bin Out'
-        const earn = (b.jobs.reduce((s,j)=>s+(parseFloat(j.amount)||3.25),0)).toFixed(2)
-        const canAccept = isDeclined || isExpired  // show re-accept if within limits
-        const now = Date.now()
-        const withinWindow = !b.expiresAt || (new Date(b.date+'T22:00:00').getTime() > now)
-
-        return `<div style="border:1px solid ${col}33;border-left:3px solid ${col};border-radius:10px;padding:12px 14px;margin-bottom:8px;background:${col}08">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-            <span style="font-size:11px;font-weight:700;color:${col};background:${col}22;padding:2px 8px;border-radius:99px">${label}</span>
-            <span style="font-size:12px;color:var(--text);font-weight:600">${vtLabel} · ${dateStr}</span>
-            <span style="font-size:11px;color:var(--muted);margin-left:auto">${b.jobs.length} stop${b.jobs.length!==1?'s':''} · <span style="color:var(--cyan);font-weight:700">$${earn}</span></span>
-          </div>
-          ${canAccept && withinWindow ? `
-          <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-            <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Route still available — accept before end of day.</div>
-            <button class="btn btn-cyan btn-full" style="min-height:44px;font-size:14px" onclick="_reacceptMissed('${b.batchId}','${b.date}')">
-              ✓ Accept This Route — $${earn}
-            </button>
-          </div>` : `
-          <div style="font-size:11px;color:var(--muted);margin-top:6px">Offer window closed · no longer available.</div>
-          `}
-        </div>`
-      }).join('')
-      + '</div>'
-  } catch(e){
-    el.innerHTML = '<div style="padding:20px;color:#ef4444;font-size:13px">Error: '+e.message+'</div>'
-  }
-}
-
-async function _reacceptMissed(batchId, date){
-  const row = window._currentRunnerRow || window._rnRow
-  if(!row){ showToast('Runner session not loaded', 'err'); return }
-  try {
-    const rate = parseFloat(row.loyalty_rate||row.loyaltyRate||3.25)
-    const { error } = await _supa.from('jobs').update({
-      status:'offered',
-      runner_id:   row.id,
-      runner_name: ((row.first_name||'')+' '+(row.last_name||'')).trim(),
-      runner_email:(row.email||'').toLowerCase(),
-      amount:      rate,
-      offer_expires_at: new Date(Date.now()+30*60*1000).toISOString(),
-      updated_at:  new Date().toISOString(),
-    }).eq('batch_id', batchId)
-    if(error) throw error
-    window._currentOfferId = batchId
-    showToast('Route re-offered ✅ — check Upcoming tab to accept', 'ok', 4000)
-    switchRouteTab('upcoming')
-    await loadRunnerRoutes(row)
-  } catch(e){ showToast('Could not re-accept: '+e.message, 'err') }
-}
-
 async function renderCompletedRoutes(){
   const container = document.getElementById('completed-route-container')
   if(!container) return
   container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted)">Loading...</div>'
 
   const range = document.getElementById('completed-range')?.value || 'today'
-  const runnerRow = window._rnRow || window._currentRunnerRow
-  if(!runnerRow?.id){ container.innerHTML = '<div style="padding:20px;color:var(--muted);text-align:center">Log in to see completed routes</div>'; return }
+  const runnerRow = window._rnRow
+  if(!runnerRow){ container.innerHTML = '<div style="padding:20px;color:var(--muted)">No runner session</div>'; return }
 
   try {
     // Date filter
@@ -20394,8 +20013,8 @@ async function renderCompletedRoutes(){
       .select('*')
       .or(`runner_id.eq.${runnerRow.id},runner_name.eq."${((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).trim()}"`)
       .eq('status', 'complete')
-      .gte('scheduled_date', fromDate.toISOString().slice(0,10))
-      .order('scheduled_date', { ascending: false })
+      .gte('completed_at', fromDate.toISOString())
+      .order('completed_at', { ascending: false })
 
     if(!jobs?.length){
       container.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--muted)">
@@ -20880,11 +20499,6 @@ async function routeAfterSignup(appData){
     // ── LIVE ZONE FLOW ────────────────────────────────────────────────────────
     const pendingEntry = { email, zip, name, status:'pending', zoneId: matchedZone?.id || null }
     PENDING_HOMEOWNERS.push(pendingEntry)
-    // Mark any address probe for this ZIP as enrolled
-    _supa.from('address_probes')
-      .update({ status:'enrolled', converted_at:new Date().toISOString(), updated_at:new Date().toISOString() })
-      .eq('zip_code', zip).eq('status','not_enrolled')
-      .catch(()=>{})
     updateOverviewCounts?.()
 
     try {
@@ -21785,14 +21399,11 @@ function renderPendingHWList(){
   if(_hwActiveTab === 'info')     list = PENDING_HOMEOWNERS.filter(a=>a.status==='info_requested')
   if(_hwActiveTab === 'rejected') list = PENDING_HOMEOWNERS.filter(a=>a.status==='rejected')
   if(_hwActiveTab === 'waitlist'){
-    // Only exclude from waitlist tab if they are a FULLY ACTIVE homeowner
-    // (not just appearing in HOMEOWNERS because they're waitlist_pending in signups)
-    const _activeEmails = new Set(
-      HOMEOWNERS.filter(h => h.status === 'active').map(h => (h.email||'').toLowerCase())
-    )
+    // Only show entries NOT already in HOMEOWNERS management section
+    const _managedEmails = new Set(HOMEOWNERS.map(h=>(h.email||'').toLowerCase()))
     list = PENDING_HOMEOWNERS.filter(a =>
       (a.status==='waitlist_pending'||a.isWaitlist) &&
-      !_activeEmails.has((a.email||'').toLowerCase())
+      !_managedEmails.has((a.email||'').toLowerCase())
     )
   }
 
@@ -22610,20 +22221,7 @@ function detectRouteChanges(zoneId, day, newStops, newRunnerId){
 function startRouteScheduler(){
   if(window._routeSchedulerRunning) return
   window._routeSchedulerRunning = true
-  // Immediately check on startup — catches cases where admin opens app after 9am
-  // and routes were approved but not sent (browser was closed at 9am)
-  setTimeout(async () => {
-    const now = new Date()
-    if(now.getHours() >= 9){
-      console.log('[Scheduler] Startup check — looking for unsent queued routes')
-      await _autoTriggerIfQueued()
-    }
-  }, 2000)
   window._lastSchedulerCheck = {}
-// Clear stale nav_state from previous session to prevent blank runner screen
-;(()=>{
-  // nav_state cleared at script init (see _clearStaleNavState IIFE)
-})()
 
   // 60-second ticker to update offer countdown badges in real time
   setInterval(()=>{
@@ -22891,7 +22489,7 @@ function approvePendingRoute(zoneId, day, permanent=true){
       status:         'queued',
       approved_at:    now.toISOString(),
       runner_id:      pending.runner?.id || null,
-      runner_email:   (pending.runner?.email || '').toLowerCase() || null,
+      runner_email:   pending.runner?.email || null,
       runner_name:    pending.runner?.name || null,
       stop_count:     (pending.stops||[]).length,
       zone_name:      pending.zoneName || '',
@@ -22908,12 +22506,12 @@ function approvePendingRoute(zoneId, day, permanent=true){
     if(existing) {
       const { error } = await _supa.from('dispatch_queue').update(payload).eq('id', existing.id)
       if(error) console.warn('[BinDash] dispatch_queue update:', error.message)
-      else { console.log('[BinDash] dispatch_queue updated ✅ — runner_email:', payload.runner_email) }
+      else console.log('[BinDash] dispatch_queue updated with full payload ✅')
     } else {
       const { error } = await _supa.from('dispatch_queue')
         .insert({ zone_id:zoneId, scheduled_date:_dqDate, created_at:now.toISOString(), ...payload })
       if(error) console.warn('[BinDash] dispatch_queue insert:', error.message)
-      else { console.log('[BinDash] dispatch_queue inserted ✅ — zone:', zoneId, 'date:', _dqDate, 'runner_email:', payload.runner_email) }
+      else console.log('[BinDash] dispatch_queue inserted with full payload ✅')
     }
   })()
 
@@ -22923,41 +22521,14 @@ function approvePendingRoute(zoneId, day, permanent=true){
   })
 
   const isPast9am = now.getHours() >= 9
-
-  // If approved after 9am — auto-send immediately (no manual step required)
   if(isPast9am){
     showToast('Route approved ✅ — sending to runner now...', 'ok', 3000)
-    // Short delay so dispatch_queue write completes first
-    setTimeout(async () => {
-      try {
-        await triggerDispatchEdgeFunction()
-      } catch(e){
-        console.warn('[BinDash] post-approval auto-send failed:', e.message)
-      }
-      renderDispatchPipeline()
-    }, 1500)
+    setTimeout(async function(){ try{ await triggerDispatchEdgeFunction() }catch(e){ console.warn('[BinDash] post-approval send:', e.message) }; renderDispatchPipeline() }, 1500)
   } else {
-    showToast('Route approved ✅ — will auto-send at 9am tomorrow', 'ok', 5000)
+    showToast('Route approved ✅ — will auto-send at 9am', 'ok', 5000)
   }
-
   renderDispatchPipeline()
   loadPendingApprovalsIntoDispatch()
-}
-
-async function _sendQueuedBatchNow(batchId, zoneId, day){
-  // Find the batch in generatedBatches or load from dispatch_queue
-  const batch = generatedBatches.find(b => b.id === batchId || (b.zoneId === zoneId && b.day === day))
-  if(batch && batch.runner?.email){
-    // Full launch flow
-    await _launchSingleBatch(batch)
-    batch.status = 'sent'
-    renderDispatchPipeline()
-    showToast('Route sent to '+batch.runner.name+' ✅', 'ok', 4000)
-  } else {
-    // Fallback: trigger edge function which reads dispatch_queue
-    showToast('Sending route...', 'info', 2000)
-    await triggerDispatchEdgeFunction()
-  }
 }
 
 async function _launchSingleBatch(batch){
@@ -22981,7 +22552,7 @@ async function _launchSingleBatch(batch){
       service_type: hw.service==='BOTH'?'Recycling + General Waste':hw.service==='GENERAL'?'General Waste':'Recycling',
       status: batch.runner?'offered':'unassigned', offer_type: batch.offerType||'zone',
       offer_expires_at: expiresAt, scheduled_date: scheduledDate,
-      amount: batch.runner?.loyaltyRate || 3.25, zone_id: batch.zoneId||null,
+      amount: 3.25, zone_id: batch.zoneId||null,
       created_at: now.toISOString(), updated_at: now.toISOString()
     }))
     if(jobRows.length){
@@ -22990,28 +22561,15 @@ async function _launchSingleBatch(batch){
         console.warn('[BinDash] single batch launch:', error.message)
         showToast('Error launching route: ' + error.message.slice(0,60), 'err')
       } else {
-        // ── Send route offer email directly — no edge function dependency ──
-        if(batch.runner?.email){
-          const _earnOut = (batch.stops.length * (batch.runner?.loyaltyRate||3.25)).toFixed(2)
-          const _stopDetails = (batch.stops||[]).map(s=>({
-            name:s.name, email:s.email, address:s.address||s.zip||'--',
-            service:s.service, plan:s.plan
-          }))
-          sendEmail(
-            batch.runner.email,
-            'New route offer: '+batch.stops.length+' stop'+(batch.stops.length!==1?'s':'')+' · $'+_earnOut,
-            EMAIL.batchOffer(
-              (batch.runner.name||'Runner').split(' ')[0],
-              batch.stops.length, _earnOut,
-              batch.day,
-              (batch.zoneName||'Your zone').replace(/ [·☀️🌙].*$/,''),
-              _stopDetails
-            ),
+        // Send email directly — no edge function dependency
+        if(batch.runner && batch.runner.email){
+          const _ern = ((batch.stops||[]).length * (batch.runner.loyaltyRate||3.25)).toFixed(2)
+          const _stp = (batch.stops||[]).map(s=>({name:s.name,email:s.email,address:s.address||'--',service:s.service}))
+          sendEmail(batch.runner.email,
+            `Route offer: ${(batch.stops||[]).length} stops · $${_ern}`,
+            EMAIL.batchOffer((batch.runner.name||'Runner').split(' ')[0],(batch.stops||[]).length,_ern,batch.day,(batch.zoneName||'Your zone').replace(/ [·☀️🌙].*$/,''),_stp),
             'batch_offer'
-          ).catch(e => console.warn('[BinDash] batch offer email:', e.message))
-          console.log('[BinDash] Route offer email sent to', batch.runner.email, '— stops:', batch.stops.length)
-        } else {
-          console.warn('[BinDash] No runner email — job inserted but no offer email sent')
+          ).catch(e=>console.warn('[BinDash] offer email:',e.message))
         }
         // Mark dispatch_queue as sent
         _supa.from('dispatch_queue')
@@ -24077,25 +23635,26 @@ async function triggerDispatchEdgeFunction(){
           if(!row.runner_email) continue
           const stops = (() => { try { return JSON.parse(row.stops_json||'[]') } catch(e){ return [] } })()
           const earnOut = parseFloat(row.earn_out || 0).toFixed(2)
-          const _fn = (row.runner_name||'Runner').split(' ')[0]
-          const _zoneName = (row.zone_name||'Your zone').replace(/ [·☀️🌙].*$/,'')
           await sendEmail(
             row.runner_email,
-            'Route offer: '+row.stop_count+' stop'+(row.stop_count!==1?'s':'')+' · $'+earnOut,
-            EMAIL.batchOffer(_fn, row.stop_count, earnOut, row.collection_day, _zoneName, stops),
+            `New route: ${row.stop_count} stop${row.stop_count!==1?'s':''} · $${earnOut} available`,
+            EMAIL.batchOffer(
+              row.runner_name?.split(' ')?.[0] || 'Runner',
+              row.stop_count, earnOut, row.collection_day, row.zone_name,
+              stops
+            ),
             'batch_offer'
           )
           // Mark as sent in dispatch_queue
           await _supa.from('dispatch_queue')
             .update({ status:'sent', sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
             .eq('id', row.id)
-          // Mark jobs as offered (from queued/unassigned → offered)
+          // Mark jobs as offered
           const jobDate = row.scheduled_date
           if(row.zone_id && jobDate){
             await _supa.from('jobs')
               .update({ status:'offered', updated_at: new Date().toISOString() })
-              .eq('zone_id', row.zone_id).eq('scheduled_date', jobDate)
-              .in('status', ['queued','unassigned','scheduled'])
+              .eq('zone_id', row.zone_id).eq('scheduled_date', jobDate).eq('status','offered')
           }
           sent++
         }
@@ -24472,7 +24031,6 @@ function renderDispatchPipeline(){
     // A future batch cannot be 'sent' — cap status by scheduled date
     const _batchDate   = b.date ? new Date(b.date+'T12:00:00') : null
     const _todayMid    = new Date(); _todayMid.setHours(0,0,0,0)
-    // _isFuture: strictly AFTER today (tomorrow onward) — today's routes are never "future"
     const _isFuture    = _batchDate && _batchDate.toDateString() !== new Date().toDateString() && _batchDate > new Date()
     const _isToday     = _batchDate && _batchDate.toDateString() === new Date().toDateString()
     const _isPast      = _batchDate && _batchDate < _todayMid
@@ -24610,7 +24168,6 @@ function renderDispatchPipeline(){
       +((statusKey==='offered'||statusKey==='sent')&&sentAt&&!isMissed?'<span style="font-size:10px;color:var(--muted);flex-shrink:0;white-space:nowrap">sent '+sentAgo+'m ago</span>':'')
       +((statusKey==='offered'||statusKey==='sent')&&isExpired?'<button onclick="event.stopPropagation();sendRouteNow(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0;white-space:nowrap">↻ Re-send</button>':'')
       +((b.status==='change_detected'||b.status==='draft')?'<button onclick="event.stopPropagation();showRouteApprovalModal(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.4);color:#06d6a0;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0">✓ Approve</button>':'')
-      +(b.status==='queued'&&!_isFuture?'<button onclick="event.stopPropagation();_sendQueuedBatchNow(\''+b.id+'\',\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);color:#a5b4fc;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0">📤 Send now</button>':'')
       +(isPreview?'<button onclick="event.stopPropagation();deleteBatchFromPreview(\''+b.id+'\')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;flex-shrink:0">🗑</button>':'')
       +'<span id="dbc-chev-'+b.id+'" style="font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0;'+(isOpen?'transform:rotate(180deg)':'')+'">▼</span>'
       +'</div>'
@@ -24710,12 +24267,7 @@ function swapBatchRunnerKeepOpen(selectEl){
         .then(({ data }) => {
           if(data) {
             _supa.from('dispatch_queue')
-              .update({
-                runner_id:    r?.id || null,
-                runner_name:  r?.name || null,
-                runner_email: r?.email?.toLowerCase() || null,
-                updated_at:   new Date().toISOString(),
-              })
+              .update({ runner_id: r?.id || null })
               .eq('id', data.id)
               .then(({ error }) => { if(error) console.warn('[BinDash] runner swap DB update:', error.message) })
           }
@@ -25077,11 +24629,9 @@ async function _autoTriggerIfQueued(){
     const { data } = await _supa.from('dispatch_queue')
       .select('id,status').eq('status','queued').eq('scheduled_date', today).limit(1)
     if(data?.length){
-      // Re-trigger if last attempt was more than 2h ago (handles failed sends)
-      const lastTrigger = sessionStorage.getItem(todayKey+'_ts')
-      const twoHoursAgo = Date.now() - 2*60*60*1000
-      if(lastTrigger && parseInt(lastTrigger) > twoHoursAgo) return
-      sessionStorage.setItem(todayKey+'_ts', String(Date.now()))
+      // Only auto-trigger once per session — but clear if previous attempt failed
+      if(sessionStorage.getItem(todayKey+'_ok')) return
+      sessionStorage.setItem(todayKey+'_ok', '1')
       console.log('[BinDash] Queued routes found post-9am — auto-triggering edge function')
       console.log('[BinDash] Queued routes found post-9am — auto-triggering (with fallback)')
       await triggerDispatchEdgeFunction()
@@ -26754,7 +26304,7 @@ async function _czPreviewZone(zip){
   if(window._czPreviewMapInstance){ window._czPreviewMapInstance.remove(); window._czPreviewMapInstance = null }
   mapEl.innerHTML = ''
 
-  const map = L.map('cz-preview-map', { zoomControl:true, attributionControl:false, scrollWheelZoom:false, tap:true })
+  const map = L.map('cz-preview-map', { zoomControl:true, attributionControl:false })
   window._czPreviewMapInstance = map
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
@@ -27187,98 +26737,6 @@ async function _linkHomeownersToNewZone(zone){
 function confirmDeleteZone(zId, name){
   document.getElementById('modal-box').innerHTML=`<div class="mh" style="background:rgba(239,68,68,.06)"><div style="font-size:15px;font-weight:700;color:#fca5a5">Delete Zone</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div><div class="mb"><div class="warn-box">⚠️ Permanently delete <strong>${name}</strong>? Deactivate instead to preserve data.</div></div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-outline btn-sm" onclick="deactivateZone('${zId}');closeM()">Deactivate instead</button><button class="btn btn-red btn-sm" onclick="deleteZone('${zId}');closeM()">Delete permanently</button></div>`
   openM()
-}
-
-let _addressProbes = []
-
-async function loadAddressProbes(){
-  try {
-    const { data, error } = await _supa.from('address_probes')
-      .select('*').order('created_at',{ascending:false}).limit(500)
-    if(error) throw error
-    _addressProbes = data || []
-    renderProbeList()
-    _renderProbeStats()
-    console.log('[BinDash] Address probes loaded:', _addressProbes.length)
-  } catch(e){
-    const list = document.getElementById('probe-list')
-    if(list) list.innerHTML = '<div style="padding:20px;color:#ef4444;font-size:13px">Error: '+e.message+'</div>'
-    console.warn('[BinDash] loadAddressProbes:', e.message)
-  }
-}
-
-function _renderProbeStats(){
-  const el = document.getElementById('probe-stats')
-  if(!el) return
-  const total     = _addressProbes.length
-  const notEnr    = _addressProbes.filter(p=>p.status==='not_enrolled').length
-  const waitlist  = _addressProbes.filter(p=>p.status==='waitlist').length
-  const enrolled  = _addressProbes.filter(p=>p.status==='enrolled').length
-  const zips      = new Set(_addressProbes.map(p=>p.zip_code).filter(Boolean)).size
-  const statStyle = 'background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center'
-  el.innerHTML = [
-    ['🔍', total,   'Total Checks',     '#a5b4fc'],
-    ['⚠️', notEnr,  'Not Enrolled',     '#f59e0b'],
-    ['⏳', waitlist,'→ Waitlist',        '#06d6a0'],
-    ['📍', zips,    'Unique ZIPs',       '#818cf8'],
-  ].map(([ic,n,lbl,col])=>
-    `<div style="${statStyle}">
-      <div style="font-size:22px;font-weight:800;color:${col}">${n}</div>
-      <div style="font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.05em">${lbl}</div>
-    </div>`
-  ).join('')
-}
-
-function renderProbeList(){
-  const el = document.getElementById('probe-list')
-  if(!el) return
-  const statusFil = document.getElementById('probe-filter-status')?.value || ''
-  const q = (document.getElementById('probe-search')?.value||'').toLowerCase()
-
-  let list = _addressProbes.filter(p => {
-    if(statusFil && p.status !== statusFil) return false
-    if(q && !((p.zip_code||'').includes(q)) && !((p.street_address||'').toLowerCase().includes(q)) && !((p.city||'').toLowerCase().includes(q))) return false
-    return true
-  })
-
-  const countEl = document.getElementById('probe-count')
-  if(countEl) countEl.textContent = list.length+' results'
-
-  if(!list.length){
-    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">No results matching filters.</div>'
-    return
-  }
-
-  const statusColors = { not_enrolled:'#f59e0b', waitlist:'#06d6a0', enrolled:'#22c55e' }
-  const statusLabels = { not_enrolled:'⚠️ Not Enrolled', waitlist:'⏳ → Waitlist', enrolled:'✅ → Active' }
-
-  el.innerHTML = list.map(p => {
-    const col   = statusColors[p.status] || '#64748b'
-    const lbl   = statusLabels[p.status] || p.status
-    const date  = p.created_at ? new Date(p.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '--'
-    const zone  = ADMIN_ZONES.find(z=>(z.zips||[z.zip]).includes(p.zip_code))
-    const zoneName = zone ? zone.name : 'No zone yet'
-    return `<div style="border:1px solid var(--border);border-left:3px solid ${col};border-radius:10px;padding:12px 14px;margin-bottom:8px;background:var(--surface);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <div style="flex:1;min-width:180px">
-        <div style="font-size:13px;font-weight:700">${p.street_address||'(address not captured)'} <span style="color:var(--muted);font-weight:400">${p.zip_code||''}</span></div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">${p.city||''} · ${zoneName} · ${date}</div>
-      </div>
-      <span style="font-size:11px;font-weight:700;background:${col}22;color:${col};padding:2px 9px;border-radius:99px;flex-shrink:0">${lbl}</span>
-      <div style="display:flex;gap:6px;flex-shrink:0">
-        <button onclick="_deleteProbe('${p.id}')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer">✕ Delete</button>
-      </div>
-    </div>`
-  }).join('')
-}
-
-async function _deleteProbe(id){
-  try {
-    await _supa.from('address_probes').delete().eq('id', id)
-    _addressProbes = _addressProbes.filter(p=>p.id!==id)
-    renderProbeList()
-    _renderProbeStats()
-    showToast('Record deleted','info',2000)
-  } catch(e){ showToast('Delete failed: '+e.message,'err') }
 }
 
 async function broadcastZoneLaunch(zone){
@@ -27814,12 +27272,7 @@ async function loadHomeownersFromSupabase(){
       const key = row.email.toLowerCase()
       if(seenEmails.has(key)) return
       seenEmails.add(key)
-      const entry = toRow(row, true)
-      // Debug log for waitlist entries
-      if(row.status==='waitlist_pending'){
-        console.log('[BinDash] Adding waitlist_pending to HOMEOWNERS:', row.first_name, row.zip_code, row.status)
-      }
-      HOMEOWNERS.push(entry)
+      HOMEOWNERS.push(toRow(row, true))
     })
 
     const _wlCount = HOMEOWNERS.filter(h=>h.status==='waitlist').length
@@ -28667,7 +28120,7 @@ function showOfferDetail(){
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM();declineOffer()">✕ Decline</button>
-    <button class="btn btn-cyan btn-full" style="min-height:52px;font-size:16px;border-radius:14px" onclick="closeM();acceptOffer()">✓ Accept — $${earn}</button>
+    <button class="btn btn-cyan" onclick="closeM();acceptOffer()">✓ Accept -- $${earn}</button>
   </div>`
   openM()
 
