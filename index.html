@@ -19306,7 +19306,7 @@ async function _loadAndRenderActiveRoute(){
     const orParts = ['runner_id.eq.'+row.id]
     if(rEmail) orParts.push('runner_email.eq.'+rEmail)
     if(runnerName) orParts.push('runner_name.eq."'+runnerName+'"')
-    console.log('[_loadAndRenderActiveRoute] querying for runner:', row.id, rEmail, runnerName)
+    console.log('[BinDash] _loadAndRenderActiveRoute: runner id=' + row.id + ' email=' + rEmail + ' name=' + runnerName)
     const { data: jobs, error } = await _supa.from('jobs')
       .select('*')
       .or(orParts.join(','))
