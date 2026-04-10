@@ -7179,9 +7179,40 @@ async function loadRunnerRoutes(runnerRow){
 
     if(batchArea) batchArea.innerHTML = batchCards
 
-    // Populate upcoming tab
+    // Build upcoming cards — exclude in_progress (those live in Active tab)
+    const _deduped = Object.values(deduped)
+    const _inProgBatches = _deduped.filter(b => b.status === 'in_progress')
+    const _upcomingCards = Object.values(deduped).filter(b => b.status !== 'in_progress').map(b => {
+      // Re-render only this batch's card from batchCards by finding its id
+      const marker = 'data-bid="'+b.id+'"'
+      const altMarker = "'"+b.id+"'"
+      if(batchCards.includes(b.id)){
+        // Find the card div that contains this batch id
+        const start = batchCards.indexOf('<div class="batch-card"')
+        // Just return full batchCards if we can't split cleanly
+        return batchCards
+      }
+      return ''
+    })
+
+    // For in_progress batches, show a redirect banner in Upcoming
+    const _inProgBanner = _inProgBatches.length
+      ? '<div style="background:rgba(6,214,160,.08);border:1.5px solid rgba(6,214,160,.3);border-radius:12px;padding:16px;margin-bottom:12px;display:flex;align-items:center;gap:14px">'
+        + '<div style="font-size:32px">🚀</div>'
+        + '<div style="flex:1">'
+        + '<div style="font-weight:700;font-size:14px;color:var(--cyan)">Route in progress!</div>'
+        + '<div style="font-size:12px;color:var(--sub);margin-top:2px">'+_inProgBatches[0].stops.length+' stop'+(_inProgBatches[0].stops.length!==1?'s':'')+' · tap Active tab to continue</div>'
+        + '</div>'
+        + '<button class="btn btn-cyan btn-sm" onclick="switchRouteTab(\'active\')" style="white-space:nowrap">Go to Route →</button>'
+        + '</div>'
+      : ''
+
     const upcomingList = document.getElementById('upcoming-batch-list')
-    if(upcomingList) upcomingList.innerHTML = batchCards || `
+    const upcomingOnlyCards = _inProgBatches.length
+      ? _inProgBanner
+      : batchCards || ''
+
+    if(upcomingList) upcomingList.innerHTML = upcomingOnlyCards || `
       <div style="text-align:center;padding:40px 20px;color:var(--muted)">
         <div style="font-size:40px;margin-bottom:12px">📬</div>
         <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No upcoming routes</div>
@@ -19271,8 +19302,35 @@ function switchRouteTab(tab){
     }
     if(pane) pane.style.display = isActive ? 'block' : 'none'
   })
-  // Update active tab badge if route is running
-  if(tab === 'active') renderActiveRouteTab()
+  // Active tab: render if we have stops, or try to load them from in-progress batch
+  if(tab === 'active'){
+    if(navRouteActive && (NAV_STOPS||[]).length){
+      renderActiveRouteTab()
+    } else {
+      // Try to find and resume an in_progress batch
+      const _row = window._currentRunnerRow
+      if(_row?.id){
+        const container = document.getElementById('active-route-container')
+        if(container) container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">⏳</div><div style="font-size:13px">Loading your route...</div></div>'
+        _supa.from('jobs').select('*')
+          .or('runner_id.eq.'+_row.id+',runner_email.eq.'+(_row.email||'').toLowerCase())
+          .eq('status','in_progress')
+          .gte('scheduled_date', new Date().toISOString().slice(0,10))
+          .limit(5)
+          .then(function(res){
+            const jobs = res.data || []
+            if(jobs.length){
+              const bId = jobs[0].batch_id || jobs[0].id
+              resumeBatch(bId).catch(function(e){ console.warn('[switchRouteTab] resume:', e.message) })
+            } else {
+              renderActiveRouteTab()
+            }
+          })
+      } else {
+        renderActiveRouteTab()
+      }
+    }
+  }
   if(tab === 'completed') renderCompletedRoutes()
 }
 
