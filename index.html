@@ -941,12 +941,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 /* Modal */
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;align-items:center;justify-content:center;padding:20px}
 .modal-bg.open{display:flex}.modal{background:var(--surface);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:540px;max-height:90vh;overflow-y:auto;animation:popIn .25s ease}
-/* Safe area for iPhone notch + home indicator */
-@supports (padding: max(0px)){
-  .sidebar { padding-bottom: max(0px, env(safe-area-inset-bottom)) !important; }
-  .modal { padding-bottom: max(0px, env(safe-area-inset-bottom)); }
-  .pg { padding-bottom: max(80px, calc(80px + env(safe-area-inset-bottom))) !important; }
-}
+/* safe-area insets: handled by existing .pg padding */
 .mh{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .mb{padding:22px}.mf{padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
 
@@ -1262,79 +1257,16 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
   .hide-mobile { display: none !important; }
 }
 
-/* ============================================================
-   MOBILE-FIRST ADDITIONS — HW & RUNNER app shell
-   Admin uses laptop; HW/Runner optimized for phone
-============================================================ */
-
-/* HW/Runner screens: constrain width on large screens for phone-app feel */
-@media (min-width: 701px) {
-  .screen.active:not(#S-admin):not(#S-land):not(#S-rn-dash) {
-    max-width: 500px;
-    margin: 0 auto;
-  }
-}
-
-/* Primary CTA buttons: always at least 48px touch target */
-/* Touch targets — min-height only, no display override (btn class handles that) */
-.btn-cyan, .btn-green, .btn-red {
-  min-height: 44px;
-}
-.btn-sm.btn-cyan, .btn-sm.btn-green, .btn-sm.btn-red {
-  min-height: 36px;
-}
-/* Full-width primary buttons get flex centering */
-.btn-full.btn-cyan, .btn-full.btn-green {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 52px;
-}
-
-/* All inputs/selects: 16px prevents iOS auto-zoom */
-input, select, textarea {
-  font-size: 16px !important;
-}
-/* Allow smaller font in explicitly small contexts */
-.btn, label, .badge, .tc, .dl-l {
-  font-size: revert;
-}
-
-/* Maps: min 50% viewport height on mobile */
+/* ==============Mobile tweaks inside @media(max-width:700px) only */
 @media (max-width: 700px) {
-  #rn-heat-map,
-  #rn-zones-map,
-  #h3-signup-map,
-  #rn-area-map,
-  #mz-admin-map,
-  #cz-preview-map {
-    min-height: 50vh !important;
+  input, select, textarea { font-size: 16px !important; }
+  #rn-heat-map, #rn-zones-map, #rn-area-map, #mz-admin-map, #cz-preview-map { min-height: 50vh !important; }
+  #h3-signup-map { min-height: 40vh !important; }
+  .btn-full.btn-cyan, .btn-full.btn-green, #S-hw-ob .btn-cyan.btn-lg, #S-hw-s .btn-cyan.btn-lg {
+    width: 100% !important; min-height: 52px !important; font-size: 16px !important; border-radius: 14px !important;
   }
-  /* Signup map slightly smaller so form is visible */
-  #h3-signup-map {
-    min-height: 40vh !important;
-  }
-  /* Full-width on explicit btn-full only — don't force all btn-cyan */
-  .btn-full.btn-cyan,
-  .btn-full.btn-green,
-  #S-hw-ob .btn-cyan.btn-lg,
-  #S-hw-s .btn-cyan.btn-lg {
-    width: 100% !important;
-    min-height: 52px !important;
-    font-size: 16px !important;
-    border-radius: 14px !important;
-  }
-  /* Step nav buttons (Back/Continue) stay side by side */
-  #h-s1 .btn, #h-s2 .btn, #h-s3 .btn, #h-s4 .btn, #h-s5 .btn, #h-lead .btn {
-    min-height: 48px !important;
-    font-size: 15px !important;
-    flex: 1;
-  }
-  /* Card grids in HW/runner: always single column */
-  #S-hw-ob .g2, #S-hw-ob .g3,
-  #S-hw-s .g2, #S-hw-s .g3 {
-    grid-template-columns: 1fr !important;
-  }
+  #h-s1 .btn, #h-s2 .btn, #h-s3 .btn, #h-s4 .btn, #h-s5 .btn, #h-lead .btn { min-height: 48px !important; flex: 1; }
+  #S-hw-ob .g2, #S-hw-ob .g3, #S-hw-s .g2, #S-hw-s .g3 { grid-template-columns: 1fr !important; }
 }
 
 /* Tablet: sidebar narrows but stays */
@@ -6217,6 +6149,8 @@ async function populateRNDashboard(){
 
     // Load homeowner interest list for this runner's area
     loadRNInterestList(merged)
+
+    console.log('[BinDash] ✅ populateRNDashboard complete — status:', isApproved?'approved':isPending?'pending':'other')
 
   } catch(err){
     console.error('[BinDash] RN profile load FAILED:', String(err?.message||err), err)
@@ -21816,7 +21750,7 @@ function renderPendingHWList(){
   if(!el) return
 
   // Update tab counts
-  const counts = { pending:0, info:0, rejected:0 }
+  const counts = { pending:0, info:0, rejected:0, waitlist:0 }
   PENDING_HOMEOWNERS.forEach(a => {
     if(a.status==='waitlist_pending'||a.isWaitlist) counts.waitlist++
     else if(a.status==='pending_review'||a.status==='payment_pending') counts.pending++
@@ -21843,11 +21777,14 @@ function renderPendingHWList(){
   if(_hwActiveTab === 'info')     list = PENDING_HOMEOWNERS.filter(a=>a.status==='info_requested')
   if(_hwActiveTab === 'rejected') list = PENDING_HOMEOWNERS.filter(a=>a.status==='rejected')
   if(_hwActiveTab === 'waitlist'){
-    // Only show entries NOT already in HOMEOWNERS management section
-    const _managedEmails = new Set(HOMEOWNERS.map(h=>(h.email||'').toLowerCase()))
+    // Only exclude from waitlist tab if they are a FULLY ACTIVE homeowner
+    // (not just appearing in HOMEOWNERS because they're waitlist_pending in signups)
+    const _activeEmails = new Set(
+      HOMEOWNERS.filter(h => h.status === 'active').map(h => (h.email||'').toLowerCase())
+    )
     list = PENDING_HOMEOWNERS.filter(a =>
       (a.status==='waitlist_pending'||a.isWaitlist) &&
-      !_managedEmails.has((a.email||'').toLowerCase())
+      !_activeEmails.has((a.email||'').toLowerCase())
     )
   }
 
