@@ -7203,7 +7203,7 @@ async function loadRunnerRoutes(runnerRow){
         + '<div style="font-weight:700;font-size:14px;color:var(--cyan)">Route in progress!</div>'
         + '<div style="font-size:12px;color:var(--sub);margin-top:2px">'+_inProgBatches[0].stops.length+' stop'+(_inProgBatches[0].stops.length!==1?'s':'')+' · tap Active tab to continue</div>'
         + '</div>'
-        + '<button class="btn btn-cyan btn-sm" onclick="switchRouteTab(\'active\')" style="white-space:nowrap">Go to Route →</button>'
+        + '<button class="btn btn-cyan btn-sm" onclick="_loadAndRenderActiveRoute();switchRouteTab(\'active\')" style="white-space:nowrap">▶ Go to Route →</button>'
         + '</div>'
       : ''
 
@@ -7225,10 +7225,8 @@ async function loadRunnerRoutes(runnerRow){
       const activeBadge = document.getElementById('rtab-active-count')
       if(activeBadge){ activeBadge.textContent = '!'; activeBadge.style.display = 'inline' }
       if(!navRouteActive){
-        // Use the real batch_id from the first stop's job, not the dedup key
-        const _realBatchId = _inProgBatch.stops?.[0]?.batch_id || _inProgBatch.stops?.[0]?.id || _inProgBatch.id
-        console.log('[BinDash] Auto-resuming in_progress batch:', _realBatchId)
-        resumeBatch(_realBatchId).catch(e => console.warn('[BinDash] auto-resume:', e.message))
+        // Load directly by runner identity — no batch_id dependency
+        _loadAndRenderActiveRoute()
       } else {
         // Already have stops loaded — switch to active tab
         switchRouteTab('active')
