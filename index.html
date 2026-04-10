@@ -19288,6 +19288,96 @@ const BATCH_STATE = {
 
 let currentRouteTab = 'upcoming'
 
+async function _loadAndRenderActiveRoute(){
+  const container = document.getElementById('active-route-container')
+  if(container) container.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--muted)"><div style="font-size:36px;margin-bottom:12px">⏳</div><div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px">Loading your route...</div></div>'
+
+  try {
+    const row = window._currentRunnerRow
+    if(!row?.id){
+      if(container) container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">Runner session not loaded — please refresh.</div>'
+      return
+    }
+
+    // Query ALL in_progress jobs for this runner — no batch_id needed
+    const today = new Date().toISOString().slice(0,10)
+    const rEmail = (row.email||'').toLowerCase()
+    const { data: jobs, error } = await _supa.from('jobs')
+      .select('*')
+      .or('runner_id.eq.'+row.id+',runner_email.eq.'+rEmail)
+      .eq('status','in_progress')
+      .gte('scheduled_date', today)
+      .order('scheduled_date', {ascending:true})
+
+    if(error) throw error
+
+    if(!jobs || !jobs.length){
+      if(container) container.innerHTML = '<div style="text-align:center;padding:60px 20px;color:var(--muted)"><div style="font-size:48px;margin-bottom:16px">🧭</div><div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px">No active route</div><div style="font-size:13px">Accept a batch offer and tap Start Route from the Upcoming tab.</div></div>'
+      return
+    }
+
+    console.log('[BinDash] _loadAndRenderActiveRoute: found', jobs.length, 'in_progress jobs')
+
+    // Enrich with homeowner data
+    const emails = [...new Set(jobs.map(j=>j.homeowner_email).filter(Boolean))]
+    let hwMap = {}
+    if(emails.length){
+      const { data: hwRows } = await _supa.from('homeowner_signups')
+        .select('email,first_name,last_name,street_address,zip_code,gate_code,gate_type,pet_info,bin_location,service_notes')
+        .in('email', emails)
+      ;(hwRows||[]).forEach(h => { hwMap[h.email] = h })
+    }
+    // Also check in-memory HOMEOWNERS
+    ;(window.HOMEOWNERS||[]).forEach(h => {
+      if(h.email && !hwMap[h.email]) hwMap[h.email] = {
+        first_name: h.name?.split(' ')[0]||'', last_name: h.name?.split(' ').slice(1).join(' ')||'',
+        street_address: h.address, zip_code: h.zip, gate_code: h.gateCode,
+        pet_info: h.pets, bin_location: h.storage, service_notes: h.notes,
+      }
+    })
+
+    // Build NAV_STOPS
+    NAV_STOPS = jobs.map(j => {
+      const hw = hwMap[j.homeowner_email] || {}
+      const fn = hw.first_name || j.homeowner_email?.split('@')[0] || 'Stop'
+      const ln = hw.last_name || ''
+      const gate = hw.gate_code || null
+      const pets = hw.pet_info || null
+      const notes = hw.service_notes || null
+      const details = [gate?'Gate: '+gate:'', pets?'Pets: '+pets:'', notes||''].filter(Boolean).join(' · ')
+      return {
+        name:        (fn+' '+ln).trim() || 'Stop',
+        address:     hw.street_address || '--',
+        zip:         hw.zip_code || '',
+        gate, pets, notes, details,
+        binLocation: hw.bin_location || null,
+        serviceType: j.service_type || 'Recycling',
+        bins:        '1 bin',
+        email:       j.homeowner_email || null,
+        hwEmail:     j.homeowner_email || null,
+        jobId:       j.id || null,
+      }
+    }).filter(Boolean)
+
+    navBatchId     = jobs[0].batch_id || jobs[0].id
+    navVisitType   = jobs[0].visit_type || 'BIN_OUT'
+    navRouteActive = true
+    navPhase       = navPhase || 'travelling'
+    navStop        = navStop  || 0
+    _saveNavState()
+
+    window._lastEnrichedJobs = jobs.map(j=>({...j, hw:hwMap[j.homeowner_email]||null,
+      hwDisplayName:((hwMap[j.homeowner_email]?.first_name||j.homeowner_email?.split('@')[0]||'Stop'))}))
+
+    renderActiveRouteTab()
+    showToast('Route loaded — '+NAV_STOPS.length+' stop'+(NAV_STOPS.length!==1?'s':'')+' ready', 'ok', 3000)
+
+  } catch(e){
+    console.error('[_loadAndRenderActiveRoute]', e)
+    if(container) container.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444">Error loading route: '+e.message+'<br><br><button class="btn btn-outline btn-sm" onclick="_loadAndRenderActiveRoute()">↻ Retry</button></div>'
+  }
+}
+
 function switchRouteTab(tab){
   currentRouteTab = tab
   const tabs = ['upcoming','active','completed']
@@ -19302,33 +19392,12 @@ function switchRouteTab(tab){
     }
     if(pane) pane.style.display = isActive ? 'block' : 'none'
   })
-  // Active tab: render if we have stops, or try to load them from in-progress batch
+  // Active tab: load in_progress jobs directly — no batch_id dependency
   if(tab === 'active'){
     if(navRouteActive && (NAV_STOPS||[]).length){
       renderActiveRouteTab()
     } else {
-      // Try to find and resume an in_progress batch
-      const _row = window._currentRunnerRow
-      if(_row?.id){
-        const container = document.getElementById('active-route-container')
-        if(container) container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">⏳</div><div style="font-size:13px">Loading your route...</div></div>'
-        _supa.from('jobs').select('*')
-          .or('runner_id.eq.'+_row.id+',runner_email.eq.'+(_row.email||'').toLowerCase())
-          .eq('status','in_progress')
-          .gte('scheduled_date', new Date().toISOString().slice(0,10))
-          .limit(5)
-          .then(function(res){
-            const jobs = res.data || []
-            if(jobs.length){
-              const bId = jobs[0].batch_id || jobs[0].id
-              resumeBatch(bId).catch(function(e){ console.warn('[switchRouteTab] resume:', e.message) })
-            } else {
-              renderActiveRouteTab()
-            }
-          })
-      } else {
-        renderActiveRouteTab()
-      }
+      _loadAndRenderActiveRoute()
     }
   }
   if(tab === 'completed') renderCompletedRoutes()
