@@ -965,6 +965,9 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .topbar{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg);position:sticky;top:0;z-index:20}
 .pg-title{font-family:'Syne',sans-serif;font-size:19px;font-weight:800}
 .body{padding:22px}.pg{display:none}.pg.on{display:block;animation:fadeUp .3s ease}
+/* Nuclear fallback: rn-home always visible when runner dash is active and no other pg.on exists */
+#S-rn-dash.active #rn-home:not(.on) { display: none; }
+#S-rn-dash.active .pg.on { display: block !important; }
 
 .sc2{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px}
 .sn{font-family:'Syne',sans-serif;font-size:26px;font-weight:800;line-height:1}.sl2{font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-top:4px}
@@ -5082,6 +5085,14 @@ function go(id){
   if(!target){ console.error('[BinDash] go() -- screen not found:', id); return }
   target.classList.add('active')
   window.scrollTo(0,0)
+  // When navigating to runner dash, always show rn-home by default
+  if(id === 'S-rn-dash'){
+    document.querySelectorAll('#S-rn-dash .pg').forEach(p => p.classList.remove('on'))
+    const homeEl = document.getElementById('rn-home')
+    if(homeEl) homeEl.classList.add('on')
+    const homeNav = document.querySelector('#S-rn-dash .nav-i')
+    if(homeNav){ document.querySelectorAll('#S-rn-dash .nav-i').forEach(n=>n.classList.remove('on')); homeNav.classList.add('on') }
+  }
   if(id === 'S-rn-ob' && window._runnerInviteName){
     const parts = (window._runnerInviteName || '').split(' ')
     const fnEl = document.getElementById('r-fn')
@@ -6151,6 +6162,22 @@ async function populateRNDashboard(){
     loadRNInterestList(merged)
 
     console.log('[BinDash] ✅ populateRNDashboard complete — status:', isApproved?'approved':isPending?'pending':'other')
+
+    // Explicitly ensure rn-home is visible — guards against any state that stripped .on
+    const _homeEl = document.getElementById('rn-home')
+    if(_homeEl && !_homeEl.classList.contains('on')){
+      console.warn('[BinDash] rn-home missing .on — forcing visibility')
+      rnNav(null, 'rn-home')
+    }
+    // Belt-and-suspenders: delayed check in case something else removes .on after us
+    setTimeout(() => {
+      const _h = document.getElementById('rn-home')
+      const _active = document.querySelector('#S-rn-dash.active')
+      if(_active && _h && !_h.classList.contains('on')){
+        console.warn('[BinDash] rn-home still missing .on after 300ms — forcing')
+        rnNav(null, 'rn-home')
+      }
+    }, 300)
 
   } catch(err){
     console.error('[BinDash] RN profile load FAILED:', String(err?.message||err), err)
@@ -8340,6 +8367,16 @@ async function initApp(){
         console.warn('[BinDash] runner load:', e)
         populateRNDashboard() // try anyway
       })
+      // Safety net: if something strips rn-home.on during async load, restore it
+      setTimeout(() => {
+        if(document.querySelector('#S-rn-dash.active')){
+          const _h = document.getElementById('rn-home')
+          if(_h && !_h.classList.contains('on')){
+            console.warn('[BinDash] Restoring rn-home visibility (500ms safety net)')
+            rnNav(null, 'rn-home')
+          }
+        }
+      }, 500)
       if(window._showConnectReturnToast){
         window._showConnectReturnToast = false
         setTimeout(()=>showToast('Stripe payout setup complete ✅ You\'re ready to get paid!','ok',5000),800)
