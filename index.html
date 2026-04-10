@@ -7177,44 +7177,32 @@ async function loadRunnerRoutes(runnerRow){
       </div>`
     }).join('')
 
-    // Split: in_progress batches go to Active tab, others to Upcoming
-    const _allBatches    = Object.values(deduped)
-    const _activeBatches = _allBatches.filter(b => b.status === 'in_progress')
-    const _upcomingBatches = _allBatches.filter(b => b.status !== 'in_progress')
+    if(batchArea) batchArea.innerHTML = batchCards
 
-    // Render upcoming cards (accepted, offered, scheduled)
-    const upcomingCardHtml = _upcomingBatches.map(batch => {
-      // find the card html from batchCards by matching batch id
-      return batchCards.split('<div class="batch-card"').find((c,i) => i > 0 && c.includes(batch.id))
-        ? '<div class="batch-card"' + batchCards.split('<div class="batch-card"').find(c => c.includes(batch.id))
-        : ''
-    }).join('')
-
-    if(batchArea) batchArea.innerHTML = upcomingCardHtml || batchCards
-
-    // Also populate the My Routes > Upcoming tab
+    // Populate upcoming tab
     const upcomingList = document.getElementById('upcoming-batch-list')
-    if(upcomingList) upcomingList.innerHTML = upcomingCardHtml || (_activeBatches.length ? '' : `
+    if(upcomingList) upcomingList.innerHTML = batchCards || `
       <div style="text-align:center;padding:40px 20px;color:var(--muted)">
         <div style="font-size:40px;margin-bottom:12px">📬</div>
         <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No upcoming routes</div>
         <div style="font-size:13px">Batch offers will appear here before each collection day.</div>
-      </div>`)
+      </div>`
 
-    // If there are in_progress routes, auto-populate active tab content and switch to it
-    if(_activeBatches.length && !navRouteActive){
-      // Route is in_progress in DB but NAV_STOPS not loaded — auto-resume
-      const _inProg = _activeBatches[0]
-      console.log('[BinDash] in_progress batch found on load — auto-resuming:', _inProg.id)
-      resumeBatch(_inProg.id).then(() => {
-        // Update active tab badge
-        const activeBadge = document.getElementById('rtab-active-count')
-        if(activeBadge){ activeBadge.textContent = '!'; activeBadge.style.display = 'inline' }
-      }).catch(e => console.warn('[BinDash] auto-resume:', e.message))
-    } else if(_activeBatches.length && navRouteActive){
-      // NAV_STOPS already loaded, just update the active badge
+    // Auto-resume any in_progress route found in DB
+    const _inProgBatch = Object.values(deduped).find(b => b.status === 'in_progress')
+    if(_inProgBatch){
       const activeBadge = document.getElementById('rtab-active-count')
       if(activeBadge){ activeBadge.textContent = '!'; activeBadge.style.display = 'inline' }
+      if(!navRouteActive){
+        // Use the real batch_id from the first stop's job, not the dedup key
+        const _realBatchId = _inProgBatch.stops?.[0]?.batch_id || _inProgBatch.stops?.[0]?.id || _inProgBatch.id
+        console.log('[BinDash] Auto-resuming in_progress batch:', _realBatchId)
+        resumeBatch(_realBatchId).catch(e => console.warn('[BinDash] auto-resume:', e.message))
+      } else {
+        // Already have stops loaded — switch to active tab
+        switchRouteTab('active')
+        renderActiveRouteTab()
+      }
     }
 
     // Update badge counts on route tabs
@@ -7534,14 +7522,30 @@ async function resumeBatch(batchId){
   showToast('Loading route...', 'info', 2000)
 
   try {
-    // Always fetch fresh from Supabase — no cache dependency
-    const { data: dbJobs, error } = await _supa
-      .from('jobs')
-      .select('*')
-      .eq('batch_id', batchId)
-      .not('status', 'in', '("cancelled","complete")')
+    // Fetch by batch_id first, fall back to runner+date if no batch_id match
+    let dbJobs = [], fetchErr = null
+    try {
+      const res = await _supa.from('jobs').select('*')
+        .eq('batch_id', batchId)
+        .not('status', 'in', '("cancelled","complete")')
+      dbJobs = res.data || []
+      fetchErr = res.error
+    } catch(e){ fetchErr = e }
+    if(fetchErr) throw fetchErr
 
-    if(error) throw error
+    // Fallback: if batchId is a synthetic key (date:type), query by runner + today
+    if(!dbJobs.length){
+      const runnerRow = window._currentRunnerRow
+      if(runnerRow?.id){
+        const today = new Date().toISOString().slice(0,10)
+        const res2 = await _supa.from('jobs').select('*')
+          .or(`runner_id.eq.${runnerRow.id},runner_email.eq.${(runnerRow.email||'').toLowerCase()}`)
+          .eq('status','in_progress')
+          .gte('scheduled_date', today)
+        dbJobs = res2.data || []
+        console.log('[resumeBatch] fallback query found:', dbJobs.length, 'jobs')
+      }
+    }
 
     let rawJobs = dbJobs || []
 
