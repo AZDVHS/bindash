@@ -941,7 +941,6 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 /* Modal */
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;align-items:center;justify-content:center;padding:20px}
 .modal-bg.open{display:flex}.modal{background:var(--surface);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:540px;max-height:90vh;overflow-y:auto;animation:popIn .25s ease}
-/* safe-area insets: handled by existing .pg padding */
 .mh{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .mb{padding:22px}.mf{padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
 
@@ -965,9 +964,6 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .topbar{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg);position:sticky;top:0;z-index:20}
 .pg-title{font-family:'Syne',sans-serif;font-size:19px;font-weight:800}
 .body{padding:22px}.pg{display:none}.pg.on{display:block;animation:fadeUp .3s ease}
-/* Nuclear fallback: rn-home always visible when runner dash is active and no other pg.on exists */
-#S-rn-dash.active #rn-home:not(.on) { display: none; }
-#S-rn-dash.active .pg.on { display: block !important; }
 
 .sc2{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px}
 .sn{font-family:'Syne',sans-serif;font-size:26px;font-weight:800;line-height:1}.sl2{font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-top:4px}
@@ -1260,18 +1256,6 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
   .hide-mobile { display: none !important; }
 }
 
-/* ==============Mobile tweaks inside @media(max-width:700px) only */
-@media (max-width: 700px) {
-  input, select, textarea { font-size: 16px !important; }
-  #rn-heat-map, #rn-zones-map, #rn-area-map, #mz-admin-map, #cz-preview-map { min-height: 50vh !important; }
-  #h3-signup-map { min-height: 40vh !important; }
-  .btn-full.btn-cyan, .btn-full.btn-green, #S-hw-ob .btn-cyan.btn-lg, #S-hw-s .btn-cyan.btn-lg {
-    width: 100% !important; min-height: 52px !important; font-size: 16px !important; border-radius: 14px !important;
-  }
-  #h-s1 .btn, #h-s2 .btn, #h-s3 .btn, #h-s4 .btn, #h-s5 .btn, #h-lead .btn { min-height: 48px !important; flex: 1; }
-  #S-hw-ob .g2, #S-hw-ob .g3, #S-hw-s .g2, #S-hw-s .g3 { grid-template-columns: 1fr !important; }
-}
-
 /* Tablet: sidebar narrows but stays */
 @media (min-width: 701px) and (max-width: 1024px) {
   .sidebar { width: 180px !important; }
@@ -1318,7 +1302,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
   word-break: break-word;
 }
 /* Smooth tab transitions */
-#rn-routes-upcoming, #rn-routes-active, #rn-routes-completed, #rn-routes-missed {
+#rn-routes-upcoming, #rn-routes-active, #rn-routes-completed {
   animation: fadeIn .15s ease;
 }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
