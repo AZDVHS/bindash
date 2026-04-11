@@ -28361,48 +28361,53 @@ function lookupRunnerZones(zip){
     return
   }
 
+  // If zones not loaded yet, load them first then re-run
+  if(!ADMIN_ZONES.length){
+    loadZonesFromSupabase().then(() => lookupRunnerZones(zip))
+    return
+  }
+
   // Show picker always once we have a valid ZIP
   picker.style.display = 'block'
   if(wlZip) wlZip.textContent = zip
 
   const prefix = zip
-  const zones  = ZONE_DATA[prefix] || null
 
-  // Check ADMIN_ZONES directly — ZONE_DATA may not include waitlist zones
-  const _allZonesForZip = ADMIN_ZONES.filter(z => {
+  // Directly check ADMIN_ZONES — don't rely on ZONE_DATA timing
+  const _allZonesForZip = (ADMIN_ZONES||[]).filter(z => {
+    if(z.status === 'inactive') return false
     const zips = z.zips || (z.zip ? [z.zip] : [])
-    return zips.includes(zip) && z.status !== 'inactive'
+    return zips.includes(zip)
   })
 
-  if(!zones || zones.length === 0){
-    if(_allZonesForZip.length === 0){
-      // Truly no zone at all — show create waitlist card
-      if(wlCard) wlCard.style.display = 'block'
-      list.innerHTML = ''
-      window._runnerZipNeedsZone = zip
-      const waitlistExp = document.getElementById('r-waitlist-explainer')
-      if(waitlistExp) waitlistExp.style.display = 'none'
-      const summary = document.getElementById('r-zones-summary')
-      if(summary) summary.style.display = 'none'
-    } else {
-      // Zones exist but not in ZONE_DATA — add them and re-render
-      _allZonesForZip.forEach(z => {
-        const zips2 = z.zips || (z.zip ? [z.zip] : [])
-        zips2.forEach(zp => {
-          if(!ZONE_DATA[zp]) ZONE_DATA[zp] = []
-          const already = ZONE_DATA[zp].find(x=>x.id===z.id)
-          if(!already) ZONE_DATA[zp].push({
-            id:z.id, name:z.name, status:z.status,
-            runners:z.runners||0, capacity:z.capacity||20,
-            homeowners:z.homeowners||0,
-            needed:Math.max(0,(z.threshold||5)-(z.homeowners||0)),
-            collection:z.collection?.join('/')||''
-          })
+  // Rebuild ZONE_DATA entry from ADMIN_ZONES for this ZIP
+  if(_allZonesForZip.length){
+    if(!ZONE_DATA[prefix]) ZONE_DATA[prefix] = []
+    _allZonesForZip.forEach(z => {
+      if(!ZONE_DATA[prefix].find(x=>x.id===z.id)){
+        const wlHOs = HOMEOWNERS.filter(h=>h.status==='waitlist'&&(h.zoneId===z.id||(z.zips||[z.zip]).includes(h.zip))).length
+        const actHOs = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||(z.zips||[z.zip]).includes(h.zip))).length
+        ZONE_DATA[prefix].push({
+          id:z.id, name:z.name, status:z.status,
+          runners:z.runners||0, capacity:z.capacity||20,
+          homeowners: wlHOs + actHOs,
+          needed: Math.max(0,(z.threshold||5)-(wlHOs+actHOs)),
+          collection: z.collection?.join('/')||''
         })
-      })
-      if(wlCard) wlCard.style.display = 'none'
-      lookupRunnerZones(zip)  // re-run with updated ZONE_DATA
-    }
+      }
+    })
+  }
+
+  const zones = ZONE_DATA[prefix] || null
+
+  if(!zones || zones.length === 0){
+    if(wlCard) wlCard.style.display = 'block'
+    list.innerHTML = ''
+    window._runnerZipNeedsZone = zip
+    const waitlistExp = document.getElementById('r-waitlist-explainer')
+    if(waitlistExp) waitlistExp.style.display = 'none'
+    const summary = document.getElementById('r-zones-summary')
+    if(summary) summary.style.display = 'none'
     return
   }
 
