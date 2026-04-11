@@ -585,7 +585,7 @@ function renderEmailStopList(stopList){
 const BRAND = {
   bg:'#07090f', surface:'#0f1420', border:'#1e2840',
   cyan:'#06d6a0', indigo:'#a5b4fc', text:'#f8fafc', sub:'#94a3b8',
-  url:'https://bindash-eight.vercel.app',
+  url: window.location.origin,
 }
 
 function emailBase(body){
@@ -712,8 +712,9 @@ const EMAIL = {
       <div class="lbl" style="text-align:center">Your Invite Code</div>
       <div class="code">${code}</div>
     </div>
-    <a href="${BRAND.url}" class="btn">Enter My Code -></a>
-    <p style="font-size:13px;color:#475569">This code is unique to you -- please don't share it.</p>
+    <a href="${BRAND.url}?ref=${encodeURIComponent(code)}" class="btn" style="font-size:18px;padding:16px 32px">Enter My Code →</a>
+    <p style="font-size:13px;color:#475569;margin-top:12px">Or copy &amp; paste your code manually: <strong style="font-family:monospace;color:#0f172a">${code}</strong></p>
+    <p style="font-size:12px;color:#94a3b8">This code is unique to you — please don't share it.</p>
   `),
 
   runnerApproved: (name, zone, refCode) => emailBase(`
