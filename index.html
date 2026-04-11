@@ -2385,9 +2385,9 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         <div class="field"><label>Phone</label><input id="lead-ph" placeholder="(555) 000-0000"></div>
         <div class="sec-h" style="margin-top:4px">Service Preference</div>
         <div class="radio-row" style="margin-bottom:8px" id="lead-svc-opts">
-          <div class="r-opt on" onclick="rOpt(this)" data-val="Recycling">♻️ Recycling</div>
-          <div class="r-opt" onclick="rOpt(this)" data-val="General Waste">🗑️ Waste</div>
-          <div class="r-opt" onclick="rOpt(this)" data-val="Both">♻️+🗑️ Both</div>
+          <div class="r-opt on" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none'" data-val="Recycling">♻️ Recycling</div>
+          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none'" data-val="General Waste">🗑️ Waste</div>
+          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none'" data-val="Both">♻️+🗑️ Both</div>
           <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='grid'" data-val="Split">📅 Split days</div>
         </div>
         <!-- Split day sub-fields — hidden until Split selected -->
@@ -10017,7 +10017,26 @@ function startOnboarding(planLetter){
 }
 
 // Radio
-function rOpt(el){el.closest('.radio-row').querySelectorAll('.r-opt').forEach(o=>o.classList.remove('on'));el.classList.add('on')}
+function rOpt(el){
+  el.closest('.radio-row').querySelectorAll('.r-opt').forEach(o=>o.classList.remove('on'))
+  el.classList.add('on')
+  // If this is a service selector, hide split-day panel when non-Split selected
+  const row = el.closest('.radio-row')
+  const hasSplit = row && row.querySelector('[data-val="Split"]')
+  if(hasSplit && el.dataset.val !== 'Split'){
+    // Hide any associated split-day panel nearby
+    const container = row.closest('div')
+    const splitPanel = container?.querySelector('#lead-split-days') || 
+                       document.getElementById('lead-split-days')
+    if(splitPanel && row.id === 'lead-svc-opts') splitPanel.style.display = 'none'
+    // Also hide ob-day-split in onboarding if needed
+    const obSplit = document.getElementById('ob-day-split')
+    const obSingle = document.getElementById('ob-day-single')
+    if(obSplit && el.closest('#lead-svc-opts') === null){
+      // Don't interfere with plan selection in h-s3
+    }
+  }
+}
 
 // Visit preference (runner onboarding step 3)
 function setVP(v){
@@ -10681,8 +10700,13 @@ async function submitLead(){
     if(typeof renderPendingHWList === 'function') renderPendingHWList()
     if(typeof updateWaitlistBadge === 'function') updateWaitlistBadge()
     if(typeof updateOverviewCounts === 'function') updateOverviewCounts()
-    // Full reload after 2s to get real DB id
-    setTimeout(() => loadSignupsFromSupabase?.(), 2000)
+    // Full reload after 1s to get real DB id and update all badges
+    setTimeout(() => {
+      loadSignupsFromSupabase?.().then(() => {
+        renderPendingHWList?.()
+        updateWaitlistBadge?.()
+      })
+    }, 1000)
 
     // Email confirmation to homeowner
     if(em && !em.includes('@lead.bindash')){
@@ -10692,7 +10716,7 @@ async function submitLead(){
     // Alert admin so they can review — critical for expansion
     const svcDisplay = isSplit ? 'Split: ♻️ '+dayR+' / 🗑️ '+dayW : serviceLabel
     sendEmail('alpha1miller@gmail.com',
-      '🏠 New Homeowner Waitlist — ZIP '+zip+' ('+fn+' '+ln+')',
+      '⏳ New Waitlist Signup — ZIP '+zip+' · '+fn+' '+ln+' · Needs Review',
       `<div style="font-family:sans-serif;padding:20px;max-width:520px">
         <h2 style="color:#06d6a0;margin:0 0 16px">New Homeowner on Waitlist</h2>
         <table style="width:100%;font-size:13px;border-collapse:collapse">
@@ -20775,14 +20799,36 @@ async function routeAfterSignup(appData){
 }
 
 function updateWaitlistBadge(){
-  const count = PENDING_HOMEOWNERS.filter(s=>s.isWaitlist||s.status==='waitlist_pending'||s.status==='waitlisted').length
+  const wlCount = PENDING_HOMEOWNERS.filter(s=>s.isWaitlist||s.status==='waitlist_pending'||s.status==='waitlisted').length
+  const pendCount = PENDING_HOMEOWNERS.filter(s=>!s.isWaitlist&&s.status!=='waitlist_pending'&&s.status!=='waitlisted'&&s.status!=='rejected').length
+  // Update waitlist-specific badge
   const b = document.getElementById('waitlist-badge')
   const ov = document.getElementById('ov-waitlist-count')
-  if(b){
-    b.textContent    = count
-    b.style.display  = count > 0 ? 'inline' : 'none'
+  if(b){ b.textContent = wlCount; b.style.display = wlCount > 0 ? 'inline' : 'none' }
+  if(ov) ov.textContent = wlCount
+  // Update hwtab-waitlist-count in Pending HW page
+  const htab = document.getElementById('hwtab-waitlist-count')
+  if(htab) htab.textContent = wlCount
+  // Update nav badge (hw-pcount) to include waitlist count
+  const navBadge = document.getElementById('hw-pcount')
+  const totalPending = pendCount + wlCount
+  if(navBadge){
+    navBadge.textContent = totalPending
+    navBadge.style.display = totalPending > 0 ? 'inline' : 'none'
   }
-  if(ov) ov.textContent = count
+  // Flash the Pending HW nav item to draw admin attention to new waitlist entries
+  if(wlCount > 0){
+    const navItem = document.querySelector('[onclick*="ad-pending-hw"]')
+    if(navItem && !navItem._wlFlashing){
+      navItem._wlFlashing = true
+      navItem.style.transition = 'background .4s'
+      let flashes = 0
+      const flash = setInterval(() => {
+        navItem.style.background = flashes%2===0 ? 'rgba(245,158,11,.15)' : 'transparent'
+        if(++flashes >= 6){ clearInterval(flash); navItem.style.background=''; navItem._wlFlashing=false }
+      }, 400)
+    }
+  }
 }
 
 function expandWaitlistForm(){
@@ -21639,11 +21685,12 @@ function renderPendingHWList(){
   if(_hwActiveTab === 'info')     list = PENDING_HOMEOWNERS.filter(a=>a.status==='info_requested')
   if(_hwActiveTab === 'rejected') list = PENDING_HOMEOWNERS.filter(a=>a.status==='rejected')
   if(_hwActiveTab === 'waitlist'){
-    // Only show entries NOT already in HOMEOWNERS management section
-    const _managedEmails = new Set(HOMEOWNERS.map(h=>(h.email||'').toLowerCase()))
+    // Show waitlist_pending entries — these need admin approval
+    // Exclude only if they've been fully approved (status='active' in HOMEOWNERS)
+    const _activeEmails = new Set(HOMEOWNERS.filter(h=>h.status==='active').map(h=>(h.email||'').toLowerCase()))
     list = PENDING_HOMEOWNERS.filter(a =>
       (a.status==='waitlist_pending'||a.isWaitlist) &&
-      !_managedEmails.has((a.email||'').toLowerCase())
+      !_activeEmails.has((a.email||'').toLowerCase())
     )
   }
 
@@ -27416,7 +27463,9 @@ async function loadHomeownersFromSupabase(){
     let hwData = [], signupData = []
     const [hwRes, sigRes] = await Promise.all([
       safeQuery(_supa.from('homeowners').select('*').in('status',['active','waitlist']).order('created_at',{ascending:false})),
-      safeQuery(_supa.from('homeowner_signups').select('*').in('status',['approved','waitlist_approved','waitlist_pending']).order('created_at',{ascending:false})),
+      // waitlist_pending stays in Pending HW → Waitlist tab until admin approves
+      // Only approved/waitlist_approved entries belong in Homeowners management
+      safeQuery(_supa.from('homeowner_signups').select('*').in('status',['approved','waitlist_approved']).order('created_at',{ascending:false})),
     ])
     hwData     = hwRes?.data     || []
     signupData = sigRes?.data    || []
