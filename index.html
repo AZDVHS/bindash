@@ -11778,38 +11778,52 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
     _rnPickerDrawHex(map, hexId, selectableSet, opts)
   })
 
-  // Draw waitlist HO markers ON TOP of all hexes — guaranteed visible
-  // These are circle markers, not hex polygons, so they can't be hidden by other layers
-  const _wlHOs = (window.HOMEOWNERS||[]).filter(h => h.status==='waitlist' || h.status==='active')
-  _wlHOs.forEach(h => {
+  // Draw HO markers ON TOP of all hexes — guaranteed visible regardless of hex layer
+  const _allPickerHOs = (window.HOMEOWNERS||[])
+  let _drawnMarkers = 0
+  for(const h of _allPickerHOs){
     try {
       let markerLat = null, markerLng = null
-      if(h.lat && h.lng){
-        markerLat = parseFloat(h.lat); markerLng = parseFloat(h.lng)
-      } else if(h.zip && ZIP_CENTROIDS[h.zip]){
-        markerLat = ZIP_CENTROIDS[h.zip][0]; markerLng = ZIP_CENTROIDS[h.zip][1]
+      // Only use real geocoded coordinates — never ZIP centroid
+      if(h.lat && h.lng && parseFloat(h.lat) !== 0 && parseFloat(h.lng) !== 0){
+        markerLat = parseFloat(h.lat)
+        markerLng = parseFloat(h.lng)
+      } else if(h.address && h.address !== '--' && h.zip){
+        // Try to geocode from address in real-time
+        try {
+          const _gc = await _rnPickerGeocode(h.address, h.city||'', 'AZ', h.zip)
+          if(_gc?.lat){ markerLat = _gc.lat; markerLng = _gc.lng }
+        } catch(e){}
       }
-      if(!markerLat) return
-      const isWl = h.status === 'waitlist'
-      const markerColor = isWl ? '#f59e0b' : '#22c55e'
-      // Draw a filled circle on top of everything
+      if(!markerLat){ console.warn('[BinDash] No coords for HO:', h.name, h.address); continue }
+
+      // Determine status - check both in-memory status and DB source
+      const _isWl = h.status === 'waitlist' || h.status === 'waitlist_pending'
+      const _isActive = h.status === 'active'
+      const markerColor = _isWl ? '#f59e0b' : '#22c55e'
+      const statusLabel = _isWl ? '⏳ Waitlist' : '✅ Active'
+
+      // Large pulsing circle marker — impossible to miss
       L.circleMarker([markerLat, markerLng], {
-        radius: 9,
-        color: '#fff',
+        radius: 11,
+        color: '#000',
         weight: 2,
         fillColor: markerColor,
-        fillOpacity: 0.95,
+        fillOpacity: 1,
+        className: _isWl ? 'ho-waitlist-marker' : 'ho-active-marker',
       }).bindTooltip(
-        '<div style="font-size:11px;font-weight:700">'+(isWl?'⏳':'✅')+' '+(h.name||'Homeowner')+'</div>'
-        +'<div style="font-size:10px;color:#94a3b8">'+(isWl?'Waitlist':'Active')+' · '+h.zip+'</div>'
-        +(h.address&&h.address!=='--'?'<div style="font-size:10px;color:#94a3b8">'+h.address+'</div>':'')
-        +'<div style="font-size:10px;color:#f59e0b;margin-top:3px">Tap zone card below to join their waitlist</div>',
-        { direction:'top', className:'h3-tip' }
+        '<div style="font-size:12px;font-weight:800;margin-bottom:3px">' + (h.name||'Homeowner') + '</div>'
+        + '<div style="font-size:11px;color:' + markerColor + ';font-weight:700">' + statusLabel + '</div>'
+        + (h.address && h.address !== '--' ? '<div style="font-size:10px;color:#94a3b8;margin-top:2px">📍 ' + h.address + '</div>' : '')
+        + '<div style="font-size:10px;color:#94a3b8">ZIP ' + (h.zip||'--') + '</div>'
+        + (_isWl ? '<div style="font-size:10px;color:#f59e0b;margin-top:4px;font-weight:600">Join their zone waitlist below ↓</div>' : ''),
+        { direction:'top', className:'h3-tip', sticky:false }
       ).addTo(map)
-      console.log('[BinDash] Drew HO marker:', h.name, h.status, markerLat, markerLng)
+      _drawnMarkers++
+      console.log('[BinDash] HO marker drawn:', h.name, h.status, markerLat.toFixed(4), markerLng.toFixed(4))
     } catch(e){ console.warn('[BinDash] HO marker error:', e.message) }
-  })
-  console.log('[BinDash] Drew', _wlHOs.length, 'HO markers on picker map')
+  }
+  console.log('[BinDash] Drew', _drawnMarkers, '/', _allPickerHOs.length, 'HO markers')
 
   // Critical: force map to recalculate size in case container was hidden
   setTimeout(() => { try { map.invalidateSize(true) } catch(e){} }, 80)
