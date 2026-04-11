@@ -10769,8 +10769,10 @@ async function submitLead(){
     // Existing waitlist zone → auto-approve into HO Management (waitlist status) + notify admin
     // No zone at all        → goes to Pending HW Waitlist tab + notify admin to create zone
     // Live zone             → full pending_review signup flow
+    // Use 'approved' instead of 'waitlist_approved' for DB compat (constraint may not allow it)
+    // The homeowners table status='waitlist' is what matters for display
     const _leadStatus = _zoneIsLive ? 'pending_review'
-                      : _zoneWaitlist ? 'waitlist_approved'   // auto-add to HO Management
+                      : _zoneWaitlist ? 'approved'            // auto-add to HO Management
                       : 'waitlist_pending'                     // no zone — needs admin action
     const _leadIsWl   = _leadStatus !== 'pending_review'
 
@@ -22304,6 +22306,10 @@ async function approveHW(appId, directZoneId){
   const autoRunner = zoneRunners.length ? zoneRunners[0] : RUNNERS.find(r=>r.status==='AVAILABLE')||null
   const colors = ['linear-gradient(135deg,var(--cyan),var(--blue))','linear-gradient(135deg,#22c55e,#06b6d4)','linear-gradient(135deg,#f59e0b,var(--red))','linear-gradient(135deg,#ec4899,#8b5cf6)']
   const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+  // Capture waitlist flag BEFORE changing app.status
+  const _isWlEntry = app.isWaitlist || app.status === 'waitlist_pending'
+  const _hoStatus  = _isWlEntry ? 'waitlist' : 'active'
+
   HOMEOWNERS.push({
     id:'C'+String(++nextHWId).padStart(3,'0'),
     name:app.name, initials:app.initials, email:app.email, phone:app.phone,
@@ -22311,7 +22317,7 @@ async function approveHW(appId, directZoneId){
     service:app.service==='General Waste'?'GENERAL':'RECYCLING',
     plan:app.plan, freq:app.freq, day:app.day, bins:1,
     storage:'--', gate:'--', pets:'None', curb:'--', notes:app.svcNotes,
-    status: (app.isWaitlist||app.status==='waitlist_pending') ? 'waitlist' : 'active',
+    status: _hoStatus,
     assignedRunner:autoRunner?autoRunner.id:null,
     color:colors[HOMEOWNERS.length%colors.length]
   })
@@ -22331,18 +22337,29 @@ async function approveHW(appId, directZoneId){
   // Persist to Supabase -- both homeowner_signups (status) and homeowners (active record)
   ;(async()=>{
     try {
-      // Determine if this is a waitlist approval or full approval
-      const _isWlApproval = app.isWaitlist || app.status === 'waitlist_pending'
+      // Use pre-captured flag — app.status was already changed to 'approved' above
+      const _isWlApproval = _isWlEntry
       const _newStatus    = _isWlApproval ? 'waitlist_approved' : 'approved'
 
-      // Update homeowner_signups status
-      await _supa.from('homeowner_signups').update({
+      // Update homeowner_signups status — try waitlist_approved first, fall back to approved
+      // (DB may have a CHECK constraint that doesn't include waitlist_approved yet)
+      const _sigRes = await _supa.from('homeowner_signups').update({
         status:          _newStatus,
         zone_id:         zoneId,
         assigned_runner: autoRunner?.id || null,
         reviewed_at:     new Date().toISOString(),
         updated_at:      new Date().toISOString(),
       }).eq('email', app.email)
+      if(_sigRes?.error?.message?.includes('check') || _sigRes?.error?.message?.includes('violat')){
+        console.warn('[BinDash] Status constraint — falling back to approved for signups table')
+        await _supa.from('homeowner_signups').update({
+          status:          'approved',
+          zone_id:         zoneId,
+          assigned_runner: autoRunner?.id || null,
+          reviewed_at:     new Date().toISOString(),
+          updated_at:      new Date().toISOString(),
+        }).eq('email', app.email)
+      }
 
       // Insert into homeowners table (permanent record — waitlist shows amber until zone live)
       const res = await _supa.from('homeowners').insert({
@@ -22363,7 +22380,7 @@ async function approveHW(appId, directZoneId){
         hex_id:           app.hexId || null,
         lat:              app.lat   || null,
         lng:              app.lng   || null,
-        status:           _isWlApproval ? 'waitlist' : 'active',
+        status:           _isWlEntry ? 'waitlist' : 'active',
         created_at:       new Date().toISOString(),
       })
       if(res?.error?.message) console.warn('[BinDash] homeowners insert:', res.error.message)
