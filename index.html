@@ -8537,6 +8537,24 @@ async function initApp(){
     // Still try to load zones even if session check fails
     try { await loadZonesFromSupabase() } catch(e){}
   }
+
+  // Handle runner invite link (?ref=CODE) — runs last so it overrides all other routing
+  if(window._pendingRunnerCode){
+    const _code = window._pendingRunnerCode
+    window._pendingRunnerCode = null
+    signupRole = 'rn'
+    go('S-rn-gate')
+    rnGateTab('code')
+    // Small delay for screen transition to complete
+    setTimeout(() => {
+      const inp = document.getElementById('rg-code-input')
+      if(inp){
+        inp.value = _code
+        inp.dispatchEvent(new Event('input'))
+      }
+      showToast('Invite link loaded — verify your code to continue', 'ok', 4000)
+    }, 300)
+  }
 }
 
 // Demo modal
