@@ -6829,7 +6829,7 @@ async function triggerOverdueEscalation(jobs, runnerRow){
     await _supa.from('jobs')
       .update({ status:'missed', updated_at: new Date().toISOString() })
       .eq('batch_id', batchId)
-      .in('status', ['offered','accepted','in_progress','scheduled'])
+      .in('status', ['offered','accepted','in_progress','scheduled','missed'])
 
     // Send apology email to each affected homeowner
     uniqueHOs.forEach(email => {
@@ -6901,6 +6901,7 @@ async function loadRunnerRoutes(runnerRow){
     const missedJobs = (jobs||[]).filter(j=>{
       if(j.visit_type !== 'BIN_OUT') return false
       if(!j.scheduled_date) return false
+      if(j.status === 'in_progress') return false  // never auto-escalate started routes
       const jobDate = new Date(j.scheduled_date + 'T00:00:00')
       return jobDate < today  // strictly before today = missed
     })
@@ -7171,7 +7172,7 @@ async function loadRunnerRoutes(runnerRow){
           ${batch.status==='in_progress' ? (() => {
             const _r = win ? getRouteLockState(batch.date, batch.stops.length) : {locked:false,state:'OPEN'}
             if(_r.locked && _r.state === 'OVERDUE'){
-              return `<span style="background:rgba(239,68,68,.12);color:#ef4444;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700">⛔ Route Expired</span>`
+              return `<button class="btn btn-cyan btn-full" onclick="resumeBatch('${batch.id}')" style="min-height:52px;font-size:15px;font-weight:800;border-radius:12px">▶ Continue Route →</button>`
             }
             return `<button class="btn btn-cyan btn-full" onclick="resumeBatch('${batch.id}')" style="min-height:52px;font-size:15px;font-weight:800;border-radius:12px">▶ Continue Route →</button>`
           })() : ''}
@@ -7278,9 +7279,11 @@ function getRouteLockState(scheduledDateStr, stopCount){
   const isPast   = workDate < new Date(now.toDateString())  // strictly before today
 
   if(isPast){
-    return { locked:true, state:'OVERDUE', color:'#ef4444',
-      title:'Route is overdue',
-      reason:'This route\'s service date has passed. Contact your admin.' }
+    // If runner already started (in_progress), always allow completion
+    // Only truly lock if they never started
+    return { locked:false, state:'LATE_WARNING', color:'#f59e0b',
+      title:'Route is from a previous day',
+      reason:'Complete this route to get paid. Contact admin if there is an issue.' }
   }
 
   if(!isToday){
@@ -8882,8 +8885,10 @@ let _signupPin = null      // the address pin marker — updated separately
 
 // Color scheme for hex status
 function hexColor(status, count, threshold){
-  if(status === 'active') return { fill:'#22c55e', opacity: 0.45 }
-  if(status === 'shadow') return { fill:'#3b82f6', opacity: 0.25 }
+  // Normalize: 'live' in DB → 'active' for display
+  const s = status === 'live' ? 'active' : status
+  if(s === 'active') return { fill:'#22c55e', opacity: 0.45 }
+  if(s === 'shadow') return { fill:'#3b82f6', opacity: 0.25 }
   const pct = threshold > 0 ? count / threshold : 0
   if(pct >= 0.8) return { fill:'#f97316', opacity: 0.55 }   // almost there — deep orange
   if(pct >= 0.4) return { fill:'#f59e0b', opacity: 0.40 }   // building — amber
@@ -8895,6 +8900,9 @@ function drawHexLayers(map, zones, opts = {}){
   const layers = []
   zones.forEach(z => {
     if(!z.hex_id) return
+    // Hard filter: never draw inactive zones as green/active
+    if(z.status === 'inactive') return  // skip completely
+    // If zone exists but isn't flagged active, treat as waitlist/building
 
     let hexId = z.hex_id
 
@@ -9327,8 +9335,11 @@ async function _initAdminMap(){
   console.log('[Map] H3 ready:', h3Ready)
   console.log('[Map] HOMEOWNERS:', HOMEOWNERS.length, '| ADMIN_ZONES:', ADMIN_ZONES.length, '| RUNNERS:', RUNNERS.length)
 
-  const geoHOs = HOMEOWNERS.filter(h => h.status==='active' && h.lat && h.lng)
-  console.log('[Map] HOs with geocoded coords:', geoHOs.length)
+  // Include both active and waitlist HOs on the map
+  const geoHOs = HOMEOWNERS.filter(h => (h.status==='active' || h.status==='waitlist') && h.lat && h.lng)
+  const geoActive   = geoHOs.filter(h => h.status==='active').length
+  const geoWaitlist = geoHOs.filter(h => h.status==='waitlist').length
+  console.log('[Map] HOs with geocoded coords:', geoHOs.length, '(active:', geoActive, 'waitlist:', geoWaitlist, ')')
 
   geoHOs.forEach(ho => {
     try {
@@ -9336,7 +9347,11 @@ async function _initAdminMap(){
       const zone = ADMIN_ZONES.find(z => z.id === ho.zoneId)
       const runner = RUNNERS.find(r => r.id === ho.assignedRunner || r.name === ho.assignedRunner)
       const key = hex || (ho.lat.toFixed(5)+','+ho.lng.toFixed(5))
-      const status = zone?.status==='live' ? 'active' : zone?.status==='waitlist' ? 'waitlist' : 'no activity'
+      // Map zone.status to display status (live=active, waitlist=waitlist, others=no activity)
+      const _zStatus = zone?.status || ''
+      const status = _zStatus==='live' ? 'active'
+                   : _zStatus==='waitlist' || _zStatus==='building' ? 'waitlist'
+                   : 'no activity'
       if(!window.homeownerData[key]){
         window.homeownerData[key] = { h3Index:hex, lat:ho.lat, lng:ho.lng, status, zone:zone||null, runnerId:runner?.id||null, runnerName:runner?.name||null, homeowners:[], poly:null }
       }
@@ -9395,8 +9410,11 @@ async function _initAdminMap(){
       if(!hoByHex8[key]) hoByHex8[key] = { h8, lat:ho.lat, lng:ho.lng, hos:[], status:'no activity', runnerId:null, runnerName:null }
       const zone   = ADMIN_ZONES.find(z => z.id === ho.zoneId)
       const runner = RUNNERS.find(r => r.id === ho.assignedRunner || r.name === ho.assignedRunner)
-      const st     = zone?.status==='live' ? 'active' : zone?.status==='waitlist' ? 'waitlist' : 'no activity'
-      if(st === 'active' || hoByHex8[key].status === 'no activity') hoByHex8[key].status = st
+      const _st = zone?.status==='live' ? 'active'
+                 : (zone?.status==='waitlist'||zone?.status==='building') ? 'waitlist'
+                 : ho.status === 'waitlist' ? 'waitlist'
+                 : 'no activity'
+      if(_st === 'active' || hoByHex8[key].status === 'no activity') hoByHex8[key].status = _st
       if(runner){ hoByHex8[key].runnerId = runner.id; hoByHex8[key].runnerName = runner.name }
       hoByHex8[key].hos.push({
         name: ((ho.first_name||'')+' '+(ho.last_name||'')).trim() || ho.email?.split('@')[0] || '--',
@@ -11902,7 +11920,9 @@ async function renderRunnerHeatmap(){
   const runnerHexes   = new Set()  // res-7 hexIds covered by any runner
   const runnerZipMeta = {}         // zip -> runner name (for tooltip)
 
-  const addZipCoverage = (zip, name, anchorOverrideLat=null, anchorOverrideLng=null) => {
+  const addZipCoverage = (zip, name, anchorOverrideLat=null, anchorOverrideLng=null, zoneStatus=null) => {
+    // Only show runner coverage hex for active/live zones — not building/waitlist
+    if(zoneStatus && zoneStatus !== 'live' && zoneStatus !== 'active') return
     const ctr = ZIP_CENTROIDS[zip]
     if(!ctr && !anchorOverrideLat) return
     try {
@@ -11931,7 +11951,7 @@ async function renderRunnerHeatmap(){
       if(r.zone_id){
         const zone = ADMIN_ZONES.find(z=>z.id===r.zone_id)
         const zips = zone?.zips || (zone?.zip ? [zone.zip] : [])
-        zips.forEach(zip => addZipCoverage(zip, name))
+        zips.forEach(zip => addZipCoverage(zip, name, null, null, zone?.status))
       }
       // C: direct zip_code — use runner's real geocoded address if available
       if(r.zip_code){
@@ -19311,7 +19331,7 @@ async function _loadAndRenderActiveRoute(){
     const { data: jobs, error } = await _supa.from('jobs')
       .select('*')
       .or(orParts.join(','))
-      .eq('status','in_progress')
+      .in('status', ['in_progress','missed'])
       .order('scheduled_date', {ascending:false})
       .limit(10)
 
