@@ -483,6 +483,9 @@ function handleStripeReturn(){
     window.history.replaceState({},'',' ')
     // Will show toast after app loads and user is detected
     window._showPortalReturnToast = true
+  } else if(p.get('ref')){
+    window._pendingRunnerCode = p.get('ref').toUpperCase()
+    window.history.replaceState({},'',' ')
   } else if(hash && (hash.includes('type=recovery') || hash.includes('type=signup'))){
     window.history.replaceState({}, '', ' ')
     setTimeout(()=>_handlePasswordResetHash(hash), 800)
@@ -5097,6 +5100,15 @@ async function retryPayment(){
 // Quick self-test -- if this runs, JS is working
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[BinDash] ✅ JS loaded OK -- go() is defined:', typeof go)
+  if(window._pendingRunnerCode){
+    setTimeout(() => {
+      signupRole='rn'; go('S-rn-gate'); rnGateTab('code')
+      const inp = document.getElementById('rg-code-input')
+      if(inp){ inp.value = window._pendingRunnerCode; inp.dispatchEvent(new Event('input')) }
+      window._pendingRunnerCode = null
+      showToast('Invite link detected — enter your code to continue ✅', 'ok', 4000)
+    }, 600)
+  }
 })
 
 // Clear stale nav_state immediately — prevents blank runner dashboard on login
@@ -11244,7 +11256,15 @@ async function hSubmit(){
 
 // Runner onboarding
 function rNext(s){
-  if(s===1&&!document.getElementById('r-fn').value.trim()){showToast('Please enter your name','err');return}
+  if(s===1){
+    if(!document.getElementById('r-fn').value.trim()){showToast('Please enter your name','err');return}
+    const dob = document.getElementById('r-dob')?.value
+    if(dob){
+      const age = Math.floor((Date.now()-new Date(dob).getTime())/31557600000)
+      if(age < 18){showToast('You must be 18 or older to apply as a BinDash runner','err');return}
+      if(age > 90){showToast('Please enter a valid date of birth','err');return}
+    }
+  }
   if(s===4){if(!document.getElementById('r-1099').checked){showToast('Please acknowledge 1099 contractor status','err');return}if(!document.getElementById('r-code').checked){showToast('Please agree to Code of Conduct','err');return}
     const fn=document.getElementById('r-fn').value
     const vp=document.querySelector('#vp-both.on')?'Both visits':document.querySelector('#vp-out.on')?'Bin Out only':'Bin In only'
@@ -28249,6 +28269,7 @@ function syncZoneData(){
   Object.keys(ZONE_DATA).forEach(k=>delete ZONE_DATA[k])
   ADMIN_ZONES.forEach(z=>{
     if(z.status==='inactive') return
+    // Include ALL non-inactive zones (waitlist, building, live) in lookup
     // Index by each full ZIP code the zone serves
     const allZips = z.zips?.length ? z.zips : (z.zip ? [z.zip] : [])
     allZips.forEach(zip => {
@@ -28328,15 +28349,41 @@ function lookupRunnerZones(zip){
   const prefix = zip
   const zones  = ZONE_DATA[prefix] || null
 
+  // Check ADMIN_ZONES directly — ZONE_DATA may not include waitlist zones
+  const _allZonesForZip = ADMIN_ZONES.filter(z => {
+    const zips = z.zips || (z.zip ? [z.zip] : [])
+    return zips.includes(zip) && z.status !== 'inactive'
+  })
+
   if(!zones || zones.length === 0){
-    // No zone exists — show waitlist create card, empty zone list
-    if(wlCard) wlCard.style.display = 'block'
-    list.innerHTML = ''
-    window._runnerZipNeedsZone = zip
-    const waitlistExp = document.getElementById('r-waitlist-explainer')
-    if(waitlistExp) waitlistExp.style.display = 'none'
-    const summary = document.getElementById('r-zones-summary')
-    if(summary) summary.style.display = 'none'
+    if(_allZonesForZip.length === 0){
+      // Truly no zone at all — show create waitlist card
+      if(wlCard) wlCard.style.display = 'block'
+      list.innerHTML = ''
+      window._runnerZipNeedsZone = zip
+      const waitlistExp = document.getElementById('r-waitlist-explainer')
+      if(waitlistExp) waitlistExp.style.display = 'none'
+      const summary = document.getElementById('r-zones-summary')
+      if(summary) summary.style.display = 'none'
+    } else {
+      // Zones exist but not in ZONE_DATA — add them and re-render
+      _allZonesForZip.forEach(z => {
+        const zips2 = z.zips || (z.zip ? [z.zip] : [])
+        zips2.forEach(zp => {
+          if(!ZONE_DATA[zp]) ZONE_DATA[zp] = []
+          const already = ZONE_DATA[zp].find(x=>x.id===z.id)
+          if(!already) ZONE_DATA[zp].push({
+            id:z.id, name:z.name, status:z.status,
+            runners:z.runners||0, capacity:z.capacity||20,
+            homeowners:z.homeowners||0,
+            needed:Math.max(0,(z.threshold||5)-(z.homeowners||0)),
+            collection:z.collection?.join('/')||''
+          })
+        })
+      })
+      if(wlCard) wlCard.style.display = 'none'
+      lookupRunnerZones(zip)  // re-run with updated ZONE_DATA
+    }
     return
   }
 
