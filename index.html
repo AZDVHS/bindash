@@ -12033,7 +12033,16 @@ window._rnHeatVisible    = { active:true, demand:true, runner:true, open:true }
 window._rnHeatSelected   = new Set() // hexIds the runner has tapped (multi-select)
 window._rnHeatHexMeta    = {}       // hexId -> { type, hoCount, hasRunner, zone, poly }
 
+let _rnHeatmapRenderTimer = null
 async function renderRunnerHeatmap(){
+  // Debounce: if called multiple times rapidly, only run once
+  if(_rnHeatmapRenderTimer){ clearTimeout(_rnHeatmapRenderTimer); _rnHeatmapRenderTimer = null }
+  // Guard: don't re-enter if already rendering
+  if(window._rnHeatmapRendering){ 
+    _rnHeatmapRenderTimer = setTimeout(() => renderRunnerHeatmap(), 500)
+    return 
+  }
+  window._rnHeatmapRendering = true
   // Auto-default zone if runner hasn't configured one yet
   await _rnAutoDefaultZone()
   // Load pending zone requests below map
@@ -12718,7 +12727,7 @@ async function renderRunnerHeatmap(){
         poly.bindTooltip(_tip, { direction:'top', className:'h3-tip', sticky:true, offset:[0,-4] })
 
         // Click: open zone request panel
-        poly.on('click', () => _rnZspOpen(h6, z.id, { hoCount: _memberCount, hasRunner, zoneName: z.name, zoneZip: firstZip }))
+        poly.on('click', () => _rnZspOpen(h6, z, { hoCount: _memberCount, hasRunner, zoneName: z.name, zoneZip: firstZip }))
 
         poly.addTo(map)
         if(!window._rnHeatLayers.open) window._rnHeatLayers.open = []
@@ -12730,6 +12739,7 @@ async function renderRunnerHeatmap(){
     console.log('[Scout] Drew', _wlZones.length, 'waitlist/building zones in expand mode')
   }
 
+  window._rnHeatmapRendering = false
   if(loadEl) loadEl.style.display = 'none'
 }
 
@@ -13076,7 +13086,8 @@ async function _rnZspOpen(hex6, zone, previewOpts){
   const title = document.getElementById('rn-zsp-title')
   const info  = document.getElementById('rn-zsp-info')
   if(panel) panel.style.display = 'block'
-  if(title) title.textContent = zone?.zone_label || ('Zone ···'+hex6.slice(-6))
+  const _zspZoneName = zone?.name || zone?.zone_label || previewOpts?.zoneName || ('Zone ···'+hex6.slice(-6))
+  if(title) title.textContent = _zspZoneName
 
   // Load HO data for these hexes
   const hoMap = {}
@@ -13248,6 +13259,19 @@ async function _rnZspAccept(){
         }).ilike('email', email)
         if(window._rnRow) window._rnRow.coverage_hexes = hexJson
 
+        // Draw new zone border immediately on current map
+        try {
+          const _map = window._rnHeatMap
+          if(_map && window._rnZspHex6 && typeof h3 !== 'undefined'){
+            const _b6 = h3.cellToBoundary(window._rnZspHex6).map(([la,ln])=>[la,ln])
+            L.polygon(_b6, {
+              color: '#06d6a0', fillColor: 'rgba(6,214,160,.08)',
+              weight: 3, dashArray: null, opacity: 1, fillOpacity: 1,
+              interactive: false,
+            }).addTo(_map)
+          }
+        } catch(e){}
+
         // Write auto-approved zone request so admin can see what happened
         await _supa.from('runner_zone_requests').insert({
           runner_email:    email,
@@ -13266,10 +13290,11 @@ async function _rnZspAccept(){
         // Auto-lead if only runner in this zone
         if(existingZone) await _autoLeadIfOnlyRunner(existingZone.id)
 
-        showToast('Zone expanded to '+zoneName+' ✅ — '+hexes.length+' hexes added to your coverage', 'ok', 5000)
+        showToast('Zone expanded to '+zoneName+' ✅ — '+hexes.length+' hexes added. Refreshing map...', 'ok', 4000)
         _rnZspClose()
-        renderRunnerHeatmap()
         _rnLoadPendingRequests()
+        // Refresh heatmap after short delay so user sees the success toast first
+        setTimeout(() => renderRunnerHeatmap(), 1200)
       } else {
         // Needs admin approval — HOs already being served in this area
         await _supa.from('runner_zone_requests').insert({
@@ -21472,25 +21497,72 @@ function approveHWWithZoneCheck(appId){
   openM()
 }
 
-function createZoneAndApproveHW(appId){
-  const app=PENDING_HOMEOWNERS.find(x=>x.id===appId); if(!app) return
-  const name=document.getElementById('new-zone-name')?.value?.trim()||suggestZoneName(app.zip)
-  const cap=parseInt(document.getElementById('nz-cap')?.value)||8
-  const days=['Mon','Tue','Wed','Thu','Fri'].filter(d=>document.getElementById('nz-day-'+d)?.checked)
-  const prefix=app.zip
-  const newZoneId='z-new-'+Date.now()
-  const newZone={id:newZoneId,name,city:app.city||app.zip+' area',
-    zip:app.zip, zips:[app.zip],
-    status:'live',pilot:false,overridden:true,runners:0,capacity:cap,
-    homeowners:0,threshold:cap,collection:days,assignedRunner:null,stopOrder:[],
-    notes:'Auto-created on approval . ZIP '+app.zip}
+async function createZoneAndApproveHW(appId){
+  const app = PENDING_HOMEOWNERS.find(x=>x.id===appId); if(!app) return
+  const name = document.getElementById('new-zone-name')?.value?.trim() || suggestZoneName(app.zip)
+  const cap  = parseInt(document.getElementById('nz-cap')?.value) || 8
+  const days = ['Mon','Tue','Wed','Thu','Fri'].filter(d=>document.getElementById('nz-day-'+d)?.checked)
+
+  const btn = document.querySelector('#modal-box .btn-cyan')
+  if(btn){ btn.disabled=true; btn.textContent='Creating...' }
+
+  // Step 1: Save zone to DB to get real UUID back
+  // Status starts as 'waitlist' — admin promotes to live when ready
+  const zoneRow = {
+    name,
+    label:           (name.slice(0,3).toUpperCase()+'-'+app.zip),
+    zip_prefix:      app.zip,
+    zip_codes:       [app.zip],
+    status:          'waitlist',
+    pilot:           true,
+    overridden:      false,
+    capacity:        cap,
+    threshold:       cap,
+    collection_days: days,
+    homeowners:      0,
+    runners:         0,
+    notes:           'Auto-created from pending HO approval · ZIP '+app.zip,
+    area:            'A1',
+    updated_at:      new Date().toISOString(),
+  }
+
+  let realZoneId = null
+  try {
+    const { data: zRes, error: zErr } = await _supa.from('zones').insert(zoneRow).select('id').single()
+    if(zErr) throw new Error(zErr.message)
+    realZoneId = zRes.id
+    console.log('[BinDash] Zone created in DB with id:', realZoneId)
+  } catch(e){
+    showToast('Zone save failed: '+e.message,'err')
+    if(btn){ btn.disabled=false; btn.textContent='Create Zone & Approve' }
+    return
+  }
+
+  // Step 2: Add to in-memory ADMIN_ZONES with real UUID
+  const newZone = {
+    id: realZoneId, name, city: app.city||app.zip+' area',
+    zip: app.zip, zips: [app.zip],
+    status: 'waitlist', pilot: true, overridden: false,
+    runners: 0, capacity: cap, homeowners: 0, threshold: cap,
+    collection: days, assignedRunner: null, stopOrder: [],
+    notes: 'Auto-created from pending HO approval · ZIP '+app.zip,
+  }
   ADMIN_ZONES.push(newZone)
   syncZoneData()
-  dbSaveZone(newZone)
   closeM()
-  approveHW(appId, newZoneId)
+
+  // Step 3: Approve HO into this zone (inserts into homeowners table as waitlist)
+  await approveHW(appId, realZoneId)
+
+  // Step 4: Update zone homeowners count in DB now that HO is approved
+  await _supa.from('zones').update({ homeowners: 1, updated_at: new Date().toISOString() }).eq('id', realZoneId)
+  newZone.homeowners = 1
+
   notifyWaitlistRunners(app.zip, name)
-  showToast(`Zone "${name}" created as Pilot ✅ -- promote to Live when ready`,'info')
+  showToast('Zone "'+name+'" created ✅ · Dustin added as waitlist HO', 'ok', 5000)
+  renderAdminZones()
+  syncZoneData()
+  updateOverviewCounts()
 }
 
 // -- PENDING RUNNER APPROVAL SYSTEM --------------
