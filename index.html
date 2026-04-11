@@ -11778,8 +11778,29 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
     _rnPickerDrawHex(map, hexId, selectableSet, opts)
   })
 
-  // Draw HO markers ON TOP of all hexes — guaranteed visible regardless of hex layer
-  const _allPickerHOs = (window.HOMEOWNERS||[])
+  // Draw HO markers ON TOP of all hexes — fetch directly, don't depend on global timing
+  let _allPickerHOs = (window.HOMEOWNERS||[]).filter(h => h.lat && h.lng)
+  if(!_allPickerHOs.length){
+    // Direct DB fetch as fallback
+    try {
+      const { data: _freshHOs } = await _supa.from('homeowners')
+        .select('id,first_name,last_name,email,status,lat,lng,street_address,city,zip_code')
+        .not('lat','is',null).not('lng','is',null)
+      if(_freshHOs?.length){
+        _allPickerHOs = _freshHOs.map(r => ({
+          name:    (r.first_name||'')+' '+(r.last_name||''),
+          email:   r.email,
+          status:  r.status,
+          lat:     r.lat,
+          lng:     r.lng,
+          address: r.street_address||'',
+          city:    r.city||'',
+          zip:     r.zip_code||'',
+        }))
+        console.log('[BinDash] Picker: fetched', _allPickerHOs.length, 'HOs direct from DB')
+      }
+    } catch(e){ console.warn('[BinDash] Picker HO fetch:', e.message) }
+  }
   let _drawnMarkers = 0
   for(const h of _allPickerHOs){
     try {
