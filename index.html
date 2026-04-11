@@ -6170,7 +6170,7 @@ function _renderRNHomeDashZones(runnerRow){
     const hwPct      = Math.min(100, Math.round(hwCount / Math.max(needed, 1) * 100))
     const rnPct      = Math.min(100, Math.round(rnCount / Math.max(capacity, 1) * 100))
     const dayLabels  = (z.collection||[]).map(d => typeof d==='object' ? d.day||d : d).join(', ') || '--'
-    const wlCount    = WAITLIST_SIGNUPS.filter(s => z.zips?.includes(s.zip) || z.zips?.includes(s.zip) || z.zip===s.zip).length
+    const wlCount    = HOMEOWNERS.filter(h => h.status==='waitlist' && (z.zips?.includes(h.zip) || z.zip===h.zip || h.zoneId===z.id)).length
 
     const statusBadge = isLive
       ? `<span style="background:rgba(34,197,94,.15);color:#22c55e;border-radius:99px;font-size:9px;font-weight:700;padding:2px 8px">🟢 Live</span>`
@@ -7771,9 +7771,10 @@ async function loadAdminProbes(){
         uniqueZips.sort().map(z=>`<option value="${z}">${z}</option>`).join('')
     }
 
-    // Update nav badge
+    // Update nav badge — only unacknowledged probes
+    const unackedToday = _adminProbes.filter(p => p.created_at?.slice(0,10)===today && p.status!=='acknowledged').length
     const badge = document.getElementById('probes-badge')
-    if(badge){ badge.textContent = todayCount; badge.style.display = todayCount > 0 ? 'inline' : 'none' }
+    if(badge){ badge.textContent = unackedToday; badge.style.display = unackedToday > 0 ? 'inline' : 'none' }
 
     renderProbesTable()
   } catch(e){
@@ -7817,6 +7818,10 @@ function renderProbesTable(){
     } else if(zone.status !== 'live'){
       action = '<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--cyan)" onclick="adNav(null,\"ad-pending-hw\")">View Pending</button>'
     }
+    // Always add acknowledge button to clear the probe from new count
+    if(p.status !== 'acknowledged'){
+      action += '<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--muted);margin-left:4px" onclick="_acknowledgeProbe(\"' + p.id + '\",this)">✓ Ack</button>'
+    }
     return '<tr style="border-bottom:1px solid rgba(30,40,64,.4)">'
       + '<td style="padding:9px 14px;color:var(--text);font-size:12px">'+addr+'</td>'
       + '<td style="padding:9px 14px;font-weight:700;color:var(--cyan)">'+( p.zip_code||'—')+'</td>'
@@ -7843,6 +7848,31 @@ function renderProbesTable(){
     + '</div>'
 }
 
+
+// ── ADDRESS PROBE ACKNOWLEDGMENT ────────────────────────────────────────────
+async function _acknowledgeProbe(probeId, btnEl){
+  if(btnEl){ btnEl.disabled=true; btnEl.textContent='...' }
+  try {
+    await _supa.from('address_probes').update({ status:'acknowledged', updated_at:new Date().toISOString() }).eq('id', probeId)
+    // Update local cache
+    const p = _adminProbes.find(x=>x.id===probeId)
+    if(p) p.status = 'acknowledged'
+    // Recount unacknowledged for today
+    const today = new Date().toISOString().slice(0,10)
+    const unacked = _adminProbes.filter(p=>p.created_at?.slice(0,10)===today && p.status!=='acknowledged').length
+    const badge = document.getElementById('probes-badge')
+    if(badge){ badge.textContent = unacked; badge.style.display = unacked > 0 ? 'inline' : 'none' }
+    // Grey out the row
+    if(btnEl){ 
+      btnEl.textContent='✓ Done'
+      const row = btnEl.closest('tr')
+      if(row) row.style.opacity='0.45'
+    }
+  } catch(e){ 
+    if(btnEl){ btnEl.disabled=false; btnEl.textContent='✓ Ack' }
+    showToast('Could not acknowledge: '+e.message,'err')
+  }
+}
 
 // ── Poll for new route offers every 2 minutes while runner is on dashboard ──
 let _rnOfferPollTimer = null
@@ -25795,7 +25825,7 @@ async function loadMicroZones(){
     const zips = (z.zips?.length?z.zips:[z.zip]).filter(Boolean)
     const hwCount = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))).length
     const rnCount = RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===z.id||r.coverageZones?.includes(z.id))).length
-    const wlCount = (WAITLIST_SIGNUPS||[]).filter(s=>zips.includes(s.zip)).length
+    const wlCount = HOMEOWNERS.filter(h=>h.status==='waitlist'&&(zips.includes(h.zip)||h.zoneId===z.id)).length
     return { ...z, hwCount, rnCount, wlCount, zips }
   }).sort((a,b)=>b.hwCount-a.hwCount)
 
@@ -25915,7 +25945,7 @@ function renderAdminZones(){
     const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
     const hwCount  = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))).length
     const rnList   = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id)||zips.includes(r.zip))
-    const wlCount  = WAITLIST_SIGNUPS.filter(s=>s.status==='waitlist'&&zips.some(z2=>s.zip===z2)).length
+    const wlCount  = HOMEOWNERS.filter(h=>h.status==='waitlist'&&(zips.some(z2=>h.zip===z2)||h.zoneId===z.id)).length
     const days     = [...new Set(HOMEOWNERS.filter(h=>h.zoneId===z.id||zips.includes(h.zip)).map(h=>h.day).filter(d=>d&&d!=='--'))].join(', ')
     const pct      = z.threshold>0 ? Math.min(100,Math.round((hwCount/z.threshold)*100)) : 0
     const planRates= { plan_a:34.99, plan_b:44.99, plan_c:54.99, oan_a:19.99, oan_b:19.99, oan_c:19.99 }
@@ -25965,6 +25995,10 @@ function renderAdminZones(){
             <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center">
               <div style="font-size:18px;font-weight:700;color:#a5b4fc">${rnList.length}</div>
               <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Runners</div>
+            </div>
+            <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:18px;font-weight:700;color:#f59e0b">${HOMEOWNERS.filter(h=>h.status==='waitlist'&&(zips.includes(h.zip)||h.zoneId===z.id)).length}</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px">Waitlisted</div>
             </div>
             <div style="background:var(--surface);border-radius:8px;padding:10px;text-align:center">
               <div style="font-size:18px;font-weight:700;color:var(--green)">$${zoneMRR.toFixed(0)}</div>
