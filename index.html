@@ -11805,16 +11805,17 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   for(const h of _allPickerHOs){
     try {
       let markerLat = null, markerLng = null
-      // Only use real geocoded coordinates — never ZIP centroid
-      if(h.lat && h.lng && parseFloat(h.lat) !== 0 && parseFloat(h.lng) !== 0){
-        markerLat = parseFloat(h.lat)
-        markerLng = parseFloat(h.lng)
-      } else if(h.address && h.address !== '--' && h.zip){
-        // Try to geocode from address in real-time
+      // Always prefer geocoding from street address — more accurate than stored coords
+      if(h.address && h.address.trim() && h.address !== '--'){
         try {
-          const _gc = await _rnPickerGeocode(h.address, h.city||'', 'AZ', h.zip)
+          const _gc = await _rnPickerGeocode(h.address, h.city||'', 'AZ', h.zip||'')
           if(_gc?.lat){ markerLat = _gc.lat; markerLng = _gc.lng }
         } catch(e){}
+      }
+      // Fall back to stored lat/lng if geocode failed
+      if(!markerLat && h.lat && h.lng && parseFloat(h.lat) !== 0 && parseFloat(h.lng) !== 0){
+        markerLat = parseFloat(h.lat)
+        markerLng = parseFloat(h.lng)
       }
       if(!markerLat){ console.warn('[BinDash] No coords for HO:', h.name, h.address); continue }
 
