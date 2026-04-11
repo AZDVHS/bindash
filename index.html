@@ -11718,11 +11718,8 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
       let hexId = null
       if(h.lat && h.lng){
         hexId = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8)
-      } else if(h.zip && ZIP_CENTROIDS[h.zip]){
-        const ctr = ZIP_CENTROIDS[h.zip]
-        hexId = h3.latLngToCell(ctr[0], ctr[1], 8)
       }
-      if(!hexId) return
+      if(!hexId) return  // no lat/lng — skip hex rendering (use circle marker instead)
       // Use res-8 directly (RN_PICKER_RES_SELECT = 8, so no parent conversion needed)
       const p8 = h3.getResolution(hexId) === RN_PICKER_RES_SELECT
                    ? hexId
@@ -11780,6 +11777,39 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   allToDraw.forEach(hexId => {
     _rnPickerDrawHex(map, hexId, selectableSet, opts)
   })
+
+  // Draw waitlist HO markers ON TOP of all hexes — guaranteed visible
+  // These are circle markers, not hex polygons, so they can't be hidden by other layers
+  const _wlHOs = (window.HOMEOWNERS||[]).filter(h => h.status==='waitlist' || h.status==='active')
+  _wlHOs.forEach(h => {
+    try {
+      let markerLat = null, markerLng = null
+      if(h.lat && h.lng){
+        markerLat = parseFloat(h.lat); markerLng = parseFloat(h.lng)
+      } else if(h.zip && ZIP_CENTROIDS[h.zip]){
+        markerLat = ZIP_CENTROIDS[h.zip][0]; markerLng = ZIP_CENTROIDS[h.zip][1]
+      }
+      if(!markerLat) return
+      const isWl = h.status === 'waitlist'
+      const markerColor = isWl ? '#f59e0b' : '#22c55e'
+      // Draw a filled circle on top of everything
+      L.circleMarker([markerLat, markerLng], {
+        radius: 9,
+        color: '#fff',
+        weight: 2,
+        fillColor: markerColor,
+        fillOpacity: 0.95,
+      }).bindTooltip(
+        '<div style="font-size:11px;font-weight:700">'+(isWl?'⏳':'✅')+' '+(h.name||'Homeowner')+'</div>'
+        +'<div style="font-size:10px;color:#94a3b8">'+(isWl?'Waitlist':'Active')+' · '+h.zip+'</div>'
+        +(h.address&&h.address!=='--'?'<div style="font-size:10px;color:#94a3b8">'+h.address+'</div>':'')
+        +'<div style="font-size:10px;color:#f59e0b;margin-top:3px">Tap zone card below to join their waitlist</div>',
+        { direction:'top', className:'h3-tip' }
+      ).addTo(map)
+      console.log('[BinDash] Drew HO marker:', h.name, h.status, markerLat, markerLng)
+    } catch(e){ console.warn('[BinDash] HO marker error:', e.message) }
+  })
+  console.log('[BinDash] Drew', _wlHOs.length, 'HO markers on picker map')
 
   // Critical: force map to recalculate size in case container was hidden
   setTimeout(() => { try { map.invalidateSize(true) } catch(e){} }, 80)
@@ -22742,6 +22772,20 @@ async function approveHW(appId, directZoneId){
         }).eq('email', app.email)
       }
 
+      // Geocode address before insert so lat/lng is always stored
+      let _hoLat = app.lat || null, _hoLng = app.lng || null
+      if(!_hoLat && app.address && app.address !== '--' && app.zip){
+        try {
+          const _gc = await geocodeAddress(app.address, app.city||'', 'AZ', app.zip)
+          if(_gc?.lat){ _hoLat = _gc.lat; _hoLng = _gc.lng }
+          console.log('[BinDash] Geocoded HO:', app.name, '->', _hoLat, _hoLng)
+        } catch(e){ console.warn('[BinDash] HO geocode failed:', e.message) }
+      }
+      if(!_hoLat){
+        console.warn('[BinDash] ⚠️ No lat/lng for HO', app.name, '— map pin will be missing')
+        showToast('⚠️ Could not geocode '+app.name+' address — update in HO Management', 'info', 6000)
+      }
+
       // Insert into homeowners table (permanent record — waitlist shows amber until zone live)
       const res = await _supa.from('homeowners').insert({
         signup_id:        app.id,
@@ -22759,8 +22803,8 @@ async function approveHW(appId, directZoneId){
         plan_id:          app.plan || '',
         assigned_runner:  autoRunner?.id || null,
         hex_id:           app.hexId || null,
-        lat:              app.lat   || null,
-        lng:              app.lng   || null,
+        lat:              _hoLat,
+        lng:              _hoLng,
         status:           _isWlEntry ? 'waitlist' : 'active',
         created_at:       new Date().toISOString(),
       })
