@@ -4914,12 +4914,12 @@ async function lookupReferralCode(code, appId){
   }
   if(resultEl) resultEl.innerHTML = '<span style="color:var(--muted)">Looking up...</span>'
   try {
-    // Check runner_applications for matching invite code
-    const { data } = await _supa.from('runner_applications')
-      .select('first_name, last_name, email, invite_code')
+    // Codes are in runner_interest table
+    const { data } = await _supa.from('runner_interest')
+      .select('full_name, email, invite_code')
       .ilike('invite_code', code).limit(1)
     const found = data?.[0]
-    const name  = found ? (found.first_name+' '+found.last_name).trim()||found.email : null
+    const name  = found ? (found.full_name||'').trim()||found.email : null
 
     if(name){
       if(resultEl) resultEl.innerHTML = `<span style="color:#22c55e">✅ Code verified — issued to <strong>${name}</strong></span>`
@@ -10155,10 +10155,10 @@ async function rnGateVerifyCode(){
   rnGateCodeResult('Checking code...', 'var(--muted)')
 
   try {
-    // Check runner_applications table for matching invite code
+    // Codes are stored in runner_interest table (not runner_applications)
     const { data, error } = await _supa
-      .from('runner_applications')
-      .select('first_name, last_name, email, invite_code, status')
+      .from('runner_interest')
+      .select('id, full_name, email, zip_code, invite_code, approved_at')
       .ilike('invite_code', code)
       .maybeSingle()
 
@@ -10169,25 +10169,25 @@ async function rnGateVerifyCode(){
       return
     }
 
-    if(data.status === 'used'){
-      rnGateCodeResult('❌ This code has already been used', '#ef4444')
-      return
-    }
+    // Split full_name into first/last
+    const nameParts = (data.full_name||'').trim().split(' ')
+    const firstName = nameParts[0] || ''
+    const lastName  = nameParts.slice(1).join(' ') || ''
 
     // Valid code — pre-fill runner onboarding and proceed
-    rnGateCodeResult('✅ Code verified — welcome, ' + (data.first_name||'Runner') + '!', '#06d6a0')
-    window._runnerInviteCode = code
-    window._runnerInviteName = data.first_name || ''
+    rnGateCodeResult('✅ Code verified — welcome, ' + (firstName||'Runner') + '!', '#06d6a0')
+    window._runnerInviteCode  = code
+    window._runnerInviteName  = firstName
     window._runnerInviteEmail = data.email || ''
 
     // Pre-fill runner onboarding fields
     setTimeout(() => {
-      const fn = document.getElementById('r-fn')
-      const ln = document.getElementById('r-ln')
-      const em = document.getElementById('r-em')
-      if(fn && data.first_name) fn.value = data.first_name
-      if(ln && data.last_name)  ln.value = data.last_name
-      if(em && data.email)      em.value = data.email
+      const fnEl = document.getElementById('r-fn')
+      const lnEl = document.getElementById('r-ln')
+      const emEl = document.getElementById('r-em')
+      if(fnEl && firstName) fnEl.value = firstName
+      if(lnEl && lastName)  lnEl.value = lastName
+      if(emEl && data.email) emEl.value = data.email
       go('S-rn-ob')
     }, 1200)
 
