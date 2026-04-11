@@ -2533,7 +2533,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px">
             <div style="background:var(--surface2);border-radius:8px;padding:9px;text-align:center">
               <div style="font-size:18px;font-weight:800;color:var(--cyan)" id="r-h3-count">0</div>
-              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Hexes Selected</div>
+              <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Service Hexes</div>
             </div>
             <div style="background:var(--surface2);border-radius:8px;padding:9px;text-align:center">
               <div style="font-size:18px;font-weight:800;color:#a5b4fc" id="r-h3-ho-count">--</div>
@@ -11711,6 +11711,26 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
     })
   } catch(e){}
 
+  // Also use in-memory HOMEOWNERS as a fallback (covers cases where DB lacks h3_index)
+  ;(window.HOMEOWNERS||[]).forEach(h => {
+    try {
+      // Use exact lat/lng if available, else ZIP centroid
+      let hexId = null
+      if(h.lat && h.lng){
+        hexId = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8)
+      } else if(h.zip && ZIP_CENTROIDS[h.zip]){
+        const ctr = ZIP_CENTROIDS[h.zip]
+        hexId = h3.latLngToCell(ctr[0], ctr[1], 8)
+      }
+      if(!hexId) return
+      const p7 = h3.cellToParent(hexId, RN_PICKER_RES_SELECT)
+      if(!selectableSet.has(p7)) return
+      if(!window._rnPickerHoHexes[p7]) window._rnPickerHoHexes[p7] = { active:0, waitlist:0 }
+      if(h.status === 'active') window._rnPickerHoHexes[p7].active++
+      else if(h.status === 'waitlist') window._rnPickerHoHexes[p7].waitlist++
+    } catch(e){}
+  })
+
   // Fetch runner's already-assigned zones for overlay
   window._rnPickerAssignedHexes = new Set()
   try {
@@ -11832,7 +11852,8 @@ function _rnPickerSelectAllHexes(){
     }
   })
   if(typeof _rnPickerOnboardingUpdate === 'function') _rnPickerOnboardingUpdate()
-  showToast('All hexes selected ✅', 'ok', 2000)
+  const _cnt = window._rnPickerSelected?.size || 0
+  showToast(_cnt + ' service hexes selected ✅', 'ok', 2000)
 }
 
 function _rnPickerClearAllHexes(){
@@ -11862,10 +11883,10 @@ function _rnPickerOnboardingUpdate(){
   safe('r-h3-ho-count', hoTotal > 0 ? hoTotal : '--')
   safe('r-h3-est-earn', estWeekly)
   // Sync to rSubmit globals
-  window._runnerAnchorHex7   = window._rnPickerAnchorHex7
-  window._runnerAnchorHex6   = window._rnPickerAnchorHex6
-  window._runnerCoverageHexes= [...sel]
-  window._selectedZoneIds    = [...sel] // backward compat
+  window._runnerAnchorHex7    = window._rnPickerAnchorHex7
+  window._runnerAnchorHex6    = window._rnPickerAnchorHex6
+  window._runnerCoverageHexes = [...sel]
+  // NOTE: _selectedZoneIds holds ADMIN_ZONE ids (not hex ids) — don't overwrite here
 }
 
 // ── My Zones editor callbacks ──
@@ -28574,7 +28595,15 @@ function _updateZonesSummary(){
   })
   summary.style.display = 'block'
   const waitlistSelected = ids.some(id=>ADMIN_ZONES.find(z=>z.id===id)?.status==='waitlist')
-  summaryTx.textContent = `${ids.length} zone${ids.length!==1?'s':''} selected: ${names.join(', ')}${waitlistSelected?' (includes waitlist)':''}`
+  const liveIds = ids.filter(id=>ADMIN_ZONES.find(z=>z.id===id)?.status==='live')
+  const wlIds   = ids.filter(id=>{const z=ADMIN_ZONES.find(z=>z.id===id); return z?.status==='waitlist'||z?.status==='building'})
+  const liveNames2 = liveIds.map(id=>ADMIN_ZONES.find(z=>z.id===id)?.name||'').filter(Boolean)
+  const wlNames2   = wlIds.map(id=>ADMIN_ZONES.find(z=>z.id===id)?.name||'').filter(Boolean)
+  let parts = []
+  if(liveNames2.length) parts.push(liveNames2.length+' live zone'+(liveNames2.length!==1?'s':'')+': '+liveNames2.join(', '))
+  if(wlNames2.length)   parts.push(wlNames2.length+' waitlist zone'+(wlNames2.length!==1?'s':'')+': '+wlNames2.join(', '))
+  if(!parts.length && names.length) parts.push(names.join(', '))
+  summaryTx.textContent = parts.join(' · ')
 }
 
 function showRunnerZoneRequestModal(){
