@@ -4435,6 +4435,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             <div id="hwpay-card-list" style="display:flex;flex-direction:column;gap:8px">
               <div style="text-align:center;padding:32px;color:var(--muted)">Loading payment data...</div>
             </div>
+            <div id="hwpay-waitlist-section" style="display:none"></div>
           </div>
 
           <!-- RUNNER PAYOUTS TAB -->
@@ -18773,7 +18774,9 @@ async function loadPaymentsData(){
 
     const planPrices = { plan_a:34.99, plan_b:44.99, plan_c:54.99, w1:34.99, w2:44.99, w3:54.99 }
     const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split', oan_a:'Bin Out As Needed — 1 Can', oan_b:'Bin Out As Needed — 2 Cans Same Day', oan_c:'Bin Out As Needed — 2 Cans Split Days', w1:'1 Can', w2:'2 Cans Same Day', w3:'2 Cans Split' }
-    HW_PAYMENTS = (hwRows||[]).map(hw => {
+    HW_PAYMENTS = (hwRows||[])
+      .filter(hw => hw.status === 'approved' || hw.status === 'active')  // never show waitlist
+      .map(hw => {
       const planKey = hw.plan || 'plan_a'
       return {
         hwId:        hw.id,
@@ -18789,12 +18792,16 @@ async function loadPaymentsData(){
         stripeSubId: hw.stripe_subscription_id || null,
       }
     })
-    // Fallback to in-memory if DB empty
-    if(!HW_PAYMENTS.length) HW_PAYMENTS = HOMEOWNERS.map(hw => ({
-      hwId:hw.id, name:hw.name, email:hw.email, plan:hw.plan||'plan_a',
-      planLabel:'1 Can', monthly:34.99, status:'active',
-      nextCharge:_nextChargeDate(), lastCharged:'--', cardLast4:'----', stripeSubId:null,
-    }))
+    // Fallback to in-memory if DB empty — only active (paying) homeowners
+    if(!HW_PAYMENTS.length){
+      HW_PAYMENTS = HOMEOWNERS
+        .filter(hw => hw.status === 'active')
+        .map(hw => ({
+          hwId:hw.id, name:hw.name, email:hw.email, plan:hw.plan||'plan_a',
+          planLabel:'1 Can', monthly:34.99, status:'active',
+          nextCharge:_nextChargeDate(), lastCharged:'--', cardLast4:'----', stripeSubId:null,
+        }))
+    }
   } catch(e){ console.warn('HW payments load:', e) }
 
   // Build RUNNER_PAYOUTS directly from runner_payouts table (no dependency on RUNNERS array)
@@ -18901,7 +18908,7 @@ function filterHWPayments(q){
 }
 
 function renderHWPayments(){
-  // Stats
+  // Stats — only active (paying) homeowners
   const active  = HW_PAYMENTS.filter(p=>p.status==='active').length
   const paused  = HW_PAYMENTS.filter(p=>p.status==='paused').length
   const failed  = HW_PAYMENTS.filter(p=>p.status==='failed').length
@@ -18911,6 +18918,32 @@ function renderHWPayments(){
   safe('pay-active-subs', active)
   safe('pay-paused-subs', paused)
   safe('pay-failed-subs', failed)
+
+  // Render waitlist section separately — these are not paying yet
+  const waitlistHOs = HOMEOWNERS.filter(h => h.status === 'waitlist')
+  const waitlistEl  = document.getElementById('hwpay-waitlist-section')
+  if(waitlistEl){
+    if(waitlistHOs.length){
+      waitlistEl.style.display = 'block'
+      waitlistEl.innerHTML = '<div style="margin-top:24px">'
+        + '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">⏳ Waitlist — No Payment Yet ('+waitlistHOs.length+')</div>'
+        + waitlistHOs.map(h => {
+            const zone = ADMIN_ZONES.find(z=>z.id===h.zoneId||(z.zips||[z.zip]).includes(h.zip))
+            return '<div style="border:1px solid rgba(245,158,11,.25);border-left:4px solid #f59e0b;border-radius:10px;padding:11px 14px;background:var(--surface);margin-bottom:8px;display:flex;align-items:center;gap:12px">'
+              + '<div style="width:30px;height:30px;border-radius:50%;background:rgba(245,158,11,.15);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#f59e0b;flex-shrink:0">'+(h.name||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)+'</div>'
+              + '<div style="flex:1;min-width:0">'
+              + '<div style="font-size:13px;font-weight:700">'+(h.name||'--')+'</div>'
+              + '<div style="font-size:11px;color:var(--muted);margin-top:1px">ZIP '+h.zip+' · '+(zone?.name||'No zone')+'</div>'
+              + '</div>'
+              + '<span style="background:rgba(245,158,11,.12);color:#fbbf24;border-radius:99px;padding:2px 10px;font-size:11px;font-weight:700;white-space:nowrap">⏳ Waitlist</span>'
+              + '<span style="font-size:12px;color:var(--muted);white-space:nowrap;margin-left:8px">No payment · Zone not live</span>'
+              + '</div>'
+          }).join('')
+        + '</div>'
+    } else {
+      waitlistEl.style.display = 'none'
+    }
+  }
 
   // Filter
   let rows = HW_PAYMENTS.filter(p=>{
