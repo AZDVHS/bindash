@@ -4062,6 +4062,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <div class="nav-i" onclick="adNav(this,'ad-jobs')"><span class="ic">📋</span> Jobs</div>
       <div class="nav-i" onclick="adNav(this,'ad-zones')"><span class="ic">📍</span> Zones</div>
       <div class="nav-i" onclick="adNav(this,'ad-rules')"><span class="ic">⚙️</span> Dispatch Rules</div>
+      <div class="nav-i" onclick="adNav(this,'ad-probes')"><span class="ic">🔍</span> Address Probes <span id="probes-badge" style="background:var(--cyan);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;display:none">0</span></div>
       <div class="s-bot">
         <div class="u-chip" style="margin-bottom:10px"><div class="avatar" style="background:linear-gradient(135deg,var(--red),var(--amber))">AD</div><div><div class="u-name" id="ad-sidebar-name">Admin</div><div class="u-role">Super Admin</div></div></div>
         <button class="btn btn-ghost btn-full btn-sm" onclick="adminLogout()">Log Out</button>
@@ -4669,6 +4670,53 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         </div>
 
         <!-- AD RULES -->
+        <!-- ===== ADDRESS PROBES ===== -->
+        <div class="pg" id="ad-probes">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+            <div>
+              <div style="font-size:22px;font-weight:800;margin-bottom:4px">Address Probes 🔍</div>
+              <div style="font-size:13px;color:var(--sub)">People who checked service availability but didn't sign up yet. High-intent demand signals.</div>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="loadAdminProbes()">↻ Refresh</button>
+          </div>
+          <!-- Stats row -->
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px" id="probes-stats">
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+              <div style="font-size:22px;font-weight:800;color:var(--cyan)" id="probes-stat-total">—</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">Total Probes</div>
+            </div>
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+              <div style="font-size:22px;font-weight:800;color:#f59e0b" id="probes-stat-zips">—</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">Unique ZIPs</div>
+            </div>
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+              <div style="font-size:22px;font-weight:800;color:#22c55e" id="probes-stat-today">—</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">Today</div>
+            </div>
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+              <div style="font-size:22px;font-weight:800;color:#a5b4fc" id="probes-stat-nozone">—</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">No Zone Yet</div>
+            </div>
+          </div>
+          <!-- Filter bar -->
+          <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+            <input id="probes-search" placeholder="Search ZIP or address..." style="flex:1;min-width:160px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text)" oninput="renderProbesTable()">
+            <select id="probes-filter-zone" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text)" onchange="renderProbesTable()">
+              <option value="">All ZIPs</option>
+            </select>
+            <select id="probes-filter-days" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text)" onchange="renderProbesTable()">
+              <option value="">All time</option>
+              <option value="1">Today</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+            </select>
+          </div>
+          <!-- Table -->
+          <div id="probes-table" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+            <div style="text-align:center;padding:40px;color:var(--muted)">Loading probes...</div>
+          </div>
+        </div>
+
         <div class="pg" id="ad-rules">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
             <div style="font-size:13px;color:var(--sub)">Rule-based auto-dispatch engine. Changes take effect on the next dispatch cycle.</div>
@@ -7683,6 +7731,119 @@ async function resumeBatch(batchId){
   }
 }
 
+// ── ADDRESS PROBES ──────────────────────────────────────────────────────────
+let _adminProbes = []
+
+async function loadAdminProbes(){
+  const tbl = document.getElementById('probes-table')
+  if(tbl) tbl.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">⏳ Loading...</div>'
+  try {
+    const { data, error } = await _supa
+      .from('address_probes')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(500)
+    if(error) throw error
+    _adminProbes = data || []
+
+    // Stats
+    const today = new Date().toISOString().slice(0,10)
+    const uniqueZips = [...new Set(_adminProbes.map(p=>p.zip_code).filter(Boolean))]
+    const todayCount = _adminProbes.filter(p=>p.created_at?.slice(0,10)===today).length
+    const noZone = _adminProbes.filter(p=>{
+      const z = ADMIN_ZONES.find(z=>{
+        const zips = z.zips||(z.zip?[z.zip]:[])
+        return zips.includes(p.zip_code)
+      })
+      return !z
+    }).length
+
+    const _s = id => document.getElementById(id)
+    if(_s('probes-stat-total'))  _s('probes-stat-total').textContent  = _adminProbes.length
+    if(_s('probes-stat-zips'))   _s('probes-stat-zips').textContent   = uniqueZips.length
+    if(_s('probes-stat-today'))  _s('probes-stat-today').textContent  = todayCount
+    if(_s('probes-stat-nozone')) _s('probes-stat-nozone').textContent = noZone
+
+    // Populate ZIP filter
+    const zipSel = document.getElementById('probes-filter-zone')
+    if(zipSel){
+      zipSel.innerHTML = '<option value="">All ZIPs</option>' +
+        uniqueZips.sort().map(z=>`<option value="${z}">${z}</option>`).join('')
+    }
+
+    // Update nav badge
+    const badge = document.getElementById('probes-badge')
+    if(badge){ badge.textContent = todayCount; badge.style.display = todayCount > 0 ? 'inline' : 'none' }
+
+    renderProbesTable()
+  } catch(e){
+    console.warn('[BinDash] loadAdminProbes:', e.message)
+    if(tbl) tbl.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444">Error loading probes: '+e.message+'</div>'
+  }
+}
+
+function renderProbesTable(){
+  const tbl = document.getElementById('probes-table')
+  if(!tbl) return
+  const search  = (document.getElementById('probes-search')?.value||'').toLowerCase()
+  const zipFilt = document.getElementById('probes-filter-zone')?.value||''
+  const days    = parseInt(document.getElementById('probes-filter-days')?.value||'0')||0
+  const cutoff  = days ? new Date(Date.now() - days*86400000).toISOString() : null
+
+  let rows = _adminProbes
+  if(search)  rows = rows.filter(function(p){ return (p.zip_code||'').includes(search)||(p.street_address||'').toLowerCase().includes(search) })
+  if(zipFilt) rows = rows.filter(function(p){ return p.zip_code===zipFilt })
+  if(cutoff)  rows = rows.filter(function(p){ return p.created_at >= cutoff })
+
+  if(!rows.length){
+    tbl.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">No probes match this filter.</div>'
+    return
+  }
+
+  function probeRow(p){
+    const zone = ADMIN_ZONES.find(function(z){
+      const zips = z.zips||(z.zip?[z.zip]:[])
+      return zips.includes(p.zip_code)
+    })
+    const zoneColor = !zone ? '#ef4444' : zone.status==='live' ? '#22c55e' : '#f59e0b'
+    const zoneText  = !zone ? '⚠️ No zone' : zone.name+' ('+zone.status+')'
+    const zoneLabel = '<span style="color:'+zoneColor+'">'+zoneText+'</span>'
+    const addr = [p.street_address, p.city, p.state].filter(Boolean).join(', ') || '—'
+    const dt   = p.created_at ? new Date(p.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '—'
+    const src  = p.source || 'signup_check'
+    let action = ''
+    if(!zone){
+      action = '<button class="btn btn-outline btn-sm" style="font-size:11px" onclick="adNav(null,\"ad-zones\");showToast(\"Create zone for ZIP ' + p.zip_code + '\",\"info\",4000)">+ Create Zone</button>'
+    } else if(zone.status !== 'live'){
+      action = '<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--cyan)" onclick="adNav(null,\"ad-pending-hw\")">View Pending</button>'
+    }
+    return '<tr style="border-bottom:1px solid rgba(30,40,64,.4)">'
+      + '<td style="padding:9px 14px;color:var(--text);font-size:12px">'+addr+'</td>'
+      + '<td style="padding:9px 14px;font-weight:700;color:var(--cyan)">'+( p.zip_code||'—')+'</td>'
+      + '<td style="padding:9px 14px;font-size:12px">'+zoneLabel+'</td>'
+      + '<td style="padding:9px 14px;color:var(--muted);font-size:11px">'+src+'</td>'
+      + '<td style="padding:9px 14px;color:var(--muted);font-size:11px">'+dt+'</td>'
+      + '<td style="padding:9px 14px">'+action+'</td>'
+      + '</tr>'
+  }
+
+  tbl.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+    + '<thead><tr style="border-bottom:1px solid var(--border);background:var(--surface2)">'
+    + '<th style="padding:10px 14px;text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase">Address</th>'
+    + '<th style="padding:10px 14px;text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase">ZIP</th>'
+    + '<th style="padding:10px 14px;text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase">Zone</th>'
+    + '<th style="padding:10px 14px;text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase">Source</th>'
+    + '<th style="padding:10px 14px;text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase">Date</th>'
+    + '<th style="padding:10px 14px;text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase">Action</th>'
+    + '</tr></thead>'
+    + '<tbody>' + rows.map(probeRow).join('') + '</tbody>'
+    + '</table>'
+    + '<div style="padding:10px 14px;font-size:11px;color:var(--muted);border-top:1px solid var(--border)">'
+    + rows.length + ' probe' + (rows.length!==1?'s':'') + ' shown'
+    + '</div>'
+}
+
+
 // ── Poll for new route offers every 2 minutes while runner is on dashboard ──
 let _rnOfferPollTimer = null
 function _stopOfferPoll(){ if(_rnOfferPollTimer){ clearInterval(_rnOfferPollTimer); _rnOfferPollTimer=null } }
@@ -10595,16 +10756,23 @@ async function submitLead(){
 
   let saveErr = null
   try {
-    // Detect zone for this ZIP — determines status
+    // Detect zone for this ZIP
     const _leadZone = ADMIN_ZONES.find(z => {
       const zips = z.zips || (z.zip ? [z.zip] : [])
       return zips.includes(zip) && z.status !== 'inactive'
     })
-    const _leadStatus = (!_leadZone || _leadZone.status === 'waitlist' || _leadZone.status === 'building')
-      ? 'waitlist_pending' : 'pending_review'
-    // Note: if DB has CHECK constraint on status, 'waitlist_pending' may fail silently
-    // The fallback query in loadSignupsFromSupabase handles this by also checking 'pending_review'
-    const _leadIsWl = _leadStatus === 'waitlist_pending'
+    const _zoneExists   = !!_leadZone
+    const _zoneIsLive   = _leadZone?.status === 'live' || _leadZone?.status === 'active'
+    const _zoneWaitlist = _zoneExists && !_zoneIsLive  // waitlist or building zone exists
+
+    // NEW ROUTING:
+    // Existing waitlist zone → auto-approve into HO Management (waitlist status) + notify admin
+    // No zone at all        → goes to Pending HW Waitlist tab + notify admin to create zone
+    // Live zone             → full pending_review signup flow
+    const _leadStatus = _zoneIsLive ? 'pending_review'
+                      : _zoneWaitlist ? 'waitlist_approved'   // auto-add to HO Management
+                      : 'waitlist_pending'                     // no zone — needs admin action
+    const _leadIsWl   = _leadStatus !== 'pending_review'
 
     // Compute H3 index from ZIP centroid for heatmap
     let _leadH3 = null, _leadH3z6 = null
@@ -10636,7 +10804,6 @@ async function submitLead(){
     saveErr = res?.error?.message || null
 
     if(saveErr && (saveErr.includes('status') || saveErr.includes('check') || saveErr.includes('violat'))){
-      // Status constraint — retry with 'pending_review' which always exists
       console.warn('[BinDash] Status constraint — retrying with pending_review')
       const res2 = await _supa.from('homeowner_signups').insert({ ..._baseInsert, status: 'pending_review' })
       saveErr = res2?.error?.message || null
@@ -10646,13 +10813,47 @@ async function submitLead(){
       console.error('[BinDash] Lead save FAILED:', saveErr)
     } else {
       console.log('[BinDash] Lead saved ✅ ZIP', zip, 'status:', _leadStatus)
-      // Patch optional columns that may not exist yet — ignore failures silently
+
+      // If existing waitlist zone → also insert directly into homeowners table
+      // This skips Pending HW and puts them straight into HO Management as waitlist
+      if(_zoneWaitlist && _leadZone){
+        try {
+          await _supa.from('homeowners').insert({
+            first_name:     fn,
+            last_name:      ln || '',
+            email:          email,
+            phone:          ph || null,
+            street_address: addr || null,
+            city:           city || _leadZone.city || null,
+            zip_code:       zip,
+            zone_id:        _leadZone.id,
+            service_type:   isSplit ? 'SPLIT' : svcVal,
+            collection_day: day || null,
+            status:         'waitlist',
+            created_at:     new Date().toISOString(),
+          })
+          console.log('[BinDash] Auto-added to homeowners table as waitlist ✅')
+          // Add to in-memory HOMEOWNERS so it shows immediately
+          HOMEOWNERS.unshift({
+            id: 'wl-'+Date.now(),
+            name: (fn+' '+(ln||'')).trim(),
+            initials: ((fn[0]||'')+(ln?.[0]||'')).toUpperCase()||'?',
+            email, phone: ph||'--', address: addr||'--', city: city||'--',
+            zip, zoneId: _leadZone.id, service: isSplit?'SPLIT':svcVal,
+            day: day||'--', status: 'waitlist', plan: 'plan_a',
+            storage:'--', gate:'--', pets:'None',
+          })
+          if(typeof renderHomeownerList === 'function') renderHomeownerList()
+        } catch(e){ console.warn('[BinDash] homeowners auto-insert:', e.message) }
+      }
+
+      // Patch optional columns silently
       ;(async () => {
         const _patch = {}
-        if(_leadH3)    _patch.h3_index    = _leadH3
-        if(_leadH3z6)  _patch.h3_zone_res6= _leadH3z6
+        if(_leadH3)    _patch.h3_index     = _leadH3
+        if(_leadH3z6)  _patch.h3_zone_res6 = _leadH3z6
         if(_leadCtr){  _patch.lat = _leadCtr[0]; _patch.lng = _leadCtr[1] }
-        if(_leadIsWl)  _patch.is_waitlist  = true
+        if(_leadIsWl)  _patch.is_waitlist   = true
         _patch.is_lead = true
         if(Object.keys(_patch).length > 0){
           await _supa.from('homeowner_signups').update(_patch).eq('email', email)
@@ -10676,7 +10877,9 @@ async function submitLead(){
   if(!saveErr){
     showToast('You\'re on the list for ZIP '+zip+' 🎉','ok')
 
-    // Immediately add to PENDING_HOMEOWNERS so admin sees it without reload
+    // Only add to PENDING_HOMEOWNERS if no zone (needs admin action)
+    // If existing zone, they're already in HOMEOWNERS via auto-insert above
+    if(!_zoneWaitlist){
     const _wlEntry = {
       id:          Date.now(),  // temp id until DB refresh
       name:        (fn+' '+(ln||'')).trim(),
@@ -10700,12 +10903,14 @@ async function submitLead(){
     if(typeof renderPendingHWList === 'function') renderPendingHWList()
     if(typeof updateWaitlistBadge === 'function') updateWaitlistBadge()
     if(typeof updateOverviewCounts === 'function') updateOverviewCounts()
+    } // end if(!_zoneWaitlist)
     // Full reload after 1s to get real DB id and update all badges
     setTimeout(() => {
       loadSignupsFromSupabase?.().then(() => {
         renderPendingHWList?.()
         updateWaitlistBadge?.()
       })
+      if(_zoneWaitlist) loadHomeownersFromSupabase?.().then(() => renderHomeownerList?.())
     }, 1000)
 
     // Email confirmation to homeowner
@@ -10713,10 +10918,12 @@ async function submitLead(){
       sendEmail(em, 'You\'re on the BinDash list for ZIP '+zip, EMAIL.leadConfirm(fn||'there', zip), 'lead_confirm')
     }
 
-    // Alert admin so they can review — critical for expansion
+    // Alert admin — message differs based on whether action is needed
     const svcDisplay = isSplit ? 'Split: ♻️ '+dayR+' / 🗑️ '+dayW : serviceLabel
-    sendEmail('alpha1miller@gmail.com',
-      '⏳ New Waitlist Signup — ZIP '+zip+' · '+fn+' '+ln+' · Needs Review',
+    const _adminSubject = _zoneWaitlist
+      ? '✅ New Waitlist HO Added — ZIP '+zip+' · '+fn+' '+ln+' (auto-added to '+(_leadZone?.name||'zone')+')'
+      : '⚠️ New Signup — ZIP '+zip+' · '+fn+' '+ln+' · No Zone — Action Required'
+    sendEmail('alpha1miller@gmail.com', _adminSubject,
       `<div style="font-family:sans-serif;padding:20px;max-width:520px">
         <h2 style="color:#06d6a0;margin:0 0 16px">New Homeowner on Waitlist</h2>
         <table style="width:100%;font-size:13px;border-collapse:collapse">
@@ -10726,7 +10933,8 @@ async function submitLead(){
           <tr><td style="padding:6px 0;color:#666">Address</td><td>${addr||'—'}</td></tr>
           <tr><td style="padding:6px 0;color:#666">ZIP</td><td style="font-weight:600">${zip}</td></tr>
           <tr><td style="padding:6px 0;color:#666">Service</td><td style="color:#06d6a0;font-weight:600">${svcDisplay}</td></tr>
-          <tr><td style="padding:6px 0;color:#666">Status</td><td><strong>pending_review</strong> — needs admin approval</td></tr>
+          <tr><td style="padding:6px 0;color:#666">Zone</td><td style="font-weight:600">${_leadZone ? (_leadZone.name||zip)+' ('+_leadZone.status+')' : '⚠️ No zone — needs creation'}</td></tr>
+          <tr><td style="padding:6px 0;color:#666">Routing</td><td><strong>${_zoneWaitlist ? '✅ Auto-added to HO Management (waitlist)' : '⚠️ Pending HW Waitlist — assign a zone'}</strong></td></tr>
         </table>
         <div style="margin-top:16px;padding:12px;background:#f8fafc;border-radius:8px;font-size:12px;color:#666">
           Review in Admin → Pending Applicants → Homeowners
@@ -13985,10 +14193,12 @@ function adNav(el, pg){
     'ad-zones':      'Zone Management',
     'ad-dispatch':   'Dispatch',
     'ad-rules':      'Dispatch Rules',
+    'ad-probes':     'Address Probes',
   }
   const titleEl = document.getElementById('ad-pg-title')
   if(titleEl) titleEl.textContent = t[pg] || pg
   if(pg === 'ad-overview')   { updateOverviewCounts(); renderDensityAlerts() }
+  if(pg === 'ad-probes') loadAdminProbes()
   if(pg === 'ad-zones'){
     renderAdminZones()
     // If micro zones map is visible, force re-render after nav transition
@@ -27465,7 +27675,10 @@ async function loadHomeownersFromSupabase(){
       safeQuery(_supa.from('homeowners').select('*').in('status',['active','waitlist']).order('created_at',{ascending:false})),
       // Include waitlist_pending so they show in Homeowners management with waitlist badge
       // They also show in Pending HW → Waitlist tab (not excluded since they're not status='active')
-      safeQuery(_supa.from('homeowner_signups').select('*').in('status',['approved','waitlist_approved','waitlist_pending']).order('created_at',{ascending:false})),
+      // waitlist_pending = not yet admin-reviewed → stays in Pending HW Waitlist tab only
+      // approved/waitlist_approved = admin has acted → show in Homeowners Management
+      // waitlist status in homeowners TABLE comes from the homeowners table query above
+      safeQuery(_supa.from('homeowner_signups').select('*').in('status',['approved','waitlist_approved']).order('created_at',{ascending:false})),
     ])
     hwData     = hwRes?.data     || []
     signupData = sigRes?.data    || []
