@@ -12660,6 +12660,96 @@ async function renderRunnerHeatmap(){
     if(anchorLat) map.setView([anchorLat, anchorLng], 11)
   }
 
+  // ── Draw waitlist/building zones directly in expand mode ─────────────────
+  // These are drawn INDEPENDENTLY of adjacentRes6 so distance doesn't limit them
+  // Show all approved (waitlist/building) zones within ~80km of runner anchor
+  if(mode === 'expand' && anchorLat && typeof h3 !== 'undefined'){
+    const _wlZones = (ADMIN_ZONES||[]).filter(z =>
+      z.status === 'waitlist' || z.status === 'building'
+    )
+    _wlZones.forEach(z => {
+      const zips = z.zips || (z.zip ? [z.zip] : [])
+      const firstZip = zips[0]
+      if(!firstZip) return
+      const ctr = ZIP_CENTROIDS[firstZip]
+      if(!ctr) return
+
+      // Distance check — only show zones within ~80km (roughly 0.72 degrees)
+      const latDiff = Math.abs(ctr[0] - anchorLat)
+      const lngDiff = Math.abs(ctr[1] - (anchorLng||ctr[1]))
+      if(latDiff > 0.72 || lngDiff > 0.72) return
+
+      try {
+        const h8  = h3.latLngToCell(ctr[0], ctr[1], 8)
+        const h6  = h3.cellToParent(h8, 6)
+
+        // Skip if already in runner's own zones
+        if(myZone6Hexes.has(h6)) return
+
+        const b6pts = h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
+
+        // Count signups in this zone's hex children
+        const children = h3.cellToChildren(h6, 8)
+        let zoneHoCount = 0
+        children.forEach(c => { zoneHoCount += hoHexes[c] || 0 })
+        const hasRunner = children.some(c => runnerHexes.has(c))
+
+        // Style
+        const isWl = z.status === 'waitlist'
+        const fillColor = isWl ? 'rgba(245,158,11,.12)' : 'rgba(251,146,60,.12)'
+        const borderColor = isWl ? '#f59e0b' : '#fb923c'
+
+        const poly = L.polygon(b6pts, {
+          color: borderColor, fillColor, fillOpacity: 1,
+          weight: 2.5, opacity: 0.9, dashArray: null, interactive: true,
+        })
+
+        // Rich tooltip
+        const _threshold   = z.threshold || z.activation_threshold || 5
+        const _memberCount = z.homeowners || zoneHoCount || 0
+        const _needed      = Math.max(0, _threshold - _memberCount)
+        const _pct         = Math.min(100, Math.round((_memberCount / _threshold) * 100))
+        const _barFill     = _pct >= 80 ? '#22c55e' : _pct >= 40 ? '#f59e0b' : '#06d6a0'
+        const _statusLabel = isWl ? '⏳ Building waitlist' : '🔨 Building'
+        const _statusColor = isWl ? '#f59e0b' : '#fb923c'
+        const _zoneZip     = zips.join(', ')
+        const _runnerLine  = hasRunner ? '✅ Runner assigned' : '🔍 No runner yet — you could be first'
+        const _tapLine     = !hasRunner ? '<br><span style="color:#06d6a0;font-weight:700">▶ Tap to request this zone</span>' : ''
+
+        const _tip = '<div style="font-family:system-ui;min-width:190px">'
+          + '<div style="font-weight:800;font-size:13px;color:#f0f4ff;margin-bottom:2px">' + (z.name||'Waitlist Zone') + '</div>'
+          + '<div style="font-size:11px;color:#94a3b8;margin-bottom:6px">ZIP ' + _zoneZip + '</div>'
+          + '<div style="font-size:11px;color:' + _statusColor + ';font-weight:700;margin-bottom:8px">' + _statusLabel + '</div>'
+          + '<div style="background:rgba(255,255,255,.08);border-radius:6px;padding:8px;margin-bottom:6px">'
+          + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">'
+          + '<span style="color:#94a3b8">Signups toward launch</span>'
+          + '<span style="color:#f0f4ff;font-weight:700">' + _memberCount + ' / ' + _threshold + '</span>'
+          + '</div>'
+          + '<div style="background:rgba(255,255,255,.1);border-radius:99px;height:5px">'
+          + '<div style="height:100%;width:' + _pct + '%;background:' + _barFill + ';border-radius:99px"></div>'
+          + '</div>'
+          + (_needed > 0
+            ? '<div style="font-size:10px;color:#94a3b8;margin-top:3px">' + _needed + ' more to launch</div>'
+            : '<div style="font-size:10px;color:#22c55e;margin-top:3px">🚀 Ready to launch!</div>')
+          + '</div>'
+          + '<div style="font-size:11px;color:#94a3b8">' + _runnerLine + '</div>' + _tapLine
+          + '</div>'
+
+        poly.bindTooltip(_tip, { direction:'top', className:'h3-tip', sticky:true, offset:[0,-4] })
+
+        // Click: open zone request panel
+        poly.on('click', () => _rnZspOpen(h6, z.id, { hoCount: _memberCount, hasRunner, zoneName: z.name, zoneZip: firstZip }))
+
+        poly.addTo(map)
+        if(!window._rnHeatLayers.open) window._rnHeatLayers.open = []
+        window._rnHeatLayers.open.push(poly)
+
+        console.log('[Scout] Drew waitlist zone:', z.name, firstZip, _memberCount+'HOs')
+      } catch(e){ console.warn('[Scout] waitlist zone draw:', e.message) }
+    })
+    console.log('[Scout] Drew', _wlZones.length, 'waitlist/building zones in expand mode')
+  }
+
   if(loadEl) loadEl.style.display = 'none'
 }
 
