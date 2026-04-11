@@ -27463,9 +27463,9 @@ async function loadHomeownersFromSupabase(){
     let hwData = [], signupData = []
     const [hwRes, sigRes] = await Promise.all([
       safeQuery(_supa.from('homeowners').select('*').in('status',['active','waitlist']).order('created_at',{ascending:false})),
-      // waitlist_pending stays in Pending HW → Waitlist tab until admin approves
-      // Only approved/waitlist_approved entries belong in Homeowners management
-      safeQuery(_supa.from('homeowner_signups').select('*').in('status',['approved','waitlist_approved']).order('created_at',{ascending:false})),
+      // Include waitlist_pending so they show in Homeowners management with waitlist badge
+      // They also show in Pending HW → Waitlist tab (not excluded since they're not status='active')
+      safeQuery(_supa.from('homeowner_signups').select('*').in('status',['approved','waitlist_approved','waitlist_pending']).order('created_at',{ascending:false})),
     ])
     hwData     = hwRes?.data     || []
     signupData = sigRes?.data    || []
