@@ -11711,10 +11711,10 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
     })
   } catch(e){}
 
-  // Also use in-memory HOMEOWNERS as a fallback (covers cases where DB lacks h3_index)
+  // Also use in-memory HOMEOWNERS as a fallback — draw ALL nearby HOs
+  // NO boundary check — show demand even outside runner's selectable area
   ;(window.HOMEOWNERS||[]).forEach(h => {
     try {
-      // Use exact lat/lng if available, else ZIP centroid
       let hexId = null
       if(h.lat && h.lng){
         hexId = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8)
@@ -11723,11 +11723,13 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
         hexId = h3.latLngToCell(ctr[0], ctr[1], 8)
       }
       if(!hexId) return
-      const p7 = h3.cellToParent(hexId, RN_PICKER_RES_SELECT)
-      if(!selectableSet.has(p7)) return
-      if(!window._rnPickerHoHexes[p7]) window._rnPickerHoHexes[p7] = { active:0, waitlist:0 }
-      if(h.status === 'active') window._rnPickerHoHexes[p7].active++
-      else if(h.status === 'waitlist') window._rnPickerHoHexes[p7].waitlist++
+      // Use res-8 directly (RN_PICKER_RES_SELECT = 8, so no parent conversion needed)
+      const p8 = h3.getResolution(hexId) === RN_PICKER_RES_SELECT
+                   ? hexId
+                   : h3.cellToParent(hexId, RN_PICKER_RES_SELECT)
+      if(!window._rnPickerHoHexes[p8]) window._rnPickerHoHexes[p8] = { active:0, waitlist:0 }
+      if(h.status === 'active') window._rnPickerHoHexes[p8].active++
+      else if(h.status === 'waitlist') window._rnPickerHoHexes[p8].waitlist++
     } catch(e){}
   })
 
@@ -11766,14 +11768,14 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
 
   // Draw all res-7 children + a buffer ring outside (shown as locked)
   const allToDraw = new Set(selectableChildren)
-  // Add 1-ring outside res-6 children so the boundary is visible
-  // Only draw selectable children + 1 thin ring outside for context
-
-  // Also add 1-ring outside the res-6 boundary for visual context (shown as locked)
+  // Add 1-ring outside boundary for context
   try {
     h3.gridDisk(h3.cellToParent(anchor8, RN_PICKER_RES_SELECT), 1)
       .forEach(h => { if(!selectableSet.has(h)) allToDraw.add(h) })
   } catch(e){}
+
+  // Add ALL HO demand hexes — even if outside selectable area
+  Object.keys(window._rnPickerHoHexes).forEach(h => allToDraw.add(h))
 
   allToDraw.forEach(hexId => {
     _rnPickerDrawHex(map, hexId, selectableSet, opts)
@@ -11797,6 +11799,21 @@ function _rnPickerDrawHex(map, hexId, selectableSet, opts){
   const ho           = window._rnPickerHoHexes[hexId] || null
   const hasActiveHO  = ho && ho.active > 0
   const hasWaitHO    = ho && ho.waitlist > 0
+
+  // If HO demand exists outside selectable area, draw as orange overlay (non-interactive)
+  if((hasWaitHO || hasActiveHO) && !isSelectable && !isAnchor){
+    const demandColor = hasActiveHO ? '#22c55e' : '#f59e0b'
+    const demandPoly = L.polygon(boundary, {
+      color: demandColor, weight: 2.5,
+      fillColor: demandColor, fillOpacity: 0.28,
+      interactive: true,
+    }).addTo(map)
+    const demandLabel = hasActiveHO
+      ? (ho.active+' active HO'+(ho.active!==1?'s':''))
+      : (ho.waitlist+' waitlist HO'+(ho.waitlist!==1?'s':'')+' — outside your current zone')
+    demandPoly.bindTooltip('<div style="font-size:11px">'+(hasWaitHO?'⏳ ':' ✅ ')+demandLabel+'<br><span style="color:#94a3b8">Expand zone in Dashboard to cover</span></div>', {direction:'top', className:'h3-tip'})
+    return
+  }
 
   const style = _rnPickerHexStyle(isAnchor, isSelected, isSelectable, isAssigned, hasActiveHO, hasWaitHO)
   const poly  = L.polygon(boundary, style).addTo(map)
