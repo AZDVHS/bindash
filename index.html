@@ -11672,7 +11672,7 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   window._rnPickerHoHexes = {}
   try {
     const { data: hos, error: hosErr } = await _supa.from('homeowners')
-      .select('h3_index,lat,lng,status').limit(5000)
+      .select('h3_index,lat,lng,status,street_address,zip_code').limit(5000)
     const rows = (!hosErr && hos) ? hos : []
     // Always fetch homeowner_signups — waitlist_pending shows as amber demand without approval
     let sigRows = []
@@ -11681,20 +11681,38 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
         .select('zip_code,status').limit(3000)
       sigRows = sigs || []
     } catch(e){}
-    rows.forEach(h => {
+    // Process rows — geocode address-only HOs (null lat/lng) so they still show hex demand
+    const _geocodedHexCache = {}
+    for(const h of rows){
       let hexId = h.h3_index || null
       if(!hexId && h.lat && h.lng && typeof h3 !== 'undefined'){
         try { hexId = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8) } catch(e){}
       }
-      if(!hexId) return
+      // If still no hexId, try geocoding from street_address — catches null-lat HOs like Dustin
+      if(!hexId && h.street_address && h.zip_code){
+        const _cacheKey = h.street_address + '|' + h.zip_code
+        if(_geocodedHexCache[_cacheKey]){
+          hexId = _geocodedHexCache[_cacheKey]
+        } else {
+          try {
+            const _gc = await _rnPickerGeocode(h.street_address, '', 'AZ', h.zip_code)
+            if(_gc?.lat){
+              hexId = h3.latLngToCell(_gc.lat, _gc.lng, 8)
+              _geocodedHexCache[_cacheKey] = hexId
+              console.log('[BinDash] Picker demand geocoded:', h.street_address, '→', hexId)
+            }
+          } catch(e){}
+        }
+      }
+      if(!hexId) continue
       try {
         const p7 = h3.cellToParent(hexId, RN_PICKER_RES_SELECT)
-        if(!selectableSet.has(p7)) return
+        // Include hex in demand even if outside selectable area (drawn as context overlay)
         if(!window._rnPickerHoHexes[p7]) window._rnPickerHoHexes[p7] = { active:0, waitlist:0 }
         if(h.status === 'active') window._rnPickerHoHexes[p7].active++
         else window._rnPickerHoHexes[p7].waitlist++
       } catch(e){}
-    })
+    }
     sigRows.forEach(s => {
       const ctr = ZIP_CENTROIDS[s.zip_code]
       if(!ctr) return
@@ -11779,13 +11797,13 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   })
 
   // Draw HO markers ON TOP of all hexes — fetch directly, don't depend on global timing
-  let _allPickerHOs = (window.HOMEOWNERS||[]).filter(h => h.lat && h.lng)
+  // Include ALL HOs — those with null lat/lng will be geocoded from street_address below
+  let _allPickerHOs = (window.HOMEOWNERS||[])
   if(!_allPickerHOs.length){
-    // Direct DB fetch as fallback
+    // Direct DB fetch as fallback — fetch ALL HOs, even those missing lat/lng
     try {
       const { data: _freshHOs } = await _supa.from('homeowners')
         .select('id,first_name,last_name,email,status,lat,lng,street_address,city,zip_code')
-        .not('lat','is',null).not('lng','is',null)
       if(_freshHOs?.length){
         _allPickerHOs = _freshHOs.map(r => ({
           name:    (r.first_name||'')+' '+(r.last_name||''),
@@ -11868,10 +11886,11 @@ function _rnPickerDrawHex(map, hexId, selectableSet, opts){
 
   // If HO demand exists outside selectable area, draw as orange overlay (non-interactive)
   if((hasWaitHO || hasActiveHO) && !isSelectable && !isAnchor){
-    const demandColor = hasActiveHO ? '#22c55e' : '#f59e0b'
+    const demandColor = hasActiveHO ? '#22c55e' : '#FFA500'
+    const demandOpacity = hasActiveHO ? 0.28 : 0.6
     const demandPoly = L.polygon(boundary, {
       color: demandColor, weight: 2.5,
-      fillColor: demandColor, fillOpacity: 0.28,
+      fillColor: demandColor, fillOpacity: demandOpacity,
       interactive: true,
     }).addTo(map)
     const demandLabel = hasActiveHO
@@ -11911,13 +11930,13 @@ function _rnPickerHexStyle(isAnchor, isSelected, isSelectable, isAssigned, hasAc
   if(isSelected){
     if(isAssigned)   return { color:'#4f46e5', weight:2.5, fillColor:'rgba(79,70,229,.22)', fillOpacity:1 }
     if(hasActiveHO)  return { color:'#15803d', weight:2,   fillColor:'rgba(21,128,61,.25)',  fillOpacity:1 }
-    if(hasWaitHO)    return { color:'#b45309', weight:2,   fillColor:'rgba(180,83,9,.22)',   fillOpacity:1 }
+    if(hasWaitHO)    return { color:'#d97706', weight:2.5, fillColor:'#FFA500', fillOpacity:0.6 }
     return { color:'#0d9488', weight:1.5, fillColor:'rgba(13,148,136,.18)', fillOpacity:1 }
   }
   // Not selected — very transparent so map shows through
   if(isAssigned)   return { color:'rgba(79,70,229,.5)',  weight:1.5, fillColor:'rgba(79,70,229,.06)',  fillOpacity:1, dashArray:'3,3' }
   if(hasActiveHO)  return { color:'rgba(21,128,61,.6)',  weight:1,   fillColor:'rgba(21,128,61,.10)',  fillOpacity:1 }
-  if(hasWaitHO)    return { color:'#f59e0b', weight:2.5, fillColor:'rgba(245,158,11,.22)', fillOpacity:1 }
+  if(hasWaitHO)    return { color:'#d97706', weight:2.5, fillColor:'#FFA500', fillOpacity:0.6 }
   return { color:'rgba(100,116,139,.25)', weight:1, fillColor:'rgba(100,116,139,.04)', fillOpacity:1 }
 }
 
