@@ -5204,73 +5204,74 @@ async function safeQuery(q){ try { return await q } catch(e){ console.warn('[Bin
 
 async function populateHWDashboard(){
   if(!currentUser) return
-
   try {
-    let data = null, loadErr = null
-    try {
-      // Use ilike for case-insensitive match, maybeSingle to avoid crash on 0 rows
-      const res = await _supa
-        .from('homeowner_signups')
-        .select('*')
-        .ilike('email', currentUser.email)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      data    = res?.data
-      loadErr = res?.error?.message || null
-    } catch(e){ loadErr = String(e?.message||e) }
+    let data = null
 
-    if(loadErr || !data){
-      console.warn('[BinDash] HW profile load:', loadErr)
-      // Try homeowners table directly as fallback
+    const _userEmail = (currentUser.email || '').trim()
+    const _userId    = currentUser.id || ''
+    console.log('[BinDash] populateHWDashboard — email:', _userEmail, 'uid:', _userId)
+
+    // Tier 1: homeowner_signups by email
+    try {
+      const res = await _supa.from('homeowner_signups').select('*')
+        .ilike('email', _userEmail).order('created_at',{ascending:false}).limit(1).maybeSingle()
+      data = res?.data || null
+      console.log('[BinDash] signups by email — found:', !!data, 'err:', res?.error?.message)
+    } catch(e){ console.warn('[BinDash] signups query err:', e?.message) }
+
+    // Tier 2: homeowners table by email + pull prefs from signups
+    if(!data){
       try {
-        const { data: hwRow } = await _supa
-          .from('homeowners')
-          .select('*')
-          .ilike('email', currentUser.email)
-          .maybeSingle()
+        const { data: hwRow, error: hwErr } = await _supa.from('homeowners').select('*').ilike('email', _userEmail).maybeSingle()
+        console.log('[BinDash] homeowners by email — found:', !!hwRow, 'err:', hwErr?.message)
         if(hwRow){
-          // Also try to pull address/preferences from homeowner_signups
           let sigRow = null
           try {
             const { data: sr } = await _supa.from('homeowner_signups')
               .select('street_address,city,zip_code,state,bin_location,gate_type,gate_code,pet_info,curb_notes,service_notes,service_type,frequency,plan_id,collection_day,collection_day_2,stripe_customer_id,stripe_subscription_id')
-              .ilike('email', currentUser.email).maybeSingle()
+              .ilike('email', _userEmail).maybeSingle()
             sigRow = sr
-          } catch(e2){}
+          } catch(e){}
           data = {
-            ...(sigRow || {}),
-            ...hwRow,
-            status:           hwRow.status || 'waitlist',
-            plan_id:          hwRow.plan_id          || sigRow?.plan_id,
-            collection_day:   hwRow.collection_day   || sigRow?.collection_day,
-            collection_day_2: hwRow.collection_day_2 || sigRow?.collection_day_2,
-            zone_id:          hwRow.zone_id,
-            assigned_runner:  hwRow.assigned_runner,
+            ...(sigRow||{}), ...hwRow,
+            status:                 hwRow.status || 'waitlist',
+            plan_id:                hwRow.plan_id          || sigRow?.plan_id,
+            collection_day:         hwRow.collection_day   || sigRow?.collection_day,
+            collection_day_2:       hwRow.collection_day_2 || sigRow?.collection_day_2,
+            zone_id:                hwRow.zone_id,
+            assigned_runner:        hwRow.assigned_runner,
             stripe_customer_id:     hwRow.stripe_customer_id     || sigRow?.stripe_customer_id,
             stripe_subscription_id: hwRow.stripe_subscription_id || sigRow?.stripe_subscription_id,
           }
-          console.log('[BinDash] HW profile loaded from homeowners table ✅ status:', data.status)
+          console.log('[BinDash] HW profile from homeowners ✅ status:', data.status)
         }
-      } catch(e2){ console.warn('[BinDash] homeowners fallback:', e2) }
+      } catch(e){ console.warn('[BinDash] homeowners fallback err:', e?.message) }
     }
 
-    if(!data){
-      go('S-hw-dash')
-      return
+    // Tier 3: auth_user_id fallback (mismatched email edge case)
+    if(!data && _userId){
+      console.warn('[BinDash] Trying auth_user_id:', _userId)
+      try {
+        const { data: s } = await _supa.from('homeowner_signups').select('*').eq('auth_user_id', _userId).maybeSingle()
+        if(s){ data = s; console.log('[BinDash] Found by uid in signups ✅') }
+      } catch(e){}
+      if(!data){
+        try {
+          const { data: h } = await _supa.from('homeowners').select('*').eq('auth_user_id', _userId).maybeSingle()
+          if(h){ data = {...h, status: h.status||'waitlist'}; console.log('[BinDash] Found by uid in homeowners ✅') }
+        } catch(e){}
+      }
     }
 
-    // If we have signup row, also fetch homeowners table to get zone/runner (more up to date)
+    if(!data){ console.warn('[BinDash] All lookups failed — no profile found for', _userEmail); go('S-hw-dash'); return }
+
+    // If approved/active, also cross-check homeowners table for latest operational fields
     if(data.status === 'approved' || data.status === 'active'){
       try {
-        const { data: hwRow } = await _supa
-          .from('homeowners')
-          .select('zone_id, assigned_runner, collection_day, collection_day_2, plan_id, status')
-          .ilike('email', currentUser.email)
-          .maybeSingle()
+        const { data: hwRow } = await _supa.from('homeowners')
+          .select('zone_id,assigned_runner,collection_day,collection_day_2,plan_id,status,service_type')
+          .ilike('email', _userEmail).maybeSingle()
         if(hwRow){
-          // homeowners table is more authoritative for operational fields
-          // but for plan_id: prefer whichever is non-empty (signups row set at checkout time)
           data = {
             ...data,
             zone_id:          hwRow.zone_id          || data.zone_id,
@@ -5281,29 +5282,26 @@ async function populateHWDashboard(){
             service_type:     hwRow.service_type     || data.service_type,
           }
         }
-      } catch(e){ /* non-blocking */ }
+      } catch(e){}
     }
 
     const row = data
-    // Use DB row for name -- most reliable source
-    const fn = row.first_name || currentUser.user_metadata?.first_name || currentUser.email?.split('@')[0] || 'there'
+    const fn = row.first_name || currentUser.user_metadata?.first_name || _userEmail.split('@')[0] || 'there'
     const ln = row.last_name  || currentUser.user_metadata?.last_name  || ''
     const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || 'HW'
 
-    // Store stripe IDs on window for pause/resume
     window._hwStripeSubId      = row.stripe_subscription_id || null
     window._hwStripeCustomerId = row.stripe_customer_id     || null
     window._hwSubPeriodEnd     = null
-    window._hwProfileRow       = row  // store full row for preference editing
+    window._hwProfileRow       = row
 
     const status = row.status
 
     if(status === 'approved' || status === 'active' || status === 'waitlist'){
       go('S-hw-dash')
       _populateHWDashData(row, fn, ln, initials)
-      loadHWCollections(row.email)
-      setTimeout(_renderHWPayHistory, 600)  // load payment history async after dashboard renders
-      // Hide payment banner for approved accounts
+      loadHWCollections(row.email || _userEmail)
+      setTimeout(_renderHWPayHistory, 600)
       const payBanner = document.getElementById('hw-payment-banner')
       if(payBanner) payBanner.style.display = 'none'
       if(window._showPortalReturnToast){
@@ -5312,66 +5310,43 @@ async function populateHWDashboard(){
       }
 
     } else if(status === 'payment_pending'){
-      // Signed up but skipped payment -- show dashboard with payment banner
       go('S-hw-dash')
       _populateHWDashData(row, fn, ln, initials)
-      // Show payment banner
       const payBanner = document.getElementById('hw-payment-banner')
       if(payBanner) payBanner.style.display = 'block'
-      // Store plan for retry
       window._hwPendingPlanKey = row.plan_id || row.plan || 'plan_a'
-      window._hwPendingEmail   = row.email
+      window._hwPendingEmail   = row.email || _userEmail
 
     } else if(status === 'zone_assigned'){
-      // -- ZONE ASSIGNED: HW was notified, needs to confirm service --
       const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id) || findZoneForZip(row.zip_code||'')
-      if(zone){
-        populateConfirmScreen(row, zone)
-        go('S-hw-confirm')
-      } else {
-        go('S-hw-waitlist')
-      }
+      if(zone){ populateConfirmScreen(row, zone); go('S-hw-confirm') }
+      else { go('S-hw-waitlist') }
 
     } else if(status === 'waitlisted'){
-      // -- WAITLISTED: check if they have an approved homeowners record first --
-      // If they're in homeowners table, show dashboard regardless of signup status
+      // Check homeowners table first — if they have a record, show dashboard
       try {
-        const { data: hwCheck } = await _supa
-          .from('homeowners').select('*').ilike('email', currentUser.email).maybeSingle()
+        const { data: hwCheck } = await _supa.from('homeowners').select('*').ilike('email', _userEmail).maybeSingle()
         if(hwCheck){
-          // They're in homeowners table — show dashboard with waitlist status
           const mergedRow = { ...row, ...hwCheck, status: hwCheck.status || 'waitlist' }
           window._hwProfileRow = mergedRow
-          go('S-hw-dash')
-          _populateHWDashData(mergedRow, fn, ln, initials)
-          loadHWCollections(mergedRow.email)
+          go('S-hw-dash'); _populateHWDashData(mergedRow, fn, ln, initials)
+          loadHWCollections(mergedRow.email || _userEmail)
           setTimeout(_renderHWPayHistory, 600)
           return
         }
-      } catch(e){ /* non-blocking */ }
-      // No homeowners record — show waitlist screen
+      } catch(e){}
       const zip = row.zip_code || ''
       const zone = findZoneForZip(zip)
-      if(zone && zone.status === 'live'){
-        populateConfirmScreen(row, zone)
-        go('S-hw-confirm')
-      } else {
-        const zipDisplay = document.getElementById('waitlist-zip-display')
-        if(zipDisplay) zipDisplay.textContent = 'ZIP ' + zip
-        go('S-hw-waitlist')
-      }
+      if(zone && zone.status === 'live'){ populateConfirmScreen(row, zone); go('S-hw-confirm') }
+      else { const zipDisplay = document.getElementById('waitlist-zip-display'); if(zipDisplay) zipDisplay.textContent = 'ZIP '+zip; go('S-hw-waitlist') }
 
     } else if(status === 'pending_review'){
-      // -- PENDING REVIEW: already confirmed, waiting for admin --
       go('S-hw-pending')
 
     } else if(status === 'rejected'){
-      // Rejected -- back to landing with message
-      showToast('Your application was not approved. Contact support for details.', 'err')
-      go('S-land')
+      showToast('Your application was not approved. Contact support for details.', 'err'); go('S-land')
 
     } else {
-      // Unknown status -- default to pending screen
       go('S-hw-pending')
     }
 
