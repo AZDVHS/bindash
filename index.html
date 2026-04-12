@@ -19154,12 +19154,14 @@ function renderHomeownerCard(hw){
   const planLabels={ plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans · $44.99/mo', plan_c:'Split · $54.99/mo',
     oan_a:'OAN 1 Can · $19.99+usage', oan_b:'OAN 2 Cans · $19.99+usage', oan_c:'OAN Split · $19.99+usage' }
   const _hwSvc = (hw.service||'').toUpperCase()
-  const mrr = hw.plan==='plan_b'?44.99
-    : hw.plan==='plan_c'?54.99
-    : hw.plan?.startsWith('oan')?19.99
-    : _hwSvc==='SPLIT'?54.99
-    : (_hwSvc==='BOTH'||_hwSvc.includes('BOTH'))?44.99
-    : 34.99
+  const _hwPlanKey = (() => {
+    if(hw.plan && STRIPE_PRICES[hw.plan]) return hw.plan
+    if(_hwSvc === 'SPLIT') return 'plan_c'
+    if(_hwSvc === 'BOTH' || _hwSvc.includes('BOTH')) return 'plan_b'
+    if(_hwSvc === 'GENERAL') return 'plan_b'
+    return 'plan_a'
+  })()
+  const mrr = STRIPE_PRICES[_hwPlanKey]?.monthlyAmt || STRIPE_PRICES[_hwPlanKey]?.baseAmt || 34.99
   const schedLabel = hw.service==='SPLIT'
     ? `♻️ ${hw.dayRecycling||'--'} / 🗑️ ${hw.dayWaste||'--'}`
     : hw.day||'--'
@@ -19439,43 +19441,63 @@ async function renderPaymentsPage(){
 
 // -- DATA LOADER ---------------------------------------------------
 async function loadPaymentsData(){
+  // Canonical plan key resolver — maps plan_id OR service_type string → STRIPE_PRICES key
+  const resolvePlanKey = (planId, svcType) => {
+    if(planId && STRIPE_PRICES[planId]) return planId
+    const s = (svcType||'').toLowerCase()
+    if(s.includes('split'))  return 'plan_c'
+    if(s.includes('both') || s.includes('same day') || s.includes('recycling + general') || s.includes('recycling+general')) return 'plan_b'
+    if(s.includes('bin out as needed') || s.startsWith('oan')) return 'oan_a'
+    if(s.includes('general waste') || s === 'general') return 'plan_b'
+    return 'plan_a'
+  }
+  const planLabels = {
+    plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split Days',
+    oan_a:'Bin Out As Needed', oan_b:'Bin Out As Needed 2-Can', oan_c:'Bin Out As Needed Split',
+  }
+
   // Build HW_PAYMENTS from homeowner_signups in DB
   try {
     const { data: hwRows } = await _supa
       .from('homeowner_signups')
-      .select('id, first_name, last_name, email, plan, stripe_subscription_id, stripe_customer_id, status')
+      .select('id, first_name, last_name, email, plan_id, service_type, stripe_subscription_id, stripe_customer_id, status')
       .in('status', ['approved','active'])
       .order('created_at', { ascending: false })
 
-    const planPrices = { plan_a:34.99, plan_b:44.99, plan_c:54.99, w1:34.99, w2:44.99, w3:54.99 }
-    const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split', oan_a:'Bin Out As Needed — 1 Can', oan_b:'Bin Out As Needed — 2 Cans Same Day', oan_c:'Bin Out As Needed — 2 Cans Split Days', w1:'1 Can', w2:'2 Cans Same Day', w3:'2 Cans Split' }
     HW_PAYMENTS = (hwRows||[])
-      .filter(hw => hw.status === 'approved' || hw.status === 'active')  // never show waitlist
+      .filter(hw => hw.status === 'approved' || hw.status === 'active')
       .map(hw => {
-      const planKey = hw.plan || 'plan_a'
-      return {
-        hwId:        hw.id,
-        name:        (hw.first_name||'')+' '+(hw.last_name||''),
-        email:       hw.email,
-        plan:        planKey,
-        planLabel:   planLabels[planKey] || planKey,
-        monthly:     planPrices[planKey] || 34.99,
-        status:      hw.status || 'active',
-        nextCharge:  _nextChargeDate(),
-        lastCharged: '--',
-        cardLast4:   '----',
-        stripeSubId: hw.stripe_subscription_id || null,
-      }
-    })
-    // Fallback to in-memory if DB empty — only active (paying) homeowners
+        const planKey = resolvePlanKey(hw.plan_id, hw.service_type)
+        const monthly = STRIPE_PRICES[planKey]?.monthlyAmt || STRIPE_PRICES[planKey]?.baseAmt || 34.99
+        return {
+          hwId:        hw.id,
+          name:        (hw.first_name||'')+' '+(hw.last_name||''),
+          email:       hw.email,
+          plan:        planKey,
+          planLabel:   planLabels[planKey] || planKey,
+          monthly,
+          status:      hw.status || 'active',
+          nextCharge:  _nextChargeDate(),
+          lastCharged: '--',
+          cardLast4:   '----',
+          stripeSubId: hw.stripe_subscription_id || null,
+        }
+      })
+
+    // Fallback to in-memory HOMEOWNERS if DB empty
     if(!HW_PAYMENTS.length){
       HW_PAYMENTS = HOMEOWNERS
         .filter(hw => hw.status === 'active')
-        .map(hw => ({
-          hwId:hw.id, name:hw.name, email:hw.email, plan:hw.plan||'plan_a',
-          planLabel:'1 Can', monthly:34.99, status:'active',
-          nextCharge:_nextChargeDate(), lastCharged:'--', cardLast4:'----', stripeSubId:null,
-        }))
+        .map(hw => {
+          const planKey = resolvePlanKey(hw.plan, hw.service)
+          const monthly = STRIPE_PRICES[planKey]?.monthlyAmt || STRIPE_PRICES[planKey]?.baseAmt || 34.99
+          return {
+            hwId:hw.id, name:hw.name, email:hw.email,
+            plan:planKey, planLabel:planLabels[planKey]||planKey,
+            monthly, status:'active',
+            nextCharge:_nextChargeDate(), lastCharged:'--', cardLast4:'----', stripeSubId:null,
+          }
+        })
     }
   } catch(e){ console.warn('HW payments load:', e) }
 
@@ -20253,7 +20275,19 @@ async function saveHWDetail(hwId){
   renderHomeownerList()
   showToast(newName + ' updated ✅', 'ok')
 
-  // homeowner_signups has all columns including collection_day_2
+  // Derive canonical plan_id from service type — synced with STRIPE_PRICES
+  const _svcToPlan = { 'RECYCLING':'plan_a', 'GENERAL':'plan_b', 'BOTH':'plan_b', 'SPLIT':'plan_c' }
+  const newPlanKey = _svcToPlan[newService] || hw.plan || 'plan_a'
+  // Preserve OAN plan if not changing service type category
+  const finalPlanKey = (hw.plan?.startsWith('oan_') && newService !== 'SPLIT') ? hw.plan : newPlanKey
+
+  // Standardized service_type strings — consistent across all DB tables
+  const _svcLabel = { 'RECYCLING':'Recycling', 'GENERAL':'General Waste', 'BOTH':'Recycling + General Waste', 'SPLIT':'Split Days' }
+
+  // Update in-memory plan so MRR card shows correctly immediately
+  hw.plan = finalPlanKey
+
+  // homeowner_signups — all columns
   const updSignups = {
     first_name:       newName.split(' ')[0] || '',
     last_name:        newName.split(' ').slice(1).join(' ') || '',
@@ -20263,9 +20297,8 @@ async function saveHWDetail(hwId){
     street_address:   newAddr  || null,
     zone_id:          newZone  || null,
     assigned_runner:  newRunner || null,
-    service_type:     newService === 'SPLIT' ? 'Split days'
-                    : newService === 'BOTH'  ? 'Recycling + General Waste'
-                    : newService === 'GENERAL' ? 'General Waste' : 'Recycling',
+    service_type:     _svcLabel[newService] || 'Recycling',
+    plan_id:          finalPlanKey,
     collection_day:   newDay   || null,
     collection_day_2: newDay2  || null,
     service_notes:    newNotes || null,
@@ -20286,7 +20319,7 @@ async function saveHWDetail(hwId){
     service_type:     updSignups.service_type,
     collection_day:   newDay   || null,
     collection_day_2: newDay2  || null,
-    plan_id:          hw.plan  || null,
+    plan_id:          finalPlanKey,
     status:           newStatus,
     updated_at:       new Date().toISOString(),
   }
@@ -28534,7 +28567,14 @@ async function loadSignupsFromSupabase(){
         zip:             row.zip_code || '',
         service:         row.service_type || 'Recycling',
         freq:            row.frequency || 'weekly',
-        plan:            row.plan_id || null,   // null → service type used for display
+        plan:            (() => {
+          if(row.plan_id && STRIPE_PRICES[row.plan_id]) return row.plan_id
+          const s = (row.service_type||'').toLowerCase()
+          if(s.includes('split') || row.collection_day_2) return 'plan_c'
+          if(s.includes('both') || s.includes('same day') || s.includes('recycling + general')) return 'plan_b'
+          if(s.includes('bin out as needed') || s.startsWith('oan')) return 'oan_a'
+          return 'plan_a'
+        })(),
         day:             row.collection_day || '--',
         svcNotes:        row.service_notes || '',
         cardLast4:       row.card_last4 || '----',
@@ -28695,6 +28735,15 @@ async function loadHomeownersFromSupabase(){
         : (svcRaw.includes('general') || svcRaw.includes('waste')) ? 'GENERAL'
         : 'RECYCLING'
 
+      // Always resolve a valid plan key — never leave null
+      const resolvedPlanId = (() => {
+        if(row.plan_id && STRIPE_PRICES[row.plan_id]) return row.plan_id
+        if(isSplit) return 'plan_c'
+        if(service === 'BOTH' || service === 'GENERAL') return 'plan_b'
+        if(svcRaw.includes('bin out as needed') || svcRaw.startsWith('oan')) return 'oan_a'
+        return 'plan_a'
+      })()
+
       return {
         id:             row.id,
         signupId:       fromSignup ? row.id : (row.signup_id||null),
@@ -28711,7 +28760,7 @@ async function loadHomeownersFromSupabase(){
         day:            day || '--',
         dayRecycling:   isSplit ? (day  || null) : null,
         dayWaste:       isSplit ? (day2 || null) : null,
-        plan:           row.plan_id || null,   // null → service type derived for display
+        plan:           resolvedPlanId,
         assignedRunner: row.assigned_runner||null,
         referredBy:     row.referred_by||row.referred_by_runner||null,
         referredByEmail:row.referred_by_email||null,
