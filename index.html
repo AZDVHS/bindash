@@ -17149,12 +17149,21 @@ function showEditPreferences(){
   const curPlan    = row.plan_id || ''
   const curNotes   = row.service_notes || ''
 
-  // Robust service type detection
-  const isOAN      = curPlan.startsWith('oan_')
-  const isSplitCurrent = (curPlan==='plan_c'||curPlan==='oan_c') || !!curDay2 || curSvcRaw.includes('split')
-  const isBoth     = !isSplitCurrent && (curSvcRaw.includes('both')||curSvcRaw.includes('general')||curPlan==='plan_b'||curPlan==='oan_b')
-  const isWaste    = !isSplitCurrent && !isBoth && curSvcRaw.includes('waste')
-  const isRecycling= !isSplitCurrent && !isBoth && !isWaste
+  // Robust service type detection — use stored plan_id OR derive from acct-plan-name element
+  // acct-plan-name is already populated by _populateHWDashData so it's reliable
+  const _resolvedPlanKey = curPlan || (() => {
+    const planName = document.getElementById('acct-plan-name')?.textContent || ''
+    if(planName.includes('Split')) return 'plan_c'
+    if(planName.includes('Same Day') || planName.includes('2 Can')) return 'plan_b'
+    if(planName.includes('Bin Out As Needed') || planName.includes('OAN')) return 'oan_a'
+    return 'plan_a'
+  })()
+
+  const isOAN      = _resolvedPlanKey.startsWith('oan_')
+  const isSplitCurrent = (_resolvedPlanKey==='plan_c'||_resolvedPlanKey==='oan_c') || !!curDay2 || curSvcRaw.includes('split')
+  const isBoth     = !isSplitCurrent && !isOAN && (_resolvedPlanKey==='plan_b' || curSvcRaw.includes('both') || curSvcRaw.includes('general'))
+  const isWaste    = !isSplitCurrent && !isBoth && !isOAN && curSvcRaw.includes('waste')
+  const isRecycling= !isSplitCurrent && !isBoth && !isWaste && !isOAN
 
   const _active = 'border:1.5px solid var(--cyan);background:rgba(6,214,160,.07);border-radius:10px;padding:12px;cursor:pointer;text-align:center'
   const _idle   = 'border:1.5px solid var(--border2);background:transparent;border-radius:10px;padding:12px;cursor:pointer;text-align:center'
@@ -17191,7 +17200,6 @@ function showEditPreferences(){
     </div>
     <input type="hidden" id="ep-svc-val" value="${isSplitCurrent?'split':isBoth?'both':isWaste?'waste':isOAN?'oan':'recycling'}">
     <div id="ep-plan-notice" style="display:none;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#fbbf24"></div>
-    <div class="sec-h">Collection schedule</div>
     <div id="ep-day-single" style="${isSplitCurrent?'display:none':''}">
       <div class="field"><label>Collection day</label>
         <select id="ep-day">
@@ -17260,7 +17268,14 @@ function epSelectSvc(svc){
   const notice  = document.getElementById('ep-plan-notice')
   const planSec = document.getElementById('ep-plan-section')
   const row = window._hwProfileRow || {}
-  const currentKey = row.plan_id || 'plan_a'
+  // Derive current plan key same way as showEditPreferences
+  const currentKey = row.plan_id || (() => {
+    const planName = document.getElementById('acct-plan-name')?.textContent || ''
+    if(planName.includes('Split')) return 'plan_c'
+    if(planName.includes('Same Day') || planName.includes('2 Can')) return 'plan_b'
+    if(planName.includes('Bin Out As Needed') || planName.includes('OAN')) return 'oan_a'
+    return 'plan_a'
+  })()
   const isOAN = currentKey.startsWith('oan')
   const planPrices = { plan_a:34.99, plan_b:44.99, plan_c:54.99 }
   const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split Days' }
