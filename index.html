@@ -5874,14 +5874,27 @@ async function _populateHWDashData(row, fn, ln, initials){
   safe('prop-bin-storage', row.bin_location  || '--')
   safe('prop-gate',       row.gate_type ? row.gate_type + (row.gate_code ? ' . Code: ' + row.gate_code : '') : '--')
   safe('prop-pets',       row.pet_info       || 'None')
-  safe('pref-service',    row.service_type   || 'Recycling')
+  // Derive service label — prefer service_type, fall back to plan
+  const _svcLabel = (() => {
+    const s = (row.service_type||'').toLowerCase()
+    if(s.includes('split')) return 'Recycling & Waste — Split Days'
+    if(s.includes('both') || s.includes('general') && s.includes('recycl')) return 'Recycling & General Waste'
+    if(s.includes('waste') || s.includes('general')) return 'General Waste'
+    if(s.includes('recycl')) return 'Recycling'
+    // Fall back to plan
+    if(effectivePlanKey === 'plan_c' || effectivePlanKey === 'oan_c') return 'Recycling & Waste — Split Days'
+    if(effectivePlanKey === 'plan_b' || effectivePlanKey === 'oan_b') return 'Recycling & General Waste'
+    if(effectivePlanKey === 'oan_a') return 'Bin Out As Needed'
+    return 'Recycling'
+  })()
+  safe('pref-service', _svcLabel)
   safe('pref-day', row.collection_day_2
     ? (row.collection_day||'--') + ' & ' + row.collection_day_2
-    : (row.collection_day || '--'))
-  const prevDayName = colDayIdx >= 0 ? dayNames[(colDayIdx + 6) % 7] : '--'
+    : (row.collection_day || (colDayIdx >= 0 ? colDay : '--')))
+  const prevDayName = colDayIdx >= 0 ? dayNames[(colDayIdx + 6) % 7] : (row.collection_day ? dayNames[(dayNames.findIndex(d=>d.toLowerCase()===row.collection_day.toLowerCase())+6)%7] : '--')
   safe('pref-binout-night', prevDayName !== '--' ? prevDayName + ' evening' : '--')
   safe('pref-plan',       planLabels[effectivePlanKey] || planLabels[planKey] || '--')
-  safe('pref-notes',      row.service_notes  || '--')
+  safe('pref-notes',      row.service_notes && row.service_notes !== '--' ? row.service_notes : (row.curb_notes && row.curb_notes !== '--' ? row.curb_notes : '--'))
 
   // Populate new card summary lines
   safe('hw-next-col-sub', colDayIdx>=0 ? (prevDayName+' evening Bin Out · '+colDay+' daytime Bin In') : 'No schedule set')
@@ -7950,14 +7963,8 @@ function renderProbesTable(){
       // Build ack button safely using dataset to avoid quote/hyphen issues with UUID
       action += '<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--muted);margin-left:4px" data-probe-id="' + p.id + '" onclick="_acknowledgeProbe(this.dataset.probeId,this)">✓ Ack</button>'
     }
-    return '<tr style="border-bottom:1px solid rgba(30,40,64,.4)">'
-      + '<td style="padding:9px 14px;color:var(--text);font-size:12px">'+addr+'</td>'
-      + '<td style="padding:9px 14px;font-weight:700;color:var(--cyan)">'+( p.zip_code||'—')+'</td>'
-      + '<td style="padding:9px 14px;font-size:12px">'+zoneLabel+'</td>'
-      + '<td style="padding:9px 14px;color:var(--muted);font-size:11px">'+src+'</td>'
-      + '<td style="padding:9px 14px;color:var(--muted);font-size:11px">'+dt+'</td>'
-      + '<td style="padding:9px 14px">'+action+'</td>'
-      + '</tr>'
+    const isCustomReq = src === 'custom_callout_request'
+    return '<tr style="border-bottom:1px solid rgba(30,40,64,.4);' + (isCustomReq ? 'background:rgba(245,158,11,.04);' : '') + '">'      + '<td style="padding:9px 14px;color:var(--text);font-size:12px">'+addr+(p.notes&&isCustomReq?'<div style="font-size:10px;color:#fbbf24;margin-top:3px;line-height:1.5">'+p.notes.substring(0,120)+(p.notes.length>120?'…':'')+'</div>':'')+'</td>'      + '<td style="padding:9px 14px;font-weight:700;color:var(--cyan)">'+( p.zip_code||'—')+'</td>'      + '<td style="padding:9px 14px;font-size:12px">'+zoneLabel+'</td>'      + '<td style="padding:9px 14px;font-size:11px">'+(isCustomReq?'<span style="background:rgba(245,158,11,.15);color:#fbbf24;padding:2px 7px;border-radius:8px;font-weight:700;font-size:10px">🔧 Custom Request</span>':'<span style="color:var(--muted)">'+src+'</span>')+'</td>'      + '<td style="padding:9px 14px;color:var(--muted);font-size:11px">'+dt+'</td>'      + '<td style="padding:9px 14px">'+action+'</td>'      + '</tr>'
   }
 
   tbl.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px">'
@@ -16437,23 +16444,54 @@ function confirmCallout(){
   const isRecycling = document.getElementById('co-r1').classList.contains('on')
 
   if(isCustom){
-    const desc = document.getElementById('co-custom-desc')?.value?.trim() || ''
+    const desc  = document.getElementById('co-custom-desc')?.value?.trim() || ''
+    const notes = document.getElementById('co-notes')?.value?.trim() || ''
     if(!desc){ showToast('Please describe your custom request','err'); return }
-    // For custom requests — log to DB and notify admin, no automatic charge
     closeM()
     showToast('Custom request submitted ✅ — our team will contact you to confirm pricing before any charge', 'ok', 7000)
-    // Save to Supabase as a custom callout probe
     ;(async()=>{
+      const row    = window._hwProfileRow || {}
+      const hwName = (row.first_name||'') + ' ' + (row.last_name||'')
+      const hwEmail= row.email || currentUser?.email || ''
+      const hwAddr = row.street_address || ''
+      const hwZip  = row.zip_code || ''
       try {
         await _supa.from('address_probes').insert({
-          street_address: (window._hwProfileRow?.street_address||null),
-          zip_code: window._hwProfileRow?.zip_code||null,
-          source: 'custom_callout_request',
-          status: 'not_enrolled',
-          notes: 'CUSTOM REQUEST: ' + desc + ' | Date: ' + dateVal + ' | Notes: ' + (document.getElementById('co-notes')?.value||''),
-          created_at: new Date().toISOString(),
+          street_address: hwAddr || null,
+          city:           row.city || null,
+          state:          'AZ',
+          zip_code:       hwZip || null,
+          source:         'custom_callout_request',
+          status:         'not_enrolled',
+          notes:          `🔧 CUSTOM REQUEST from ${hwName} (${hwEmail}) | Date: ${dateVal} | Request: ${desc}${notes?' | Extra notes: '+notes:''}`,
+          created_at:     new Date().toISOString(),
         })
       } catch(e){ console.warn('[BinDash] Custom callout save:', e.message) }
+      // Email admin
+      try {
+        sendEmail(
+          'alpha1miller@gmail.com',
+          `🔧 Custom Callout Request — ${hwName || hwEmail}`,
+          `<div style="font-family:sans-serif;padding:20px;max-width:520px">
+            <h2 style="color:#f59e0b;margin:0 0 4px">Custom Callout Request</h2>
+            <p style="color:#666;margin:0 0 16px">A homeowner has submitted a custom service request requiring a quote.</p>
+            <table style="width:100%;font-size:13px;border-collapse:collapse">
+              <tr><td style="padding:5px 0;color:#666;width:110px">Homeowner</td><td style="font-weight:600">${hwName}</td></tr>
+              <tr><td style="padding:5px 0;color:#666">Email</td><td>${hwEmail}</td></tr>
+              <tr><td style="padding:5px 0;color:#666">Address</td><td>${hwAddr}${hwZip?' · ZIP '+hwZip:''}</td></tr>
+              <tr><td style="padding:5px 0;color:#666">Date needed</td><td style="font-weight:600">${dateVal}</td></tr>
+              <tr><td style="padding:5px 0;color:#666">Request</td><td style="font-weight:600;color:#92400e">${desc}</td></tr>
+              ${notes?`<tr><td style="padding:5px 0;color:#666">Extra notes</td><td>${notes}</td></tr>`:''}
+            </table>
+            <div style="margin-top:16px;padding:12px;background:#fffbeb;border-radius:8px;font-size:12px;color:#92400e">
+              ⚠️ This request is <strong>subject to price changes</strong> based on the nature of the work.<br>
+              Contact the homeowner to confirm scope and pricing before dispatching a runner.<br><br>
+              Review in Admin → Address Probes (source: custom_callout_request).
+            </div>
+          </div>`,
+          'custom_callout_admin_alert'
+        )
+      } catch(e){ console.warn('[BinDash] Custom callout email:', e.message) }
     })()
     return
   }
@@ -16921,14 +16959,16 @@ async function confirmPlanChange(planLetter, priceId, planKey){
 
 // -- PROPERTY & PREFERENCES MODALS ----------------
 function showEditProperty(){
-  // Pre-populate from current DB data
-  const addr  = document.getElementById('prop-address')?.textContent || ''
-  const cityZip = document.getElementById('prop-city-zip')?.textContent || ''
-  const city  = cityZip.split(',')[0]?.trim() || ''
-  const zip   = cityZip.match(/\d{5}/)?.[0] || ''
-  const binLoc = document.getElementById('prop-bin-storage')?.textContent || ''
-  const gate  = document.getElementById('prop-gate')?.textContent || ''
-  const pets  = document.getElementById('prop-pets')?.textContent || ''
+  // Always read from DB row — DOM may show formatted/blank text
+  const row   = window._hwProfileRow || {}
+  const addr  = row.street_address || ''
+  const city  = row.city || ''
+  const zip   = row.zip_code || ''
+  const binLoc = row.bin_location || ''
+  const gate  = row.gate_type || ''
+  const gateCode = row.gate_code || ''
+  const pets  = row.pet_info || ''
+  const curb  = row.curb_notes || ''
 
   document.getElementById('modal-box').innerHTML=`
   <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit Property</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
@@ -16958,27 +16998,33 @@ function showEditProperty(){
       </select>
     </div>
     <div class="field"><label>Gate code / access notes</label>
-      <input id="ep-gatecode" placeholder="e.g. 1234" value="${gate.includes('Code:')?gate.split('Code:')[1].trim():''}">
+      <input id="ep-gatecode" placeholder="e.g. 1234" value="${gateCode}">
     </div>
     <div class="field"><label>Pets on property</label>
       <select id="ep-pets">
-        <option ${pets==='None'||pets==='--'?'selected':''}>No pets</option>
-        <option ${pets.includes('Dog')?'selected':''}>Dog -- friendly</option>
-        <option ${pets.includes('keep gate')?'selected':''}>Dog -- keep gate closed</option>
-        <option ${pets.includes('Other')?'selected':''}>Other pets</option>
-        <option ${pets.includes('Cat')?'selected':''}>Cats only (indoor)</option>
+        <option ${!pets||pets==='None'||pets==='--'?'selected':''}>No pets</option>
+        <option ${(pets||'').includes('Dog')&&!(pets||'').includes('gate')?'selected':''}>Dog -- friendly</option>
+        <option ${(pets||'').includes('keep gate')?'selected':''}>Dog -- keep gate closed</option>
+        <option ${(pets||'').includes('Other')?'selected':''}>Other pets</option>
+        <option ${(pets||'').includes('Cat')?'selected':''}>Cats only (indoor)</option>
       </select>
     </div>
     <div class="field"><label>Curb placement / special notes</label>
-      <textarea id="ep-notes" placeholder="e.g. Place bins left of driveway behind mailbox">${document.getElementById('pref-notes')?.textContent||''}</textarea>
+      <textarea id="ep-notes" placeholder="e.g. Place bins left of driveway behind mailbox">${curb && curb!=='--' ? curb : ''}</textarea>
     </div>
     <div class="sec-h">Property Photos <span style="font-size:10px;font-weight:400;color:var(--muted)">Help your runner identify your bins and access</span></div>
     <div id="ep-photos-wrap" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
-    <label style="display:flex;align-items:center;gap:8px;background:rgba(6,214,160,.06);border:1.5px dashed rgba(6,214,160,.35);border-radius:9px;padding:10px 14px;cursor:pointer;font-size:12px;color:var(--cyan)">
-      📷 Add photo
-      <input type="file" id="ep-photo-input" accept="image/*" multiple style="display:none" onchange="epAddPhotos(this.files)">
-    </label>
-    <div style="font-size:10px;color:var(--muted);margin-top:5px">Tap existing photos to remove. Max 5 photos.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;background:rgba(6,214,160,.06);border:1.5px dashed rgba(6,214,160,.35);border-radius:9px;padding:10px 14px;cursor:pointer;font-size:12px;color:var(--cyan);flex:1;min-width:120px;justify-content:center">
+        📷 Camera
+        <input type="file" accept="image/*" capture="environment" style="display:none" onchange="epAddPhotos(this.files)">
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;background:rgba(6,214,160,.06);border:1.5px dashed rgba(6,214,160,.35);border-radius:9px;padding:10px 14px;cursor:pointer;font-size:12px;color:var(--cyan);flex:1;min-width:120px;justify-content:center">
+        🖼 From Files
+        <input type="file" id="ep-photo-input" accept="image/*" multiple style="display:none" onchange="epAddPhotos(this.files)">
+      </label>
+    </div>
+    <div style="font-size:10px;color:var(--muted);margin-top:5px">Tap existing photos to remove · Max 5 photos</div>
     <div id="ep-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:4px"></div>
   </div>
   <div class="mf">
@@ -17082,56 +17128,54 @@ async function saveEditProperty(){
   }
 }
 function showEditPreferences(){
-  // Read current values from populated elements
-  // Always read from DB row — DOM text can be formatted differently than raw values
   const row        = window._hwProfileRow || {}
-  const curDay     = row.collection_day    || document.getElementById('pref-day')?.textContent?.trim()     || 'Monday'
+  const curDay     = row.collection_day    || 'Monday'
   const curDay2    = row.collection_day_2  || ''
-  const curSvc     = row.service_type      || document.getElementById('pref-service')?.textContent?.trim() || 'recycling'
-  const curPlan    = row.plan_id           || document.getElementById('acct-plan-name')?.dataset?.planId   || ''
-  const curNotes   = row.service_notes     || document.getElementById('pref-notes')?.textContent?.trim()   || ''
-  const curBinout  = row.binout_night      || document.getElementById('pref-binout-night')?.textContent?.trim() || ''
+  const curSvcRaw  = (row.service_type || '').toLowerCase()
+  const curPlan    = row.plan_id || ''
+  const curNotes   = row.service_notes || ''
 
-  // Detect split-day service from raw DB value
-  const isSplitCurrent = (row.plan_id==='plan_c' || row.plan_id==='oan_c') || !!row.collection_day_2 || curSvc.toLowerCase().includes('split')
+  // Robust service type detection
+  const isOAN      = curPlan.startsWith('oan_')
+  const isSplitCurrent = (curPlan==='plan_c'||curPlan==='oan_c') || !!curDay2 || curSvcRaw.includes('split')
+  const isBoth     = !isSplitCurrent && (curSvcRaw.includes('both')||curSvcRaw.includes('general')||curPlan==='plan_b'||curPlan==='oan_b')
+  const isWaste    = !isSplitCurrent && !isBoth && curSvcRaw.includes('waste')
+  const isRecycling= !isSplitCurrent && !isBoth && !isWaste
 
-  // Plan pricing for change notification
+  const _active = 'border:1.5px solid var(--cyan);background:rgba(6,214,160,.07);border-radius:10px;padding:12px;cursor:pointer;text-align:center'
+  const _idle   = 'border:1.5px solid var(--border2);background:transparent;border-radius:10px;padding:12px;cursor:pointer;text-align:center'
+  const _oanActive = 'border:1.5px solid #fbbf24;background:rgba(245,158,11,.07);border-radius:10px;padding:12px;cursor:pointer;text-align:center'
+
   const planPrices = {
-    plan_a: { label:'1 Can — Weekly', price: 34.99 },
-    plan_b: { label:'2 Cans Same Day — Weekly', price: 44.99 },
-    plan_c: { label:'2 Cans Split Days — Weekly', price: 54.99 },
-    oan_a:  { label:'Bin Out As Needed — 1 Can', price: 19.99, oan: true },
-    oan_b:  { label:'Bin Out As Needed — 2 Cans Same Day', price: 19.99, oan: true },
-    oan_c:  { label:'Bin Out As Needed — 2 Cans Split', price: 19.99, oan: true },
+    plan_a:{label:'1 Can — Weekly',price:34.99}, plan_b:{label:'2 Cans Same Day',price:44.99}, plan_c:{label:'2 Cans Split Days',price:54.99},
+    oan_a:{label:'Bin Out As Needed — 1 Can',price:19.99,oan:true}, oan_b:{label:'Bin Out As Needed — 2 Cans',price:19.99,oan:true}, oan_c:{label:'Bin Out As Needed — Split',price:19.99,oan:true},
   }
-  const currentPlanKey = row.plan_id || 'plan_a'
-  const currentPlanPrice = planPrices[currentPlanKey]?.price || 34.99
+  const currentPlanPrice = planPrices[curPlan]?.price || 34.99
 
   document.getElementById('modal-box').innerHTML=`
   <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit Service Preferences</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
   <div class="mb" style="max-height:70vh;overflow-y:auto">
     <div class="sec-h" style="margin-top:0">Which bins does your runner handle?</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
-      <div id="ep-svc-recycling" onclick="epSelectSvc('recycling')" style="border:1.5px solid ${(curSvc||'').toLowerCase()==='recycling'?'var(--cyan)':'var(--border2)'};background:${(curSvc||'').toLowerCase()==='recycling'?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+      <div id="ep-svc-recycling" onclick="epSelectSvc('recycling')" style="${isRecycling?_active:_idle}">
         <div style="font-size:20px">♻️</div><div style="font-size:12px;font-weight:700;margin-top:4px">Recycling only</div>
       </div>
-      <div id="ep-svc-waste" onclick="epSelectSvc('waste')" style="border:1.5px solid ${(curSvc||'').toLowerCase()==='waste'?'var(--cyan)':'var(--border2)'};background:${(curSvc||'').toLowerCase()==='waste'?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+      <div id="ep-svc-waste" onclick="epSelectSvc('waste')" style="${isWaste?_active:_idle}">
         <div style="font-size:20px">🗑️</div><div style="font-size:12px;font-weight:700;margin-top:4px">General Waste only</div>
       </div>
-      <div id="ep-svc-both" onclick="epSelectSvc('both')" style="border:1.5px solid ${(curSvc||'').toLowerCase()==='both'?'var(--cyan)':'var(--border2)'};background:${(curSvc||'').toLowerCase()==='both'?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+      <div id="ep-svc-both" onclick="epSelectSvc('both')" style="${isBoth?_active:_idle}">
         <div style="font-size:20px">♻️🗑️</div><div style="font-size:12px;font-weight:700;margin-top:4px">Both — same day</div>
       </div>
-      <div id="ep-svc-split" onclick="epSelectSvc('split')" style="border:1.5px solid ${isSplitCurrent||(curSvc||'').toLowerCase()==='split'?'var(--cyan)':'var(--border2)'};background:${isSplitCurrent||(curSvc||'').toLowerCase()==='split'?'rgba(6,214,160,.07)':'transparent'};border-radius:10px;padding:12px;cursor:pointer;text-align:center">
+      <div id="ep-svc-split" onclick="epSelectSvc('split')" style="${isSplitCurrent?_active:_idle}">
         <div style="font-size:20px">📅</div><div style="font-size:12px;font-weight:700;margin-top:4px">Both — split days</div>
         <div style="font-size:10px;color:var(--muted);margin-top:2px">Different days for each bin</div>
       </div>
+      <div id="ep-svc-oan" onclick="epSelectSvc('oan')" style="${isOAN?_oanActive:_idle};grid-column:1/-1">
+        <div style="font-size:20px">📦</div><div style="font-size:12px;font-weight:700;margin-top:4px">Bin Out As Needed</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">Only when your bin is full · $19.99/mo + usage</div>
+      </div>
     </div>
-    <input type="hidden" id="ep-svc-val" value="${
-      isSplitCurrent ? 'split'
-      : (curSvc||'').toLowerCase()==='both' ? 'both'
-      : (curSvc||'').toLowerCase()==='waste' ? 'waste'
-      : 'recycling'
-    }">
+    <input type="hidden" id="ep-svc-val" value="${isSplitCurrent?'split':isBoth?'both':isWaste?'waste':isOAN?'oan':'recycling'}">
     <div id="ep-plan-notice" style="display:none;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#fbbf24"></div>
     <div class="sec-h">Collection schedule</div>
     <div id="ep-day-single" style="${isSplitCurrent?'display:none':''}">
@@ -17145,7 +17189,7 @@ function showEditPreferences(){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="field"><label>♻️ Recycling day</label>
           <select id="ep-day-recycling">
-            ${['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d=>`<option ${d===(isSplitCurrent?curDay:'')?'selected':''}>${d}</option>`).join('')}
+            ${['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d=>`<option ${d===curDay?'selected':''}>${d}</option>`).join('')}
           </select>
         </div>
         <div class="field"><label>🗑️ Waste day</label>
@@ -17158,45 +17202,48 @@ function showEditPreferences(){
     </div>
     <div class="sec-h">Special instructions for runner</div>
     <div class="field">
-      <textarea id="ep-svc-notes" placeholder="e.g. Side gate is usually unlocked, bins are behind the lemon tree">${curNotes==='--'?'':curNotes}</textarea>
+      <textarea id="ep-svc-notes" placeholder="e.g. Side gate is usually unlocked, bins are behind the lemon tree">${curNotes && curNotes!=='--' ? curNotes : ''}</textarea>
     </div>
     <div id="ep-plan-section" style="display:none">
       <div class="sec-h">Your plan</div>
       <div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--sub);margin-bottom:8px">
-        Current: <strong style="color:var(--text)">${curPlan || planPrices[currentPlanKey]?.label || '--'}</strong>
-        — $${currentPlanPrice.toFixed(2)}/mo
+        Current: <strong style="color:var(--text)">${planPrices[curPlan]?.label || curPlan || '--'}</strong> — $${currentPlanPrice.toFixed(2)}/mo
       </div>
-      <div style="font-size:12px;color:var(--muted)">Service type changes that affect your bin count will be reflected in your next billing cycle. Contact support for plan downgrades.</div>
+      <div style="font-size:12px;color:var(--muted)">Service type changes that affect your bin count will be reflected in your next billing cycle.</div>
     </div>
-
     <div id="epr-error" style="display:none;color:#fca5a5;font-size:13px;margin-top:8px"></div>
-
-    <!-- BILLING DISCLAIMER -->
     <div style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.6;margin-top:8px">
-      ⚠️ <strong>Collection day changes</strong> take effect from your next scheduled visit. <strong>Service type changes</strong> that affect your plan rate will be applied at your next billing cycle — your current rate stays in effect until then.
+      ⚠️ Collection day changes require admin approval and take effect from your next cycle. Changing service type may affect your monthly rate.
     </div>
   </div>
   <div class="mf">
     <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
-    <button class="btn btn-cyan btn-sm" id="epr-btn" onclick="saveEditPreferences()">Save Changes</button>
+    <button class="btn btn-cyan" onclick="saveEditPreferences()">Save Preferences</button>
   </div>`
   openM()
 }
 
 function epSelectSvc(svc){
   document.getElementById('ep-svc-val').value = svc
-  // Highlight selected card
-  ;['recycling','waste','both','split'].forEach(s=>{
+  // Highlight selected card — handle recycling/waste/both/split/oan
+  ;['recycling','waste','both','split','oan'].forEach(s=>{
     const el = document.getElementById('ep-svc-'+s)
     if(!el) return
     const on = s === svc
+    const isOanCard = s === 'oan'
+    el.style.borderColor = on ? (isOanCard ? '#fbbf24' : 'var(--cyan)') : 'var(--border2)'
+    el.style.background  = on ? (isOanCard ? 'rgba(245,158,11,.07)' : 'rgba(6,214,160,.07)') : 'transparent'
+  })
     el.style.borderColor = on ? 'var(--cyan)' : 'var(--border2)'
-    el.style.background  = on ? 'rgba(6,214,160,.07)' : 'transparent'
+    el.style.background  = on ? (isOanCard ? 'rgba(245,158,11,.07)' : 'rgba(6,214,160,.07)') : 'transparent'
   })
   // Show/hide split day pickers
   const isSplit = svc === 'split'
-  document.getElementById('ep-day-single').style.display = isSplit ? 'none' : ''
-  document.getElementById('ep-day-split').style.display  = isSplit ? '' : 'none'
+  const isOanSvc = svc === 'oan'
+  const daySingle = document.getElementById('ep-day-single')
+  const daySplit  = document.getElementById('ep-day-split')
+  if(daySingle) daySingle.style.display = isSplit || isOanSvc ? 'none' : ''
+  if(daySplit)  daySplit.style.display  = isSplit ? '' : 'none'
 
   // Plan change notice — only show if the selection actually requires a different plan
   const notice  = document.getElementById('ep-plan-notice')
