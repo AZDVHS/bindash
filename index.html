@@ -19744,11 +19744,12 @@ function filterHWPayments(q){
 }
 
 function renderHWPayments(){
-  // Stats — only active (paying) homeowners
-  const active  = HW_PAYMENTS.filter(p=>p.status==='active').length
+  // 'approved' and 'active' are both paying — treat identically for billing stats
+  const _isPaying = p => p.status === 'active' || p.status === 'approved'
+  const active  = HW_PAYMENTS.filter(_isPaying).length
   const paused  = HW_PAYMENTS.filter(p=>p.status==='paused').length
   const failed  = HW_PAYMENTS.filter(p=>p.status==='failed').length
-  const mrr     = HW_PAYMENTS.filter(p=>p.status==='active').reduce((s,p)=>s+p.monthly,0)
+  const mrr     = HW_PAYMENTS.filter(_isPaying).reduce((s,p)=>s+(parseFloat(p.monthly)||0),0)
   const safe = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v }
   safe('pay-mrr',         '$'+mrr.toFixed(2))
   safe('pay-active-subs', active)
@@ -19791,7 +19792,7 @@ function renderHWPayments(){
   safe('hwpay-count', rows.length+' homeowner'+(rows.length!==1?'s':''))
 
   const statusBadge = s => {
-    const m = { active:['#22c55e22','#22c55e','● Active'], paused:['rgba(245,158,11,.15)','#fbbf24','⏸ Paused'], failed:['rgba(239,68,68,.15)','#ef4444','⚠ Failed'], cancelled:['rgba(100,100,100,.15)','#666','○ Cancelled'] }
+    const m = { active:['#22c55e22','#22c55e','● Active'], approved:['#22c55e22','#22c55e','● Active'], paused:['rgba(245,158,11,.15)','#fbbf24','⏸ Paused'], failed:['rgba(239,68,68,.15)','#ef4444','⚠ Failed'], cancelled:['rgba(100,100,100,.15)','#666','○ Cancelled'] }
     const [bg,col,lbl] = m[s]||m.active
     return `<span class="badge" style="background:${bg};color:${col}">${lbl}</span>`
   }
@@ -19806,8 +19807,8 @@ function renderHWPayments(){
     return
   }
 
-  const sc = {active:'#22c55e', paused:'#f59e0b', failed:'#ef4444', cancelled:'#64748b'}
-  const sl = {active:'Active', paused:'Paused', failed:'Failed', cancelled:'Cancelled'}
+  const sc = {active:'#22c55e', approved:'#22c55e', paused:'#f59e0b', failed:'#ef4444', cancelled:'#64748b'}
+  const sl = {active:'Active', approved:'Active', paused:'Paused', failed:'Failed', cancelled:'Cancelled'}
   const planIcons = {plan_a:'🗑️', plan_b:'🗑️🗑️', plan_c:'♻️🗑️', oan_a:'📅', oan_b:'📅', oan_c:'📅'}
 
   tbody.innerHTML = rows.map((p,idx)=>{
@@ -19854,7 +19855,7 @@ function renderHWPayments(){
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" onclick="_adminNavToHW('${p.email}')">View homeowner</button>
           ${p.stripeSubId?`<a href="https://dashboard.stripe.com/subscriptions/${p.stripeSubId}" target="_blank" class="btn btn-outline btn-sm">View in Stripe ↗</a>`:''}
-          ${p.status==='active'?`<button class="btn btn-ghost btn-sm" style="color:#fbbf24" onclick="showToast('Pause flow coming soon','info')">⏸ Pause</button>`:''}
+          ${(p.status==='active'||p.status==='approved')?`<button class="btn btn-ghost btn-sm" style="color:#fbbf24" onclick="showToast('Pause flow coming soon','info')">⏸ Pause</button>`:''}
           ${p.status==='paused'?`<button class="btn btn-outline btn-sm" onclick="showToast('Resume flow coming soon','info')">▶ Resume</button>`:''}
         </div>
       </div>
@@ -20217,7 +20218,7 @@ async function _doPayRunner(runnerId){
 
 // -- PROFIT OVERVIEW RENDER ----------------------------------------
 function renderProfitOverview(){
-  const activePay  = HW_PAYMENTS.filter(p=>p.status==='active')
+  const activePay  = HW_PAYMENTS.filter(p=>p.status==='active'||p.status==='approved')
   const revenue    = activePay.reduce((s,p)=>s+p.monthly,0)
   const costs      = RUNNER_PAYOUTS.reduce((s,r)=>s+(r.lastPaidAmt?parseFloat(r.lastPaidAmt):0),0)
   const stripeFees = activePay.reduce((s,p)=>s+(p.monthly*0.029+0.30),0)
@@ -21644,9 +21645,9 @@ function updateOverviewCounts(){
   pc = pendingRN
   const totalPending = pendingHW + pendingRN
 
-  // MRR estimate from active HW payments
-  const mrr = (HW_PAYMENTS||[]).filter(p=>p.status==='active').reduce((s,p)=>s+(parseFloat(p.amount)||34.99),0)
-  const activeSubs = (HW_PAYMENTS||[]).filter(p=>p.status==='active').length
+  // MRR estimate from active/approved HW payments
+  const mrr = (HW_PAYMENTS||[]).filter(p=>p.status==='active'||p.status==='approved').reduce((s,p)=>s+(parseFloat(p.monthly)||0),0)
+  const activeSubs = (HW_PAYMENTS||[]).filter(p=>p.status==='active'||p.status==='approved').length
 
   const safe = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v }
 
