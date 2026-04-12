@@ -2986,12 +2986,12 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             <!-- Hex stats row -->
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid rgba(255,255,255,.06)">
               <div style="padding:10px;text-align:center;border-right:1px solid rgba(255,255,255,.06)">
-                <div style="font-size:16px;font-weight:800;color:var(--cyan)" id="hw-nb-your-hex">⬡</div>
-                <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Your Hex</div>
+                <div style="font-size:13px;font-weight:800;color:var(--cyan);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px" id="hw-nb-your-hex">⬡</div>
+                <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Your Street</div>
               </div>
               <div style="padding:10px;text-align:center;border-right:1px solid rgba(255,255,255,.06)">
                 <div style="font-size:16px;font-weight:800;color:#a5b4fc" id="hw-nb-cluster-count">7</div>
-                <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Hex Cluster</div>
+                <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-top:2px">Nearby Homes</div>
               </div>
               <div style="padding:10px;text-align:center">
                 <div style="font-size:16px;font-weight:800" id="hw-nb-runner-status" style="color:#fbbf24">--</div>
@@ -5455,9 +5455,10 @@ async function _populateHWNeighborhoodCard(row){
   const safe = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val }
   const safeHTML = (id, val) => { const el=document.getElementById(id); if(el) el.innerHTML=val }
 
-  // Subtitle
-  const anchorShort = anchorHex.slice(-6)
-  safe('hw-nb-subtitle', `Hex ···${anchorShort} · ${cluster.length}-hex cluster · ZIP ${row.zip_code||'--'}`)
+  // Subtitle — show neighborhood context, not raw hex ID
+  const _nbCity = row.city && row.city !== '--' ? row.city : (row.zip_code ? 'ZIP ' + row.zip_code : 'Your area')
+  const _nbZip  = row.zip_code ? ' · ZIP ' + row.zip_code : ''
+  safe('hw-nb-subtitle', `${_nbCity}${_nbZip} · ${cluster.length}-home cluster`)
 
   // Progress bar
   safe('hw-nb-count-label', `${totalCount} of ${TARGET} neighbours joined`)
@@ -5482,8 +5483,16 @@ async function _populateHWNeighborhoodCard(row){
     safe('hw-nb-threshold-note', `${remaining} more neighbours needed to strengthen runner coverage in your area.`)
   }
 
-  // Stats row
-  safe('hw-nb-your-hex', '⬡ ' + anchorShort)
+  // Stats row — show street area instead of raw hex ID
+  const _streetArea = (() => {
+    if(row.street_address && row.street_address !== '--'){
+      // Show just the street name (no number) for privacy + readability
+      const parts = row.street_address.trim().split(' ')
+      return parts.slice(1).join(' ') || row.street_address
+    }
+    return row.city && row.city !== '--' ? row.city : '📍 Your block'
+  })()
+  safe('hw-nb-your-hex', _streetArea)
   safe('hw-nb-cluster-count', cluster.length)
 
   const runnerEl = document.getElementById('hw-nb-runner-status')
