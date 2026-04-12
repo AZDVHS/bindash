@@ -4114,7 +4114,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <div class="nav-i" onclick="adNav(this,'ad-pending-hw')"><span class="ic">🏠</span> Pending Homeowners <span id="hw-pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
       <div class="nav-i" onclick="adNav(this,'ad-pending')"><span class="ic">🚐</span> Pending Runners <span id="pcount" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
       <div class="nav-i" onclick="adNav(this,'ad-runner-requests')"><span class="ic">🎟️</span> Runner Requests <span id="rr-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;pointer-events:none;display:none">0</span></div>
-      <div class="nav-i" onclick="adNav(this,'ad-runner-zone-requests')"><span class="ic">🗺️</span> Runner Scout <span id="rzr-badge" style="background:var(--amber);color:#07090f;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;display:none">0</span></div>
+      <div class="nav-i" id="nav-runner-scout" onclick="adNav(this,'ad-runner-zone-requests')" style="position:relative"><span class="ic">🗺️</span> Zone Requests <span id="rzr-badge" style="background:#ef4444;color:#fff;border-radius:99px;font-size:9px;padding:2px 7px;font-weight:700;margin-left:4px;display:none">0</span></div>
       <div class="s-sect">Management</div>
       <div class="nav-i" onclick="adNav(this,'ad-homeowners')"><span class="ic">🏠</span> Homeowners</div>
       <div class="nav-i" onclick="adNav(this,'ad-runners')"><span class="ic">🚐</span> Runners</div>
@@ -4339,10 +4339,13 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         <div class="pg" id="ad-runner-zone-requests">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
             <div>
-              <div style="font-size:18px;font-weight:700">🗺️ Runner Scout</div>
-              <div style="font-size:13px;color:var(--muted);margin-top:2px">Runners flag high-demand areas they've spotted. Review to decide if a micro zone should be created.</div>
+              <div style="font-size:18px;font-weight:700">🗺️ Zone Requests</div>
+              <div style="font-size:13px;color:var(--muted);margin-top:2px">Runners request coverage for new ZIPs. Review, create zones, and assign runners here.</div>
             </div>
-            <button class="btn btn-cyan btn-sm" onclick="renderRunnerZoneRequests()">↺ Refresh</button>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" style="background:rgba(6,214,160,.12);border:1px solid rgba(6,214,160,.3);color:var(--cyan)" onclick="_quickCreateZoneModal()">⚡ Quick Create Zone</button>
+              <button class="btn btn-outline btn-sm" onclick="renderRunnerZoneRequests()">↺ Refresh</button>
+            </div>
           </div>
 
           <!-- HOW IT WORKS -->
@@ -27932,6 +27935,125 @@ function confirmActivateMicroZone(zip, city){
   setTimeout(()=>{ adNav(null,'ad-zones') }, 1000)
 }
 
+function _quickCreateZoneModal(){
+  const runnerOpts = RUNNERS.filter(r=>r.status!=='INACTIVE')
+    .map(r=>`<option value="${r.email}">${r.name} · ZIP ${r.zip||'--'}</option>`).join('')
+
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh"><div style="font-size:15px;font-weight:700">⚡ Quick Create Zone</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
+  <div class="mb">
+    <div class="info-box" style="margin-bottom:14px">Creates a live zone for a ZIP and optionally assigns a runner in one step.</div>
+    <div class="field"><label>ZIP Code *</label><input id="qcz-zip" placeholder="e.g. 85301" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'')"></div>
+    <div class="field"><label>Zone Name</label><input id="qcz-name" placeholder="e.g. Glendale North — leave blank to auto-generate"></div>
+    <div class="field"><label>Zone Status</label>
+      <select id="qcz-status">
+        <option value="live">🟢 Live — runners dispatch immediately</option>
+        <option value="waitlist">⏳ Waitlist — building demand</option>
+      </select>
+    </div>
+    <div class="field"><label>Assign Runner <span style="color:var(--muted);font-size:10px;font-weight:400">(optional)</span></label>
+      <select id="qcz-runner">
+        <option value="">— No runner yet —</option>
+        ${runnerOpts}
+      </select>
+    </div>
+    <div class="field"><label>Collection Day</label>
+      <select id="qcz-day">
+        <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+        <option selected>Thursday</option><option>Friday</option>
+      </select>
+    </div>
+    <div id="qcz-error" style="display:none;color:#fca5a5;font-size:12px;margin-top:6px"></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+    <button class="btn btn-cyan" onclick="_quickCreateZoneSubmit()">⚡ Create Zone</button>
+  </div>`
+  openM()
+}
+
+async function _quickCreateZoneSubmit(){
+  const zip      = document.getElementById('qcz-zip')?.value?.trim()
+  const nameVal  = document.getElementById('qcz-name')?.value?.trim()
+  const status   = document.getElementById('qcz-status')?.value || 'live'
+  const runner   = document.getElementById('qcz-runner')?.value || ''
+  const day      = document.getElementById('qcz-day')?.value || 'Thursday'
+  const errEl    = document.getElementById('qcz-error')
+
+  if(!zip || zip.length < 5){ if(errEl){ errEl.textContent='Please enter a valid 5-digit ZIP'; errEl.style.display='block' } return }
+
+  const existingZone = ADMIN_ZONES.find(z=>(z.zips||[z.zip]).includes(zip))
+  if(existingZone){
+    if(errEl){ errEl.textContent=`Zone already exists: ${existingZone.name}. Use Zones page to edit it.`; errEl.style.display='block' } return
+  }
+
+  const btn = document.querySelector('#modal-box .btn-cyan')
+  if(btn){ btn.disabled=true; btn.textContent='Creating...' }
+
+  try {
+    const zoneName = nameVal || ('ZIP ' + zip + ' Area')
+    const newZone = {
+      id:          'zone_' + zip + '_' + Date.now(),
+      name:        zoneName,
+      status,
+      zips:        [zip],
+      zip:         zip,
+      collection:  [day],
+      homeowners:  0,
+      runners:     runner ? 1 : 0,
+      threshold:   3,
+      pilot:       false,
+    }
+
+    // Save to DB
+    const { data: savedZone, error: zErr } = await _supa.from('admin_zones').insert({
+      name:                zoneName,
+      status,
+      zip_codes:           JSON.stringify([zip]),
+      zip_prefix:          zip,
+      collection_days:     JSON.stringify([day]),
+      activation_threshold: 3,
+      created_at:          new Date().toISOString(),
+      updated_at:          new Date().toISOString(),
+    }).select('id').single()
+    if(zErr) throw new Error('Zone save failed: ' + zErr.message)
+
+    const realZoneId = savedZone?.id || newZone.id
+    newZone.id = realZoneId
+    ADMIN_ZONES.push(newZone)
+
+    // Assign runner if selected
+    if(runner){
+      const rnObj = RUNNERS.find(r=>r.email===runner)
+      if(rnObj){
+        const existingCoverage = [...(rnObj.coverageZones||[])]
+        if(!existingCoverage.includes(realZoneId)) existingCoverage.push(realZoneId)
+        await _supa.from('runners').update({
+          zone_id: rnObj.zoneId || realZoneId,
+          coverage_zones: JSON.stringify(existingCoverage),
+          updated_at: new Date().toISOString(),
+        }).ilike('email', runner)
+        rnObj.coverageZones = existingCoverage
+        if(!rnObj.zoneId) rnObj.zoneId = realZoneId
+        // Mark any pending zone requests for this ZIP as approved
+        await _supa.from('runner_zone_requests').update({
+          status: 'approved', zone_id: realZoneId, updated_at: new Date().toISOString()
+        }).eq('zip_code', zip).eq('status','pending')
+      }
+    }
+
+    syncZoneData()
+    closeM()
+    showToast(`✅ Zone "${zoneName}" created${runner?' + runner assigned':''}`, 'ok', 5000)
+    renderRunnerZoneRequests()
+    loadRunnerZoneRequestsBadge()
+    if(typeof renderAdminZones === 'function') renderAdminZones()
+  } catch(e){
+    if(errEl){ errEl.textContent = e?.message||String(e); errEl.style.display='block' }
+    if(btn){ btn.disabled=false; btn.textContent='⚡ Create Zone' }
+  }
+}
+
 function _adminCreateZoneFromRequest(zip, status, requestIdsCsv, runnerEmail, runnerName, hwCount){
   // Find the runner in RUNNERS by email for the dropdown pre-select
   const runner = RUNNERS.find(r => r.email && r.email.toLowerCase() === (runnerEmail||'').toLowerCase())
@@ -29083,6 +29205,18 @@ async function loadRunnersFromSupabase(){
     rnData.forEach((row,i) => RUNNERS.push(toRunner(row, i, false)))
     if(useAppFallback){
       appData.forEach((row,i) => RUNNERS.push(toRunner(row, i, true)))
+    }
+
+    // Deduplicate by email — keep the most recently created row
+    const _seenEmails = new Set()
+    for(let i = RUNNERS.length - 1; i >= 0; i--){
+      const email = (RUNNERS[i].email||'').toLowerCase()
+      if(_seenEmails.has(email)){
+        RUNNERS.splice(i, 1)
+        console.warn('[BinDash] Deduped runner:', email)
+      } else {
+        _seenEmails.add(email)
+      }
     }
 
     // Cross-reference zone assigned_runner to set isPriority on the right runner
@@ -31235,19 +31369,32 @@ async function loadZoneWaitlistBadge(){
 
 async function loadRunnerZoneRequestsBadge(){
   try {
-    // Only count meaningful pending flags — not homeowner waitlist or null-ZIP entries
-    // Count only real pending flags — exclude null-ZIP entries and homeowner waitlist
     const { data: pendingRows } = await _supa.from('runner_zone_requests')
-      .select('id,zip_code,type')
+      .select('id,zip_code,type,runner_name')
       .eq('status','pending')
-    const count = (pendingRows||[]).filter(r =>
+    const relevant = (pendingRows||[]).filter(r =>
       r.type !== 'homeowner_waitlist' &&
       r.zip_code && r.zip_code.trim() !== ''
-    ).length
-    // Replaced .count query below — keep variable name for compatibility
-    const res = { count }
+    )
+    const count = relevant.length
     const badge = document.getElementById('rzr-badge')
-    if(badge){ badge.textContent=count; badge.style.display=count?'inline':'none' }
+    const navEl = document.getElementById('nav-runner-scout')
+    if(badge){
+      badge.textContent = count
+      badge.style.display = count ? 'inline' : 'none'
+    }
+    if(navEl){
+      // Pulse the nav item red when there are pending requests
+      navEl.style.borderLeft = count ? '3px solid #ef4444' : ''
+      navEl.style.background  = count ? 'rgba(239,68,68,.08)' : ''
+    }
+    // Show toast if new requests came in since last check
+    const _prevCount = window._lastZoneReqCount || 0
+    if(count > _prevCount && _prevCount !== undefined){
+      const newest = relevant[0]
+      showToast(`🗺️ New zone request from ${newest?.runner_name||'a runner'} — ZIP ${newest?.zip_code||'--'}`, 'info', 8000)
+    }
+    window._lastZoneReqCount = count
   } catch(e){}
 }
 
