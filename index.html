@@ -953,6 +953,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 
 /* Modal */
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;align-items:center;justify-content:center;padding:20px}
+/* Keep property map Leaflet panes below modal overlay */
+#hw-prop-map .leaflet-pane,
+#hw-prop-map .leaflet-top,
+#hw-prop-map .leaflet-bottom { z-index:1 !important; }
+#hw-prop-map { isolation: isolate; }
 .modal-bg.open{display:flex}.modal{background:var(--surface);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:540px;max-height:90vh;overflow-y:auto;animation:popIn .25s ease}
 .mh{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .mb{padding:22px}.mf{padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
@@ -3115,7 +3120,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
               <div style="font-size:13px;font-weight:700">🗺 Your Property</div>
               <span style="font-size:10px;color:var(--muted);background:rgba(245,158,11,.1);color:#fbbf24;padding:2px 8px;border-radius:10px;font-weight:600">RES-8 HEX GRID</span>
             </div>
-            <div id="hw-prop-map" style="height:220px;width:100%;background:#0a0e18"></div>
+            <div id="hw-prop-map" style="height:220px;width:100%;background:#0a0e18;position:relative;z-index:0;overflow:hidden"></div>
             <div style="padding:8px 14px;font-size:10px;color:var(--muted);border-top:1px solid var(--border)">📍 Orange hex shows your property's H3 service cell · More data coming soon</div>
           </div>
 
@@ -11608,7 +11613,17 @@ async function _initHWPropMap(){
   }
   if(!lat){ mapEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:12px">📍 Address needed to show property map</div>'; return }
 
-  const map = L.map('hw-prop-map', { zoomControl:false, attributionControl:false, dragging:false, scrollWheelZoom:false })
+  // Ensure container is properly sized before Leaflet init
+  mapEl.style.height = '220px'
+  mapEl.style.overflow = 'hidden'
+  mapEl.style.position = 'relative'
+  mapEl.style.zIndex = '0'
+
+  const map = L.map('hw-prop-map', {
+    zoomControl: false, attributionControl: false,
+    dragging: false, scrollWheelZoom: false,
+    touchZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false,
+  })
   window._hwPropMap = map
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
