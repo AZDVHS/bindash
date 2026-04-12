@@ -15297,11 +15297,9 @@ async function saveDispatchRules(){
   const dot   = document.getElementById('dispatch-auto-dot')
   const label = document.getElementById('dispatch-auto-label')
   if(dot && label){
-    if(DISPATCH_RULES.autoDispatch){
-      dot.style.background='#22c55e'; label.textContent='Auto-dispatch on'; label.style.color='#22c55e'
-    } else {
-      dot.style.background='#64748b'; label.textContent='Manual dispatch'; label.style.color='var(--muted)'
-    }
+    // Auto-dispatch is permanently off — always show Manual dispatch
+    if(dot)   { dot.style.background='#64748b' }
+    if(label) { label.textContent='Manual dispatch'; label.style.color='var(--muted)' }
   }
 }
 
@@ -24406,6 +24404,9 @@ function startRouteScheduler(){
       if(!b) return
       const badgeEl = card.querySelector('.dispatch-badge')
       if(!badgeEl) return
+      // Only show expiry countdown if admin actually launched this batch
+      // (manualSend=true means adminLaunchBatch fired). Unlauncehd batches never expire.
+      if(!b.manualSend && !b.sentAt) return
       const expiresAt = b.offerExpiresAt || b._offerExpiresAt
       if(!expiresAt) return
       const minsLeft = Math.max(0, Math.round((new Date(expiresAt).getTime() - Date.now()) / 60000))
@@ -24414,20 +24415,6 @@ function startRouteScheduler(){
         badgeEl.textContent = '⏰ Offer expired'
         badgeEl.style.color = '#ef4444'
         badgeEl.style.background = 'rgba(239,68,68,.22)'
-        // Show re-send button if not already there
-        const resendBtn = card.querySelector('.resend-btn')
-        if(!resendBtn && (b.status==='offered'||b.status==='sent')){
-          const chevron = card.querySelector(`#dbc-chev-${batchId}`)
-          if(chevron){
-            const btn = document.createElement('button')
-            btn.className = 'resend-btn'
-            btn.textContent = '↻ Re-send'
-            btn.style.cssText = 'background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;white-space:nowrap'
-            btn.onclick = (e) => { e.stopPropagation(); sendRouteNow(b.zoneId, b.day) }
-            chevron.parentNode.insertBefore(btn, chevron)
-          }
-        }
-
       } else {
         const col = minsLeft <= 5 ? '#ef4444' : '#f59e0b'
         const icon = minsLeft <= 5 ? '🔴' : minsLeft <= 15 ? '🟡' : '⏳'
@@ -25020,6 +25007,14 @@ async function adminLaunchBatch(zoneId, day, btnEl){
 }
 
 async function sendRouteNow(zoneId, day){
+  // Guard: only allow re-send after admin has already launched this route once
+  const _key = 'pending_route:'+zoneId+':'+normDay(day)
+  const _raw = localStorage.getItem(_key)
+  const _batch = _raw ? JSON.parse(_raw) : generatedBatches.find(b=>b.zoneId===zoneId&&normDay(b.day)===normDay(day))
+  if(_batch && !_batch.manualSend && !_batch.sentAt){
+    showToast('Route not launched yet — use 🚀 Launch to dispatch for the first time', 'warn', 4000)
+    return
+  }
   const key = 'pending_route:'+zoneId+':'+normDay(day)
   const raw = localStorage.getItem(key)
 
@@ -25990,6 +25985,11 @@ async function sendRouteOffer(runner, batch, opts = {}){
 }
 
 async function triggerDispatchEdgeFunction(){
+  // ── MANUAL MODE: Edge function trigger permanently disabled ───────────────
+  // Routes only dispatch via adminLaunchBatch (🚀 Launch button).
+  // This function is kept to avoid reference errors but does nothing.
+  console.log('[BinDash] triggerDispatchEdgeFunction: manual mode — no-op')
+  return
   // ── MANUAL MODE: Auto-dispatch disabled ──────────────────────────────────
   // Routes are queued only. Admin approves and sends manually from Dispatch dashboard.
   // TODO (Phase 2 automation): uncomment the edge function call below once
@@ -26006,6 +26006,9 @@ async function triggerDispatchEdgeFunction(){
 
 
 async function launchDispatchRoutes(){
+  // ── MANUAL MODE: Replaced by adminLaunchBatch (per-zone 🚀 Launch button) ─
+  console.log('[BinDash] launchDispatchRoutes: manual mode — use adminLaunchBatch instead')
+  return
   const toSend = generatedBatches.filter(b=>b.status==='queued'||b.status==='preview')
   if(!toSend.length){ showToast('No approved routes to launch — approve drafts first','err'); return }
 
@@ -26365,15 +26368,22 @@ function renderDispatchPipeline(){
     if(_isToday && ['sent','offered'].includes(effectiveStatus) && !b.manualSend && !b.sentAt){
       effectiveStatus = 'queued'  // today's batch shown as sent but admin hasn't launched
     }
+    // Any batch not yet launched must never show in_progress, late, or expired
+    const _wasLaunchedEff = b.manualSend || !!b.sentAt
+    if(!_wasLaunchedEff && ['expired','late'].includes(effectiveStatus)){
+      effectiveStatus = 'queued'
+    }
 
     const isPreview = effectiveStatus==='preview'||effectiveStatus==='draft'||effectiveStatus==='queued'
     const statusKey = effectiveStatus
     const borderCol = isMissed ? '#ef4444' : isBinIn ? '#06d6a0' : (sc[statusKey]||'#64748b')
 
     // --- Rich offer status ---
+    // Expiry/countdown only apply after admin clicks Launch (manualSend=true OR sentAt set)
+    const _wasLaunched = b.manualSend || !!b.sentAt
     const now_ms     = Date.now()
-    const expiresAt  = (!_isFuture && (b.offerExpiresAt || b._offerExpiresAt)) || null
-    const sentAt     = (!_isFuture && (b.sentAt || b._sentAt)) || null
+    const expiresAt  = (_wasLaunched && !_isFuture && (b.offerExpiresAt || b._offerExpiresAt)) || null
+    const sentAt     = (_wasLaunched && !_isFuture && (b.sentAt || b._sentAt)) || null
     const minsLeft   = expiresAt ? Math.max(0, Math.round((new Date(expiresAt).getTime() - now_ms) / 60000)) : null
     const isExpired  = expiresAt && new Date(expiresAt).getTime() < now_ms
     const sentAgo    = sentAt ? Math.round((now_ms - new Date(sentAt).getTime()) / 60000) : null
@@ -26381,13 +26391,11 @@ function renderDispatchPipeline(){
     let badgeTxt, badgeCol
     if(isMissed){
       badgeTxt = '🚨 MISSED'; badgeCol = '#ef4444'
+    } else if(!_wasLaunched && !['accepted','in_progress','complete'].includes(statusKey)){
+      // Not yet launched — always show ready to launch regardless of DB status
+      badgeTxt = '✅ Approved · ready to launch'
+      badgeCol = '#06d6a0'
     } else if(_isFuture){
-      // Future date — always show countdown to 9am on that day
-      const sendDate = new Date(b.date+'T09:00:00')
-      const msUntil  = sendDate - Date.now()
-      const hUntil   = Math.floor(msUntil / 3600000)
-      const mUntil   = Math.floor((msUntil % 3600000) / 60000)
-      const dayLabel = _batchDate.toLocaleDateString('en-US',{weekday:'short'})
       badgeTxt = '✅ Approved · ready to launch'
       badgeCol = '#06d6a0'
     } else if((statusKey==='offered'||statusKey==='sent') && isExpired){
@@ -26490,8 +26498,8 @@ function renderDispatchPipeline(){
       +'</div>'
       +(isLiveView?'<div style="width:60px;flex-shrink:0"><div style="height:4px;background:var(--surface3);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+borderCol+';border-radius:99px"></div></div><div style="font-size:9px;color:var(--muted);text-align:center;margin-top:2px">'+pct+'%</div></div>':'')
       +'<span class="dispatch-badge" style="background:'+badgeCol+'22;color:'+badgeCol+';font-size:10px;font-weight:700;padding:2px 9px;border-radius:99px;flex-shrink:0;white-space:nowrap">'+badgeTxt+'</span>'
-      +((statusKey==='offered'||statusKey==='sent')&&sentAt&&!isMissed?'<span style="font-size:10px;color:var(--muted);flex-shrink:0;white-space:nowrap">sent '+sentAgo+'m ago</span>':'')
-      +((statusKey==='offered'||statusKey==='sent')&&isExpired?'<button onclick="event.stopPropagation();sendRouteNow(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0;white-space:nowrap">↻ Re-send</button>':'')
+      +((statusKey==='offered'||statusKey==='sent')&&sentAt&&!isMissed&&_wasLaunched?'<span style="font-size:10px;color:var(--muted);flex-shrink:0;white-space:nowrap">sent '+sentAgo+'m ago</span>':'')
+      +((statusKey==='offered'||statusKey==='sent')&&isExpired&&_wasLaunched?'<button onclick="event.stopPropagation();sendRouteNow(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0;white-space:nowrap">↻ Re-send</button>':'')
       +((b.status==='change_detected'||b.status==='draft')?'<button onclick="event.stopPropagation();showRouteApprovalModal(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.4);color:#06d6a0;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0">✓ Approve</button>':'')
       +(isPreview?'<button onclick="event.stopPropagation();deleteBatchFromPreview(\''+b.id+'\')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;flex-shrink:0">🗑</button>':'')
       +'<span id="dbc-chev-'+b.id+'" style="font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0;'+(isOpen?'transform:rotate(180deg)':'')+'">▼</span>'
@@ -26914,8 +26922,8 @@ async function initDispatchPage(){
     await _adGenerateBatchesAsync(true)
   }
 
-  // Auto-fire edge function if queued routes exist after 9am (catches overnight approvals)
-  _autoTriggerIfQueued().catch(e => console.warn('[BinDash] autoTrigger:', e.message))
+  // Auto-trigger disabled — admin manually launches via 🚀 Launch button
+  // _autoTriggerIfQueued() is a no-op in manual mode
 
   // Start periodic status refresh — poll every 30s so badge advances without page reload
   _startDispatchStatusPoll()
@@ -26944,28 +26952,11 @@ function _startDispatchStatusPoll(){
 //   The label on each card says WHICH COLLECTION it serves, not when the job runs.
 // Called whenever admin opens dispatch — if post-9am and queued routes waiting, fire edge fn
 async function _autoTriggerIfQueued(){
-  const now = new Date()
-  const hhmm = now.getHours() * 100 + now.getMinutes()
-  if(hhmm < 900) return  // before 9am, don't trigger
-  const today = now.toISOString().slice(0,10)
-  const todayKey = '_autoTriggered_' + today
-  // Only skip if already successfully sent today (check dispatch_queue, not just sessionStorage)
-  try {
-    const { data } = await _supa.from('dispatch_queue')
-      .select('id,status').eq('status','queued').eq('scheduled_date', today).limit(1)
-    if(data?.length){
-      // Only auto-trigger once per session — but clear if previous attempt failed
-      if(sessionStorage.getItem(todayKey+'_ok')) return
-      sessionStorage.setItem(todayKey+'_ok', '1')
-      console.log('[BinDash] Queued routes found post-9am — auto-triggering edge function')
-      console.log('[BinDash] Queued routes found post-9am — auto-triggering (with fallback)')
-      await triggerDispatchEdgeFunction()
-    }
-  } catch(e){ 
-    // Clear ok flag so next poll retries
-    sessionStorage.removeItem(today+'_ok')
-    console.warn('[BinDash] _autoTriggerIfQueued:', e.message) 
-  }
+  // ── MANUAL MODE: Auto-trigger permanently disabled ────────────────────────
+  // Routes only dispatch when admin clicks the 🚀 Launch button (adminLaunchBatch).
+  // This function is a no-op. Nothing fires automatically.
+  // TODO (Phase 2): remove this guard when pg_cron automation is ready.
+  console.log('[BinDash] _autoTriggerIfQueued: manual mode — no-op')
 }
 
 async function loadLiveJobsIntoPipeline(){
