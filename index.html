@@ -5248,22 +5248,38 @@ async function populateHWDashboard(){
       } catch(e){ console.warn('[BinDash] homeowners fallback err:', e?.message) }
     }
 
-    // Tier 3: auth_user_id fallback (mismatched email edge case)
-    if(!data && _userId){
-      console.warn('[BinDash] Trying auth_user_id:', _userId)
-      try {
-        const { data: s } = await _supa.from('homeowner_signups').select('*').eq('auth_user_id', _userId).maybeSingle()
-        if(s){ data = s; console.log('[BinDash] Found by uid in signups ✅') }
-      } catch(e){}
-      if(!data){
+    // Tier 3: try matching by first_name from auth metadata (email mismatch edge case)
+    if(!data){
+      const _metaFirst = (currentUser.user_metadata?.first_name || '').toLowerCase()
+      const _metaLast  = (currentUser.user_metadata?.last_name  || '').toLowerCase()
+      console.warn('[BinDash] Email lookup failed for', _userEmail, '— trying name fallback:', _metaFirst, _metaLast)
+      if(_metaFirst){
         try {
-          const { data: h } = await _supa.from('homeowners').select('*').eq('auth_user_id', _userId).maybeSingle()
-          if(h){ data = {...h, status: h.status||'waitlist'}; console.log('[BinDash] Found by uid in homeowners ✅') }
+          const { data: s } = await _supa.from('homeowner_signups').select('*')
+            .ilike('first_name', _metaFirst).order('created_at',{ascending:false}).limit(1).maybeSingle()
+          if(s){ data = s; console.log('[BinDash] Found by first_name in signups ✅', s.email) }
         } catch(e){}
+        if(!data){
+          try {
+            const { data: h } = await _supa.from('homeowners').select('*')
+              .ilike('first_name', _metaFirst).limit(1).maybeSingle()
+            if(h){ data = {...h, status: h.status||'waitlist'}; console.log('[BinDash] Found by first_name in homeowners ✅', h.email) }
+          } catch(e){}
+        }
       }
     }
 
     if(!data){ console.warn('[BinDash] All lookups failed — no profile found for', _userEmail); go('S-hw-dash'); return }
+
+    // If data was found but email doesn't match session email, silently fix it in DB
+    if(data.email && data.email.toLowerCase() !== _userEmail.toLowerCase() && _userEmail){
+      console.log('[BinDash] Email mismatch — syncing DB email from', data.email, '→', _userEmail)
+      try {
+        await _supa.from('homeowner_signups').update({ email: _userEmail, updated_at: new Date().toISOString() }).eq('email', data.email)
+        await _supa.from('homeowners').update({ email: _userEmail, updated_at: new Date().toISOString() }).eq('email', data.email)
+        data.email = _userEmail
+      } catch(e){ console.warn('[BinDash] Email sync failed:', e?.message) }
+    }
 
     // If approved/active, also cross-check homeowners table for latest operational fields
     if(data.status === 'approved' || data.status === 'active'){
