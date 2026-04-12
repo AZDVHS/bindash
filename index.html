@@ -24314,7 +24314,7 @@ let openCards = new Set()  // tracks which dispatch cards are expanded — modul
 const ROUTE_STATUS = {
   draft:            { label: 'Created · awaiting approval', color: '#f59e0b', bg: 'rgba(245,158,11,.15)' },
   change_detected:  { label: 'Change detected · awaiting approval', color: '#ef4444', bg: 'rgba(239,68,68,.15)' },
-  queued:           { label: 'Approved · sends at 9am', color: '#3b82f6', bg: 'rgba(59,130,246,.15)' },
+  queued:           { label: '✅ Ready to Launch', color: '#06d6a0', bg: 'rgba(6,214,160,.12)' },
   sent:             { label: 'Sent · awaiting acceptance', color: '#f59e0b', bg: 'rgba(245,158,11,.15)' },
   accepted:         { label: 'Accepted', color: '#22c55e', bg: 'rgba(34,197,94,.15)' },
   in_progress:      { label: 'In progress', color: '#06d6a0', bg: 'rgba(6,214,160,.15)' },
@@ -26200,7 +26200,7 @@ function renderDispatchPipeline(){
       emptyMsg = `No Bin Out routes dispatched for ${selectedDay} yet`
       emptyAction = `<div style="font-size:12px;color:var(--muted);margin-top:6px">
         This is the Bin Out night for <strong>${pillCollectionDay}</strong> collection.<br>
-        Route generates &amp; sends at 9am on <strong>${prevDayName}</strong> and sends at 9am after approval.
+        Route will appear here once you click 🚀 Launch from the approval strip above.
       </div>`
     } else {
       emptyIcon = '📋'
@@ -26248,18 +26248,12 @@ function renderDispatchPipeline(){
     if(badgeEl) badgeEl.textContent = batches.length+' batch'+(batches.length!==1?'es':'')+' · '+RUNNERS.filter(r=>r.status==='AVAILABLE').length+' runners available'
   }
 
-  const sc = { preview:'#a5b4fc', draft:'#f59e0b', change_detected:'#ef4444', queued:'#3b82f6', sent:'#f59e0b', offered:'#f59e0b', broadcast:'#3b82f6', accepted:'#22c55e', in_progress:'#06d6a0', unassigned:'#ef4444', complete:'#64748b' }
+  const sc = { preview:'#a5b4fc', draft:'#f59e0b', change_detected:'#ef4444', queued:'#06d6a0', sent:'#f59e0b', offered:'#f59e0b', broadcast:'#3b82f6', accepted:'#22c55e', in_progress:'#06d6a0', unassigned:'#ef4444', complete:'#64748b' }
   const si = {
     preview:         '👁 Preview — pending approval',
     draft:           '🕐 Awaiting approval',
     change_detected: '⚠️ Change detected — re-approve',
-    queued: (()=>{
-      const now9 = new Date(); now9.setHours(9,0,0,0)
-      const ms = now9 - Date.now()
-      if(ms <= 0) return '📤 Sending...'
-      const h = Math.floor(ms/3600000), m = Math.floor((ms%3600000)/60000)
-      return h > 0 ? `🕐 Approved · sends in ${h}h ${m}m` : `🕐 Approved · sends in ${m}m`
-    })(),
+    queued:           '✅ Approved · ready to launch',
     sent:            '📤 Offer sent · awaiting accept',
     offered:         '📤 Offer sent · awaiting accept',
     broadcast:       '📡 Broadcast · awaiting accept',
@@ -26298,19 +26292,12 @@ function renderDispatchPipeline(){
     const sentAgo  = sentAt ? Math.round((now - new Date(sentAt).getTime()) / 60000) : null
     const windowMins = b.windowMins || 45
 
-    // Build stage list
-    // For queued routes, compute time until 9am send
-    const now9am = new Date(); now9am.setHours(9,0,0,0)
-    const msToSend = now9am - Date.now()
-    const minsToSend = msToSend > 0 ? Math.round(msToSend/60000) : 0
-    const sendTimeStr = msToSend > 0
-      ? (minsToSend > 60 ? Math.floor(minsToSend/60)+'h '+( minsToSend%60)+'m' : minsToSend+'m')
-      : 'now'
+    // Build stage list — no auto-send, admin launches manually
 
     const isQueued = statusKey === 'queued'
     const stages = isQueued ? [
       { key:'approved', label:'Approved',     done: true,  time: 'Admin queued' },
-      { key:'scheduled',label:'Auto-sends',   done: false, time: msToSend > 0 ? 'in '+sendTimeStr : 'sending now', warn: msToSend <= 0 },
+      { key:'launch',   label:'Ready to Launch', done: false, time: '← click Launch', warn: false },
       { key:'sent',     label:'Offer Sent',   done: false, time: null },
       { key:'accepted', label:'Accepted',     done: false, time: null },
       { key:'complete', label:'Complete',     done: false, time: null },
@@ -26388,8 +26375,8 @@ function renderDispatchPipeline(){
       const hUntil   = Math.floor(msUntil / 3600000)
       const mUntil   = Math.floor((msUntil % 3600000) / 60000)
       const dayLabel = _batchDate.toLocaleDateString('en-US',{weekday:'short'})
-      badgeTxt = `✅ Approved · ready to launch` + (hUntil > 0 ? ` — planned ${dayLabel}` : '')
-      badgeCol = '#3b82f6'
+      badgeTxt = '✅ Approved · ready to launch'
+      badgeCol = '#06d6a0'
     } else if((statusKey==='offered'||statusKey==='sent') && isExpired){
       badgeTxt = '⏰ Offer expired'; badgeCol = '#ef4444'
     } else if((statusKey==='offered'||statusKey==='sent') && minsLeft !== null){
@@ -29447,25 +29434,32 @@ async function loadSignupsFromSupabase(){
     } catch(fetchErr){ loadErr = String(fetchErr?.message || fetchErr) }
     if(loadErr){ console.warn('[BinDash] Could not load signups:', loadErr); return }
 
-    // If RLS returns 0 rows but no error, try without status filter (admin fallback)
+    // If RLS returns 0 rows but no error, try without status filter to distinguish
+    // "no pending signups" (correct) from "RLS blocking query" (error)
     if(!data.length){
-      console.warn('[BinDash] No signups returned — may be RLS issue. Trying unrestricted query...')
       try {
-        const res2 = await _supa.from('homeowner_signups').select('*').order('created_at',{ascending:false}).limit(200)
+        const res2 = await _supa.from('homeowner_signups').select('id,status').order('created_at',{ascending:false}).limit(200)
         if(!res2.error && res2.data?.length){
-          console.log('[BinDash] Unrestricted query got:', res2.data.length, 'rows')
-          // Filter in JS instead
-          data = (res2.data||[]).filter(r => {
-            // Include anything that isn't already approved/active/complete
-            const exclude = ['approved','active','complete','cancelled']
-            return !exclude.includes(r.status)
-          })
-          console.log('[BinDash] After JS filter:', data.length, 'relevant rows')
+          // There ARE signups — just none in pending statuses. Not an RLS issue.
+          const allStatuses = [...new Set(res2.data.map(r=>r.status))]
+          console.log('[BinDash] loadSignupsFromSupabase: 0 pending signups (all statuses in DB:', allStatuses.join(', ')+')')
+          // Pull full data for any that aren't approved/active/complete
+          const pendingIds = res2.data.filter(r => !['approved','active','complete','cancelled'].includes(r.status)).map(r=>r.id)
+          if(pendingIds.length){
+            const res3 = await _supa.from('homeowner_signups').select('*').in('id', pendingIds)
+            data = res3.data || []
+            console.log('[BinDash] Fetched', data.length, 'non-approved signups by ID')
+          }
+          // If still 0, it's genuinely empty — no warning needed
+        } else if(res2.error){
+          console.warn('[BinDash] loadSignupsFromSupabase RLS issue — admin may need SELECT policy on homeowner_signups:', res2.error.message)
+        } else {
+          console.log('[BinDash] loadSignupsFromSupabase: table is empty')
         }
       } catch(e2){ console.warn('[BinDash] Fallback query failed:', e2.message) }
     }
 
-    if(!data.length){ console.warn('[BinDash] loadSignupsFromSupabase: still no data after fallback'); return }
+    if(!data.length){ console.log('[BinDash] loadSignupsFromSupabase: no pending signups to display'); return }
 
     // Clear then repopulate in-memory arrays
     PENDING_HOMEOWNERS.length = 0
