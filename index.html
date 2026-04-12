@@ -3193,6 +3193,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
               <div class="dl" style="margin-bottom:9px"><div class="dl-l">Curb Placement</div><div>Confirmed after first collection</div></div>
               <div class="dl" style="margin-bottom:9px"><div class="dl-l">Gate</div><div id="prop-gate">--</div></div>
               <div class="dl"><div class="dl-l">Pets</div><div id="prop-pets">--</div></div>
+              <div id="prop-photos-wrap" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:6px"></div>
               <button class="btn btn-outline btn-sm" style="margin-top:14px" onclick="showEditProperty()">✏️ Edit Property</button>
             </div>
             <div class="card">
@@ -5787,19 +5788,18 @@ async function _populateHWDashData(row, fn, ln, initials){
 
   // If key fields are missing, do a silent fresh fetch from DB to fill gaps
   // This handles the drift case where homeowners table is missing fields that signups has
-  if(!row.collection_day || !row.service_type || !row.street_address || !row.street_address.trim()){
+  if(!row.collection_day || !row.service_type || !row.street_address || !row.street_address.trim() || !row.service_notes || !row.bin_photos){
     try {
       const _em = row.email || currentUser?.email || ''
       if(_em){
         const { data: _fresh } = await _supa.from('homeowner_signups')
-          .select('street_address,city,zip_code,state,service_type,collection_day,collection_day_2,bin_location,gate_type,gate_code,pet_info,curb_notes,service_notes,plan_id,frequency')
+          .select('street_address,city,zip_code,state,service_type,collection_day,collection_day_2,bin_location,gate_type,gate_code,pet_info,curb_notes,service_notes,plan_id,frequency,bin_photos')
           .ilike('email', _em).maybeSingle()
         if(_fresh){
           console.log('[BinDash] _populateHWDashData: gap-filling from signups:', _fresh)
           row = {
             ..._fresh,
-            ...row,  // homeowners fields take priority
-            // But fill any empty homeowners fields from signups
+            ...row,
             street_address:   row.street_address && row.street_address !== '--' ? row.street_address : (_fresh.street_address || ''),
             city:             row.city && row.city !== '--' ? row.city : (_fresh.city || ''),
             zip_code:         row.zip_code || _fresh.zip_code || '',
@@ -5813,6 +5813,7 @@ async function _populateHWDashData(row, fn, ln, initials){
             pet_info:         row.pet_info || _fresh.pet_info || '',
             curb_notes:       row.curb_notes || _fresh.curb_notes || '',
             service_notes:    row.service_notes || _fresh.service_notes || '',
+            bin_photos:       row.bin_photos || _fresh.bin_photos || null,
           }
           // Update stored profile row so subsequent operations use fresh data
           window._hwProfileRow = row
@@ -11826,6 +11827,26 @@ function hwNav(el,pg){
         : (_colDay || '--'))
       safe('pref-binout-night', _isOAN ? 'Only when bin is full' : (_prevDay !== '--' ? _prevDay + ' evening' : '--'))
       safe('pref-notes', row.service_notes && row.service_notes !== '--' ? row.service_notes : (row.curb_notes && row.curb_notes !== '--' ? row.curb_notes : '--'))
+
+      // Render bin photos from DB column (base64 from onboarding)
+      const _propPhotosWrap = document.getElementById('prop-photos-wrap')
+      if(_propPhotosWrap){
+        const _photos = (() => {
+          try {
+            const raw = row.bin_photos
+            if(!raw) return []
+            const p = typeof raw === 'string' ? JSON.parse(raw) : raw
+            return Array.isArray(p) ? p.filter(Boolean) : []
+          } catch(e){ return [] }
+        })()
+        if(_photos.length){
+          _propPhotosWrap.innerHTML = _photos.slice(0,5).map(src =>
+            `<img src="${src}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1.5px solid var(--border2)">`
+          ).join('')
+        } else {
+          _propPhotosWrap.innerHTML = ''
+        }
+      }
     }
   }
 }
@@ -17284,22 +17305,51 @@ function showEditProperty(){
 async function _epLoadExistingPhotos(){
   const wrap = document.getElementById('ep-photos-wrap')
   if(!wrap) return
-  const row = window._hwProfileRow || {}
+  const row   = window._hwProfileRow || {}
   const email = row.email || currentUser?.email
   if(!email) return
+
+  wrap.innerHTML = ''
+
+  // ── Source 1: base64 photos saved during onboarding (bin_photos DB column) ──
+  const _dbPhotos = (() => {
+    try {
+      const raw = row.bin_photos
+      if(!raw) return []
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : []
+    } catch(e){ return [] }
+  })()
+
+  if(_dbPhotos.length){
+    _dbPhotos.slice(0,5).forEach((src, i) => {
+      const d = document.createElement('div')
+      d.style.cssText = 'position:relative;flex-shrink:0'
+      d.innerHTML = `<img src="${src}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1.5px solid var(--border2)">`
+      wrap.appendChild(d)
+    })
+  }
+
+  // ── Source 2: Supabase Storage (photos uploaded via Edit Property) ──
   try {
-    // List files in storage bucket for this user
     const folder = email.replace('@','_at_').replace(/[^a-zA-Z0-9_]/g,'-')
     const { data: files } = await _supa.storage.from('property-photos').list(folder, { limit:20 })
-    if(!files?.length){ wrap.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:4px 0">No photos yet</div>'; return }
-    wrap.innerHTML = files.slice(0,5).map(f => {
-      const { data: { publicUrl } } = _supa.storage.from('property-photos').getPublicUrl(folder+'/'+f.name)
-      return '<div style="position:relative;flex-shrink:0" onclick="_epRemovePhoto(\'' + folder + '\',\'' + f.name + '\',this)">'
-        + '<img src="' + publicUrl + '" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1.5px solid var(--border2)">'
-        + '<div style="position:absolute;top:2px;right:2px;background:rgba(239,68,68,.85);color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:flex;align-items:center;justify-content:center;cursor:pointer">✕</div>'
-        + '</div>'
-    }).join('')
-  } catch(e){ wrap.innerHTML = '<div style="font-size:11px;color:var(--muted)">Could not load photos</div>' }
+    if(files?.length){
+      files.slice(0, 5 - _dbPhotos.length).forEach(f => {
+        const { data: { publicUrl } } = _supa.storage.from('property-photos').getPublicUrl(folder+'/'+f.name)
+        const d = document.createElement('div')
+        d.style.cssText = 'position:relative;flex-shrink:0'
+        d.setAttribute('onclick', `_epRemovePhoto('${folder}','${f.name}',this)`)
+        d.innerHTML = `<img src="${publicUrl}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1.5px solid var(--border2)">`
+          + `<div style="position:absolute;top:2px;right:2px;background:rgba(239,68,68,.85);color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:flex;align-items:center;justify-content:center;cursor:pointer">✕</div>`
+        wrap.appendChild(d)
+      })
+    }
+  } catch(e){ console.warn('[BinDash] Storage photo load:', e.message) }
+
+  if(!wrap.children.length){
+    wrap.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:4px 0">No photos yet — tap 📷 or 🖼 to add</div>'
+  }
 }
 
 async function epAddPhotos(files){
@@ -19550,6 +19600,13 @@ async function _adminActivateHW(hwId){
       street_address:   addr || null,
       city:             city || null,
       zip_code:         zip  || null,
+      service_notes:    sigData?.service_notes || null,
+      curb_notes:       sigData?.curb_notes    || null,
+      bin_photos:       sigData?.bin_photos    || null,
+      bin_location:     sigData?.bin_location  || null,
+      gate_type:        sigData?.gate_type     || null,
+      gate_code:        sigData?.gate_code     || null,
+      pet_info:         sigData?.pet_info      || null,
       updated_at:       new Date().toISOString(),
     }).ilike('email', hw.email)
 
