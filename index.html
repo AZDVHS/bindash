@@ -5230,16 +5230,27 @@ async function populateHWDashboard(){
           .ilike('email', currentUser.email)
           .maybeSingle()
         if(hwRow){
+          // Also try to pull address/preferences from homeowner_signups
+          let sigRow = null
+          try {
+            const { data: sr } = await _supa.from('homeowner_signups')
+              .select('street_address,city,zip_code,state,bin_location,gate_type,gate_code,pet_info,curb_notes,service_notes,service_type,frequency,plan_id,collection_day,collection_day_2,stripe_customer_id,stripe_subscription_id')
+              .ilike('email', currentUser.email).maybeSingle()
+            sigRow = sr
+          } catch(e2){}
           data = {
+            ...(sigRow || {}),
             ...hwRow,
-            status:           'approved',
-            plan_id:          hwRow.plan_id,
-            collection_day:   hwRow.collection_day,
-            collection_day_2: hwRow.collection_day_2,
+            status:           hwRow.status || 'waitlist',
+            plan_id:          hwRow.plan_id          || sigRow?.plan_id,
+            collection_day:   hwRow.collection_day   || sigRow?.collection_day,
+            collection_day_2: hwRow.collection_day_2 || sigRow?.collection_day_2,
             zone_id:          hwRow.zone_id,
             assigned_runner:  hwRow.assigned_runner,
+            stripe_customer_id:     hwRow.stripe_customer_id     || sigRow?.stripe_customer_id,
+            stripe_subscription_id: hwRow.stripe_subscription_id || sigRow?.stripe_subscription_id,
           }
-          console.log('[BinDash] HW profile loaded from homeowners table ✅')
+          console.log('[BinDash] HW profile loaded from homeowners table ✅ status:', data.status)
         }
       } catch(e2){ console.warn('[BinDash] homeowners fallback:', e2) }
     }
@@ -5287,7 +5298,7 @@ async function populateHWDashboard(){
 
     const status = row.status
 
-    if(status === 'approved' || status === 'active'){
+    if(status === 'approved' || status === 'active' || status === 'waitlist'){
       go('S-hw-dash')
       _populateHWDashData(row, fn, ln, initials)
       loadHWCollections(row.email)
@@ -5322,7 +5333,23 @@ async function populateHWDashboard(){
       }
 
     } else if(status === 'waitlisted'){
-      // -- WAITLISTED: check if a zone now exists for their ZIP --
+      // -- WAITLISTED: check if they have an approved homeowners record first --
+      // If they're in homeowners table, show dashboard regardless of signup status
+      try {
+        const { data: hwCheck } = await _supa
+          .from('homeowners').select('*').ilike('email', currentUser.email).maybeSingle()
+        if(hwCheck){
+          // They're in homeowners table — show dashboard with waitlist status
+          const mergedRow = { ...row, ...hwCheck, status: hwCheck.status || 'waitlist' }
+          window._hwProfileRow = mergedRow
+          go('S-hw-dash')
+          _populateHWDashData(mergedRow, fn, ln, initials)
+          loadHWCollections(mergedRow.email)
+          setTimeout(_renderHWPayHistory, 600)
+          return
+        }
+      } catch(e){ /* non-blocking */ }
+      // No homeowners record — show waitlist screen
       const zip = row.zip_code || ''
       const zone = findZoneForZip(zip)
       if(zone && zone.status === 'live'){
@@ -5845,6 +5872,7 @@ async function _populateHWDashData(row, fn, ln, initials){
   }
 
   // Property page -- use DB fields
+  console.log('[BinDash] _populateHWDashData: street_address=', row.street_address, 'zip=', row.zip_code, 'plan_id=', row.plan_id, 'status=', row.status)
   safe('prop-address',    row.street_address || '--')
   safe('prop-city-zip',   (row.city ? row.city + ', ' : '') + (row.state||'AZ') + ' ' + (row.zip_code||''))
   safe('prop-bin-storage', row.bin_location  || '--')
