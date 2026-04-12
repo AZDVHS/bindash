@@ -18704,11 +18704,23 @@ async function navComplete(){
       const compressed = await _compressPhoto(window._navPhotoFile, 800, 0.72)
       const fname = `jobs/${stop?.jobId||Date.now()}_stop${navStop}.jpg`
       const { data, error } = await _supa.storage.from('job-photos').upload(fname, compressed, { upsert:true, contentType:'image/jpeg' })
-      if(!error){
+      if(error){
+        console.warn('[BinDash] Photo storage upload failed:', error.message, '— using base64 fallback')
+        // Fallback: encode as base64 and store directly in job record
+        const _file = window._navPhotoFile
+        photoUrl = await new Promise(res => {
+          const reader = new FileReader()
+          reader.onload = e => res(e.target.result)
+          reader.onerror = () => res(null)
+          reader.readAsDataURL(_file)
+        })
+        if(photoUrl) console.log('[BinDash] Photo stored as base64 ✅ length:', photoUrl.length)
+      } else {
         const { data:ud } = _supa.storage.from('job-photos').getPublicUrl(fname)
         photoUrl = ud?.publicUrl || null
+        console.log('[BinDash] Photo uploaded to storage ✅', fname)
       }
-    } catch(e){ console.warn('[photo]', e.message) }
+    } catch(e){ console.warn('[BinDash] Photo upload exception:', e.message) }
     window._navPhotoFile = null
   }
 
@@ -18757,7 +18769,11 @@ async function navComplete(){
     navPhase = 'travelling'
     showToast('✅ Stop '+navStop+' of '+NAV_STOPS.length+' — keep going!','ok',2500)
   }
-  renderActiveRouteTab()
+  // Only re-render if Bin In modal isn't currently showing
+  // (last stop triggers completeBatch which opens Bin In modal — don't overwrite it)
+  if(!window._pendingBinInBatch){
+    renderActiveRouteTab()
+  }
 }
 
 function navPauseConfirm(){
@@ -21709,10 +21725,27 @@ async function navFinishRoute(){
   navRouteActive = false
   navPhase = 'idle'
 
-  // Mark batch complete and create payout
+  // Mark batch complete — this also triggers Bin In offer modal
   if(navBatchId) await completeBatch(navBatchId)
 
-  // Switch to completed tab
+  // If Bin In offer modal is showing, wait for runner to respond before switching tabs
+  // _pendingBinInBatch is set by _autoCreateBinInBatch and cleared on accept/decline
+  if(window._pendingBinInBatch){
+    showToast('☀️ Respond to the Bin In offer above, then your route will close', 'info', 6000)
+    // Poll until runner responds (accept/decline clears _pendingBinInBatch)
+    await new Promise(resolve => {
+      const poll = setInterval(() => {
+        if(!window._pendingBinInBatch){
+          clearInterval(poll)
+          resolve()
+        }
+      }, 500)
+      // Safety timeout — 30 min max wait
+      setTimeout(() => { clearInterval(poll); resolve() }, 30 * 60 * 1000)
+    })
+  }
+
+  // Now safe to switch away — Bin In decision is made
   switchRouteTab('completed')
   showToast('Route submitted ✅ Pay queued for Friday', 'ok', 5000)
 
@@ -21721,7 +21754,7 @@ async function navFinishRoute(){
     if(typeof loadRunnerRoutes === 'function') await loadRunnerRoutes()
   } catch(e){ console.warn('[BinDash] navFinishRoute runner reload:', e.message) }
 
-  // Refresh admin dispatch pipeline so completed route shows immediately
+  // Refresh admin dispatch pipeline
   try {
     if(typeof loadLiveJobsIntoPipeline === 'function'){
       window._livePipelineBatches = null
