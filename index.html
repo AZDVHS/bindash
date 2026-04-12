@@ -8472,15 +8472,32 @@ async function _forceStartBatch(batchId){
 
 async function completeBatch(batchId){
   const runnerRow = window._currentRunnerRow
+  const rEmail = (runnerRow?.email||'').toLowerCase()
   try {
-    const { data: jobs } = await _supa.from('jobs')
+    // Update jobs to complete — match by batch_id OR by runner+in_progress for safety
+    let { data: jobs, error: updErr } = await _supa.from('jobs')
       .update({ status:'complete', completed_at:new Date().toISOString(), updated_at:new Date().toISOString() })
       .eq('batch_id', batchId)
-      .select('id, amount, visit_type, homeowner_email, runner_id, runner_name, scheduled_date, zone_id, service_type')
+      .select('id, amount, visit_type, homeowner_email, runner_id, runner_name, runner_email, scheduled_date, zone_id, service_type')
+
+    if(updErr) console.warn('[BinDash] completeBatch update error:', updErr.message)
+
+    // Fallback: if batch_id match returned nothing, try matching by runner+status
+    if(!jobs?.length && rEmail){
+      console.warn('[BinDash] completeBatch: no jobs matched batch_id, trying runner_email fallback')
+      const { data: jobs2, error: e2 } = await _supa.from('jobs')
+        .update({ status:'complete', completed_at:new Date().toISOString(), updated_at:new Date().toISOString() })
+        .eq('runner_email', rEmail)
+        .eq('status', 'in_progress')
+        .select('id, amount, visit_type, homeowner_email, runner_id, runner_name, runner_email, scheduled_date, zone_id, service_type')
+      if(e2) console.warn('[BinDash] completeBatch fallback error:', e2.message)
+      else jobs = jobs2
+    }
 
     const jobCount    = jobs?.length || 0
     const totalEarned = (jobCount * 3.25).toFixed(2)
     const visitType   = jobs?.[0]?.visit_type
+    console.log('[BinDash] completeBatch: marked', jobCount, 'jobs complete. visitType:', visitType)
 
     // Create pending payout
     if(runnerRow?.id && jobCount > 0){
@@ -18754,6 +18771,8 @@ async function navComplete(){
   _saveNavState()
 
   if(isLast){
+    // ── LAST STOP: trigger Bin In offer FIRST, then show done card ─────────
+    // Must happen before navPhase changes so runner is still on active tab
     navPhase = 'done'
     navRouteActive = false
     sessionStorage.removeItem('nav_state')
@@ -18762,16 +18781,24 @@ async function navComplete(){
     const earn = (NAV_STOPS.length*3.25).toFixed(2)
     const zname = ADMIN_ZONES.find(z=>z.id===navBatchZoneId)?.name||'your zone'
     const rnRow = window._rnRow||window._currentRunnerRow||{}
-    if(rnRow.email) sendEmail(rnRow.email,'Route complete — $'+earn+' earned 🎉',
-      EMAIL.routeComplete(rnRow.first_name||'Runner',NAV_STOPS.length,zname,earn),'route_complete')
+
+    // Render done card first so runner sees earnings
+    renderActiveRouteTab()
+
+    // Now trigger Bin In offer — stays on top of done card as modal
+    // completeBatch marks jobs complete, creates Bin In jobs in DB, shows offer modal
+    ;(async()=>{
+      try {
+        await completeBatch(navBatchId)
+        if(rnRow.email) sendEmail(rnRow.email,'Route complete — $'+earn+' earned 🎉',
+          EMAIL.routeComplete(rnRow.first_name||'Runner',NAV_STOPS.length,zname,earn),'route_complete')
+      } catch(e){ console.warn('[BinDash] navComplete last stop:', e.message) }
+    })()
+
     showToast('🎉 Route done! $'+earn+' queued for Friday','ok',4000)
   } else {
     navPhase = 'travelling'
     showToast('✅ Stop '+navStop+' of '+NAV_STOPS.length+' — keep going!','ok',2500)
-  }
-  // Only re-render if Bin In modal isn't currently showing
-  // (last stop triggers completeBatch which opens Bin In modal — don't overwrite it)
-  if(!window._pendingBinInBatch){
     renderActiveRouteTab()
   }
 }
@@ -21722,34 +21749,20 @@ function _resilientUpdate(table, data, matchCol, matchVal){
 
 
 async function navFinishRoute(){
+  // completeBatch was already called by navComplete on last stop
+  // This just cleans up UI state and switches to completed tab
   navRouteActive = false
   navPhase = 'idle'
+  navBatchId = ''
+  navStop = 0
+  NAV_STOPS = []
+  sessionStorage.removeItem('nav_state')
 
-  // Mark batch complete — this also triggers Bin In offer modal
-  if(navBatchId) await completeBatch(navBatchId)
-
-  // If Bin In offer modal is showing, wait for runner to respond before switching tabs
-  // _pendingBinInBatch is set by _autoCreateBinInBatch and cleared on accept/decline
-  if(window._pendingBinInBatch){
-    showToast('☀️ Respond to the Bin In offer above, then your route will close', 'info', 6000)
-    // Poll until runner responds (accept/decline clears _pendingBinInBatch)
-    await new Promise(resolve => {
-      const poll = setInterval(() => {
-        if(!window._pendingBinInBatch){
-          clearInterval(poll)
-          resolve()
-        }
-      }, 500)
-      // Safety timeout — 30 min max wait
-      setTimeout(() => { clearInterval(poll); resolve() }, 30 * 60 * 1000)
-    })
-  }
-
-  // Now safe to switch away — Bin In decision is made
+  // Switch to completed tab
   switchRouteTab('completed')
   showToast('Route submitted ✅ Pay queued for Friday', 'ok', 5000)
 
-  // Reload runner's active jobs so dashboard reflects completion
+  // Reload runner routes
   try {
     if(typeof loadRunnerRoutes === 'function') await loadRunnerRoutes()
   } catch(e){ console.warn('[BinDash] navFinishRoute runner reload:', e.message) }
