@@ -486,6 +486,11 @@ function handleStripeReturn(){
   } else if(p.get('ref')){
     window._pendingRunnerCode = p.get('ref').toUpperCase()
     window.history.replaceState({},'',' ')
+  } else if(p.get('login')){
+    // Dashboard link from email — prefill email field and route straight to login
+    const _loginEmail = decodeURIComponent(p.get('login'))
+    window._prefillLoginEmail = _loginEmail
+    window.history.replaceState({},'',' ')
   } else if(hash && (hash.includes('type=recovery') || hash.includes('type=signup'))){
     window.history.replaceState({}, '', ' ')
     setTimeout(()=>_handlePasswordResetHash(hash), 800)
@@ -640,7 +645,7 @@ const EMAIL = {
     <p>We'll email you once you're approved and your first collection is scheduled.</p>
   `),
 
-  hwApproved: (name, day, zone, runner, plan, binOut) => emailBase(`
+  hwApproved: (name, day, zone, runner, plan, binOut, email) => emailBase(`
     <h1>Welcome to BinDash, ${name}! 🎉</h1>
     <p>Your account is <strong style="color:${BRAND.cyan}">active</strong> and your first collection is scheduled. Here's everything you need to know.</p>
 
@@ -684,7 +689,7 @@ const EMAIL = {
       </ul>
     </div>
 
-    <a href="${BRAND.url}" class="btn">View My Dashboard -></a>
+    <a href="${BRAND.url}?login=${encodeURIComponent(email||'')}" class="btn">View My Dashboard -></a>
     <p style="font-size:13px;color:#64748b;margin-top:16px">Questions? Just reply to this email. We're here to help.</p>
   `),
 
@@ -694,14 +699,14 @@ const EMAIL = {
     <p>If you believe this is an error or have questions, please reply to this email and we'll take another look.</p>
   `),
 
-  zoneActivated: (name, zip, zone) => emailBase(`
+  zoneActivated: (name, zip, zone, email) => emailBase(`
     <h1>BinDash is now in your area! 🚀</h1>
     <p>Hi ${name}, great news -- we've just launched service in <strong style="color:#1e293b;font-weight:700">ZIP ${zip}</strong>. Log back in to confirm your service details and get started.</p>
     <div class="card">
       <div class="row"><div class="lbl">Your Zone</div><div class="val">${zone}</div></div>
       <div class="row"><div class="lbl">Next Step</div><div class="val">Log in and confirm your service</div></div>
     </div>
-    <a href="${BRAND.url}" class="btn">Confirm My Service -></a>
+    <a href="${BRAND.url}?login=${encodeURIComponent(email||'')}" class="btn">Confirm My Service -></a>
     <p style="font-size:13px;color:#475569">Takes 2 minutes. No payment until your first collection is confirmed.</p>
   `),
 
@@ -786,11 +791,11 @@ const EMAIL = {
     <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0">Offer expires in 25 minutes . Log in to accept or decline</p>
   `),
 
-  waitlistReminder: (name, zip, zone) => emailBase(`
+  waitlistReminder: (name, zip, zone, email) => emailBase(`
     <h1>Still interested in BinDash? 👋</h1>
     <p>Hi ${name}, we launched service in <strong style="color:#1e293b;font-weight:700">ZIP ${zip}</strong> a little while ago but haven't heard back from you yet.</p>
     <div class="card"><div class="row"><div class="lbl">Zone Ready</div><div class="val">${zone}</div></div></div>
-    <a href="${BRAND.url}" class="btn">Complete My Signup -></a>
+    <a href="${BRAND.url}?login=${encodeURIComponent(email||'')}" class="btn">Complete My Signup -></a>
     <p style="font-size:13px;color:#475569">Takes 2 minutes. No payment until your first collection is confirmed. If you're no longer interested, just ignore this email.</p>
   `),
 
@@ -8456,7 +8461,22 @@ async function initApp(){
 
   try {
     const { data: { session } } = await _supa.auth.getSession()
-    if(!session) return // No session -- stay on landing page
+    if(!session){
+      // No session — if we have a prefill email, route straight to login
+      if(window._prefillLoginEmail){
+        const _em = window._prefillLoginEmail
+        window._prefillLoginEmail = null
+        go('S-login')
+        setTimeout(() => {
+          const emailEl = document.getElementById('l-email')
+          const pwEl    = document.getElementById('l-pw')
+          if(emailEl){ emailEl.value = _em; emailEl.dispatchEvent(new Event('input')) }
+          if(pwEl) pwEl.focus()
+          showToast('Enter your password to continue', 'info', 4000)
+        }, 200)
+      }
+      return // No session -- stay on landing page
+    }
 
     const user = session.user
     let role   = user?.user_metadata?.role || ''
@@ -21732,7 +21752,7 @@ async function confirmCreateZoneFromWaitlist(zip){
 
     for(const row of rows){
       const _cemail = row.email && !row.email.includes('@lead.'+'bindash') ? row.email : null
-      if(_cemail) sendEmail(_cemail, 'BinDash is now in your area! Launch in ZIP '+zip, EMAIL.zoneActivated(row.first_name||'there', zip, newZone.name), 'zone_activated')
+      if(_cemail) sendEmail(_cemail, 'BinDash is now in your area! Launch in ZIP '+zip, EMAIL.zoneActivated(row.first_name||'there', zip, newZone.name, _cemail), 'zone_activated')
     }
   } catch(e){ console.warn('[BinDash] Zone assign failed:', String(e?.message||e)) }
 
@@ -22968,7 +22988,7 @@ async function approveHW(appId, directZoneId){
       'waitlist_confirmed'
     )
   } else {
-    sendEmail(app.email, 'Welcome to BinDash -- your account is active! 🎉', EMAIL.hwApproved(_appFn, app.day||'Tuesday', _approveZoneName, autoRunner?.name||null, _planLabel, _binOutNight), 'hw_approved')
+    sendEmail(app.email, 'Welcome to BinDash -- your account is active! 🎉', EMAIL.hwApproved(_appFn, app.day||'Tuesday', _approveZoneName, autoRunner?.name||null, _planLabel, _binOutNight, app.email), 'hw_approved')
   }
 
   // Reload from Supabase to sync and remove from pending
@@ -30580,7 +30600,7 @@ async function sendWaitlistReminder(id, contact){
       const _rd = _rr?.data
       if(_rd?.email && !_rd.email.includes('@lead.'+'bindash')){
         const _rzn = ADMIN_ZONES.find(z=>z.id===_rd.zone_id)?.name||'your area'
-        sendEmail(_rd.email, 'Reminder: Complete your BinDash signup', EMAIL.waitlistReminder(_rd.first_name||'there', _rd.zip_code, _rzn), 'waitlist_reminder')
+        sendEmail(_rd.email, 'Reminder: Complete your BinDash signup', EMAIL.waitlistReminder(_rd.first_name||'there', _rd.zip_code, _rzn, _rd.email), 'waitlist_reminder')
       }
     } catch(e){}
     renderZoneWaitlist()
