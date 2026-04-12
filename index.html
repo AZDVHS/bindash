@@ -24371,6 +24371,30 @@ function startRouteScheduler(){
   window._routeSchedulerRunning = true
   window._lastSchedulerCheck = {}
 
+  // ── Supabase realtime — live admin job status sync ───────────────────────
+  if(!window._jobsRealtimeChannel && typeof _supa !== 'undefined'){
+    try {
+      window._jobsRealtimeChannel = _supa
+        .channel('admin-jobs-live')
+        .on('postgres_changes', { event:'*', schema:'public', table:'jobs' }, (payload) => {
+          const newStatus = payload.new?.status
+          const oldStatus = payload.old?.status
+          if(newStatus === oldStatus) return
+          console.log('[Realtime] Job', oldStatus, '→', newStatus)
+          // Refresh dispatch pipeline if admin has it open
+          if(document.querySelector('#ad-dispatch')?.style.display !== 'none'){
+            window._livePipelineBatches = null
+            loadLiveJobsIntoPipeline?.().then(() => renderDispatchPipeline?.())
+          }
+          if(typeof updateOverviewCounts === 'function') updateOverviewCounts()
+          if(newStatus === 'complete' && document.querySelector('#ad-payments')?.style.display !== 'none')
+            loadPaymentsData?.()
+        })
+        .subscribe(status => console.log('[Realtime] jobs channel:', status))
+    } catch(e){ console.warn('[BinDash] realtime setup:', e?.message) }
+  }
+
+
   // 60-second ticker to update offer countdown badges in real time
   setInterval(()=>{
     const dispatchVisible = document.querySelector('#ad-dispatch')?.style.display !== 'none'
@@ -24443,14 +24467,14 @@ function startRouteScheduler(){
 
         sendEmail(
           'alpha1miller@gmail.com',
-          `📋 BinDash Dispatch: ${queued.length} route${queued.length!==1?'s':''} ready to approve`,
+          `🚀 BinDash: Route Batch Ready for Approval — ${queued.length} route${queued.length!==1?'s':''} need your launch`,
           `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
           <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,sans-serif">
           <div style="max-width:560px;margin:0 auto;padding:32px 20px">
             <div style="font-size:22px;font-weight:900;color:#06d6a0;margin-bottom:24px">BIN<span style="color:#6366f1">DASH</span></div>
             <div style="background:#fff;border-radius:14px;padding:28px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-              <h2 style="margin:0 0 6px;font-size:20px;color:#0f172a">📋 Daily Dispatch Reminder</h2>
-              <p style="color:#64748b;margin:0 0 20px;font-size:14px">You have <strong style="color:#0f172a">${queued.length} route${queued.length!==1?'s':''}</strong> queued and ready for review. Approve and dispatch manually from the Dispatch dashboard.</p>
+              <h2 style="margin:0 0 6px;font-size:20px;color:#0f172a">🚀 Route Batch Ready for Approval</h2>
+              <p style="color:#64748b;margin:0 0 20px;font-size:14px">Your <strong style="color:#0f172a">${queued.length} route${queued.length!==1?'s':''}</strong> have been prepared and are ready to review. Routes marked <span style="color:#f59e0b;font-weight:600">⚠ Changed</span> need review before launch. Click below to open Dispatch and hit 🚀 Launch on each route.</p>
               <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px">
                 <thead><tr style="background:#f1f5f9">
                   <th style="padding:8px 12px;text-align:left;color:#64748b;font-weight:600">Zone</th>
@@ -24461,9 +24485,9 @@ function startRouteScheduler(){
                 <tbody>${_routeList}</tbody>
               </table>
               <a href="${_dispatchUrl}" style="display:block;background:#06d6a0;color:#07090f;font-weight:800;font-size:15px;padding:14px 24px;border-radius:10px;text-decoration:none;text-align:center">
-                Open Dispatch Dashboard →
+                🚀 Review & Launch Routes →
               </a>
-              <p style="font-size:11px;color:#94a3b8;text-align:center;margin-top:16px">Routes are queued only — nothing sends until you manually approve and dispatch each one.</p>
+              <p style="font-size:11px;color:#94a3b8;text-align:center;margin-top:16px">Nothing is sent to runners until you click 🚀 Launch in the Dispatch dashboard.</p>
             </div>
           </div></body></html>`,
           '8am_dispatch_reminder'
@@ -24852,7 +24876,17 @@ function loadPendingApprovalsIntoDispatch(){
       <button class="btn btn-cyan btn-sm" style="font-size:10px" onclick="approvePendingRoute('${p.zoneId}','${p.day}',true)">✓ Approve</button>
     </div>
   </div>`).join('')
-  + (dayQueued.length ? `<div style="padding:7px 14px;font-size:11px;color:var(--muted);background:rgba(59,130,246,.06);border-bottom:1px solid var(--border)">🕐 ${dayQueued.map(p=>p.zoneName).join(', ')} — approved · queued for auto-send · <button onclick="${dayQueued.map(p=>`sendRouteNow('${p.zoneId}','${p.day}')`).join(';')}" style="background:none;border:none;color:var(--cyan);font-size:11px;cursor:pointer;padding:0;text-decoration:underline">Send now →</button></div>` : '')
+  + (dayQueued.length ? `<div style="padding:7px 14px;background:rgba(6,214,160,.05);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="font-size:11px;color:var(--cyan);font-weight:700">✅ ${dayQueued.length} route${dayQueued.length!==1?'s':''} approved — ready to dispatch</span>
+    <span style="font-size:11px;color:var(--muted)">${dayQueued.map(p=>p.zoneName+' · '+(p.stops?.length||0)+' stops').join(' · ')}</span>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      ${dayQueued.map(p=>`
+        <button onclick="adminLaunchBatch('${p.zoneId}','${p.day}',this)"
+          style="background:linear-gradient(135deg,#06d6a0,#22c55e);color:#07090f;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer;display:flex;align-items:center;gap:5px">
+          🚀 Launch ${p.zoneName}
+        </button>`).join('')}
+    </div>
+  </div>` : '')
 }
 
 // Full day names for matching
@@ -24861,6 +24895,129 @@ const FULL_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','
 // EXPLICIT immediate dispatch — called only by "Send now →" or the Launch button.
 // Approve button NEVER calls this. This also cancels the scheduled 9am auto-send
 // for any batches it launches (sets sentAt so the scheduler skips them).
+// ── adminLaunchBatch ─────────────────────────────────────────────────────────
+// The ONLY way routes are dispatched to runners. Called by "🚀 Launch" button.
+// 1. Marks jobs as 'offered' in DB
+// 2. Sends email+SMS to runner based on preferences
+// 3. Saves this route as the new default template for next cycle
+// 4. Stamps dispatch_queue as sent so scheduler never re-fires
+async function adminLaunchBatch(zoneId, day, btnEl){
+  if(btnEl){ btnEl.disabled = true; btnEl.textContent = '🚀 Launching...' }
+
+  const key = 'pending_route:'+zoneId+':'+normDay(day)
+  const raw = localStorage.getItem(key)
+  const memBatch = generatedBatches.find(b => b.zoneId===zoneId && normDay(b.day)===normDay(day))
+
+  if(!raw && !memBatch){
+    showToast('Route data not found — refresh dispatch and try again', 'err', 5000)
+    if(btnEl){ btnEl.disabled=false; btnEl.textContent='🚀 Launch' }
+    return
+  }
+
+  const batch = memBatch || JSON.parse(raw)
+  const runner = batch.runner
+  const stops  = batch.stops || []
+  const zone   = ADMIN_ZONES.find(z=>z.id===zoneId)
+  const zoneName = zone?.name || batch.zoneName || zoneId
+
+  if(!runner?.email){
+    showToast('No runner assigned to '+zoneName+' — assign a runner first', 'err', 5000)
+    if(btnEl){ btnEl.disabled=false; btnEl.textContent='🚀 Launch' }
+    return
+  }
+
+  try {
+    // 1. Mark all jobs offered in DB
+    const phxNow   = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Phoenix'}))
+    const today    = phxNow.toISOString().slice(0,10)
+    const tomorrow = new Date(phxNow); tomorrow.setDate(phxNow.getDate()+1)
+    const tomorrowStr = tomorrow.toISOString().slice(0,10)
+    const expiresAt = new Date(Date.now() + 45*60*1000).toISOString()
+    const earnOut   = (stops.length * (runner.loyaltyRate||3.25)).toFixed(2)
+    const inBatchId = zoneId + '_' + normDay(day) + '_' + Date.now()
+
+    // Insert job rows
+    const jobRows = stops.map(hw => ({
+      batch_id:         inBatchId,
+      homeowner_email:  hw.email,
+      runner_id:        runner.id   || null,
+      runner_name:      runner.name || null,
+      runner_email:     (runner.email||'').toLowerCase(),
+      visit_type:       'BIN_OUT',
+      job_type:         'subscription',
+      service_type:     hw.service==='BOTH'?'Recycling + General Waste':hw.service==='GENERAL'?'General Waste':'Recycling',
+      status:           'offered',
+      offer_type:       'zone',
+      offer_expires_at: expiresAt,
+      scheduled_date:   tomorrowStr,
+      amount:           runner.loyaltyRate || 3.25,
+      zone_id:          zoneId,
+      created_at:       new Date().toISOString(),
+      updated_at:       new Date().toISOString(),
+    }))
+
+    const { error: jobErr } = await _supa.from('jobs').insert(jobRows)
+    if(jobErr) throw new Error('Job insert failed: ' + jobErr.message)
+
+    // 2. Stamp dispatch_queue as sent
+    const earn = parseFloat(earnOut)
+    await _supa.from('dispatch_queue').upsert({
+      zone_id:              zoneId,
+      scheduled_date:       tomorrowStr,
+      status:               'sent',
+      sent_at:              new Date().toISOString(),
+      notification_sent_at: new Date().toISOString(),
+      runner_id:            runner.id || null,
+      runner_email:         (runner.email||'').toLowerCase(),
+      runner_name:          runner.name || null,
+      stop_count:           stops.length,
+      zone_name:            zoneName,
+      earn_out:             earn,
+      collection_day:       day,
+      updated_at:           new Date().toISOString(),
+    }, { onConflict: 'zone_id,scheduled_date' })
+
+    // 3. Send email + SMS to runner
+    const stopsList = stops.map(s=>({
+      name:    s.name,
+      email:   s.email,
+      address: s.address||s.zip||'--',
+      service: s.service,
+    }))
+    await sendEmail(
+      runner.email,
+      `New route: ${stops.length} stop${stops.length!==1?'s':''} · $${earnOut} available`,
+      EMAIL.batchOffer(
+        (runner.name||'Runner').split(' ')[0],
+        stops.length, earnOut, day, zoneName, stopsList
+      ),
+      'admin_launched_offer'
+    )
+    if(runner.phone && runner.phone !== '--' && runner.phone.replace(/\D/g,'').length >= 10)
+      sendSMS(runner.phone, SMS.routeOffer((runner.name||'Runner').split(' ')[0], stops.length, earnOut, day), 'admin_launched_sms')
+
+    // 4. Save as new default template for next cycle
+    saveRouteTemplate(zoneId, day, stops.map(s=>s.email||s), runner.id)
+
+    // 5. Update local state
+    batch.status = 'sent'
+    batch.manualSend = true
+    if(raw) localStorage.setItem(key, JSON.stringify(batch))
+    if(memBatch) memBatch.status = 'sent'
+
+    showToast(`🚀 Route launched — ${runner.name} notified for ${stops.length} stop${stops.length!==1?'s':''}`, 'ok', 6000)
+    loadPendingApprovalsIntoDispatch()
+    window._livePipelineBatches = null
+    await loadLiveJobsIntoPipeline()
+    renderDispatchPipeline()
+
+  } catch(e){
+    console.error('[BinDash] adminLaunchBatch:', e)
+    showToast('Launch failed: ' + (e.message||e), 'err', 6000)
+    if(btnEl){ btnEl.disabled=false; btnEl.textContent='🚀 Launch' }
+  }
+}
+
 async function sendRouteNow(zoneId, day){
   const key = 'pending_route:'+zoneId+':'+normDay(day)
   const raw = localStorage.getItem(key)
@@ -26231,7 +26388,7 @@ function renderDispatchPipeline(){
       const hUntil   = Math.floor(msUntil / 3600000)
       const mUntil   = Math.floor((msUntil % 3600000) / 60000)
       const dayLabel = _batchDate.toLocaleDateString('en-US',{weekday:'short'})
-      badgeTxt = `🕐 Approved · sends ${dayLabel} at 9am` + (hUntil > 0 ? ` (in ${hUntil}h ${mUntil}m)` : '')
+      badgeTxt = `✅ Approved · ready to launch` + (hUntil > 0 ? ` — planned ${dayLabel}` : '')
       badgeCol = '#3b82f6'
     } else if((statusKey==='offered'||statusKey==='sent') && isExpired){
       badgeTxt = '⏰ Offer expired'; badgeCol = '#ef4444'
