@@ -25000,10 +25000,11 @@ async function adminLaunchBatch(zoneId, day, btnEl){
     saveRouteTemplate(zoneId, day, stops.map(s=>s.email||s), runner.id)
 
     // 5. Update local state
-    batch.status = 'sent'
+    batch.status     = 'sent'
     batch.manualSend = true
+    batch.sentAt     = new Date().toISOString()
     if(raw) localStorage.setItem(key, JSON.stringify(batch))
-    if(memBatch) memBatch.status = 'sent'
+    if(memBatch){ memBatch.status = 'sent'; memBatch.manualSend = true; memBatch.sentAt = batch.sentAt }
 
     showToast(`🚀 Route launched — ${runner.name} notified for ${stops.length} stop${stops.length!==1?'s':''}`, 'ok', 6000)
     loadPendingApprovalsIntoDispatch()
@@ -26967,9 +26968,15 @@ async function loadLiveJobsIntoPipeline(){
       dateRange.push(d.toISOString().slice(0,10))
     }
     const { data: dqRows } = await _supa.from('dispatch_queue')
-      .select('zone_id,scheduled_date,status,earn_out,runner_id,runner_name')
+      .select('zone_id,scheduled_date,status,earn_out,runner_id,runner_name,notification_sent_at,sent_at')
       .in('scheduled_date', dateRange)
     ;(dqRows||[]).forEach(dq => {
+      // Only treat as 'sent' if notification was actually fired (notification_sent_at set)
+      // This prevents old 'sent' rows from incorrectly showing "Offer sent" before admin launches
+      const effectiveDqStatus = (dq.status === 'sent' || dq.status === 'offered')
+        ? (dq.notification_sent_at ? dq.status : 'queued')
+        : dq.status
+
       // Update matching generatedBatch status
       generatedBatches.forEach(b => {
         if(b.zoneId === dq.zone_id){
@@ -26979,15 +26986,10 @@ async function loadLiveJobsIntoPipeline(){
             // Only advance status — never go backwards
             const statusRank = { draft:0, change_detected:1, queued:2, sent:3, offered:4, accepted:5, in_progress:6, complete:7 }
             const currentRank = statusRank[b.status] || 0
-            const newRank     = statusRank[dq.status] || 0
+            const newRank     = statusRank[effectiveDqStatus] || 0
             if(newRank > currentRank){
-              b.status  = dq.status
-              b.sentAt  = b.sentAt || new Date().toISOString()
-            }
-            // queued → sent/offered: always advance regardless of rank
-            if(b.status === 'queued' && (dq.status === 'sent' || dq.status === 'offered')){
-              b.status = 'sent'
-              b.sentAt = b.sentAt || new Date().toISOString()
+              b.status  = effectiveDqStatus
+              b.sentAt  = dq.sent_at || b.sentAt || null
             }
             // Also update earnOut from DB if it was 0
             if(dq.earn_out && (!b.earnOut || b.earnOut === '0.00')){
@@ -27146,15 +27148,21 @@ async function loadLiveJobsIntoPipeline(){
 
     window._livePipelineBatches = Object.values(batchMap)
 
-  // ── Sanitise generatedBatches — clear poisoned future status ──────────────
+  // ── Sanitise generatedBatches — clear poisoned status ────────────────────
   const _todayStr = new Date().toISOString().slice(0,10)
   generatedBatches.forEach(b => {
     if(!b.date) return
     const bDate = b.date.slice(0,10)
+    // Future batches can never be sent yet
     if(bDate > _todayStr && ['sent','offered'].includes(b.status)){
-      b.status = 'queued'   // future batch can't be sent yet
+      b.status = 'queued'
       b.sentAt = null
       b.offerExpiresAt = null
+    }
+    // Today's batches: if manualSend flag isn't set, treat as queued not sent
+    // manualSend is set by adminLaunchBatch when the admin actually clicks Launch
+    if(bDate === _todayStr && b.status === 'sent' && !b.manualSend && !b.sentAt){
+      b.status = 'queued'
     }
   })
 
