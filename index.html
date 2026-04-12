@@ -5678,8 +5678,78 @@ async function hwCompletePayment(){
     if(btn){ btn.disabled = false; btn.textContent = 'Complete Payment ->' }
   }
 }
+// ── Homeowner Data Validator ─────────────────────────────────────────────────
+// Runs before any UI render — flags missing fields in console, returns cleaned row
+function validateHomeownerData(row, context){
+  if(!row) { console.warn('[BinDash] validateHomeownerData: null row in', context); return row }
+  const warn = (field, val) => console.warn(`[BinDash] HO data drift [${context}]: "${field}" is ${JSON.stringify(val)} — expected populated value`)
+  if(!row.street_address || row.street_address === '--') warn('street_address', row.street_address)
+  if(!row.city || row.city === '--')                     warn('city', row.city)
+  if(!row.zip_code)                                      warn('zip_code', row.zip_code)
+  if(!row.service_type)                                  warn('service_type', row.service_type)
+  if(!row.collection_day && !row.collection_day_2)       warn('collection_day', row.collection_day)
+  if(!row.plan_id)                                       warn('plan_id', row.plan_id)
+  // Normalize service_type to canonical Title Case strings
+  const _svcNorm = {
+    'recycling': 'Recycling', 'recycling only': 'Recycling',
+    'general waste': 'General Waste', 'general': 'General Waste', 'waste': 'General Waste',
+    'recycling + general waste': 'Recycling + General Waste',
+    'both': 'Recycling + General Waste', 'recycling+general waste': 'Recycling + General Waste',
+    'split days': 'Split Days', 'split': 'Split Days',
+    'bin out as needed': 'Bin Out As Needed',
+  }
+  if(row.service_type){
+    const norm = _svcNorm[(row.service_type||'').toLowerCase().trim()]
+    if(norm && norm !== row.service_type){
+      console.log(`[BinDash] validateHomeownerData: normalizing service_type "${row.service_type}" → "${norm}"`)
+      row = { ...row, service_type: norm }
+    }
+  }
+  return row
+}
+
 async function _populateHWDashData(row, fn, ln, initials){
   const safe = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val }
+
+  // Validate and normalize before any rendering
+  row = validateHomeownerData(row, '_populateHWDashData')
+
+  // If key fields are missing, do a silent fresh fetch from DB to fill gaps
+  // This handles the drift case where homeowners table is missing fields that signups has
+  if(!row.collection_day || !row.service_type || !row.street_address || !row.street_address.trim()){
+    try {
+      const _em = row.email || currentUser?.email || ''
+      if(_em){
+        const { data: _fresh } = await _supa.from('homeowner_signups')
+          .select('street_address,city,zip_code,state,service_type,collection_day,collection_day_2,bin_location,gate_type,gate_code,pet_info,curb_notes,service_notes,plan_id,frequency')
+          .ilike('email', _em).maybeSingle()
+        if(_fresh){
+          console.log('[BinDash] _populateHWDashData: gap-filling from signups:', _fresh)
+          row = {
+            ..._fresh,
+            ...row,  // homeowners fields take priority
+            // But fill any empty homeowners fields from signups
+            street_address:   row.street_address && row.street_address !== '--' ? row.street_address : (_fresh.street_address || ''),
+            city:             row.city && row.city !== '--' ? row.city : (_fresh.city || ''),
+            zip_code:         row.zip_code || _fresh.zip_code || '',
+            service_type:     row.service_type || _fresh.service_type || 'Recycling',
+            collection_day:   row.collection_day || _fresh.collection_day || '',
+            collection_day_2: row.collection_day_2 || _fresh.collection_day_2 || null,
+            plan_id:          row.plan_id || _fresh.plan_id || '',
+            bin_location:     row.bin_location || _fresh.bin_location || '',
+            gate_type:        row.gate_type || _fresh.gate_type || '',
+            gate_code:        row.gate_code || _fresh.gate_code || '',
+            pet_info:         row.pet_info || _fresh.pet_info || '',
+            curb_notes:       row.curb_notes || _fresh.curb_notes || '',
+            service_notes:    row.service_notes || _fresh.service_notes || '',
+          }
+          // Update stored profile row so subsequent operations use fresh data
+          window._hwProfileRow = row
+          row = validateHomeownerData(row, '_populateHWDashData:gap-fill')
+        }
+      }
+    } catch(e){ console.warn('[BinDash] gap-fill fetch failed:', e?.message) }
+  }
 
   // Sidebar + greeting
   safe('hw-sidebar-name', fn + ' ' + ln)
@@ -11605,7 +11675,49 @@ async function rSubmit(){
 }
 
 // Nav
-function hwNav(el,pg){document.querySelectorAll('#S-hw-dash .nav-i').forEach(n=>n.classList.remove('on'));if(el)el.classList.add('on');document.querySelectorAll('#S-hw-dash .pg').forEach(p=>p.classList.remove('on'));document.getElementById(pg).classList.add('on');const t={'hw-home':'Dashboard','hw-collections':'My Collections','hw-property':'My Property','hw-schedule':'Schedule','hw-account':'Account & Plan'};document.getElementById('hw-pg-title').textContent=t[pg];if(pg==='hw-property') setTimeout(_initHWPropMap,80)}
+function hwNav(el,pg){
+  document.querySelectorAll('#S-hw-dash .nav-i').forEach(n=>n.classList.remove('on'))
+  if(el) el.classList.add('on')
+  document.querySelectorAll('#S-hw-dash .pg').forEach(p=>p.classList.remove('on'))
+  document.getElementById(pg).classList.add('on')
+  const t={'hw-home':'Dashboard','hw-collections':'My Collections','hw-property':'My Property','hw-schedule':'Schedule','hw-account':'Account & Plan'}
+  document.getElementById('hw-pg-title').textContent = t[pg]
+  if(pg === 'hw-property'){
+    setTimeout(_initHWPropMap, 80)
+    // Re-populate property fields from latest _hwProfileRow on every open
+    // This ensures data drift (empty fields) is corrected without full reload
+    if(window._hwProfileRow){
+      const row = window._hwProfileRow
+      const safe = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val }
+      safe('prop-address',    row.street_address && row.street_address !== '--' ? row.street_address : '--')
+      safe('prop-city-zip',   (row.city && row.city !== '--' ? row.city + ', ' : '') + (row.state||'AZ') + ' ' + (row.zip_code||''))
+      safe('prop-bin-storage', row.bin_location || '--')
+      safe('prop-gate',       row.gate_type ? row.gate_type + (row.gate_code ? ' · Code: '+row.gate_code : '') : '--')
+      safe('prop-pets',       row.pet_info || 'None')
+      // Service prefs
+      const _dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+      const _colDay = row.collection_day || ''
+      const _colDayIdx = _dayNames.findIndex(d => d.toLowerCase() === _colDay.toLowerCase())
+      const _prevDay = _colDayIdx >= 0 ? _dayNames[(_colDayIdx + 6) % 7] : '--'
+      const _isOAN = (row.plan_id||'').startsWith('oan_')
+      const _svcLabel = (() => {
+        if(_isOAN) return 'Bin Out As Needed'
+        const s = (row.service_type||'').toLowerCase()
+        if(s.includes('split')) return 'Recycling & Waste — Split Days'
+        if(s.includes('both') || (s.includes('recycling') && s.includes('general'))) return 'Recycling & General Waste'
+        if(s.includes('general') || s.includes('waste')) return 'General Waste'
+        if(s.includes('recycl')) return 'Recycling'
+        return row.service_type || '--'
+      })()
+      safe('pref-service', _svcLabel)
+      safe('pref-day', _isOAN ? 'Weekly drive-by'
+        : row.collection_day_2 ? (_colDay||'--') + ' & ' + row.collection_day_2
+        : (_colDay || '--'))
+      safe('pref-binout-night', _isOAN ? 'Only when bin is full' : (_prevDay !== '--' ? _prevDay + ' evening' : '--'))
+      safe('pref-notes', row.service_notes && row.service_notes !== '--' ? row.service_notes : (row.curb_notes && row.curb_notes !== '--' ? row.curb_notes : '--'))
+    }
+  }
+}
 
 window._hwPropMap = null
 async function _initHWPropMap(){
@@ -19262,7 +19374,7 @@ async function _adminActivateHW(hwId){
   const hw = HOMEOWNERS.find(h => h.id === hwId)
   if(!hw){ showToast('Homeowner not found','err'); return }
 
-  if(!confirm(`Activate ${hw.name}'s account?\n\nThis will:\n• Set their status to Active\n• Send them the welcome email\n• Enable their dashboard access`)) return
+  if(!confirm(`Activate ${hw.name}'s account?\n\nThis will:\n• Set their status to Active\n• Sync all profile data from signup record\n• Send them the welcome email`)) return
 
   const btn = event?.target
   if(btn){ btn.disabled = true; btn.textContent = 'Activating...' }
@@ -19272,41 +19384,68 @@ async function _adminActivateHW(hwId){
     const zoneName = zone?.name || 'Your zone'
     const runner = RUNNERS.find(r => r.id === hw.assignedRunner)
     const planLabels = { plan_a:'1 Can', plan_b:'2 Cans Same Day', plan_c:'2 Cans Split Days', oan_a:'Bin Out As Needed', oan_b:'Bin Out As Needed 2-Can', oan_c:'Bin Out As Needed Split' }
-    const planLabel = planLabels[hw.plan] || hw.plan || 'Standard'
-    const day = hw.day || '--'
 
-    // 1. Update homeowner_signups → approved
-    const { error: sigErr } = await _supa.from('homeowner_signups')
-      .update({ status: 'approved', reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .ilike('email', hw.email)
-    if(sigErr) console.warn('[BinDash] Activate: signups update:', sigErr.message)
+    // Step 1: Pull latest data from homeowner_signups to preserve all fields
+    let sigData = null
+    try {
+      const { data: sd } = await _supa.from('homeowner_signups').select('*').ilike('email', hw.email).maybeSingle()
+      sigData = sd
+    } catch(e){}
 
-    // 2. Update homeowners → active
-    const { error: hwErr } = await _supa.from('homeowners')
-      .update({ status: 'active', updated_at: new Date().toISOString() })
-      .ilike('email', hw.email)
-    if(hwErr) console.warn('[BinDash] Activate: homeowners update:', hwErr.message)
+    // Normalize service_type to canonical form
+    const _svcNorm = {
+      'recycling':'Recycling','recycling only':'Recycling','recycling only':'Recycling',
+      'general waste':'General Waste','general':'General Waste','waste':'General Waste',
+      'recycling + general waste':'Recycling + General Waste','both':'Recycling + General Waste',
+      'split days':'Split Days','split':'Split Days','bin out as needed':'Bin Out As Needed',
+    }
+    const rawSvc = sigData?.service_type || hw.service || 'Recycling'
+    const canonicalSvc = _svcNorm[rawSvc.toLowerCase().trim()] || rawSvc
 
-    // 3. Update in-memory
-    hw.status = 'active'
+    const day       = sigData?.collection_day || hw.day || '--'
+    const day2      = sigData?.collection_day_2 || hw.dayWaste || null
+    const planKey   = sigData?.plan_id || hw.plan || 'plan_a'
+    const planLabel = planLabels[planKey] || planKey || 'Standard'
+    const addr      = sigData?.street_address || hw.address || ''
+    const city      = sigData?.city || hw.city || ''
+    const zip       = sigData?.zip_code || hw.zip || ''
 
-    // 4. Send welcome email
-    const binOutNight = (() => {
-      const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
-      const idx = days.findIndex(d => d.toLowerCase() === (day||'').toLowerCase())
-      return idx >= 0 ? days[(idx + 6) % 7] + ' evening' : 'Evening before collection'
-    })()
+    // Step 2: Update homeowner_signups → approved + preserve data
+    await _supa.from('homeowner_signups').update({
+      status: 'approved',
+      reviewed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).ilike('email', hw.email)
+
+    // Step 3: Update homeowners → active + sync all preserved fields
+    await _supa.from('homeowners').update({
+      status: 'active',
+      service_type:     canonicalSvc,
+      collection_day:   day !== '--' ? day : null,
+      collection_day_2: day2 || null,
+      plan_id:          planKey,
+      street_address:   addr || null,
+      city:             city || null,
+      zip_code:         zip  || null,
+      updated_at:       new Date().toISOString(),
+    }).ilike('email', hw.email)
+
+    // Step 4: Update in-memory
+    hw.status  = 'active'
+    hw.service = canonicalSvc
+    hw.day     = day
+    hw.plan    = planKey
+
+    // Step 5: Calculate bin-out night
+    const _days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+    const _idx  = _days.findIndex(d => d.toLowerCase() === (day||'').toLowerCase())
+    const binOutNight = _idx >= 0 ? _days[(_idx + 6) % 7] + ' evening' : 'Evening before collection'
+
+    // Step 6: Send welcome email
     sendEmail(
       hw.email,
       'Welcome to BinDash — your account is active! 🎉',
-      EMAIL.hwApproved(
-        hw.name.split(' ')[0] || hw.name,
-        day, zoneName,
-        runner?.name || null,
-        planLabel,
-        binOutNight,
-        hw.email
-      ),
+      EMAIL.hwApproved(hw.name.split(' ')[0]||hw.name, day, zoneName, runner?.name||null, planLabel, binOutNight, hw.email),
       'hw_approved_manual'
     )
 
@@ -28260,16 +28399,16 @@ function confirmDeleteZone(zId, name){
 }
 
 async function broadcastZoneLaunch(zone){
-  // Find all waitlist-status HOs in this zone and email them to complete signup
   try {
     const { data: wlHOs } = await _supa.from('homeowner_signups')
-      .select('email,first_name,zip_code,status')
+      .select('email,first_name,zip_code,status,service_type,collection_day,plan_id')
       .eq('zone_id', zone.id)
       .in('status', ['waitlist_pending','waitlist_approved','waitlisted'])
     if(!wlHOs?.length){ console.log('[BinDash] No waitlist HOs to notify for', zone.name); return }
 
     wlHOs.forEach(ho => {
       if(!ho.email || ho.email.includes('@lead.bindash')) return
+      const loginUrl = (BRAND?.url || 'https://www.bindash.shop') + '?login=' + encodeURIComponent(ho.email)
       sendEmail(
         ho.email,
         '🎉 BinDash is launching in your area — complete your signup!',
@@ -28281,18 +28420,17 @@ async function broadcastZoneLaunch(zone){
           <p style="font-size:15px;color:#475569;margin:0 0 20px">Hi ${ho.first_name||'there'}, you signed up for the BinDash waitlist for ZIP ${ho.zip_code}. We now have runners available and are ready to activate service for you!</p>
           <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:18px;margin-bottom:24px">
             <div style="font-size:14px;font-weight:700;color:#15803d;margin-bottom:8px">✅ Your zone is now active: ${zone.name}</div>
-            <div style="font-size:13px;color:#166534">Runners are ready to start collecting in your neighborhood. Complete your account setup to get started.</div>
+            <div style="font-size:13px;color:#166534">Runners are ready. Click below — your info is already saved, just log in to confirm.</div>
           </div>
-          <a href="https://www.bindash.shop" style="display:block;background:#06d6a0;color:#07090f;font-weight:800;font-size:16px;padding:16px 32px;border-radius:12px;text-decoration:none;text-align:center;margin-bottom:12px">Complete My Signup →</a>
+          <a href="${loginUrl}" style="display:block;background:#06d6a0;color:#07090f;font-weight:800;font-size:16px;padding:16px 32px;border-radius:12px;text-decoration:none;text-align:center;margin-bottom:12px">Complete My Account →</a>
           <p style="font-size:12px;color:#94a3b8;text-align:center">Questions? Reply to this email. — The BinDash Team</p>
         </div></body></html>`,
         'zone_launch_broadcast'
       )
     })
     showToast(`📬 Zone launch email sent to ${wlHOs.length} waitlist customer${wlHOs.length!==1?'s':''}`, 'ok', 5000)
-    console.log('[BinDash] Zone launch broadcast sent to', wlHOs.length, 'waitlist HOs')
 
-    // Update their status from waitlist_pending → pending_review so they appear in Pending
+    // Update status to pending_review — preserves all existing data fields
     await _supa.from('homeowner_signups')
       .update({ status:'pending_review', updated_at: new Date().toISOString() })
       .eq('zone_id', zone.id)
