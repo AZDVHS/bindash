@@ -7225,19 +7225,42 @@ async function loadRunnerRoutes(runnerRow){
     const rid        = runnerRow.id
     const runnerName = ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim()
 
-    // Fetch active jobs for this runner
+    // Fetch active jobs for this runner — query by email (most reliable), fallback to id/name
     const runnerEmail = (runnerRow.email||'').toLowerCase().trim()
-    // Build OR filter — include email match for edge-function-sent offers
-    const orFilter = [`runner_id.eq.${rid}`, `runner_name.eq."${runnerName}"`]
-    if(runnerEmail) orFilter.push(`runner_email.eq.${runnerEmail}`)
 
-    const { data: jobs, error } = await _supa
-      .from('jobs')
-      .select('*')
-      .or(orFilter.join(','))
-      .in('status', ['offered','accepted','in_progress','scheduled'])
-      .order('scheduled_date', { ascending: true })
+    let jobs = [], jobError = null
 
+    // Primary: match by runner_email
+    if(runnerEmail){
+      const res = await _supa.from('jobs')
+        .select('*').ilike('runner_email', runnerEmail)
+        .in('status', ['offered','accepted','in_progress','scheduled'])
+        .order('scheduled_date', { ascending: true })
+      jobs = res.data || []; jobError = res.error
+    }
+
+    // Fallback 1: runner_id
+    if(!jobs.length && rid){
+      const res = await _supa.from('jobs')
+        .select('*').eq('runner_id', rid)
+        .in('status', ['offered','accepted','in_progress','scheduled'])
+        .order('scheduled_date', { ascending: true })
+      if(res.data?.length) jobs = res.data
+    }
+
+    // Fallback 2: runner_name (catches legacy rows)
+    if(!jobs.length){
+      const runnerName = ((runnerRow.first_name||'') + ' ' + (runnerRow.last_name||'')).trim()
+      if(runnerName){
+        const res = await _supa.from('jobs')
+          .select('*').ilike('runner_name', runnerName)
+          .in('status', ['offered','accepted','in_progress','scheduled'])
+          .order('scheduled_date', { ascending: true })
+        if(res.data?.length) jobs = res.data
+      }
+    }
+
+    const error = jobError
     if(error) throw error
 
     // Detect missed routes — jobs whose scheduled_date is in the past and status is still open
@@ -8184,28 +8207,39 @@ async function _acknowledgeProbe(probeId, btnEl){
 // ── Poll for new route offers every 2 minutes while runner is on dashboard ──
 let _rnOfferPollTimer = null
 function _stopOfferPoll(){ if(_rnOfferPollTimer){ clearInterval(_rnOfferPollTimer); _rnOfferPollTimer=null } }
+
+async function _checkForNewOffer(row){
+  const banner = document.getElementById('offer-banner')
+  if(banner?.style.display !== 'none') return  // already showing
+  const dashVisible = document.getElementById('S-rn-dash')?.offsetParent !== null
+  if(!dashVisible) return
+  if(!row) return
+  try {
+    const rId    = row.id || ''
+    const rName  = ((row.first_name||row.name||'')+' '+(row.last_name||'')).trim()
+    const rEmail = (row.email||'').toLowerCase().trim()
+    const orParts = []
+    if(rId)    orParts.push(`runner_id.eq.${rId}`)
+    if(rName)  orParts.push(`runner_name.eq."${rName}"`)
+    if(rEmail) orParts.push(`runner_email.eq.${rEmail}`)
+    if(!orParts.length) return
+    const { data: offered } = await _supa.from('jobs')
+      .select('id').or(orParts.join(',')).eq('status','offered').limit(1)
+    if(offered?.length){
+      console.log('[OfferPoll] Pending offer found — refreshing routes to show banner')
+      await loadRunnerRoutes(row)
+    }
+  } catch(e){ console.warn('[OfferPoll]', e?.message) }
+}
+
 function _startOfferPoll(runnerRow){
   if(_rnOfferPollTimer) clearInterval(_rnOfferPollTimer)
-  _rnOfferPollTimer = setInterval(async () => {
-    // Only poll if runner dashboard is visible and banner is hidden
-    const banner = document.getElementById('offer-banner')
-    const dashVisible = document.getElementById('rn-home')?.offsetParent !== null
-    if(!dashVisible) return
-    if(banner?.style.display !== 'none') return  // already showing offer
-    const row = runnerRow || window._currentRunnerRow
-    if(!row?.id) return
-    try {
-      const rEmail = (row.email||'').toLowerCase()
-      const orF    = [`runner_id.eq.${row.id}`, `runner_name.eq."${((row.first_name||'')+' '+(row.last_name||'')).trim()}"`, `runner_email.eq.${rEmail}`]
-      const { data: offered } = await _supa.from('jobs')
-        .select('id').or(orF.join(',')).eq('status','offered').limit(1)
-      if(offered?.length){
-        // New offer found — reload routes to show banner
-        await loadRunnerRoutes(row)
-        console.log('[OfferPoll] New offer detected — banner shown')
-      }
-    } catch(e){}
-  }, 120000)  // every 2 minutes
+  // Immediate check 2s after login — don't wait for first interval
+  setTimeout(() => _checkForNewOffer(runnerRow || window._currentRunnerRow), 2000)
+  // Poll every 60s
+  _rnOfferPollTimer = setInterval(() => {
+    _checkForNewOffer(runnerRow || window._currentRunnerRow)
+  }, 60000)
 }
 
 async function startBatch(batchId){
@@ -24384,13 +24418,18 @@ function approvePendingRoute(zoneId, day, permanent=true){
     if(b.zoneId===zoneId && normDay(b.day)===normDay(day)) b.status = 'queued'
   })
 
-  const isPast9am = now.getHours() >= 9
-  if(isPast9am){
+  // Always use Phoenix time — NEVER raw browser local time for dispatch decisions
+  const phxNow  = new Date(now.toLocaleString('en-US', { timeZone: 'America/Phoenix' }))
+  const phxHour = phxNow.getHours()
+  // Dispatch window: 9am–8pm Phoenix only. Outside this window → queue for 9am.
+  const inDispatchWindow = phxHour >= 9 && phxHour < 20
+
+  if(inDispatchWindow){
     showToast('Route approved ✅ — sending to runner now...', 'ok', 3000)
     setTimeout(async function(){
       try{
         await triggerDispatchEdgeFunction()
-        // Immediately mark as sent so the 9am scheduler doesn't fire again
+        // Mark sent immediately so scheduler never re-fires this row
         const _dqDateStr = pending.date || new Date(now.getTime()+86400000).toISOString().slice(0,10)
         await _supa.from('dispatch_queue')
           .update({ status:'sent', sent_at: new Date().toISOString(), notification_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
@@ -24400,7 +24439,11 @@ function approvePendingRoute(zoneId, day, permanent=true){
       renderDispatchPipeline()
     }, 1500)
   } else {
-    showToast('Route approved ✅ — will auto-send at 9am', 'ok', 5000)
+    const _msg = phxHour >= 20
+      ? 'Route approved ✅ — queued for 9am tomorrow (after-hours, not sending tonight)'
+      : 'Route approved ✅ — will auto-send at 9am Phoenix time'
+    showToast(_msg, 'ok', 7000)
+    console.log('[BinDash] Approval outside dispatch window. PHX hour:', phxHour, '— queued only, no immediate send.')
   }
   renderDispatchPipeline()
   loadPendingApprovalsIntoDispatch()
@@ -24422,7 +24465,9 @@ async function _launchSingleBatch(batch){
     const expiresAt = new Date(now.getTime() + (batch.windowMins||45)*60*1000).toISOString()
     const jobRows = batch.stops.map(hw=>({
       batch_id: batch.id, homeowner_email: hw.email,
-      runner_id: batch.runner?.id||null, runner_name: batch.runner?.name||null,
+      runner_id:    batch.runner?.id    || null,
+      runner_name:  batch.runner?.name  || null,
+      runner_email: batch.runner?.email?.toLowerCase() || null,
       visit_type: 'BIN_OUT', job_type: 'subscription',
       service_type: hw.service==='BOTH'?'Recycling + General Waste':hw.service==='GENERAL'?'General Waste':'Recycling',
       status: batch.runner?'offered':'unassigned', offer_type: batch.offerType||'zone',
