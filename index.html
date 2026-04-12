@@ -5811,8 +5811,8 @@ async function _populateHWDashData(row, fn, ln, initials){
   }  // end if(colDayIdx >= 0)
 
   // Subscription banner
-  const planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split Days · $54.99/mo', oan_a:'Bin Out As Needed — 1 Can · $19.99/mo+usage', oan_b:'Bin Out As Needed — 2 Cans Same Day · $19.99/mo+usage', oan_c:'Bin Out As Needed — 2 Cans Split · $19.99/mo+usage' }
-  const planIcons  = { plan_a:'🗑️', plan_b:'🗑️🗑️', plan_c:'♻️🗑️' }
+  const planLabels = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split Days · $54.99/mo', oan_a:'Bin Out As Needed — 1 Can · $19.99/mo + usage', oan_b:'Bin Out As Needed — 2 Cans Same Day · $19.99/mo + usage', oan_c:'Bin Out As Needed — 2 Cans Split · $19.99/mo + usage' }
+  const planIcons  = { plan_a:'🗑️', plan_b:'🗑️🗑️', plan_c:'♻️🗑️', oan_a:'📅', oan_b:'📅', oan_c:'📅' }
   const planKey = row.plan_id || ''
   // Derive plan from service_type / collection_day_2 if plan_id not set or unrecognized
   const derivedPlanKey = (() => {
@@ -5829,17 +5829,25 @@ async function _populateHWDashData(row, fn, ln, initials){
     return 'plan_a'
   })()
   const effectivePlanKey = planLabels[planKey] ? planKey : derivedPlanKey
+  const isOANPlan = effectivePlanKey.startsWith('oan_')
   safe('acct-plan-name', planLabels[effectivePlanKey] || planLabels.plan_a)
-  safe('acct-plan-icon', planIcons[effectivePlanKey] || planIcons[planKey] || '🗑️')
+  safe('acct-plan-icon', planIcons[effectivePlanKey] || '🗑️')
   const activeSince = row.created_at
     ? new Date(row.created_at).toLocaleDateString('en-US',{month:'short',year:'numeric'})
     : '--'
-  safe('acct-plan-detail', (colDay || '--') + 's . Active since ' + activeSince)
+  // OAN detail line shows usage fees instead of collection day
+  const _oanUsageFees = { oan_a:'+$12.99/move', oan_b:'+$16.99/move', oan_c:'+$19.99/move' }
+  safe('acct-plan-detail', isOANPlan
+    ? `Pay per move · ${_oanUsageFees[effectivePlanKey]||''} · Active since ${activeSince}`
+    : `${colDay || '--'}s · Active since ${activeSince}`)
 
   // Update plan + zone badges now that values are resolved
   if(_pBadge){
-    const _planShort = { plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split · $54.99/mo', oan_a:'OAN · $19.99+', oan_b:'OAN 2-Can · $19.99+', oan_c:'OAN Split · $19.99+' }
-    _pBadge.textContent = '🗑️ ' + (_planShort[effectivePlanKey] || '--')
+    const _planShort = {
+      plan_a:'1 Can · $34.99/mo', plan_b:'2 Cans Same Day · $44.99/mo', plan_c:'2 Cans Split · $54.99/mo',
+      oan_a:'OAN 1-Can · $19.99/mo+', oan_b:'OAN 2-Can · $19.99/mo+', oan_c:'OAN Split · $19.99/mo+',
+    }
+    _pBadge.textContent = (isOANPlan ? '📅 ' : '🗑️ ') + (_planShort[effectivePlanKey] || '--')
   }
   if(_zBadge){
     const _zn = ADMIN_ZONES.find(z=>z.id===row.zone_id)
@@ -5874,26 +5882,30 @@ async function _populateHWDashData(row, fn, ln, initials){
   safe('prop-bin-storage', row.bin_location  || '--')
   safe('prop-gate',       row.gate_type ? row.gate_type + (row.gate_code ? ' . Code: ' + row.gate_code : '') : '--')
   safe('prop-pets',       row.pet_info       || 'None')
-  // Derive service label — prefer service_type, fall back to plan
+  // Derive service label — OAN first, then service_type, then plan
   const _svcLabel = (() => {
+    if(isOANPlan) return 'Bin Out As Needed — runner checks on collection day'
     const s = (row.service_type||'').toLowerCase()
     if(s.includes('split')) return 'Recycling & Waste — Split Days'
-    if(s.includes('both') || s.includes('general') && s.includes('recycl')) return 'Recycling & General Waste'
+    if(s.includes('both') || (s.includes('general') && s.includes('recycl'))) return 'Recycling & General Waste'
     if(s.includes('waste') || s.includes('general')) return 'General Waste'
     if(s.includes('recycl')) return 'Recycling'
     // Fall back to plan
-    if(effectivePlanKey === 'plan_c' || effectivePlanKey === 'oan_c') return 'Recycling & Waste — Split Days'
-    if(effectivePlanKey === 'plan_b' || effectivePlanKey === 'oan_b') return 'Recycling & General Waste'
-    if(effectivePlanKey === 'oan_a') return 'Bin Out As Needed'
+    if(effectivePlanKey === 'plan_c') return 'Recycling & Waste — Split Days'
+    if(effectivePlanKey === 'plan_b') return 'Recycling & General Waste'
     return 'Recycling'
   })()
   safe('pref-service', _svcLabel)
-  safe('pref-day', row.collection_day_2
-    ? (row.collection_day||'--') + ' & ' + row.collection_day_2
+  safe('pref-day', isOANPlan ? 'Weekly drive-by (no fixed day)'
+    : row.collection_day_2 ? (row.collection_day||'--') + ' & ' + row.collection_day_2
     : (row.collection_day || (colDayIdx >= 0 ? colDay : '--')))
-  const prevDayName = colDayIdx >= 0 ? dayNames[(colDayIdx + 6) % 7] : (row.collection_day ? dayNames[(dayNames.findIndex(d=>d.toLowerCase()===row.collection_day.toLowerCase())+6)%7] : '--')
-  safe('pref-binout-night', prevDayName !== '--' ? prevDayName + ' evening' : '--')
-  safe('pref-plan',       planLabels[effectivePlanKey] || planLabels[planKey] || '--')
+  const prevDayName = colDayIdx >= 0 ? dayNames[(colDayIdx + 6) % 7] : (row.collection_day ? dayNames[(dayNames.findIndex(d=>d.toLowerCase()===(row.collection_day||'').toLowerCase())+6)%7] : '--')
+  safe('pref-binout-night', isOANPlan ? 'Only when bin is full' : (prevDayName !== '--' ? prevDayName + ' evening' : '--'))
+  // pref-plan: show clean label with per-move fees for OAN
+  const _prefPlanLabel = isOANPlan
+    ? `Bin Out As Needed · $19.99/mo + ${_oanUsageFees[effectivePlanKey]||'usage fees'}`
+    : (planLabels[effectivePlanKey] || planLabels[planKey] || '--')
+  safe('pref-plan', _prefPlanLabel)
   safe('pref-notes',      row.service_notes && row.service_notes !== '--' ? row.service_notes : (row.curb_notes && row.curb_notes !== '--' ? row.curb_notes : '--'))
 
   // Populate new card summary lines
@@ -5901,7 +5913,9 @@ async function _populateHWDashData(row, fn, ln, initials){
   const dayDisplay = row.collection_day_2
     ? (row.collection_day||'--') + ' & ' + row.collection_day_2
     : (row.collection_day||'--')
-  safe('hw-svc-summary',  (planLabels[effectivePlanKey]||planLabels[planKey]||'--') + ' · ' + dayDisplay + 's')
+  safe('hw-svc-summary', isOANPlan
+    ? `Bin Out As Needed · $19.99/mo + ${_oanUsageFees[effectivePlanKey]||'usage fees'}`
+    : (planLabels[effectivePlanKey]||planLabels[planKey]||'--') + ' · ' + dayDisplay + 's')
 
   // Populate recent collections list in expandable card
   const recentEl = document.getElementById('hw-recent-list')
