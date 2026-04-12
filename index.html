@@ -5131,7 +5131,7 @@ function checkDispatchLock(context, overrideFn){
   </div>
   <div class="mb">
     <div style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:10px">
-      Editing <strong>${contextLabel}</strong> during the dispatch window could conflict with routes currently being generated or offered to runners.
+      Editing <strong>${contextLabel}</strong> while a route has already been launched could conflict with an active offer. Check the Dispatch dashboard first.
     </div>
     <div style="font-size:12px;color:var(--muted)">${timeMsg} Lock lifts automatically at <strong>1pm</strong>.</div>
     ${overrideFn ? `<div style="margin-top:12px;padding:10px 12px;background:rgba(239,68,68,.06);border-radius:8px;font-size:12px;color:#fca5a5">⚠️ Override won't update routes already sent to runners — you may need to reassign manually.</div>` : ''}
@@ -24827,7 +24827,7 @@ function showRouteApprovalModal(zoneId, day){
     ${isChange ? `<div style="background:rgba(239,68,68,.08);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#ef4444"><strong>Changes from last week:</strong> ${p.changes.join(' · ')}</div>` : `<div style="background:rgba(245,158,11,.08);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#fbbf24">First time this route has been dispatched — once approved it becomes the template for future auto-dispatch.</div>`}
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">Runner: <span style="color:var(--text)">${p.runner?.name||'Unassigned'}</span></div>
     <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:4px">${stopList}${moreStops}${removedList ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><div style="font-size:10px;color:#ef4444;font-weight:700;margin-bottom:4px">REMOVED:</div>'+removedList+'</div>' : ''}</div>
-    <div style="font-size:11px;color:var(--muted);margin-top:8px">Route sends at 9am (or immediately if approved after 9am).</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">Route is queued — click 🚀 Launch in the Dispatch panel to notify the runner.</div>
   </div>
   <div class="mf" style="gap:8px;flex-wrap:wrap">
     <button class="btn btn-ghost btn-sm" onclick="closeM();rejectPendingRoute('${zoneId}','${day}')">Discard</button>
@@ -25295,14 +25295,11 @@ async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
       statusEl.innerHTML = `<div style="font-size:11px;color:var(--muted);padding:4px 0">No homeowners scheduled for ${collDay} collection</div>`
       return
     }
-    const now = new Date()
-    const lockTime = new Date(today); lockTime.setHours(9,0,0,0)
-    const isLocked = diffDays===1 && now >= lockTime
     statusEl.innerHTML = `
     <div style="background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.2);border-radius:9px;padding:10px 14px;font-size:12px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <span style="font-size:11px;font-weight:700;color:#3b82f6;text-transform:uppercase;letter-spacing:.06em">📅 ${dateStr} — Bin Out night for ${collDay} collection</span>
-        ${isLocked?'<span style="background:rgba(239,68,68,.12);color:#ef4444;font-size:10px;padding:1px 7px;border-radius:4px;margin-left:auto">🔒 Locked — route generates at 9am</span>':''}
+        <span style="background:rgba(6,214,160,.12);color:var(--cyan);font-size:10px;padding:1px 7px;border-radius:4px;margin-left:auto">Manual dispatch</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px">
         <div style="background:rgba(59,130,246,.08);border-radius:7px;padding:7px 10px;text-align:center">
@@ -25318,8 +25315,7 @@ async function _showDispatchDayStatus(day, scheduledDateStr, dateStr){
           <div style="font-size:9px;color:var(--muted)">Runners available</div>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--muted)">Bin Out routes send at 9am${diffDays===1?' today':' on '+day} after approval.</div>
-      ${isLocked?'<div style="font-size:11px;color:#ef4444;margin-top:4px;font-weight:700">⚠️ Homeowner and zone changes are locked — dispatch window starts at 9am.</div>':''}
+      <div style="font-size:11px;color:var(--muted)">Route is ready — approve above then click 🚀 Launch to notify ${runners.length>0?'the assigned runner':'a runner'}.</div>
     </div>`
     return
   }
@@ -26159,8 +26155,18 @@ function renderDispatchPipeline(){
     })
   }
 
-  const batchSource = generatedBatches.length ? generatedBatches : (window._livePipelineBatches || [])
-  const isLiveView  = !generatedBatches.length && batchSource.length > 0
+  // batchSource: generatedBatches (admin state) take priority over live DB jobs
+  // On reload when generatedBatches is empty, live pipeline fills in — but we reset
+  // any 'offered'/'sent' status on today's batches that weren't manually launched
+  let batchSource = []
+  if(generatedBatches.length){
+    const genKeys = new Set(generatedBatches.map(b => b.zoneId+'_'+normDay(b.day||'')))
+    const liveExtra = (window._livePipelineBatches||[]).filter(b => !genKeys.has(b.zoneId+'_'+normDay(b.day||'')))
+    batchSource = [...generatedBatches, ...liveExtra]
+  } else {
+    batchSource = window._livePipelineBatches || []
+  }
+  const isLiveView = !generatedBatches.length && batchSource.length > 0
 
   // Determine day context for better labeling
   const selectedDay  = document.getElementById('dispatch-day-val')?.value || ''
@@ -26349,9 +26355,15 @@ function renderDispatchPipeline(){
     const _isPast      = _batchDate && _batchDate < _todayMid
 
     // Effective status — future batches can only be queued/draft/preview
+    // Today's batches: only show sent/offered if adminLaunchBatch actually fired
+    // (manualSend=true AND sentAt set). Stale DB jobs from old test runs must not
+    // override the in-memory queued status.
     let effectiveStatus = b.status || 'unassigned'
     if(_isFuture && ['sent','offered','sending'].includes(effectiveStatus)){
-      effectiveStatus = 'queued'  // reset poisoned future status
+      effectiveStatus = 'queued'  // future batch never sent yet
+    }
+    if(_isToday && ['sent','offered'].includes(effectiveStatus) && !b.manualSend && !b.sentAt){
+      effectiveStatus = 'queued'  // today's batch shown as sent but admin hasn't launched
     }
 
     const isPreview = effectiveStatus==='preview'||effectiveStatus==='draft'||effectiveStatus==='queued'
@@ -26601,7 +26613,7 @@ function swapBatchRunnerKeepOpen(selectEl){
 
   // Use live DB batches if no preview batches have been generated
   const batchSource = generatedBatches.length ? generatedBatches : (window._livePipelineBatches || [])
-  const isLiveView  = !generatedBatches.length && batchSource.length > 0
+  const isLiveView = !generatedBatches.length && batchSource.length > 0
 
 
 function moveStopToBatch(fromBatchId, stopIdx, toBatchId){
@@ -26988,8 +27000,9 @@ async function loadLiveJobsIntoPipeline(){
             const currentRank = statusRank[b.status] || 0
             const newRank     = statusRank[effectiveDqStatus] || 0
             if(newRank > currentRank){
-              b.status  = effectiveDqStatus
-              b.sentAt  = dq.sent_at || b.sentAt || null
+              b.status     = effectiveDqStatus
+              b.sentAt     = dq.notification_sent_at ? (dq.sent_at || b.sentAt || null) : null
+              b.manualSend = !!dq.notification_sent_at  // only true if admin actually launched
             }
             // Also update earnOut from DB if it was 0
             if(dq.earn_out && (!b.earnOut || b.earnOut === '0.00')){
@@ -26997,6 +27010,13 @@ async function loadLiveJobsIntoPipeline(){
               b.earnTotal = b.earnOut
             }
           }
+        }
+      })
+      // Also sync _livePipelineBatches for the same zone/date
+      ;(window._livePipelineBatches||[]).forEach(b => {
+        if(b.zoneId === dq.zone_id && (b.date||'').startsWith((dq.scheduled_date||'').slice(0,10))){
+          b.manualSend = !!dq.notification_sent_at
+          b.sentAt     = dq.notification_sent_at ? (dq.sent_at || null) : null
         }
       })
     })
@@ -27102,7 +27122,8 @@ async function loadLiveJobsIntoPipeline(){
           status:    j.status,
           offerType: j.offer_type || 'loyalty',
           offerBadge:j.offer_type==='broadcast' ? '📡 Broadcast' : '🔒 Assigned runner (25 min)',
-          sentAt:    j.updated_at || j.created_at || null,
+          sentAt:    null,      // only set if notification_sent_at confirmed in dispatch_queue
+          manualSend:false,     // only true if admin clicked Launch (set during dq sync below)
           offerExpiresAt: j.offer_expires_at || null,
           earnTotal: '0.00',
           hasSplit:  false,
