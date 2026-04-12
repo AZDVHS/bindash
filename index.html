@@ -197,6 +197,65 @@ const _EXPECTED = {
 const EMAIL_TEST_MODE = false
 const EMAIL_TEST_ADMIN = 'alpha1miller@gmail.com'
 
+
+// ── SMS Notifications via Twilio ─────────────────────────────────────────────
+// SMS_TEST_MODE: when true, sends to admin phone instead of actual recipient
+const SMS_TEST_MODE    = false
+const SMS_ADMIN_PHONE  = ''  // set your phone number here for test mode e.g. '+16025551234'
+
+// SMS message templates — keep under 160 chars each for single-segment billing
+const SMS = {
+  // Homeowner notifications
+  binOut:      (name, runner, day)      => `BinDash: Hi ${name}! Your bins are at the curb. Runner: ${runner}. Collection day: ${day}. -BinDash`,
+  binIn:       (name, runner)           => `BinDash: Hi ${name}! Your bins are back at your property. Runner: ${runner} completed your Bin In. -BinDash`,
+  routeActive: (name, runner)           => `BinDash: ${runner} is heading to your property now for bin service. -BinDash`,
+  zoneActive:  (name, zip)              => `BinDash: Great news ${name}! BinDash is now live in ZIP ${zip}. Log in to complete your account. -BinDash`,
+  welcome:     (name, day)              => `BinDash: Welcome ${name}! Your first collection is scheduled for ${day}s. Log in to view your dashboard. -BinDash`,
+  sos:         (name)                   => `BinDash: Emergency pickup dispatched for ${name}. A runner is on the way. -BinDash`,
+
+  // Runner notifications
+  routeOffer:  (name, stops, earn, day) => `BinDash: New route offer ${name}! ${stops} stops · $${earn} · ${day}. You have 25 min to accept. Log in now. -BinDash`,
+  routeAccepted:(name, stops)           => `BinDash: Route confirmed ${name}. ${stops} stops assigned. Check app for details. -BinDash`,
+  sosDispatch: (name, addr)             => `BinDash SOS: Emergency dispatch ${name}! Address: ${addr}. First to accept gets the job. -BinDash`,
+  zoneAssigned:(name, zone)             => `BinDash: You've been assigned to ${zone}. You'll now receive route offers for this area. -BinDash`,
+}
+
+async function sendSMS(to, message, type){
+  // Skip if no phone number
+  if(!to || to === '--' || to.replace(/\D/g,'').length < 10){
+    console.log('[BinDash] sendSMS SKIPPED — no valid phone:', to, type)
+    return
+  }
+
+  let actualTo  = to
+  let actualMsg = message
+  if(SMS_TEST_MODE && SMS_ADMIN_PHONE && to !== SMS_ADMIN_PHONE){
+    actualTo  = SMS_ADMIN_PHONE
+    actualMsg = `[TEST→${to}] ${message}`
+    console.log('[BinDash] SMS TEST MODE: redirecting from', to, 'to admin')
+  }
+
+  try {
+    const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/send-sms', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+        'apikey':        SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ to: actualTo, message: actualMsg, type: type || 'general' }),
+    })
+    const d = await res.json()
+    if(res.ok && d.ok){
+      console.log('[BinDash] sendSMS OK:', type, '->', actualTo, '| SID:', d.sid)
+    } else {
+      console.warn('[BinDash] sendSMS failed:', d.error || d, 'type:', type)
+    }
+  } catch(e){
+    console.warn('[BinDash] sendSMS exception:', e?.message, 'type:', type)
+  }
+}
+
 async function sendEmail(to, subject, html, type){
   if(!to || to.includes('@lead.bindash')){
     console.log('[BinDash] sendEmail SKIPPED -- bad address:', to)
@@ -16774,6 +16833,14 @@ async function confirmSosHW(){
       'sos_admin'
     )
 
+    // SMS all available runners immediately
+    const _hwAddr = window._hwProfileRow?.street_address || addr || 'their property'
+    const _hwName = window._hwProfileRow?.first_name || 'A homeowner'
+    RUNNERS.filter(r => r.status !== 'INACTIVE').forEach(r => {
+      if(r.phone && r.phone !== '--')
+        sendSMS(r.phone, SMS.sosDispatch(r.name?.split(' ')[0]||'Runner', _hwAddr), 'sos_runner_sms')
+    })
+
   } catch(e){
     if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
     if(btn){ btn.disabled=false; btn.textContent='🚨 Dispatch Now' }
@@ -18406,9 +18473,13 @@ async function navComplete(){
       sessionStorage.setItem(_key,'1')
       const rname = (window._rnRow?.first_name||window._currentRunnerRow?.first_name||'Your runner')
       const day = new Date().toLocaleDateString([],{weekday:'long'})
-      setTimeout(()=>{ sendEmail(stop.email,'Your bins are at the curb! 🌙',
-        EMAIL.binOutComplete(stop.name?.split(' ')[0]||'there',rname,NAV_STOPS.length,day),'bin_out_complete') },
-        (navStop%5)*300)
+      setTimeout(()=>{
+        sendEmail(stop.email,'Your bins are at the curb! 🌙',
+          EMAIL.binOutComplete(stop.name?.split(' ')[0]||'there',rname,NAV_STOPS.length,day),'bin_out_complete')
+        // SMS notification — send if HO has a phone number
+        if(stop.phone && stop.phone !== '--')
+          sendSMS(stop.phone, SMS.binOut(stop.name?.split(' ')[0]||'there', rname, day), 'bin_out_sms')
+      }, (navStop%5)*300)
     }
   }
 
@@ -23683,6 +23754,9 @@ async function approveHW(appId, directZoneId){
     )
   } else {
     sendEmail(app.email, 'Welcome to BinDash -- your account is active! 🎉', EMAIL.hwApproved(_appFn, app.day||'Tuesday', _approveZoneName, autoRunner?.name||null, _planLabel, _binOutNight, app.email), 'hw_approved')
+    // Welcome SMS
+    if(app.phone && app.phone !== '--')
+      sendSMS(app.phone, SMS.welcome(_appFn, app.day||'Tuesday'), 'hw_welcome_sms')
   }
 
   // Reload from Supabase to sync and remove from pending
@@ -24269,7 +24343,7 @@ async function _launchSingleBatch(batch){
         console.warn('[BinDash] single batch launch:', error.message)
         showToast('Error launching route: ' + error.message.slice(0,60), 'err')
       } else {
-        // Send email directly — no edge function dependency
+        // Send email + SMS — no edge function dependency for email
         if(batch.runner && batch.runner.email){
           const _ern = ((batch.stops||[]).length * (batch.runner.loyaltyRate||3.25)).toFixed(2)
           const _stp = (batch.stops||[]).map(s=>({name:s.name,email:s.email,address:s.address||'--',service:s.service}))
@@ -24278,6 +24352,12 @@ async function _launchSingleBatch(batch){
             EMAIL.batchOffer((batch.runner.name||'Runner').split(' ')[0],(batch.stops||[]).length,_ern,batch.day,(batch.zoneName||'Your zone').replace(/ [·☀️🌙].*$/,''),_stp),
             'batch_offer'
           ).catch(e=>console.warn('[BinDash] offer email:',e.message))
+          // SMS alert to runner
+          if(batch.runner.phone && batch.runner.phone !== '--')
+            sendSMS(batch.runner.phone, SMS.routeOffer(
+              (batch.runner.name||'Runner').split(' ')[0],
+              (batch.stops||[]).length, _ern, batch.day
+            ), 'batch_offer_sms')
         }
         // Mark dispatch_queue as sent
         _supa.from('dispatch_queue')
