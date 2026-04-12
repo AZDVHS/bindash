@@ -550,6 +550,10 @@ function handleStripeReturn(){
     const _loginEmail = decodeURIComponent(p.get('login'))
     window._prefillLoginEmail = _loginEmail
     window.history.replaceState({},'',' ')
+  } else if(p.get('admin') === 'dispatch'){
+    // Link from 8am dispatch reminder email — deep-link to dispatch after admin login
+    window._adminDeepLink = 'ad-dispatch'
+    window.history.replaceState({},'',' ')
   } else if(hash && (hash.includes('type=recovery') || hash.includes('type=signup'))){
     window.history.replaceState({}, '', ' ')
     setTimeout(()=>_handlePasswordResetHash(hash), 800)
@@ -4674,9 +4678,8 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
                 <option value="all">All visit types</option>
               </select>
               <button onclick="loadLiveJobsIntoPipeline()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--muted);cursor:pointer">⟳ Refresh</button>
-              <button onclick="sendDirectTestEmail()" title="Send Lee's Glendale route email directly — bypasses queue" style="background:none;border:1px solid rgba(245,158,11,.4);border-radius:6px;padding:4px 10px;font-size:11px;color:#f59e0b;cursor:pointer">✉ Test Email</button>
-              <button onclick="triggerDispatchEdgeFunction()" title="Force-send any queued route emails now via edge function" style="background:none;border:1px solid rgba(99,102,241,.4);border-radius:6px;padding:4px 10px;font-size:11px;color:#a5b4fc;cursor:pointer">📡 Send Queued</button>
-              <button id="dispatch-launch-btn" class="btn btn-sm" onclick="launchDispatchRoutes()" style="display:none;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;font-weight:700;border:none;padding:6px 14px">🚀 Launch Routes</button>
+              <!-- Test Email, Send Queued, and Launch Routes removed — manual dispatch only in early ops -->
+              <!-- TODO: re-enable triggerDispatchEdgeFunction() and launchDispatchRoutes() when automation is ready -->
             </div>
           </div>
 
@@ -7913,10 +7916,13 @@ function _executeStartRoute(){
   showToast('▶ Route started — good luck! 🚀', 'ok', 3000)
   // Ensure jobs marked in_progress
   if(navBatchId){
-    _supa.from('jobs')
-      .update({ status:'in_progress', updated_at:new Date().toISOString() })
-      .eq('batch_id', navBatchId)
-      .catch(function(e){ console.warn('[BinDash] in_progress update:', e.message) })
+    ;(async()=>{
+      try {
+        await _supa.from('jobs')
+          .update({ status:'in_progress', updated_at:new Date().toISOString() })
+          .eq('batch_id', navBatchId)
+      } catch(e){ console.warn('[BinDash] in_progress update:', e?.message) }
+    })()
   }
 }
 
@@ -8810,7 +8816,8 @@ async function initApp(){
       const nameEl = document.getElementById('ad-sidebar-name')
       if(nameEl) nameEl.textContent = user?.user_metadata?.name || 'Admin'
       go('S-admin')
-      setTimeout(() => adNav(null, 'ad-overview'), 80)
+      setTimeout(() => adNav(null, window._adminDeepLink || 'ad-overview'), 80)
+      window._adminDeepLink = null
       await loadZonesFromSupabase()
       await loadSignupsFromSupabase()   // await — pending panel needs this before render
       loadRunnerApplicationsFromSupabase()
@@ -9003,7 +9010,8 @@ async function doLogin(){
     } else if(role === 'admin' || role === 'super_admin' || role === 'ops'){
       adminAuthed = true
       go('S-admin')
-      setTimeout(() => adNav(null, 'ad-overview'), 80)
+      setTimeout(() => adNav(null, window._adminDeepLink || 'ad-overview'), 80)
+      window._adminDeepLink = null
       await loadZonesFromSupabase()
       loadSignupsFromSupabase()
       loadHomeownersFromSupabase()
@@ -21315,7 +21323,7 @@ async function navSkipStop(){
     await _supa.from('jobs').update({
       status: 'missed', notes: 'Skipped — runner could not access property',
       updated_at: new Date().toISOString()
-    }).eq('id', s.jobId).catch(()=>{})
+    }).eq('id', s.jobId)
   }
   navStop++
   navPhase = 'travelling'
@@ -21396,7 +21404,7 @@ async function navSubmitIssue(){
       status: selected.includes('no_access') ? 'missed' : 'complete',
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    }).eq('id', s.jobId).catch(()=>{})
+    }).eq('id', s.jobId)
   }
 
   // Notify admin via email
@@ -22193,7 +22201,7 @@ async function routeAfterSignup(appData){
     if(isKnownWaitlistZone){
       matchedZone.homeowners = (matchedZone.homeowners||0) + 1
       _supa.from('zones').update({ homeowners: matchedZone.homeowners, updated_at: new Date().toISOString() })
-        .eq('id', matchedZone.id).catch(()=>{})
+        .eq('id', matchedZone.id)
     }
 
     // Create zone request in Scout panel so admin can act on it
@@ -24146,62 +24154,68 @@ function startRouteScheduler(){
     const hhmm    = phxTime.getHours() * 100 + phxTime.getMinutes()
     const key     = phxTime.toDateString()
 
-    // 8:00am PHX — generate drafts + email admin if changes detected
+    // ── 8:00am PHX — Generate route drafts + email admin reminder ─────────────
+    // NO auto-send. Drafts are queued only. Admin must manually approve + dispatch.
     if(hhmm >= 800 && hhmm < 802 && !window._lastSchedulerCheck['8am_'+key]){
       window._lastSchedulerCheck['8am_'+key] = true
-      console.log('[Scheduler] 8am PHX — generating drafts, checking for changes')
+      console.log('[Scheduler] 8am PHX — generating drafts, sending admin reminder')
       await autoGenerateDrafts()
       await loadLiveJobsIntoPipeline()
       renderDispatchPipeline()
-      const changed = (generatedBatches||[]).filter(b => b.status === 'change_detected' || b.status === 'draft')
-      if(changed.length){
-        sendEmail('alpha1miller@gmail.com',
-          `⚠️ BinDash: ${changed.length} route${changed.length!==1?'s':''} need review before 9am`,
-          `<div style="font-family:sans-serif;padding:20px;max-width:520px"><h2 style="color:#f59e0b">Route Review Required</h2>
-          <p>${changed.length} route${changed.length!==1?'s':''} changed from last week and need approval before the 9am dispatch window.</p>
-          <ul>${changed.map(b=>`<li><strong>${b.zoneName||b.zoneId}</strong> — ${b.stops?.length||0} stops · ${b.day}</li>`).join('')}</ul>
-          <a href="${BRAND?.url||'https://www.bindash.shop'}" style="display:inline-block;background:#06d6a0;color:#07090f;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700">Review in Dispatch →</a></div>`,
-          '8am_route_review'
+
+      // Count queued routes for the reminder
+      const queued = (generatedBatches||[]).filter(b => b.status === 'queued' || b.status === 'draft' || b.status === 'change_detected')
+      if(queued.length){
+        const _dispatchUrl = (BRAND?.url || 'https://www.bindash.shop') + '?admin=dispatch'
+        const _routeList = queued.map(b =>
+          `<tr><td style="padding:6px 12px;border-bottom:1px solid #e2e8f0"><strong>${b.zoneName||b.zoneId||'--'}</strong></td>` +
+          `<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0">${b.stops?.length||0} stop${(b.stops?.length||0)!==1?'s':''}</td>` +
+          `<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0">${b.day||'--'}</td>` +
+          `<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0;color:${b.status==='change_detected'?'#f59e0b':'#06d6a0'}">${b.status==='change_detected'?'⚠ Changed':'✓ Ready'}</td></tr>`
+        ).join('')
+
+        sendEmail(
+          'alpha1miller@gmail.com',
+          `📋 BinDash Dispatch: ${queued.length} route${queued.length!==1?'s':''} ready to approve`,
+          `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+          <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,sans-serif">
+          <div style="max-width:560px;margin:0 auto;padding:32px 20px">
+            <div style="font-size:22px;font-weight:900;color:#06d6a0;margin-bottom:24px">BIN<span style="color:#6366f1">DASH</span></div>
+            <div style="background:#fff;border-radius:14px;padding:28px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+              <h2 style="margin:0 0 6px;font-size:20px;color:#0f172a">📋 Daily Dispatch Reminder</h2>
+              <p style="color:#64748b;margin:0 0 20px;font-size:14px">You have <strong style="color:#0f172a">${queued.length} route${queued.length!==1?'s':''}</strong> queued and ready for review. Approve and dispatch manually from the Dispatch dashboard.</p>
+              <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px">
+                <thead><tr style="background:#f1f5f9">
+                  <th style="padding:8px 12px;text-align:left;color:#64748b;font-weight:600">Zone</th>
+                  <th style="padding:8px 12px;text-align:left;color:#64748b;font-weight:600">Stops</th>
+                  <th style="padding:8px 12px;text-align:left;color:#64748b;font-weight:600">Day</th>
+                  <th style="padding:8px 12px;text-align:left;color:#64748b;font-weight:600">Status</th>
+                </tr></thead>
+                <tbody>${_routeList}</tbody>
+              </table>
+              <a href="${_dispatchUrl}" style="display:block;background:#06d6a0;color:#07090f;font-weight:800;font-size:15px;padding:14px 24px;border-radius:10px;text-decoration:none;text-align:center">
+                Open Dispatch Dashboard →
+              </a>
+              <p style="font-size:11px;color:#94a3b8;text-align:center;margin-top:16px">Routes are queued only — nothing sends until you manually approve and dispatch each one.</p>
+            </div>
+          </div></body></html>`,
+          '8am_dispatch_reminder'
         )
+        console.log('[Scheduler] 8am reminder sent — ' + queued.length + ' routes queued')
       }
     }
 
-    // 9:00am PHX — UI refresh only. Actual sends handled by Supabase edge fn / cron.
-    // Browser is a fallback only — fires edge fn if dispatch_queue has unsent queued rows
+    // ── 9:00am PHX — UI refresh only, no auto-send ────────────────────────────
+    // TODO (future automation): hook triggerDispatchEdgeFunction() here once pg_cron is set up
     if(hhmm >= 900 && hhmm < 902 && !window._lastSchedulerCheck['9am_'+key]){
       window._lastSchedulerCheck['9am_'+key] = true
-      console.log('[Scheduler] 9am PHX — UI refresh (sends are edge fn responsibility)')
-      await loadLiveJobsIntoPipeline()
-      renderDispatchPipeline()
-      try {
-        const _today = phxTime.toISOString().slice(0,10)
-        const { data: _q } = await _supa.from('dispatch_queue')
-          .select('id').eq('status','queued').eq('scheduled_date', _today).is('notification_sent_at', null).limit(1)
-        if(_q?.length){
-          console.log('[Scheduler] 9am PHX fallback — unsent queued routes found, triggering edge fn')
-          await triggerDispatchEdgeFunction()
-        }
-      } catch(e){ console.warn('[Scheduler] 9am edge fn fallback:', e.message) }
-    }
-
-    // 10:00am PHX — remind admin if unapproved routes remain
-    if(hhmm >= 1000 && hhmm < 1002 && !window._lastSchedulerCheck['10am_'+key]){
-      window._lastSchedulerCheck['10am_'+key] = true
-      console.log('[Scheduler] 10am PHX — unapproved route check')
-      _remindAdminUnapproved()
+      console.log('[Scheduler] 9am PHX — UI refresh only (no auto-send in manual mode)')
       await loadLiveJobsIntoPipeline()
       renderDispatchPipeline()
     }
 
-    // 1:00pm PHX — final UI refresh
-    if(hhmm >= 1300 && hhmm < 1302 && !window._lastSchedulerCheck['1pm_'+key]){
-      window._lastSchedulerCheck['1pm_'+key] = true
-      console.log('[Scheduler] 1pm PHX — dispatch UI refresh')
-      await loadLiveJobsIntoPipeline()
-      renderDispatchPipeline()
-    }
-
-    // Continuous 30s UI refresh when dispatch visible — NEVER sends anything
+    // ── 30s UI refresh when dispatch panel is open — purely cosmetic ──────────
+    // Does NOT send anything — just keeps the pipeline display current
     const _hasAdminEdits = (generatedBatches||[]).some(b => b._adminOrderModified || b.status === 'preview')
     if(document.querySelector('#ad-dispatch')?.style.display !== 'none' && !_hasAdminEdits){
       window._livePipelineBatches = null
@@ -24418,33 +24432,10 @@ function approvePendingRoute(zoneId, day, permanent=true){
     if(b.zoneId===zoneId && normDay(b.day)===normDay(day)) b.status = 'queued'
   })
 
-  // Always use Phoenix time — NEVER raw browser local time for dispatch decisions
-  const phxNow  = new Date(now.toLocaleString('en-US', { timeZone: 'America/Phoenix' }))
-  const phxHour = phxNow.getHours()
-  // Dispatch window: 9am–8pm Phoenix only. Outside this window → queue for 9am.
-  const inDispatchWindow = phxHour >= 9 && phxHour < 20
-
-  if(inDispatchWindow){
-    showToast('Route approved ✅ — sending to runner now...', 'ok', 3000)
-    setTimeout(async function(){
-      try{
-        await triggerDispatchEdgeFunction()
-        // Mark sent immediately so scheduler never re-fires this row
-        const _dqDateStr = pending.date || new Date(now.getTime()+86400000).toISOString().slice(0,10)
-        await _supa.from('dispatch_queue')
-          .update({ status:'sent', sent_at: new Date().toISOString(), notification_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-          .eq('zone_id', zoneId).eq('scheduled_date', _dqDateStr).eq('status','queued')
-        console.log('[BinDash] dispatch_queue marked sent after post-approval send')
-      }catch(e){ console.warn('[BinDash] post-approval send:', e.message) }
-      renderDispatchPipeline()
-    }, 1500)
-  } else {
-    const _msg = phxHour >= 20
-      ? 'Route approved ✅ — queued for 9am tomorrow (after-hours, not sending tonight)'
-      : 'Route approved ✅ — will auto-send at 9am Phoenix time'
-    showToast(_msg, 'ok', 7000)
-    console.log('[BinDash] Approval outside dispatch window. PHX hour:', phxHour, '— queued only, no immediate send.')
-  }
+  // ── MANUAL MODE: Approve queues only — never auto-sends ─────────────────
+  // TODO (Phase 2): restore immediate send logic here once automation is stable
+  showToast('Route approved ✅ — queued for manual dispatch', 'ok', 5000)
+  console.log('[BinDash] Route approved and queued — manual dispatch required')
   renderDispatchPipeline()
   loadPendingApprovalsIntoDispatch()
 }
@@ -25578,91 +25569,20 @@ async function sendRouteOffer(runner, batch, opts = {}){
 }
 
 async function triggerDispatchEdgeFunction(){
-  const btn = document.querySelector('[onclick="triggerDispatchEdgeFunction()"]')
-  if(btn){ btn.textContent = '📡 Triggering...'; btn.disabled = true }
-  let edgeFnWorked = false
-  try {
-    const supaUrl = (typeof SUPABASE_URL !== 'undefined' && SUPABASE_URL) || 'https://vaktkyrtfxlqfzdqfeiq.supabase.co'
-    const supaKey = (typeof SUPABASE_ANON_KEY !== 'undefined' && SUPABASE_ANON_KEY) || ''
-    const res = await fetch(`${supaUrl}/functions/v1/dispatch-scheduler`, {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + supaKey, 'Content-Type': 'application/json', 'x-trigger': 'manual-admin' },
-      body: JSON.stringify({ trigger: 'manual', timestamp: new Date().toISOString() }),
-    })
-    const data = await res.json()
-    edgeFnWorked = true
-    if(data.emails_sent > 0){
-      showToast(`✅ Edge function ran — ${data.emails_sent} email${data.emails_sent!==1?'s':''} sent`, 'ok', 6000)
-    } else if(data.queued_found === 0){
-      showToast('📡 Edge function ran — no queued routes found. Approve a route first.', 'info', 5000)
-    } else {
-      showToast(`📡 Ran — ${data.queued_found} queued, ${data.emails_sent} sent. Check runner emails.`, 'info', 6000)
-    }
-    console.log('[BinDash] Edge function result:', data)
-  } catch(e){
-    console.warn('[BinDash] Edge function CORS/network error — using browser fallback:', e.message)
-    // ── FALLBACK: send directly from browser when edge function fails (CORS) ──
-    try {
-      const today = new Date().toISOString().slice(0,10)
-      // Only send routes scheduled for TODAY — never future dates
-      // BIN OUT night = the pill date = today's date
-      const { data: queuedRows } = await _supa.from('dispatch_queue')
-        .select('*').eq('status','queued').eq('scheduled_date', today).limit(20)
-      if(!queuedRows?.length){
-        showToast('No queued routes to send', 'info', 3000)
-      } else {
-        let sent = 0
-        for(const row of queuedRows){
-          if(!row.runner_email) continue
-          const stops = (() => { try { return JSON.parse(row.stops_json||'[]') } catch(e){ return [] } })()
-          const earnOut = parseFloat(row.earn_out || 0).toFixed(2)
-          await sendEmail(
-            row.runner_email,
-            `New route: ${row.stop_count} stop${row.stop_count!==1?'s':''} · $${earnOut} available`,
-            EMAIL.batchOffer(
-              row.runner_name?.split(' ')?.[0] || 'Runner',
-              row.stop_count, earnOut, row.collection_day, row.zone_name,
-              stops
-            ),
-            'batch_offer'
-          )
-          // Mark as sent in dispatch_queue
-          await _supa.from('dispatch_queue')
-            .update({ status:'sent', sent_at: new Date().toISOString(), notification_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-            .eq('id', row.id)
-          // Mark jobs as offered
-          const jobDate = row.scheduled_date
-          if(row.zone_id && jobDate){
-            await _supa.from('jobs')
-              .update({ status:'offered', updated_at: new Date().toISOString() })
-              .eq('zone_id', row.zone_id).eq('scheduled_date', jobDate).eq('status','offered')
-          }
-          sent++
-        }
-        showToast(`📤 Sent ${sent} route offer${sent!==1?'s':''} directly — edge function bypassed`, 'ok', 6000)
-        // Immediately advance both in-memory and DB status
-        const _nowSent = new Date().toISOString()
-        generatedBatches.forEach(b => {
-          if(b.status === 'queued'){
-            b.status = 'sent'
-            b.sentAt = _nowSent
-            b.offerExpiresAt = new Date(Date.now() + (b.windowMins||45)*60*1000).toISOString()
-          }
-        })
-        edgeFnWorked = true
-      }
-    } catch(fallbackErr){
-      showToast('Send failed: ' + fallbackErr.message + ' — check edge function CORS config', 'err', 8000)
-      console.error('[BinDash] Fallback send failed:', fallbackErr)
-    }
-  } finally {
-    if(edgeFnWorked){
-      await loadLiveJobsIntoPipeline()
-      renderDispatchPipeline()
-    }
-    if(btn){ btn.textContent = '📡 Send Queued'; btn.disabled = false }
-  }
+  // ── MANUAL MODE: Auto-dispatch disabled ──────────────────────────────────
+  // Routes are queued only. Admin approves and sends manually from Dispatch dashboard.
+  // TODO (Phase 2 automation): uncomment the edge function call below once
+  //   pg_cron + dispatch-scheduler edge function are fully tested.
+  //
+  // const res = await fetch(`${SUPABASE_URL}/functions/v1/dispatch-scheduler`, {
+  //   method: 'POST',
+  //   headers: { 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+  //   body: JSON.stringify({ trigger: 'manual', timestamp: new Date().toISOString() }),
+  // })
+  console.log('[triggerDispatchEdgeFunction] Manual mode — no-op. Routes stay queued until admin dispatches.')
+  return { skipped: true, reason: 'manual_mode' }
 }
+
 
 async function launchDispatchRoutes(){
   const toSend = generatedBatches.filter(b=>b.status==='queued'||b.status==='preview')
@@ -30054,6 +29974,8 @@ async function doAdminLogin(){
     if(btn){ btn.disabled=false; btn.textContent='Sign In to Staff Portal ->' }
 
     go('S-admin')
+    setTimeout(() => adNav(null, window._adminDeepLink || 'ad-overview'), 80)
+    window._adminDeepLink = null
     // Load all admin data
     await loadZonesFromSupabase()
     await Promise.all([
