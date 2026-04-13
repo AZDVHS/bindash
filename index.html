@@ -26960,11 +26960,33 @@ async function _autoTriggerIfQueued(){
 }
 
 async function loadLiveJobsIntoPipeline(){
+  // ── One-time startup: clear stale dispatch_queue rows that have no live offered jobs ──
+  // This prevents old test-run rows (sent/notification_sent_at set) from poisoning the UI
+  if(!window._dqCleanupDone){
+    window._dqCleanupDone = true
+    try {
+      const _today = new Date().toISOString().slice(0,10)
+      // Find dispatch_queue rows marked sent but with no active offered/accepted jobs for today+
+      const { data: staleRows } = await _supa.from('dispatch_queue')
+        .select('id, zone_id, scheduled_date, status, notification_sent_at')
+        .in('status', ['sent','offered'])
+        .lt('scheduled_date', _today)  // past dates only — today's real dispatches stay
+      if(staleRows?.length){
+        const staleIds = staleRows.map(r => r.id)
+        await _supa.from('dispatch_queue')
+          .update({ status:'queued', notification_sent_at:null, sent_at:null, updated_at:new Date().toISOString() })
+          .in('id', staleIds)
+        console.log('[BinDash] Cleared', staleIds.length, 'stale dispatch_queue rows from past dates')
+      }
+    } catch(e){ console.warn('[BinDash] dq cleanup:', e?.message) }
+  }
+
   // ── Sync generatedBatches status from dispatch_queue DB ──────────────────
   // The edge function updates dispatch_queue.status = 'sent' when email fires
   // but generatedBatches is in-memory and still shows 'queued'
   try {
     const today = new Date(); today.setHours(0,0,0,0)
+    const todayStr = today.toISOString().slice(0,10)
     const dateRange = []
     for(let i=-1; i<=2; i++){
       const d = new Date(today); d.setDate(today.getDate()+i)
@@ -26974,10 +26996,12 @@ async function loadLiveJobsIntoPipeline(){
       .select('zone_id,scheduled_date,status,earn_out,runner_id,runner_name,notification_sent_at,sent_at')
       .in('scheduled_date', dateRange)
     ;(dqRows||[]).forEach(dq => {
-      // Only treat as 'sent' if notification was actually fired (notification_sent_at set)
-      // This prevents old 'sent' rows from incorrectly showing "Offer sent" before admin launches
+      // Only treat as 'sent' if:
+      // 1. notification_sent_at is set (actual notification fired), AND
+      // 2. The scheduled_date is today or future (past rows are stale test data)
+      const dqIsFresh = dq.scheduled_date >= todayStr
       const effectiveDqStatus = (dq.status === 'sent' || dq.status === 'offered')
-        ? (dq.notification_sent_at ? dq.status : 'queued')
+        ? (dq.notification_sent_at && dqIsFresh ? dq.status : 'queued')
         : dq.status
 
       // Update matching generatedBatch status
@@ -27060,6 +27084,9 @@ async function loadLiveJobsIntoPipeline(){
 
     if(!isPastDay){
       query = query.not('status', 'in', '("complete","cancelled")')
+      // Exclude stale offered/unassigned jobs from past dates — orphaned test data
+      const _todayQ = new Date().toISOString().slice(0,10)
+      query = query.or(`scheduled_date.gte.${_todayQ},status.in.(accepted,in_progress,complete,missed)`)
     }
 
     // When a specific pill day is selected, it represents the BIN_OUT night.
