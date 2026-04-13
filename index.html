@@ -24418,7 +24418,30 @@ function startRouteScheduler(){
           const newStatus = payload.new?.status
           const oldStatus = payload.old?.status
           if(newStatus === oldStatus) return
-          console.log('[Realtime] Job', oldStatus, '→', newStatus)
+          console.log('[Realtime] Job', oldStatus, '→', newStatus, 'batch:', payload.new?.batch_id)
+
+          // Immediately promote generatedBatches if a runner accepted/started/completed
+          // This gives instant admin feedback without waiting for the 30s poll
+          const _advanceRank = { sent:3, offered:4, accepted:5, in_progress:6, complete:7 }
+          if(_advanceRank[newStatus] > (_advanceRank[oldStatus]||0)){
+            const batchId = payload.new?.batch_id
+            const zoneId  = payload.new?.zone_id
+            if(zoneId){
+              generatedBatches.forEach(gb => {
+                if(gb.zoneId === zoneId){
+                  const gbRank = _advanceRank[gb.status] || 0
+                  const newRank = _advanceRank[newStatus] || 0
+                  if(newRank > gbRank){
+                    gb.status = newStatus
+                    gb.manualSend = true  // must have been launched if runner accepted
+                    if(newStatus === 'accepted') gb.sentAt = gb.sentAt || new Date().toISOString()
+                    console.log('[Realtime] Promoted generatedBatch', gb.zoneId, 'to', newStatus)
+                  }
+                }
+              })
+            }
+          }
+
           // Refresh dispatch pipeline if admin has it open
           if(document.querySelector('#ad-dispatch')?.style.display !== 'none'){
             window._livePipelineBatches = null
@@ -26237,12 +26260,30 @@ function renderDispatchPipeline(){
   }
 
   // batchSource: generatedBatches (admin state) take priority over live DB jobs
-  // On reload when generatedBatches is empty, live pipeline fills in — but we reset
-  // any 'offered'/'sent' status on today's batches that weren't manually launched
+  // BUT: live pipeline wins for post-launch status advances (accepted, in_progress, complete)
+  // because generatedBatches only knows about the launch, not what happened after
+  const _statusRankMerge = { draft:0, change_detected:1, queued:2, sent:3, offered:4, accepted:5, in_progress:6, complete:7 }
   let batchSource = []
   if(generatedBatches.length){
     const genKeys = new Set(generatedBatches.map(b => b.zoneId+'_'+normDay(b.day||'')))
     const liveExtra = (window._livePipelineBatches||[]).filter(b => !genKeys.has(b.zoneId+'_'+normDay(b.day||'')))
+    // Promote generatedBatch status if live pipeline shows a higher-rank status
+    // This is how accepted/in_progress/complete from runner flow back to admin view
+    generatedBatches.forEach(gb => {
+      const liveMatch = (window._livePipelineBatches||[]).find(lb =>
+        lb.zoneId === gb.zoneId && normDay(lb.day||'') === normDay(gb.day||'')
+      )
+      if(liveMatch){
+        const liveRank = _statusRankMerge[liveMatch.status] || 0
+        const genRank  = _statusRankMerge[gb.status] || 0
+        if(liveRank > genRank){
+          gb.status = liveMatch.status
+          // Carry over sentAt if live has it and gen doesn't
+          if(liveMatch.sentAt && !gb.sentAt) gb.sentAt = liveMatch.sentAt
+          if(liveMatch.manualSend) gb.manualSend = true
+        }
+      }
+    })
     batchSource = [...generatedBatches, ...liveExtra]
   } else {
     batchSource = window._livePipelineBatches || []
