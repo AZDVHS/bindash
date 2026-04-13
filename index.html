@@ -8752,7 +8752,7 @@ async function _offerBinInToZone(inBatchId, binOutJobs, originalRunner, tomorrow
       status:           'offered',
       offer_type:       'zone',
       offer_expires_at: zoneExpiresAt,
-      scheduled_date:   tomorrowStr,
+      scheduled_date:   scheduledDateStr,
       amount:           3.25,
       zone_id:          j.zone_id,
       created_at:       new Date().toISOString(),
@@ -8777,7 +8777,7 @@ async function _offerBinInToZone(inBatchId, binOutJobs, originalRunner, tomorrow
       status:           'broadcast',
       offer_type:       'broadcast',
       offer_expires_at: new Date(Date.now() + 2*60*60*1000).toISOString(),
-      scheduled_date:   tomorrowStr,
+      scheduled_date:   scheduledDateStr,
       amount:           3.25,
       zone_id:          j.zone_id,
       created_at:       new Date().toISOString(),
@@ -24916,12 +24916,27 @@ async function adminLaunchBatch(zoneId, day, btnEl){
   try {
     // 1. Mark all jobs offered in DB
     const phxNow   = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Phoenix'}))
-    const today    = phxNow.toISOString().slice(0,10)
-    const tomorrow = new Date(phxNow); tomorrow.setDate(phxNow.getDate()+1)
-    const tomorrowStr = tomorrow.toISOString().slice(0,10)
+    const todayStr = phxNow.toISOString().slice(0,10)
+
+    // Scheduled date = the night the physical Bin Out work happens.
+    // The dispatch day pill represents the BIN OUT night (not collection day).
+    // If admin launches on the same day as the pill, use today.
+    // If the pill day is tomorrow (i.e. admin is pre-launching), use tomorrow.
+    const dayNames7  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+    const phxDayIdx  = phxNow.getDay()
+    const pillDayIdx = dayNames7.findIndex(d => normDay(d) === normDay(day))
+    let dayDiff = pillDayIdx - phxDayIdx
+    if(dayDiff < 0) dayDiff += 7
+    if(dayDiff > 3) dayDiff -= 7
+    const scheduledDate = new Date(phxNow)
+    scheduledDate.setDate(phxNow.getDate() + dayDiff)
+    const scheduledDateStr = scheduledDate.toISOString().slice(0,10)
+
+    console.log('[adminLaunchBatch] pill day:', day, '| phx today:', todayStr, '| scheduled_date:', scheduledDateStr)
+
     const expiresAt = new Date(Date.now() + 45*60*1000).toISOString()
     const earnOut   = (stops.length * (runner.loyaltyRate||3.25)).toFixed(2)
-    const inBatchId = zoneId + '_' + normDay(day) + '_' + Date.now()
+    const inBatchId = zoneId + '_' + normDay(day) + '_' + scheduledDateStr
 
     // Insert job rows
     const jobRows = stops.map(hw => ({
@@ -24936,21 +24951,31 @@ async function adminLaunchBatch(zoneId, day, btnEl){
       status:           'offered',
       offer_type:       'zone',
       offer_expires_at: expiresAt,
-      scheduled_date:   tomorrowStr,
+      scheduled_date:   scheduledDateStr,
       amount:           runner.loyaltyRate || 3.25,
       zone_id:          zoneId,
       created_at:       new Date().toISOString(),
       updated_at:       new Date().toISOString(),
     }))
 
+    // Cancel any existing offered jobs for this zone+date before inserting new ones
+    // Prevents double-offering when admin clicks Launch more than once or after old test runs
+    const { error: cancelErr } = await _supa.from('jobs')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('zone_id', zoneId)
+      .eq('scheduled_date', scheduledDateStr)
+      .in('status', ['offered', 'unassigned'])
+    if(cancelErr) console.warn('[adminLaunchBatch] cancel old jobs:', cancelErr.message)
+
     const { error: jobErr } = await _supa.from('jobs').insert(jobRows)
     if(jobErr) throw new Error('Job insert failed: ' + jobErr.message)
+    console.log('[adminLaunchBatch] Inserted', jobRows.length, 'jobs for', scheduledDateStr, '| runner:', runner.email)
 
     // 2. Stamp dispatch_queue as sent
     const earn = parseFloat(earnOut)
     await _supa.from('dispatch_queue').upsert({
       zone_id:              zoneId,
-      scheduled_date:       tomorrowStr,
+      scheduled_date:       scheduledDateStr,
       status:               'sent',
       sent_at:              new Date().toISOString(),
       notification_sent_at: new Date().toISOString(),
@@ -24971,15 +24996,17 @@ async function adminLaunchBatch(zoneId, day, btnEl){
       address: s.address||s.zip||'--',
       service: s.service,
     }))
+    console.log('[adminLaunchBatch] Sending offer email to runner:', runner.email, '| name:', runner.name)
     await sendEmail(
       runner.email,
-      `New route: ${stops.length} stop${stops.length!==1?'s':''} · $${earnOut} available`,
+      `New BinDash route: ${stops.length} stop${stops.length!==1?'s':''} · $${earnOut} — accept now`,
       EMAIL.batchOffer(
         (runner.name||'Runner').split(' ')[0],
         stops.length, earnOut, day, zoneName, stopsList
       ),
       'admin_launched_offer'
     )
+    console.log('[adminLaunchBatch] sendEmail called for', runner.email)
     if(runner.phone && runner.phone !== '--' && runner.phone.replace(/\D/g,'').length >= 10)
       sendSMS(runner.phone, SMS.routeOffer((runner.name||'Runner').split(' ')[0], stops.length, earnOut, day), 'admin_launched_sms')
 
