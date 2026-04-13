@@ -190,6 +190,20 @@ const _EXPECTED = {
     }
   } else {
     console.log('[BinDash] Config OK -- all keys verified')
+
+// ── Phoenix timezone date helper — use everywhere instead of new Date().toISOString().slice(0,10) ──
+// toISOString() returns UTC which can be a different date than Phoenix time (UTC-7)
+function _phxToday(){
+  const p = new Intl.DateTimeFormat('en-US',{timeZone:'America/Phoenix',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date())
+  return p.find(x=>x.type==='year').value+'-'+p.find(x=>x.type==='month').value+'-'+p.find(x=>x.type==='day').value
+}
+function _phxTomorrow(){
+  const d = new Date(); d.setDate(d.getDate()+1)
+  const p = new Intl.DateTimeFormat('en-US',{timeZone:'America/Phoenix',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d)
+  return p.find(x=>x.type==='year').value+'-'+p.find(x=>x.type==='month').value+'-'+p.find(x=>x.type==='day').value
+}
+
+
   }
 })()
 // ── TEST MODE: redirect all emails to admin ───────────────────────────────
@@ -5237,7 +5251,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Clear stale nav_state immediately — prevents blank runner dashboard on login
 ;(function _clearStaleNavState(){
   try {
-    const _today = new Date().toISOString().slice(0,10)
+    const _today = _phxToday()
     ;[sessionStorage, localStorage].forEach(function(store){
       try {
         const _raw = store.getItem('nav_state')
@@ -7945,7 +7959,7 @@ async function resumeBatch(batchId){
     if(!dbJobs.length){
       const runnerRow = window._currentRunnerRow
       if(runnerRow?.id){
-        const today = new Date().toISOString().slice(0,10)
+        const today = _phxToday()
         const res2 = await _supa.from('jobs').select('*')
           .or(`runner_id.eq.${runnerRow.id},runner_email.eq.${(runnerRow.email||'').toLowerCase()}`)
           .eq('status','in_progress')
@@ -8072,7 +8086,7 @@ async function loadAdminProbes(){
     _adminProbes = data || []
 
     // Stats
-    const today = new Date().toISOString().slice(0,10)
+    const today = _phxToday()
     const uniqueZips = [...new Set(_adminProbes.map(p=>p.zip_code).filter(Boolean))]
     const todayCount = _adminProbes.filter(p=>p.created_at?.slice(0,10)===today).length
     const noZone = _adminProbes.filter(p=>{
@@ -8194,7 +8208,7 @@ async function _acknowledgeProbe(probeId, btnEl){
     const p = _adminProbes.find(x=>x.id===probeId)
     if(p) p.status = 'acknowledged'
     // Recount unacknowledged for today
-    const today = new Date().toISOString().slice(0,10)
+    const today = _phxToday()
     const unacked = _adminProbes.filter(p=>p.created_at?.slice(0,10)===today && p.status!=='acknowledged').length
     const badge = document.getElementById('probes-badge')
     if(badge){ badge.textContent = unacked; badge.style.display = unacked > 0 ? 'inline' : 'none' }
@@ -8273,7 +8287,7 @@ async function startBatch(batchId){
 
   // If batch_id didn't match any jobs, try to find jobs by looking at in_progress/accepted status
   if(!batchJobs.length){
-    const todayStr = new Date().toISOString().slice(0,10)
+    const todayStr = _phxToday()
     const zoneFallback = (window._lastEnrichedJobs||[]).filter(j=>
       j.scheduled_date === todayStr && ['offered','accepted','in_progress'].includes(j.status)
     )
@@ -8356,7 +8370,7 @@ async function startBatch(batchId){
 
     // Last resort: all today's accepted/in_progress jobs
     const jobsToUse = batchJobs.length ? batchJobs : (window._lastEnrichedJobs||[]).filter(j=>
-      j.scheduled_date >= new Date().toISOString().slice(0,10) &&
+      j.scheduled_date >= _phxToday() &&
       ['offered','accepted','in_progress'].includes(j.status)
     ).slice(0, 20)
 
@@ -21042,7 +21056,7 @@ async function _loadAndRenderActiveRoute(){
     }
 
     // Query ALL in_progress jobs for this runner — no batch_id needed
-    const today = new Date().toISOString().slice(0,10)
+    const today = _phxToday()
     const rEmail = (row.email||'').toLowerCase()
     const runnerName = ((row.first_name||'')+ ' '+(row.last_name||'')).trim()
     const orParts = ['runner_id.eq.'+row.id]
@@ -22190,7 +22204,7 @@ function updateOverviewCounts(){
   safe('ov-dispatch-hint', todayJobs > 0 ? todayJobs + ' route' + (todayJobs!==1?'s':'') + ' active' : 'No routes yet')
 
   // Jobs today count — live from DB (approximate from in-memory if available)
-  const todayStr = new Date().toISOString().slice(0,10)
+  const todayStr = _phxToday()
   safe('ov-jobs-count', todayJobs)
   safe('ov-jobs-sub', 'dispatched today')
   safe('ov-jobs-hint', todayJobs + ' dispatched')
@@ -24915,24 +24929,35 @@ async function adminLaunchBatch(zoneId, day, btnEl){
 
   try {
     // 1. Mark all jobs offered in DB
-    const phxNow   = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Phoenix'}))
-    const todayStr = phxNow.toISOString().slice(0,10)
+    // Get current Phoenix date/time using Intl — reliable, no DST issues
+    const phxParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Phoenix',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      weekday: 'long',
+    }).formatToParts(new Date())
+    const phxYear    = phxParts.find(p=>p.type==='year').value
+    const phxMonth   = phxParts.find(p=>p.type==='month').value
+    const phxDay     = phxParts.find(p=>p.type==='day').value
+    const phxWeekday = phxParts.find(p=>p.type==='weekday').value  // e.g. "Sunday"
+    const todayStr   = `${phxYear}-${phxMonth}-${phxDay}`          // e.g. "2026-04-12"
+    const todayDayIdx = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].indexOf(phxWeekday)
 
-    // Scheduled date = the night the physical Bin Out work happens.
-    // The dispatch day pill represents the BIN OUT night (not collection day).
-    // If admin launches on the same day as the pill, use today.
-    // If the pill day is tomorrow (i.e. admin is pre-launching), use tomorrow.
-    const dayNames7  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
-    const phxDayIdx  = phxNow.getDay()
-    const pillDayIdx = dayNames7.findIndex(d => normDay(d) === normDay(day))
-    let dayDiff = pillDayIdx - phxDayIdx
-    if(dayDiff < 0) dayDiff += 7
-    if(dayDiff > 3) dayDiff -= 7
-    const scheduledDate = new Date(phxNow)
-    scheduledDate.setDate(phxNow.getDate() + dayDiff)
-    const scheduledDateStr = scheduledDate.toISOString().slice(0,10)
+    // The dispatch pill day = the BIN OUT night.
+    // dayDiff = how many days ahead of today PHX the pill day is.
+    const pillDayIdx = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].findIndex(d => normDay(d) === normDay(day))
+    let dayDiff = pillDayIdx - todayDayIdx
+    if(dayDiff < 0)  dayDiff += 7
+    if(dayDiff > 3)  dayDiff -= 7   // past days wrap backward (shouldn't happen in normal use)
 
-    console.log('[adminLaunchBatch] pill day:', day, '| phx today:', todayStr, '| scheduled_date:', scheduledDateStr)
+    // Build scheduledDateStr by adding dayDiff to today's PHX date — no UTC conversion
+    const scheduled = new Date(`${todayStr}T12:00:00`)  // noon local avoids DST edge
+    scheduled.setDate(scheduled.getDate() + dayDiff)
+    const sy = scheduled.getFullYear()
+    const sm = String(scheduled.getMonth()+1).padStart(2,'0')
+    const sd = String(scheduled.getDate()).padStart(2,'0')
+    const scheduledDateStr = `${sy}-${sm}-${sd}`
+
+    console.log('[adminLaunchBatch] PHX today:', todayStr, '('+phxWeekday+') | pill:', day, '| dayDiff:', dayDiff, '| scheduled_date:', scheduledDateStr)
 
     const expiresAt = new Date(Date.now() + 45*60*1000).toISOString()
     const earnOut   = (stops.length * (runner.loyaltyRate||3.25)).toFixed(2)
@@ -25057,7 +25082,7 @@ async function sendRouteNow(zoneId, day){
     showToast('Re-sending via edge function...', 'info', 3000)
     try {
       // Mark route as queued in dispatch_queue so edge function picks it up
-      const today = new Date().toISOString().slice(0,10)
+      const today = _phxToday()
       const { data: dq } = await _supa.from('dispatch_queue')
         .select('*').eq('zone_id', zoneId).gte('scheduled_date', today).maybeSingle()
 
@@ -25134,7 +25159,7 @@ async function sendRouteNow(zoneId, day){
           EMAIL.batchOffer(memBatch.runner.name.split(' ')[0], memBatch.stops.length, earnOut, memBatch.day, memBatch.zoneName?.replace(/ · [☀️🌙].*$/,'') || 'your zone', memBatch.stops),
           'batch_offer_resend')
         // Update existing jobs — reset offer window, don't create new rows
-        const todayStr = memBatch.date || new Date().toISOString().slice(0,10)
+        const todayStr = memBatch.date || _phxToday()
         await _supa.from('jobs').update({
           status: 'offered',
           updated_at: new Date().toISOString(),
@@ -26992,7 +27017,7 @@ async function loadLiveJobsIntoPipeline(){
   if(!window._dqCleanupDone){
     window._dqCleanupDone = true
     try {
-      const _today = new Date().toISOString().slice(0,10)
+      const _today = _phxToday()
       // Find dispatch_queue rows marked sent but with no active offered/accepted jobs for today+
       const { data: staleRows } = await _supa.from('dispatch_queue')
         .select('id, zone_id, scheduled_date, status, notification_sent_at')
@@ -27112,7 +27137,7 @@ async function loadLiveJobsIntoPipeline(){
     if(!isPastDay){
       query = query.not('status', 'in', '("complete","cancelled")')
       // Exclude stale offered/unassigned jobs from past dates — orphaned test data
-      const _todayQ = new Date().toISOString().slice(0,10)
+      const _todayQ = _phxToday()
       query = query.or(`scheduled_date.gte.${_todayQ},status.in.(accepted,in_progress,complete,missed)`)
     }
 
@@ -27215,7 +27240,7 @@ async function loadLiveJobsIntoPipeline(){
     window._livePipelineBatches = Object.values(batchMap)
 
   // ── Sanitise generatedBatches — clear poisoned status ────────────────────
-  const _todayStr = new Date().toISOString().slice(0,10)
+  const _todayStr = _phxToday()
   generatedBatches.forEach(b => {
     if(!b.date) return
     const bDate = b.date.slice(0,10)
