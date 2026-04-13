@@ -191,18 +191,6 @@ const _EXPECTED = {
   } else {
     console.log('[BinDash] Config OK -- all keys verified')
 
-// ── Phoenix timezone date helper — use everywhere instead of new Date().toISOString().slice(0,10) ──
-// toISOString() returns UTC which can be a different date than Phoenix time (UTC-7)
-function _phxToday(){
-  const p = new Intl.DateTimeFormat('en-US',{timeZone:'America/Phoenix',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date())
-  return p.find(x=>x.type==='year').value+'-'+p.find(x=>x.type==='month').value+'-'+p.find(x=>x.type==='day').value
-}
-function _phxTomorrow(){
-  const d = new Date(); d.setDate(d.getDate()+1)
-  const p = new Intl.DateTimeFormat('en-US',{timeZone:'America/Phoenix',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d)
-  return p.find(x=>x.type==='year').value+'-'+p.find(x=>x.type==='month').value+'-'+p.find(x=>x.type==='day').value
-}
-
 
   }
 })()
@@ -210,6 +198,44 @@ function _phxTomorrow(){
 // Set to false when going live with real customers
 const EMAIL_TEST_MODE = false
 const EMAIL_TEST_ADMIN = 'alpha1miller@gmail.com'
+
+// ── Phoenix timezone date helpers ─────────────────────────────────────────
+// MUST be global — used by loadZonesFromSupabase, loadLiveJobsIntoPipeline,
+// adminLaunchBatch, loadRunnerRoutes, and many others.
+// Never use new Date().toISOString().slice(0,10) — that returns UTC which
+// shifts the date after ~5pm Phoenix time (UTC-7, no DST).
+function _phxToday(){
+  try {
+    const p = new Intl.DateTimeFormat('en-US',{
+      timeZone:'America/Phoenix',
+      year:'numeric', month:'2-digit', day:'2-digit'
+    }).formatToParts(new Date())
+    return p.find(x=>x.type==='year').value+'-'+
+           p.find(x=>x.type==='month').value+'-'+
+           p.find(x=>x.type==='day').value
+  } catch(e){
+    // Fallback — should never happen in modern browsers
+    const d = new Date()
+    d.setHours(d.getHours() - 7) // PHX = UTC-7, no DST
+    return d.toISOString().slice(0,10)
+  }
+}
+function _phxTomorrow(){
+  try {
+    const tom = new Date(); tom.setDate(tom.getDate()+1)
+    const p = new Intl.DateTimeFormat('en-US',{
+      timeZone:'America/Phoenix',
+      year:'numeric', month:'2-digit', day:'2-digit'
+    }).formatToParts(tom)
+    return p.find(x=>x.type==='year').value+'-'+
+           p.find(x=>x.type==='month').value+'-'+
+           p.find(x=>x.type==='day').value
+  } catch(e){
+    const d = new Date(); d.setDate(d.getDate()+1)
+    d.setHours(d.getHours() - 7)
+    return d.toISOString().slice(0,10)
+  }
+}
 
 
 // ── SMS Notifications via Twilio ─────────────────────────────────────────────
