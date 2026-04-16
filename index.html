@@ -25308,13 +25308,15 @@ async function adminLaunchBatch(zoneId, day, btnEl){
       updated_at:       new Date().toISOString(),
     }))
 
-    // Cancel any existing offered/pending jobs for this zone+date before inserting
+    // Cancel any existing offered/pending/unassigned jobs for this zone+date before inserting
+    // This prevents duplicate stops when Launch is clicked more than once
     const { error: cancelErr } = await _supa.from('jobs')
       .update({ status: 'cancelled', updated_at: new Date().toISOString() })
       .eq('zone_id', zoneId)
       .in('scheduled_date', [scheduledDateStr, binInDateStr])
-      .in('status', ['offered', 'unassigned', 'pending'])
+      .in('status', ['offered', 'unassigned', 'pending', 'broadcast'])
     if(cancelErr) console.warn('[adminLaunchBatch] cancel old jobs:', cancelErr.message)
+    else console.log('[adminLaunchBatch] Cancelled any stale jobs for', scheduledDateStr, 'and', binInDateStr)
 
     // Insert BIN_OUT jobs
     const { error: jobErr } = await _supa.from('jobs').insert(jobRows)
@@ -27526,10 +27528,13 @@ async function loadLiveJobsIntoPipeline(){
     if(!d){ renderDispatchPipeline(); return }
     // Primary: the selected pill date (BIN_OUT night for this collection day)
     dateRange.push(d.toISOString().slice(0,10))
-    // Also include previous day — BIN_IN jobs created after that day's BIN_OUT
-    // appear on the NEXT pill day, so we need both in the window
+    // Include previous day (for BIN_IN created from previous BIN_OUT)
     const dPrev = new Date(d); dPrev.setDate(d.getDate()-1)
     dateRange.push(dPrev.toISOString().slice(0,10))
+    // Include NEXT day — BIN_IN jobs pre-created at launch are scheduled_date = d+1
+    // (BIN_OUT runs Thursday evening, BIN_IN runs Friday morning)
+    const dNext = new Date(d); dNext.setDate(d.getDate()+1)
+    dateRange.push(dNext.toISOString().slice(0,10))
     isPastDay = d < today
   } else {
     // All days — full 3-back/3-forward window
