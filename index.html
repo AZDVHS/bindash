@@ -25144,6 +25144,26 @@ const FULL_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','
 // 2. Sends email+SMS to runner based on preferences
 // 3. Saves this route as the new default template for next cycle
 // 4. Stamps dispatch_queue as sent so scheduler never re-fires
+// Helper called from batch card buttons — reads zone/day from data-attributes
+// This avoids all quote-escaping issues in innerHTML template strings
+function _cardLaunch(btn){
+  const card = btn.closest('[data-zone-id]')
+  const zoneId = btn.dataset.zoneId || card?.dataset?.zoneId
+  const day    = btn.dataset.day    || card?.dataset?.day
+  console.log('[BinDash] _cardLaunch: zoneId=', zoneId, 'day=', day)
+  if(!zoneId){ showToast('Cannot determine zone — check data-zone-id attribute', 'err'); return }
+  if(!day){ showToast('Cannot determine day — check data-day attribute', 'err'); return }
+  adminLaunchBatch(zoneId, day, btn)
+}
+function _cardResend(btn){
+  const card = btn.closest('[data-zone-id]')
+  const zoneId = btn.dataset.zoneId || card?.dataset?.zoneId
+  const day    = btn.dataset.day    || card?.dataset?.day
+  console.log('[BinDash] _cardResend: zoneId=', zoneId, 'day=', day)
+  if(!zoneId || !day){ showToast('Cannot determine zone/day — refresh and try again', 'err'); return }
+  sendRouteNow(zoneId, day, btn)
+}
+
 async function adminLaunchBatch(zoneId, day, btnEl){
   if(btnEl){ btnEl.disabled = true; btnEl.textContent = '🚀 Launching...' }
 
@@ -26883,8 +26903,7 @@ function renderDispatchPipeline(){
         +'</div>'
       : ''
     return '<div style="border:'+(isMissed?'2px':'1px')+' solid rgba('+borderRgb+(isMissed?',.5':',.3')+');border-left:4px solid '+borderCol+';border-radius:10px;overflow:hidden;background:var(--surface);margin-bottom:8px'+(isMissed?';box-shadow:0 0 12px rgba(239,68,68,.15)':'')+'"'
-      +' data-batch-id="'+b.id+'"'+(isOpen?' data-dispatch-card-open="1"':'')+' id="dbc-'+b.id+'">'
-      +missedBar
+      +' data-batch-id="'+b.id+'" data-zone-id="'+b.zoneId+'" data-day="'+(b.day||'')+'"'+(isOpen?' data-dispatch-card-open="1"':'')+' id="dbc-'+b.id+'">'
       +'<div style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer" onclick="toggleDispatchCard(\''+b.id+'\')">'
       +'<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;'+(isBinIn?'background:rgba(6,214,160,.15);color:#06d6a0':'background:rgba(99,102,241,.15);color:#a5b4fc')+';flex-shrink:0">'+vtLabel+'</span>'
       +'<div style="flex:1;min-width:0">'
@@ -26903,8 +26922,8 @@ function renderDispatchPipeline(){
       +(isLiveView?'<div style="width:60px;flex-shrink:0"><div style="height:4px;background:var(--surface3);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+borderCol+';border-radius:99px"></div></div><div style="font-size:9px;color:var(--muted);text-align:center;margin-top:2px">'+pct+'%</div></div>':'')
       +'<span class="dispatch-badge" style="background:'+badgeCol+'22;color:'+badgeCol+';font-size:10px;font-weight:700;padding:2px 9px;border-radius:99px;flex-shrink:0;white-space:nowrap">'+badgeTxt+'</span>'
       +((statusKey==='offered'||statusKey==='sent')&&sentAt&&!isMissed&&_wasLaunched?'<span style="font-size:10px;color:var(--muted);flex-shrink:0;white-space:nowrap">sent '+sentAgo+'m ago</span>':'')
-      +((statusKey==='offered'||statusKey==='sent')&&isExpired?'<button onclick="event.stopPropagation();sendRouteNow(\\\''+b.zoneId+'\\\',\\\''+b.day+'\\\',this)" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.5);color:#ef4444;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:800;flex-shrink:0;white-space:nowrap">↻ Re-send</button>':'')
-      +((effectiveStatus==='queued'||statusKey==='queued')?'<button onclick="event.stopPropagation();adminLaunchBatch(\\\''+b.zoneId+'\\\',\\\''+b.day+'\\\',this)" style="background:linear-gradient(135deg,#06d6a0,#22c55e);color:#07090f;border:none;border-radius:6px;padding:3px 12px;font-size:11px;cursor:pointer;font-weight:800;flex-shrink:0">🚀 Launch</button>':'')
+      +((statusKey==='offered'||statusKey==='sent')&&isExpired&&(_wasLaunched||_liveEvidenceLaunched)?'<button data-zone-id="'+b.zoneId+'" data-day="'+(b.day||'')+'" onclick="event.stopPropagation();_cardResend(this)" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.5);color:#ef4444;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:800;flex-shrink:0;white-space:nowrap">↻ Re-send</button>':'')
+      +((effectiveStatus==='queued'||statusKey==='queued')?'<button data-zone-id="'+b.zoneId+'" data-day="'+(b.day||'')+'" onclick="event.stopPropagation();_cardLaunch(this)" style="background:linear-gradient(135deg,#06d6a0,#22c55e);color:#07090f;border:none;border-radius:6px;padding:3px 12px;font-size:11px;cursor:pointer;font-weight:800;flex-shrink:0">🚀 Launch</button>':'')
       +((b.status==='change_detected'||b.status==='draft')?'<button onclick="event.stopPropagation();showRouteApprovalModal(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.4);color:#06d6a0;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0">✓ Approve</button>':'')
       +(isPreview?'<button onclick="event.stopPropagation();deleteBatchFromPreview(\''+b.id+'\')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;flex-shrink:0">🗑</button>':'')
       +'<span id="dbc-chev-'+b.id+'" style="font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0;'+(isOpen?'transform:rotate(180deg)':'')+'">▼</span>'
@@ -27514,7 +27533,9 @@ async function loadLiveJobsIntoPipeline(){
     const visitTypeFilter = document.getElementById('dispatch-visit-filter')?.value || ''
     if(effectiveDay && !visitTypeFilter){
       // Pill day selected with no explicit visit type — default to BIN_OUT only
-      query = query.neq('visit_type', 'BIN_IN')
+      // Never filter out BIN_IN from DB query — always include them in the BIN_IN section
+    // The visit_type dropdown only affects the BIN_OUT display, not the BIN_IN section
+    // query = query.neq('visit_type', 'BIN_IN')  // REMOVED — was hiding BIN_IN from pipeline
     } else if(visitTypeFilter){
       query = query.eq('visit_type', visitTypeFilter)
     }
