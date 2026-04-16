@@ -8575,14 +8575,28 @@ async function completeBatch(batchId){
       await _autoCreateBinInBatch(jobs, runnerRow)
     }
 
-    // Mark dispatch_queue row as complete
+    // Mark dispatch_queue row as complete + update all matching jobs
     if(jobs?.[0]?.zone_id && jobs?.[0]?.scheduled_date){
-      _supa.from('dispatch_queue')
-        .update({ status: 'complete', completed_at: new Date().toISOString() })
+      const dqUpdate = await _supa.from('dispatch_queue')
+        .update({ status: 'complete', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq('zone_id', jobs[0].zone_id)
         .eq('scheduled_date', jobs[0].scheduled_date)
-        .then(({ error: dqErr }) => { if(dqErr) console.warn('[BinDash] dispatch_queue complete:', dqErr.message) })
+      if(dqUpdate.error) console.warn('[BinDash] dispatch_queue complete:', dqUpdate.error.message)
+      else console.log('[BinDash] dispatch_queue marked complete ✅ zone:', jobs[0].zone_id)
     }
+
+    // Ensure ALL jobs in this batch are marked complete (catches any missed by individual stop updates)
+    if(batchId){
+      const { error: batchComplErr } = await _supa.from('jobs')
+        .update({ status:'complete', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('batch_id', batchId)
+        .in('status', ['accepted','in_progress','offered'])
+      if(batchComplErr) console.warn('[BinDash] batch complete sweep:', batchComplErr.message)
+    }
+
+    // Push completion to admin pipeline immediately (no wait for 30s poll)
+    window._livePipelineBatches = null
+    loadLiveJobsIntoPipeline?.().catch(e => console.warn('[BinDash] pipeline refresh on complete:', e.message))
 
     showToast(`Route complete ✅ — $${totalEarned} queued for Friday payout`, 'ok', 5000)
     // Refresh routes AND earnings stats together so dashboard reflects completion immediately
@@ -18611,11 +18625,13 @@ function navPhotoTaken(input){
   const stopIdx = parseInt(input.id.replace('stop-photo-',''))
   const file = input.files[0]
 
-  // Store for upload on complete — compress before upload but show instantly
+  // Store for upload on complete — also keep objectUrl for re-render restoration
   window._navPhotoFile = file
+  if(window._navPhotoObjectUrl) URL.revokeObjectURL(window._navPhotoObjectUrl)  // free old
 
   // Instant preview via createObjectURL — no FileReader delay, no memory spike
   const objectUrl = URL.createObjectURL(file)
+  window._navPhotoObjectUrl = objectUrl   // persist for re-render restore
   const preview = document.getElementById('photo-preview-'+stopIdx)
   if(preview){
     const placeholder = document.getElementById('photo-placeholder-'+stopIdx)
@@ -18777,6 +18793,7 @@ async function navComplete(){
       }
     } catch(e){ console.warn('[BinDash] Photo upload exception:', e.message) }
     window._navPhotoFile = null
+    window._navPhotoObjectUrl = null
   }
 
   // Save job completion — offline-resilient queue
@@ -21400,6 +21417,35 @@ function renderActiveRouteTab(){
       <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">All Stops</div>
       ${stopListHtml}
     </div>`
+
+  // ── Restore photo preview after re-render if runner had taken a photo ──
+  // renderActiveRouteTab wipes container.innerHTML — we rebuild the preview
+  // from the stored object URL so the photo isn't lost between renders.
+  if(window._navPhotoFile && window._navPhotoObjectUrl && isArrived){
+    setTimeout(() => {
+      const preview = document.getElementById('photo-preview-'+navStop)
+      const placeholder = document.getElementById('photo-placeholder-'+navStop)
+      if(preview && !preview.querySelector('img.nav-proof-img')){
+        if(placeholder) placeholder.style.display = 'none'
+        const img = document.createElement('img')
+        img.className = 'nav-proof-img'
+        img._blobUrl = window._navPhotoObjectUrl
+        img.style.cssText = 'width:100%;height:180px;object-fit:cover;border-radius:12px;display:block'
+        img.src = window._navPhotoObjectUrl
+        preview.appendChild(img)
+        let badge = preview.querySelector('.photo-badge')
+        if(!badge){
+          badge = document.createElement('div')
+          badge.className = 'photo-badge'
+          badge.style.cssText = 'position:absolute;top:8px;left:8px;background:rgba(34,197,94,.9);color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px'
+          preview.appendChild(badge)
+        }
+        badge.textContent = '✓ Photo ready'
+        const btn = document.getElementById('complete-btn-'+navStop)
+        if(btn) btn.textContent = '✓ Done — Next Stop  📷'
+      }
+    }, 50)
+  }
 
   // Load runner note badge async after render — can't use inline script in template literal
   if(navPhase === 'arrived'){
