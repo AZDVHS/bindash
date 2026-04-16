@@ -25381,7 +25381,8 @@ async function adminLaunchBatch(zoneId, day, btnEl){
   }
 }
 
-async function sendRouteNow(zoneId, day){
+async function sendRouteNow(zoneId, day, btnEl){
+  if(btnEl){ btnEl.disabled=true; btnEl.textContent='↻ Sending...' }
   // Guard: only allow re-send after admin has already launched this route once
   const _key = 'pending_route:'+zoneId+':'+normDay(day)
   const _raw = localStorage.getItem(_key)
@@ -25402,7 +25403,8 @@ async function sendRouteNow(zoneId, day){
 
   if(!raw && !memBatch){
     // Route is in DB but not in memory — re-send via edge function or direct email
-    showToast('Re-sending via edge function...', 'info', 3000)
+    if(btnEl){ setTimeout(()=>{ if(btnEl){ btnEl.disabled=false; btnEl.textContent='↻ Re-send' }},4000) }
+  showToast('Re-sending via edge function...', 'info', 3000)
     try {
       // Mark route as queued in dispatch_queue so edge function picks it up
       const today = _phxToday()
@@ -26901,7 +26903,8 @@ function renderDispatchPipeline(){
       +(isLiveView?'<div style="width:60px;flex-shrink:0"><div style="height:4px;background:var(--surface3);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+borderCol+';border-radius:99px"></div></div><div style="font-size:9px;color:var(--muted);text-align:center;margin-top:2px">'+pct+'%</div></div>':'')
       +'<span class="dispatch-badge" style="background:'+badgeCol+'22;color:'+badgeCol+';font-size:10px;font-weight:700;padding:2px 9px;border-radius:99px;flex-shrink:0;white-space:nowrap">'+badgeTxt+'</span>'
       +((statusKey==='offered'||statusKey==='sent')&&sentAt&&!isMissed&&_wasLaunched?'<span style="font-size:10px;color:var(--muted);flex-shrink:0;white-space:nowrap">sent '+sentAgo+'m ago</span>':'')
-      +((statusKey==='offered'||statusKey==='sent')&&isExpired&&_wasLaunched?'<button onclick="event.stopPropagation();sendRouteNow(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0;white-space:nowrap">↻ Re-send</button>':'')
+      +((statusKey==='offered'||statusKey==='sent')&&isExpired?'<button onclick="event.stopPropagation();sendRouteNow(\\\''+b.zoneId+'\\\',\\\''+b.day+'\\\',this)" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.5);color:#ef4444;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:800;flex-shrink:0;white-space:nowrap">↻ Re-send</button>':'')
+      +((effectiveStatus==='queued'||statusKey==='queued')?'<button onclick="event.stopPropagation();adminLaunchBatch(\\\''+b.zoneId+'\\\',\\\''+b.day+'\\\',this)" style="background:linear-gradient(135deg,#06d6a0,#22c55e);color:#07090f;border:none;border-radius:6px;padding:3px 12px;font-size:11px;cursor:pointer;font-weight:800;flex-shrink:0">🚀 Launch</button>':'')
       +((b.status==='change_detected'||b.status==='draft')?'<button onclick="event.stopPropagation();showRouteApprovalModal(\''+b.zoneId+'\',\''+b.day+'\')" style="background:rgba(6,214,160,.15);border:1px solid rgba(6,214,160,.4);color:#06d6a0;border-radius:6px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700;flex-shrink:0">✓ Approve</button>':'')
       +(isPreview?'<button onclick="event.stopPropagation();deleteBatchFromPreview(\''+b.id+'\')" style="background:none;border:1px solid rgba(239,68,68,.3);color:#ef4444;border-radius:6px;padding:2px 7px;font-size:10px;cursor:pointer;flex-shrink:0">🗑</button>':'')
       +'<span id="dbc-chev-'+b.id+'" style="font-size:11px;color:var(--muted);transition:transform .2s;flex-shrink:0;'+(isOpen?'transform:rotate(180deg)':'')+'">▼</span>'
