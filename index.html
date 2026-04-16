@@ -8578,7 +8578,7 @@ async function completeBatch(batchId){
     // Mark dispatch_queue row as complete + update all matching jobs
     if(jobs?.[0]?.zone_id && jobs?.[0]?.scheduled_date){
       const dqUpdate = await _supa.from('dispatch_queue')
-        .update({ status: 'complete', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .update({ status: 'complete', updated_at: new Date().toISOString() })
         .eq('zone_id', jobs[0].zone_id)
         .eq('scheduled_date', jobs[0].scheduled_date)
       if(dqUpdate.error) console.warn('[BinDash] dispatch_queue complete:', dqUpdate.error.message)
@@ -8607,7 +8607,8 @@ async function completeBatch(batchId){
     // Refresh admin dispatch pipeline if admin has it open (background, non-blocking)
     try { if(window._livePipelineBatches) loadLiveJobsIntoPipeline() } catch(e){}
   } catch(e){
-    showToast('Error: '+String(e?.message||e), 'err')
+    console.error('[BinDash] completeBatch FAILED:', e?.message || e, e)
+    showToast('Route complete error: '+String(e?.message||e), 'err')
   }
 }
 
@@ -8693,6 +8694,7 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
           zone_id:         ref0.zone_id || null,
           scheduled_date:  tomorrowStr,
           status:          'queued',
+          visit_type:      'BIN_IN',
           runner_id:       runnerRow?.id || ref0.runner_id || null,
           runner_email:    runnerRow?.email?.toLowerCase() || null,
           runner_name:     runnerRow ? ((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).trim() : (ref0.runner_name||null),
@@ -18788,8 +18790,10 @@ async function navComplete(){
         if(photoUrl) console.log('[BinDash] Photo stored as base64 ✅ length:', photoUrl.length)
       } else {
         const { data:ud } = _supa.storage.from('job-photos').getPublicUrl(fname)
+        // Supabase storage returns { data: { publicUrl: '...' } }
         photoUrl = ud?.publicUrl || null
-        console.log('[BinDash] Photo uploaded to storage ✅', fname)
+        if(!photoUrl) console.warn('[BinDash] getPublicUrl returned no URL — ud:', JSON.stringify(ud))
+        else console.log('[BinDash] Photo uploaded to storage ✅', fname, '| url:', photoUrl.slice(0,60))
       }
     } catch(e){ console.warn('[BinDash] Photo upload exception:', e.message) }
     window._navPhotoFile = null
@@ -21823,8 +21827,12 @@ async function _flushOfflineQueue(){
 function _resilientUpdate(table, data, matchCol, matchVal){
   const op = () => _supa.from(table).update(data).eq(matchCol, matchVal)
   if(!_isOnline){ _offlineQueue.push(op); return Promise.resolve() }
-  return op().then(({error}) => {
-    if(error) throw error
+  return op().then(({error, data: result}) => {
+    if(error){
+      console.error('[_resilientUpdate] FAILED:', table, matchCol+'='+matchVal, error.message, error)
+      throw error
+    }
+    console.log('[_resilientUpdate] OK:', table, matchCol+'='+matchVal, result?.length||0, 'rows')
   }).catch(e => {
     _offlineQueue.push(op)
     console.warn('[offline queue]', table, e.message)
@@ -24498,6 +24506,33 @@ function startRouteScheduler(){
             loadPaymentsData?.()
         })
         .subscribe(status => console.log('[Realtime] jobs channel:', status))
+
+      // Also listen to dispatch_queue changes for immediate pipeline refresh
+      if(!window._dqRealtimeChannel){
+        window._dqRealtimeChannel = _supa
+          .channel('admin-dq-live')
+          .on('postgres_changes', { event:'UPDATE', schema:'public', table:'dispatch_queue' }, (payload) => {
+            const newStatus = payload.new?.status
+            const oldStatus = payload.old?.status
+            if(newStatus === oldStatus) return
+            console.log('[Realtime] dispatch_queue', oldStatus, '→', newStatus, 'zone:', payload.new?.zone_id)
+            // Promote generatedBatches to match DB status
+            const zoneId = payload.new?.zone_id
+            if(zoneId){
+              generatedBatches.forEach(gb => {
+                if(gb.zoneId === zoneId){
+                  const _r = { draft:0, queued:2, sent:3, offered:4, accepted:5, in_progress:6, complete:7 }
+                  if((_r[newStatus]||0) > (_r[gb.status]||0)) gb.status = newStatus
+                }
+              })
+            }
+            if(document.querySelector('#ad-dispatch')?.style.display !== 'none'){
+              window._livePipelineBatches = null
+              loadLiveJobsIntoPipeline?.().then(() => renderDispatchPipeline?.())
+            }
+          })
+          .subscribe(s => console.log('[Realtime] dispatch_queue channel:', s))
+      }
     } catch(e){ console.warn('[BinDash] realtime setup:', e?.message) }
   }
 
@@ -24795,10 +24830,7 @@ function approvePendingRoute(zoneId, day, permanent=true){
       earn_out:       pending.earnOut
                     || ((pending.stops||[]).length * (pending.runner?.loyaltyRate || 3.25)),
       collection_day: pending.day || '',
-      stops_json:     JSON.stringify((pending.stops||[]).map(s=>({
-        name: s.name, email: s.email,
-        address: s.address||s.zip, service: s.service, plan: s.plan,
-      }))),
+      // stops_json omitted — column may not exist in all deployments
     }
     const { data: existing } = await _supa.from('dispatch_queue')
       .select('id').eq('zone_id', zoneId).eq('scheduled_date', _dqDate).maybeSingle()
@@ -25097,6 +25129,7 @@ async function adminLaunchBatch(zoneId, day, btnEl){
       zone_id:              zoneId,
       scheduled_date:       scheduledDateStr,
       status:               'sent',
+      visit_type:           'BIN_OUT',
       sent_at:              new Date().toISOString(),
       notification_sent_at: new Date().toISOString(),
       runner_id:            runner.id || null,
