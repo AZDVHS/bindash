@@ -26611,9 +26611,14 @@ function renderDispatchPipeline(){
         const genRank  = _statusRankMerge[gb.status] || 0
         if(liveRank > genRank){
           gb.status = liveMatch.status
-          // Carry over sentAt if live has it and gen doesn't
           if(liveMatch.sentAt && !gb.sentAt) gb.sentAt = liveMatch.sentAt
           if(liveMatch.manualSend) gb.manualSend = true
+          if(liveMatch.offerExpiresAt) gb.offerExpiresAt = liveMatch.offerExpiresAt
+        }
+        // Always trust live for launched evidence — prevents poll from resetting to queued
+        if(['sent','offered','accepted','in_progress','complete'].includes(liveMatch.status)){
+          gb.manualSend = true
+          if(!gb.sentAt && liveMatch.sentAt) gb.sentAt = liveMatch.sentAt
         }
       }
     })
@@ -27397,7 +27402,7 @@ function _startDispatchStatusPoll(){
       await loadLiveJobsIntoPipeline()
       renderDispatchPipeline()
     } catch(e){}
-  }, 30000)  // every 30 seconds
+  }, 15000)  // every 15 seconds
 }
 
 // Load active (non-complete) jobs from Supabase for the selected day
@@ -27591,8 +27596,14 @@ async function loadLiveJobsIntoPipeline(){
         const runner    = RUNNERS.find(r=>r.id===j.runner_id||r.name===j.runner_name)
         const zone      = ADMIN_ZONES.find(z=>z.id===j.zone_id)
         const visitLabel = j.visit_type==='BIN_IN' ? '☀️ BIN IN' : '🌙 BIN OUT'
-        const jDay      = j.scheduled_date
-          ? dayNames[new Date(j.scheduled_date+'T12:00:00').getDay()]
+        // For BIN_IN, the display day = the BIN_OUT night (scheduled_date - 1 day)
+        // so BIN_IN appears on the same pill as its paired BIN_OUT
+        const _jRaw = j.scheduled_date ? new Date(j.scheduled_date+'T12:00:00') : null
+        const _jDisplay = _jRaw && j.visit_type === 'BIN_IN'
+          ? new Date(_jRaw.getTime() - 86400000)  // one day back = BIN_OUT night
+          : _jRaw
+        const jDay = _jDisplay
+          ? dayNames[_jDisplay.getDay()]
           : effectiveDay
         const jDateFormatted = j.scheduled_date
           ? new Date(j.scheduled_date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})
