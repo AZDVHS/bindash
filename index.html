@@ -8710,7 +8710,7 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
           collection_day:  new Date(tomorrowStr+'T12:00:00').toLocaleDateString('en-US',{weekday:'long'}),
           created_at:      new Date().toISOString(),
           updated_at:      new Date().toISOString(),
-        }, { onConflict: 'zone_id,scheduled_date,visit_type' }).select('id').maybeSingle()
+        }, { onConflict: 'zone_id,scheduled_date' }).select('id').maybeSingle()
         // Refresh admin pipeline
         window._livePipelineBatches = null
         loadLiveJobsIntoPipeline?.()
@@ -24476,9 +24476,9 @@ function startRouteScheduler(){
         .channel('admin-jobs-live')
         .on('postgres_changes', { event:'*', schema:'public', table:'jobs' }, (payload) => {
           const newStatus = payload.new?.status
-          const oldStatus = payload.old?.status
-          if(newStatus === oldStatus) return
-          console.log('[Realtime] Job', oldStatus, '→', newStatus, 'batch:', payload.new?.batch_id)
+          const oldStatus = payload.old?.status  // may be undefined on INSERT
+          if(newStatus && newStatus === oldStatus) return
+          console.log('[Realtime] Job', payload.eventType, oldStatus||'(new)', '→', newStatus, 'batch:', payload.new?.batch_id)
 
           // Immediately promote generatedBatches if a runner accepted/started/completed
           // This gives instant admin feedback without waiting for the 30s poll
@@ -24519,9 +24519,9 @@ function startRouteScheduler(){
           .channel('admin-dq-live')
           .on('postgres_changes', { event:'UPDATE', schema:'public', table:'dispatch_queue' }, (payload) => {
             const newStatus = payload.new?.status
-            const oldStatus = payload.old?.status
-            if(newStatus === oldStatus) return
-            console.log('[Realtime] dispatch_queue', oldStatus, '→', newStatus, 'zone:', payload.new?.zone_id)
+            const oldStatus = payload.old?.status  // undefined on INSERT events
+            if(newStatus && newStatus === oldStatus) return
+            console.log('[Realtime] dispatch_queue', payload.eventType, oldStatus||'(new)', '→', newStatus, 'zone:', payload.new?.zone_id)
             // Promote generatedBatches to match DB status
             const zoneId = payload.new?.zone_id
             if(zoneId){
@@ -26357,8 +26357,12 @@ function renderDispatchPipeline(){
   const _statusRankMerge = { draft:0, change_detected:1, queued:2, sent:3, offered:4, accepted:5, in_progress:6, complete:7 }
   let batchSource = []
   if(generatedBatches.length){
-    const genKeys = new Set(generatedBatches.map(b => b.zoneId+'_'+normDay(b.day||'')))
-    const liveExtra = (window._livePipelineBatches||[]).filter(b => !genKeys.has(b.zoneId+'_'+normDay(b.day||'')))
+    // genKeys keyed by zone+day+visitType so BIN_IN and BIN_OUT can coexist for same zone+day
+    const genKeys = new Set(generatedBatches.map(b => b.zoneId+'_'+normDay(b.day||'')+'_'+(b.visitType||'BIN_OUT')))
+    const liveExtra = (window._livePipelineBatches||[]).filter(b => {
+      const lk = b.zoneId+'_'+normDay(b.day||'')+'_'+(b.visitType||'BIN_OUT')
+      return !genKeys.has(lk)
+    })
     // Promote generatedBatch status if live pipeline shows a higher-rank status
     // This is how accepted/in_progress/complete from runner flow back to admin view
     generatedBatches.forEach(gb => {
@@ -27279,8 +27283,12 @@ async function loadLiveJobsIntoPipeline(){
   if(effectiveDay){
     const d = resolveDate(effectiveDay)
     if(!d){ renderDispatchPipeline(); return }
-    // Direct match — scheduled_date = the date the work physically happens
+    // Primary: the selected pill date (BIN_OUT night for this collection day)
     dateRange.push(d.toISOString().slice(0,10))
+    // Also include previous day — BIN_IN jobs created after that day's BIN_OUT
+    // appear on the NEXT pill day, so we need both in the window
+    const dPrev = new Date(d); dPrev.setDate(d.getDate()-1)
+    dateRange.push(dPrev.toISOString().slice(0,10))
     isPastDay = d < today
   } else {
     // All days — full 3-back/3-forward window
@@ -27299,13 +27307,14 @@ async function loadLiveJobsIntoPipeline(){
       .order('visit_type',     { ascending: true })
       .order('created_at',     { ascending: true })
 
+
+    // Always exclude cancelled (garbage test data). Include complete for history.
+    query = query.not('status', 'in', '("cancelled")')
     if(!isPastDay){
-      query = query.not('status', 'in', '("complete","cancelled")')
-      // Exclude stale offered/unassigned jobs from past dates — orphaned test data
+      // Exclude stale offered jobs from before today — orphaned test data
       const _todayQ = _phxToday()
       query = query.or(`scheduled_date.gte.${_todayQ},status.in.(accepted,in_progress,complete,missed)`)
     }
-
     // When a specific pill day is selected, it represents the BIN_OUT night.
     // Only show BIN_IN routes if the admin has explicitly selected BIN_IN view
     // (indicated by visit_type filter or absence of specific day selection).
