@@ -7910,6 +7910,26 @@ async function acceptOffer(){
     document.getElementById('offer-banner').style.display = 'none'
     showToast('Route accepted ✅ — check My Routes to start when ready', 'ok', 5000)
 
+    // Notify homeowners that their route is accepted (if they opted in)
+    const _acceptedJobs = (window._lastEnrichedJobs||[]).filter(j=>(j.batch_id||j.id)===offerId)
+    const rName = ((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).trim() || 'Your runner'
+    const _acceptKey = 'ho_accept_notified:' + offerId
+    if(!sessionStorage.getItem(_acceptKey)){
+      sessionStorage.setItem(_acceptKey, '1')
+      _acceptedJobs.slice(0,20).forEach(j => {
+        const hw = (window._rnHwMap||{})[j.homeowner_email] || {}
+        const pref = (hw.notification_preference || 'email').toLowerCase()
+        const hoName = ((hw.first_name||'')+' '+(hw.last_name||'')).trim().split(' ')[0] || 'there'
+        const schedDate = j.scheduled_date ? new Date(j.scheduled_date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}) : 'tonight'
+        if(pref !== 'none' && pref !== 'sms' && j.homeowner_email)
+          sendEmail(j.homeowner_email, '✅ Your bins will be moved tonight!',
+            `<p>Hi ${hoName},</p><p>Great news — <strong>${rName}</strong> has accepted your bin service for <strong>${schedDate}</strong>. Your bins will be moved between 3pm–7pm.</p><p>— BinDash</p>`,
+            'ho_route_accepted')
+        if((pref === 'sms' || pref === 'both') && hw.phone && hw.phone !== '--')
+          sendSMS(hw.phone, `BinDash: ${rName} accepted your bin route for ${schedDate}. Bins moved 3pm-7pm. -BinDash`, 'ho_accept_sms')
+      })
+    }
+
     await loadRunnerRoutes(runnerRow)
     rnNav(document.querySelector('#S-rn-dash .nav-i:nth-child(2)'), 'rn-routes')
 
@@ -24536,189 +24556,150 @@ function startRouteScheduler(){
   window._routeSchedulerRunning = true
   window._lastSchedulerCheck = {}
 
-  // ── Supabase realtime — live admin job status sync ───────────────────────
+  // ── Supabase Realtime — jobs table ──────────────────────────────────────
   if(!window._jobsRealtimeChannel && typeof _supa !== 'undefined'){
     try {
       window._jobsRealtimeChannel = _supa
         .channel('admin-jobs-live')
         .on('postgres_changes', { event:'*', schema:'public', table:'jobs' }, (payload) => {
           const newStatus = payload.new?.status
-          const oldStatus = payload.old?.status  // may be undefined on INSERT
+          const oldStatus = payload.old?.status
           if(newStatus && newStatus === oldStatus) return
-          console.log('[Realtime] Job', payload.eventType, oldStatus||'(new)', '→', newStatus, 'batch:', payload.new?.batch_id)
-
-          // Immediately promote generatedBatches if a runner accepted/started/completed
-          // This gives instant admin feedback without waiting for the 30s poll
-          const _advanceRank = { sent:3, offered:4, accepted:5, in_progress:6, complete:7 }
-          if(_advanceRank[newStatus] > (_advanceRank[oldStatus]||0)){
-            const batchId = payload.new?.batch_id
-            const zoneId  = payload.new?.zone_id
-            if(zoneId){
-              generatedBatches.forEach(gb => {
-                if(gb.zoneId === zoneId){
-                  const gbRank = _advanceRank[gb.status] || 0
-                  const newRank = _advanceRank[newStatus] || 0
-                  if(newRank > gbRank){
-                    gb.status = newStatus
-                    gb.manualSend = true  // must have been launched if runner accepted
-                    if(newStatus === 'accepted') gb.sentAt = gb.sentAt || new Date().toISOString()
-                    console.log('[Realtime] Promoted generatedBatch', gb.zoneId, 'to', newStatus)
-                  }
-                }
-              })
-            }
+          console.log('[Realtime] Job', payload.eventType, oldStatus||'(new)', '→', newStatus)
+          const _rank = { pending:1, offered:2, sent:3, accepted:4, in_progress:5, complete:6 }
+          const zoneId = payload.new?.zone_id
+          if(zoneId && (_rank[newStatus]||0) > (_rank[oldStatus]||0)){
+            generatedBatches.forEach(gb => {
+              if(gb.zoneId === zoneId && (_rank[newStatus]||0) > (_rank[gb.status]||0)){
+                gb.status = newStatus
+                gb.manualSend = true
+                if(newStatus === 'accepted') gb.sentAt = gb.sentAt || new Date().toISOString()
+              }
+            })
           }
-
-          // Refresh dispatch pipeline if admin has it open
           if(document.querySelector('#ad-dispatch')?.style.display !== 'none'){
             window._livePipelineBatches = null
             loadLiveJobsIntoPipeline?.().then(() => renderDispatchPipeline?.())
           }
           if(typeof updateOverviewCounts === 'function') updateOverviewCounts()
-          if(newStatus === 'complete' && document.querySelector('#ad-payments')?.style.display !== 'none')
+          if(['complete','in_progress'].includes(newStatus) && document.querySelector('#ad-payments')?.style.display !== 'none')
             loadPaymentsData?.()
         })
-        .subscribe(status => console.log('[Realtime] jobs channel:', status))
-
-      // Also listen to dispatch_queue changes for immediate pipeline refresh
-      if(!window._dqRealtimeChannel){
-        window._dqRealtimeChannel = _supa
-          .channel('admin-dq-live')
-          .on('postgres_changes', { event:'UPDATE', schema:'public', table:'dispatch_queue' }, (payload) => {
-            const newStatus = payload.new?.status
-            const oldStatus = payload.old?.status  // undefined on INSERT events
-            if(newStatus && newStatus === oldStatus) return
-            console.log('[Realtime] dispatch_queue', payload.eventType, oldStatus||'(new)', '→', newStatus, 'zone:', payload.new?.zone_id)
-            // Promote generatedBatches to match DB status
-            const zoneId = payload.new?.zone_id
-            if(zoneId){
-              generatedBatches.forEach(gb => {
-                if(gb.zoneId === zoneId){
-                  const _r = { draft:0, queued:2, sent:3, offered:4, accepted:5, in_progress:6, complete:7 }
-                  if((_r[newStatus]||0) > (_r[gb.status]||0)) gb.status = newStatus
-                }
-              })
-            }
-            if(document.querySelector('#ad-dispatch')?.style.display !== 'none'){
-              window._livePipelineBatches = null
-              loadLiveJobsIntoPipeline?.().then(() => renderDispatchPipeline?.())
-            }
-          })
-          .subscribe(s => console.log('[Realtime] dispatch_queue channel:', s))
-      }
-    } catch(e){ console.warn('[BinDash] realtime setup:', e?.message) }
+        .subscribe(s => console.log('[Realtime] jobs channel:', s))
+    } catch(e){ console.warn('[BinDash] realtime jobs setup:', e?.message) }
   }
 
+  // ── Supabase Realtime — dispatch_queue table ─────────────────────────────
+  if(!window._dqRealtimeChannel && typeof _supa !== 'undefined'){
+    try {
+      window._dqRealtimeChannel = _supa
+        .channel('admin-dq-live')
+        .on('postgres_changes', { event:'UPDATE', schema:'public', table:'dispatch_queue' }, (payload) => {
+          const newStatus = payload.new?.status
+          const oldStatus = payload.old?.status
+          if(newStatus && newStatus === oldStatus) return
+          console.log('[Realtime] dispatch_queue', payload.eventType, oldStatus||'(new)', '→', newStatus, 'zone:', payload.new?.zone_id)
+          const zoneId = payload.new?.zone_id
+          const _r = { draft:0, queued:1, sent:2, offered:3, accepted:4, in_progress:5, complete:6 }
+          if(zoneId) generatedBatches.forEach(gb => {
+            if(gb.zoneId === zoneId && (_r[newStatus]||0) > (_r[gb.status]||0)) gb.status = newStatus
+          })
+          if(document.querySelector('#ad-dispatch')?.style.display !== 'none'){
+            window._livePipelineBatches = null
+            loadLiveJobsIntoPipeline?.().then(() => renderDispatchPipeline?.())
+          }
+        })
+        .subscribe(s => console.log('[Realtime] dispatch_queue channel:', s))
+    } catch(e){ console.warn('[BinDash] realtime dq setup:', e?.message) }
+  }
 
-  // 60-second ticker to update offer countdown badges in real time
-  setInterval(()=>{
-    const dispatchVisible = document.querySelector('#ad-dispatch')?.style.display !== 'none'
-    if(!dispatchVisible) return
-    // Update any visible countdown badges without full re-render
-    document.querySelectorAll('[data-batch-id]').forEach(card => {
-      const batchId = card.dataset.batchId
-      const b = [...(generatedBatches||[]), ...(window._livePipelineBatches||[])].find(x=>x.id===batchId)
-      if(!b) return
-      const badgeEl = card.querySelector('.dispatch-badge')
-      if(!badgeEl) return
-      // Only show expiry countdown if admin actually launched this batch
-      // (manualSend=true means adminLaunchBatch fired). Unlauncehd batches never expire.
-      if(!b.manualSend && !b.sentAt) return
-      const expiresAt = b.offerExpiresAt || b._offerExpiresAt
-      if(!expiresAt) return
-      const minsLeft = Math.max(0, Math.round((new Date(expiresAt).getTime() - Date.now()) / 60000))
-      const isExpired = new Date(expiresAt).getTime() < Date.now()
-      if(isExpired){
-        badgeEl.textContent = '⏰ Offer expired'
-        badgeEl.style.color = '#ef4444'
-        badgeEl.style.background = 'rgba(239,68,68,.22)'
-      } else {
-        const col = minsLeft <= 5 ? '#ef4444' : '#f59e0b'
-        const icon = minsLeft <= 5 ? '🔴' : minsLeft <= 15 ? '🟡' : '⏳'
-        badgeEl.textContent = `${icon} ${minsLeft}m left`
-        badgeEl.style.color = col
-        badgeEl.style.background = col + '22'
+  // ── Main scheduler ticker (60s) ──────────────────────────────────────────
+  // Checks PHX time for daily tasks. All times in America/Phoenix (UTC-7, no DST).
+  setInterval(async () => {
+    const phxParts = new Intl.DateTimeFormat('en-US',{
+      timeZone:'America/Phoenix', hour:'2-digit', minute:'2-digit', hour12:false,
+      year:'numeric', month:'2-digit', day:'2-digit'
+    }).formatToParts(new Date())
+    const hh = parseInt(phxParts.find(p=>p.type==='hour').value)
+    const mm = parseInt(phxParts.find(p=>p.type==='minute').value)
+    const hhmm = hh * 100 + mm
+    const phxDate = phxParts.find(p=>p.type==='year').value + '-' + phxParts.find(p=>p.type==='month').value + '-' + phxParts.find(p=>p.type==='day').value
+    const dayKey = 'sched_' + phxDate
+
+    // ── 5:00am — Generate today's routes + pre-create BIN_IN ───────────────
+    if(hhmm >= 500 && hhmm < 502 && !window._lastSchedulerCheck[dayKey+'_5am']){
+      window._lastSchedulerCheck[dayKey+'_5am'] = true
+      console.log('[Scheduler] 5am — generating route drafts')
+      try { await autoGenerateDrafts() } catch(e){ console.warn('[Scheduler] 5am draft gen:', e.message) }
+    }
+
+    // ── 10:00am — Alert if any routes still need admin approval ─────────────
+    if(hhmm >= 1000 && hhmm < 1002 && !window._lastSchedulerCheck[dayKey+'_10am']){
+      window._lastSchedulerCheck[dayKey+'_10am'] = true
+      const needApproval = getPendingRoutes().filter(p => p.status==='draft' || p.status==='change_detected')
+      if(needApproval.length){
+        const _url = (BRAND?.url||'https://bindash.shop') + '?admin=dispatch'
+        sendEmail('alpha1miller@gmail.com',
+          `⚠️ BinDash: ${needApproval.length} route${needApproval.length!==1?'s':''} still need approval — deadline in 2 hours`,
+          `<div style="font-family:sans-serif;padding:20px;max-width:540px">
+            <div style="font-size:22px;font-weight:900;color:#06d6a0;margin-bottom:16px">BIN<span style="color:#6366f1">DASH</span></div>
+            <h2 style="color:#f59e0b;margin:0 0 8px">⚠️ Routes Awaiting Approval</h2>
+            <p style="color:#64748b">${needApproval.map(p=>p.zoneName+' · '+p.day).join(', ')} still need your approval. Please review and launch before noon.</p>
+            <a href="${_url}" style="display:inline-block;background:#06d6a0;color:#07090f;padding:12px 24px;border-radius:8px;font-weight:800;text-decoration:none;margin-top:12px">Review & Launch →</a>
+          </div>`, '10am_approval_alert')
+        addNotif({ title:'⚠️ Routes need approval', body: needApproval.map(p=>p.zoneName).join(', ') + ' — approve by noon', type:'warn', action:"adNav(null,'ad-dispatch')" })
+        console.log('[Scheduler] 10am alert sent —', needApproval.length, 'routes pending')
       }
-    })
+    }
+
+    // ── 2:00pm — Urgent broadcast for unaccepted offered routes ─────────────
+    if(hhmm >= 1400 && hhmm < 1402 && !window._lastSchedulerCheck[dayKey+'_2pm']){
+      window._lastSchedulerCheck[dayKey+'_2pm'] = true
+      try {
+        const { data: unacceptedJobs } = await _supa.from('jobs')
+          .select('batch_id, zone_id, runner_email, runner_name, scheduled_date, visit_type')
+          .eq('scheduled_date', phxDate)
+          .eq('visit_type', 'BIN_OUT')
+          .eq('status', 'offered')
+          .limit(50)
+        if(unacceptedJobs?.length){
+          // Group by batch
+          const batches = {}
+          unacceptedJobs.forEach(j => {
+            if(!batches[j.batch_id]) batches[j.batch_id] = { ...j, count: 0 }
+            batches[j.batch_id].count++
+          })
+          for(const b of Object.values(batches)){
+            // Broadcast to all available zone runners with urgency bonus note
+            const zoneRunners = RUNNERS.filter(r =>
+              r.status !== 'INACTIVE' &&
+              (r.zoneId === b.zone_id || r.coverageZones?.includes(b.zone_id)) &&
+              r.email
+            )
+            for(const r of zoneRunners){
+              sendEmail(r.email,
+                `🚨 Urgent: Bin Out route needs a runner — bonus available`,
+                `<p>Hi ${r.name?.split(' ')[0]||'Runner'},</p><p>A Bin Out route for today is still unclaimed. Log in to BinDash now to accept — a completion bonus may be available.</p>`,
+                '2pm_urgent_offer')
+            }
+            // Alert admin
+            sendEmail('alpha1miller@gmail.com',
+              `🚨 BinDash: Route for ${phxDate} is unaccepted at 2pm`,
+              `<p>${b.count} stop${b.count!==1?'s':''} in batch ${b.batch_id} have not been accepted. Broadcast sent to ${zoneRunners.length} zone runner${zoneRunners.length!==1?'s':''}.</p>`,
+              '2pm_admin_alert')
+            console.log('[Scheduler] 2pm urgent broadcast — batch', b.batch_id)
+          }
+        }
+      } catch(e){ console.warn('[Scheduler] 2pm broadcast:', e.message) }
+    }
+
+    // ── 30s UI refresh when dispatch is open ──────────────────────────────
   }, 60000)
 
-  setInterval(async ()=>{
-    // Always use America/Phoenix timezone (UTC-7, no DST)
-    const now     = new Date()
-    const phxTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Phoenix' }))
-    const hhmm    = phxTime.getHours() * 100 + phxTime.getMinutes()
-    const key     = phxTime.toDateString()
-
-    // ── 8:00am PHX — Generate route drafts + email admin reminder ─────────────
-    // NO auto-send. Drafts are queued only. Admin must manually approve + dispatch.
-    if(hhmm >= 800 && hhmm < 802 && !window._lastSchedulerCheck['8am_'+key]){
-      window._lastSchedulerCheck['8am_'+key] = true
-      console.log('[Scheduler] 8am PHX — generating drafts, sending admin reminder')
-      await autoGenerateDrafts()
-      await loadLiveJobsIntoPipeline()
-      renderDispatchPipeline()
-
-      // Count queued routes for the reminder
-      const queued = (generatedBatches||[]).filter(b => b.status === 'queued' || b.status === 'draft' || b.status === 'change_detected')
-      if(queued.length){
-        const _dispatchUrl = (BRAND?.url || 'https://www.bindash.shop') + '?admin=dispatch'
-        const _routeList = queued.map(b =>
-          `<tr><td style="padding:6px 12px;border-bottom:1px solid #e2e8f0"><strong>${b.zoneName||b.zoneId||'--'}</strong></td>` +
-          `<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0">${b.stops?.length||0} stop${(b.stops?.length||0)!==1?'s':''}</td>` +
-          `<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0">${b.day||'--'}</td>` +
-          `<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0;color:${b.status==='change_detected'?'#f59e0b':'#06d6a0'}">${b.status==='change_detected'?'⚠ Changed':'✓ Ready'}</td></tr>`
-        ).join('')
-
-        sendEmail(
-          'alpha1miller@gmail.com',
-          `🚀 BinDash: Route Batch Ready for Approval — ${queued.length} route${queued.length!==1?'s':''} need your launch`,
-          `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
-          <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,sans-serif">
-          <div style="max-width:560px;margin:0 auto;padding:32px 20px">
-            <div style="font-size:22px;font-weight:900;color:#06d6a0;margin-bottom:24px">BIN<span style="color:#6366f1">DASH</span></div>
-            <div style="background:#fff;border-radius:14px;padding:28px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-              <h2 style="margin:0 0 6px;font-size:20px;color:#0f172a">🚀 Route Batch Ready for Approval</h2>
-              <p style="color:#64748b;margin:0 0 20px;font-size:14px">Your <strong style="color:#0f172a">${queued.length} route${queued.length!==1?'s':''}</strong> have been prepared and are ready to review. Routes marked <span style="color:#f59e0b;font-weight:600">⚠ Changed</span> need review before launch. Click below to open Dispatch and hit 🚀 Launch on each route.</p>
-              <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px">
-                <thead><tr style="background:#f1f5f9">
-                  <th style="padding:8px 12px;text-align:left;color:#64748b;font-weight:600">Zone</th>
-                  <th style="padding:8px 12px;text-align:left;color:#64748b;font-weight:600">Stops</th>
-                  <th style="padding:8px 12px;text-align:left;color:#64748b;font-weight:600">Day</th>
-                  <th style="padding:8px 12px;text-align:left;color:#64748b;font-weight:600">Status</th>
-                </tr></thead>
-                <tbody>${_routeList}</tbody>
-              </table>
-              <a href="${_dispatchUrl}" style="display:block;background:#06d6a0;color:#07090f;font-weight:800;font-size:15px;padding:14px 24px;border-radius:10px;text-decoration:none;text-align:center">
-                🚀 Review & Launch Routes →
-              </a>
-              <p style="font-size:11px;color:#94a3b8;text-align:center;margin-top:16px">Nothing is sent to runners until you click 🚀 Launch in the Dispatch dashboard.</p>
-            </div>
-          </div></body></html>`,
-          '8am_dispatch_reminder'
-        )
-        console.log('[Scheduler] 8am reminder sent — ' + queued.length + ' routes queued')
-      }
-    }
-
-    // ── 9:00am PHX — UI refresh only, no auto-send ────────────────────────────
-    // TODO (future automation): hook triggerDispatchEdgeFunction() here once pg_cron is set up
-    if(hhmm >= 900 && hhmm < 902 && !window._lastSchedulerCheck['9am_'+key]){
-      window._lastSchedulerCheck['9am_'+key] = true
-      console.log('[Scheduler] 9am PHX — UI refresh only (no auto-send in manual mode)')
-      await loadLiveJobsIntoPipeline()
-      renderDispatchPipeline()
-    }
-
-    // ── 30s UI refresh when dispatch panel is open — purely cosmetic ──────────
-    // Does NOT send anything — just keeps the pipeline display current
-    const _hasAdminEdits = (generatedBatches||[]).some(b => b._adminOrderModified || b.status === 'preview')
-    if(document.querySelector('#ad-dispatch')?.style.display !== 'none' && !_hasAdminEdits){
-      window._livePipelineBatches = null
-      await loadLiveJobsIntoPipeline()
-      if(!generatedBatches.length) renderDispatchPipeline()
-    }
-  }, 30000)
+  // ── Separate 30s poll for dispatch pipeline refresh ───────────────────────
+  _startDispatchStatusPoll()
 }
+
 
 // Repeat route sending is now handled by the dispatch-scheduler edge function at 9am.
 // This function is kept as a no-op stub to avoid reference errors.
@@ -24748,40 +24729,76 @@ async function _warnRunnersUnapprovedRoutes(){
 }
 
 async function autoGenerateDrafts(){
-  if(DISPATCH_RULES.requireReview === false && !ADMIN_ZONES.length) return
-  // tomorrow = the Bin Out night (physical work date)
-  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
-  const tomorrowDay = FULL_DAYS[tomorrow.getDay()]   // e.g. "Thursday" (bin out night)
-  // Collection day = the day after the Bin Out night
-  const collectionDay = FULL_DAYS[(tomorrow.getDay() + 1) % 7]  // e.g. "Friday"
-  const collNorm = normDay(collectionDay)
-  ADMIN_ZONES.forEach(z => {
-    // Filter HOs whose COLLECTION day matches (not the bin out night)
-    const hws = HOMEOWNERS.filter(hw=>{
-      if(hw.status!=='active') return false
-      if(hw.zoneId!==z.id && !((z.zips||[]).includes(hw.zip))) return false
-      return normDay(hw.day)===collNorm||normDay(hw.dayRecycling)===collNorm||normDay(hw.dayWaste)===collNorm
+  // Called at 5am daily. Generates route drafts for each active zone.
+  // Auto-approves if route matches last successful template (no changes).
+  // Marks as 'draft' if new or 'change_detected' if HOs/runner changed.
+  const today = new Date()
+  // Bin Out night = tonight. Collection day = tomorrow morning.
+  const binOutDay  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][today.getDay()]
+  const collIdx    = (today.getDay() + 1) % 7
+  const collDay    = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][collIdx]
+  const collNorm   = normDay(collDay)
+  const todayStr   = _phxToday()
+  // BIN_IN scheduled date = tomorrow
+  const tom = new Date(today); tom.setDate(today.getDate()+1)
+  const ty = tom.getFullYear(), tm = String(tom.getMonth()+1).padStart(2,'0'), td = String(tom.getDate()).padStart(2,'0')
+  const tomorrowStr = ty+'-'+tm+'-'+td
+
+  let generated = 0, autoApproved = 0, needsReview = 0
+
+  for(const z of ADMIN_ZONES){
+    if(z.status === 'inactive') continue
+    const hws = HOMEOWNERS.filter(hw => {
+      if(hw.status !== 'active') return false
+      if(hw.zoneId !== z.id && !(z.zips||[]).includes(hw.zip)) return false
+      return normDay(hw.day)===collNorm || normDay(hw.dayRecycling)===collNorm || normDay(hw.dayWaste)===collNorm
     })
-    if(!hws.length) return
+    if(!hws.length) continue
+
     const priority = ruleGetPriorityRunner(z.id)
-    const { isNew, changes } = detectRouteChanges(z.id, tomorrowDay, hws, priority?.id)
+    const { isNew, changes } = detectRouteChanges(z.id, binOutDay, hws, priority?.id)
     const status = isNew ? 'draft' : changes.length ? 'change_detected' : 'queued'
-    const key = 'pending_route:'+z.id+':'+normDay(tomorrowDay)
-    // Never overwrite a route that was already sent/complete — only draft/queued can be regenerated
-    const _existingRaw = localStorage.getItem(key)
-    const _existing = _existingRaw ? (() => { try { return JSON.parse(_existingRaw) } catch(e){ return null } })() : null
-    if(_existing && ['sent','complete','accepted','in_progress'].includes(_existing.status)){
-      console.log('[BinDash] autoGenerateDrafts: skipping', z.name, '— already', _existing.status)
-      return
+
+    // Skip if already sent/complete for today
+    const lsKey = 'pending_route:'+z.id+':'+normDay(binOutDay)
+    const existing = (() => { try { return JSON.parse(localStorage.getItem(lsKey)||'null') } catch(e){ return null } })()
+    if(existing && ['sent','complete','accepted','in_progress'].includes(existing.status)){
+      console.log('[Scheduler] Skipping', z.name, '— already', existing.status)
+      continue
     }
-    const pending = { zoneId:z.id, zoneName:z.name, day:tomorrowDay, date:tomorrow.toISOString().slice(0,10), stops:hws, runner:priority, status, changes, isNew, generatedAt: new Date().toISOString() }
-    localStorage.setItem(key, JSON.stringify(pending))
-    if(status==='draft'||status==='change_detected'){
-      addNotif({ title:'🗺️ Route needs approval', body:`${z.name} · ${tomorrowDay} · ${hws.length} stops${changes.length?' · '+changes.join(', '):''}`, type:'warn', action:`adNav(null,'ad-dispatch')` })
+
+    const pending = { zoneId:z.id, zoneName:z.name, day:binOutDay, date:todayStr, stops:hws, runner:priority, status, changes, isNew, generatedAt:new Date().toISOString() }
+    localStorage.setItem(lsKey, JSON.stringify(pending))
+    generated++
+
+    if(status === 'queued'){
+      // No changes — auto-approve, write to dispatch_queue
+      autoApproved++
+      approvePendingRoute(z.id, binOutDay, true)
+      console.log('[Scheduler] Auto-approved', z.name, '— no changes from last route')
+    } else {
+      needsReview++
+      addNotif({ title:'🗺️ Route needs approval', body: z.name+' · '+binOutDay+' · '+(changes.length?' Changes: '+changes.join(', '):'New route'), type:'warn', action:"adNav(null,'ad-dispatch')" })
     }
-  })
-  showToast('Routes drafted for tomorrow — check Dispatch for approvals', 'info', 4000)
+  }
+
+  if(generated){
+    const _url = (BRAND?.url||'https://bindash.shop') + '?admin=dispatch'
+    sendEmail('alpha1miller@gmail.com',
+      `🚀 BinDash: Route Batch Ready — ${autoApproved} auto-approved, ${needsReview} need review`,
+      `<div style="font-family:sans-serif;padding:20px;max-width:540px">
+        <div style="font-size:22px;font-weight:900;color:#06d6a0;margin-bottom:16px">BIN<span style="color:#6366f1">DASH</span></div>
+        <h2 style="margin:0 0 8px">📋 Daily Route Batch Ready</h2>
+        ${autoApproved ? '<p style="color:#22c55e">✅ <strong>'+autoApproved+' route'+(autoApproved!==1?'s':'')+' auto-approved</strong> — no changes from last week.</p>' : ''}
+        ${needsReview ? '<p style="color:#f59e0b">⚠️ <strong>'+needsReview+' route'+(needsReview!==1?'s':'')+' need your review</strong> — homeowner or runner changes detected.</p>' : ''}
+        <p style="color:#64748b;font-size:13px">Routes must be approved and launched before 10am or an alert will be sent. Nothing goes to runners until you click 🚀 Launch.</p>
+        <a href="${_url}" style="display:inline-block;background:#06d6a0;color:#07090f;padding:12px 24px;border-radius:8px;font-weight:800;text-decoration:none;margin-top:12px">Open Dispatch Dashboard →</a>
+      </div>`, '5am_batch_ready')
+    console.log('[Scheduler] 5am drafts: generated', generated, '| auto-approved', autoApproved, '| needs review', needsReview)
+    showToast(`📋 Routes generated — ${autoApproved} auto-approved, ${needsReview} need review`, 'info', 5000)
+  }
 }
+
 
 // Queued route release at 1pm is handled by the dispatch-scheduler edge function.
 // Stub kept to avoid reference errors.
@@ -25261,21 +25278,26 @@ async function adminLaunchBatch(zoneId, day, btnEl){
 
     // Stamp dispatch_queue for BIN_IN as queued/pending (visible on next day's pill)
     const binInDayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][binInDate.getDay()]
-    await _supa.from('dispatch_queue').insert({
-      zone_id:         zoneId,
-      scheduled_date:  binInDateStr,
-      status:          'queued',
-      visit_type:      'BIN_IN',
-      runner_id:       runner.id || null,
-      runner_email:    (runner.email||'').toLowerCase(),
-      runner_name:     runner.name || null,
-      stop_count:      stops.length,
-      zone_name:       zoneName + ' · ☀️ BIN IN',
-      earn_out:        earn,
-      collection_day:  binInDayName,
-      created_at:      new Date().toISOString(),
-      updated_at:      new Date().toISOString(),
-    }).select('id').maybeSingle()  // non-fatal conflict
+    // BIN_IN dispatch_queue row — non-fatal, only works after SQL migration adds visit_type column
+    try {
+      const { error: binInDqErr } = await _supa.from('dispatch_queue').insert({
+        zone_id:         zoneId,
+        scheduled_date:  binInDateStr,
+        status:          'queued',
+        visit_type:      'BIN_IN',
+        runner_id:       runner.id || null,
+        runner_email:    (runner.email||'').toLowerCase(),
+        runner_name:     runner.name || null,
+        stop_count:      stops.length,
+        zone_name:       zoneName + ' · ☀️ BIN IN',
+        earn_out:        earn,
+        collection_day:  binInDayName,
+        created_at:      new Date().toISOString(),
+        updated_at:      new Date().toISOString(),
+      })
+      if(binInDqErr) console.warn('[adminLaunchBatch] BIN_IN dispatch_queue insert (non-fatal):', binInDqErr.message, '— run SQL migration to add visit_type column')
+      else console.log('[adminLaunchBatch] BIN_IN dispatch_queue row created ✅ for', binInDateStr)
+    } catch(e){ console.warn('[adminLaunchBatch] BIN_IN dq insert exception:', e.message) }
 
     // 3. Send email + SMS to runner
     const stopsList = stops.map(s=>({
@@ -25307,8 +25329,28 @@ async function adminLaunchBatch(zoneId, day, btnEl){
     batch.sentAt     = new Date().toISOString()
     if(raw) localStorage.setItem(key, JSON.stringify(batch))
     if(memBatch){ memBatch.status = 'sent'; memBatch.manualSend = true; memBatch.sentAt = batch.sentAt }
+    // Also mark generatedBatches entry as sent so it doesn't reset on re-render
+    generatedBatches.forEach(b => {
+      if(b.zoneId === zoneId && normDay(b.day) === normDay(day)){ b.status='sent'; b.manualSend=true; b.sentAt=batch.sentAt }
+    })
 
     showToast(`🚀 Route launched — ${runner.name} notified for ${stops.length} stop${stops.length!==1?'s':''}`, 'ok', 6000)
+    // ── 1-hour broadcast: if runner hasn't accepted, broadcast to zone runners ──
+    const _bKey = 'btimer_' + binOutBatchId
+    if(window[_bKey]) clearTimeout(window[_bKey])
+    window[_bKey] = setTimeout(async () => {
+      try {
+        const { data: stillOff } = await _supa.from('jobs').select('id').eq('batch_id', binOutBatchId).eq('status','offered').limit(1)
+        if(stillOff?.length){
+          console.log('[Scheduler] 1hr no-accept — broadcasting', binOutBatchId)
+          const zRs = (RUNNERS||[]).filter(r => r.status!=='INACTIVE' && (r.zoneId===zoneId||r.coverageZones?.includes(zoneId)) && r.email && r.email.toLowerCase()!==(runner.email||'').toLowerCase())
+          for(const r of zRs) sendEmail(r.email, `📬 Route available — ${stops.length} stops · $${earnOut}`, `<p>Hi ${r.name?.split(' ')[0]||'Runner'},</p><p>A route in your zone needs a runner. Log in to BinDash to accept.</p>`, 'broadcast_zone')
+          await _supa.from('jobs').update({ status:'broadcast', offer_type:'broadcast', updated_at:new Date().toISOString() }).eq('batch_id', binOutBatchId).eq('status','offered')
+          window._livePipelineBatches = null; loadLiveJobsIntoPipeline?.().then(()=>renderDispatchPipeline?.())
+          showToast('⏰ 1hr window expired — route broadcast to zone', 'warn', 5000)
+        }
+      } catch(e){ console.warn('[Scheduler] 1hr broadcast:', e.message) }
+    }, 60 * 60 * 1000)  // 60 minutes
     loadPendingApprovalsIntoDispatch()
     window._livePipelineBatches = null
     await loadLiveJobsIntoPipeline()
@@ -27430,12 +27472,13 @@ async function loadLiveJobsIntoPipeline(){
       .order('created_at',     { ascending: true })
 
 
-    // Always exclude cancelled (garbage test data). Include complete for history.
+    // Exclude cancelled. Include complete for history. Include pending for pre-created BIN_IN.
     query = query.not('status', 'in', '("cancelled")')
     if(!isPastDay){
-      // Exclude stale offered jobs from before today — orphaned test data
+      // Keep: pending (pre-created BIN_IN), offered, accepted, in_progress, complete for current+future
+      // Drop: stale offered/unassigned from past dates only
       const _todayQ = _phxToday()
-      query = query.or(`scheduled_date.gte.${_todayQ},status.in.(accepted,in_progress,complete,missed)`)
+      query = query.or(`scheduled_date.gte.${_todayQ},status.in.(accepted,in_progress,complete,missed,pending)`)
     }
     // When a specific pill day is selected, it represents the BIN_OUT night.
     // Only show BIN_IN routes if the admin has explicitly selected BIN_IN view
