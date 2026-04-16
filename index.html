@@ -7352,7 +7352,7 @@ async function loadRunnerRoutes(runnerRow){
     if(allEmails.length){
       const { data: hwRows } = await _supa
         .from('homeowner_signups')
-        .select('email, first_name, last_name, street_address, zip_code, bin_location, gate_type, gate_code, pet_info, service_notes')
+        .select('email, first_name, last_name, street_address, zip_code, bin_location, gate_type, gate_code, pet_info, service_notes, phone, notification_preference')
         .in('email', allEmails)
       ;(hwRows||[]).forEach(h => {
         hwMap[h.email] = h
@@ -8008,7 +8008,7 @@ async function resumeBatch(batchId){
     if(emails.length){
       const { data: hwRows } = await _supa
         .from('homeowner_signups')
-        .select('email,first_name,last_name,street_address,zip_code,gate_code,gate_type,pet_info,bin_location,service_notes')
+        .select('email,first_name,last_name,street_address,zip_code,gate_code,gate_type,pet_info,bin_location,service_notes,phone,notification_preference')
         .in('email', emails)
       ;(hwRows||[]).forEach(h => { hwMap[h.email] = h })
     }
@@ -8061,6 +8061,8 @@ async function resumeBatch(batchId){
         bins:        '1 bin',
         email:       email || null,
         hwEmail:     email || null,
+        phone:       hw.phone || null,
+        notifPref:   hw.notification_preference || 'email',  // 'email'|'sms'|'both'|'none'
         jobId:       j.id || null,
       }
     }).filter(Boolean)
@@ -8495,6 +8497,8 @@ async function _forceStartBatch(batchId){
           bins:        j.hw?.bins || '1 bin',
           email:       j.homeowner_email  || null,
           hwEmail:     j.homeowner_email  || null,
+          phone:       j.hw?.phone || null,
+          notifPref:   j.hw?.notification_preference || 'email',
           jobId:       j.id,
         }
       })
@@ -8576,9 +8580,42 @@ async function completeBatch(batchId){
       } catch(e){ console.warn('[BinDash] runner stat update:', e.message) }
     }
 
-    // AUTO-CREATE BIN IN batch if this was BIN OUT
+    // ── UNLOCK PRE-CREATED BIN_IN jobs (new architecture) ────────────────
+    // BIN_IN jobs are pre-created at launch time with status='pending'.
+    // When BIN_OUT completes, flip them to 'offered' so the runner gets the offer.
     if(visitType === 'BIN_OUT' && jobs?.length){
-      await _autoCreateBinInBatch(jobs, runnerRow)
+      const binInBatchId = (jobs[0].batch_id || batchId) + '-IN'
+      const { data: binInJobs, error: biErr } = await _supa.from('jobs')
+        .select('id, status, scheduled_date, homeowner_email')
+        .eq('batch_id', binInBatchId)
+        .eq('status', 'pending')
+      if(biErr) console.warn('[BinDash] BIN_IN unlock fetch:', biErr.message)
+      else if(binInJobs?.length){
+        const offerExpiresAt = new Date(Date.now() + 25*60*1000).toISOString()
+        const { error: offerErr } = await _supa.from('jobs')
+          .update({ status:'offered', offer_expires_at:offerExpiresAt, updated_at:new Date().toISOString() })
+          .eq('batch_id', binInBatchId)
+          .eq('status', 'pending')
+        if(offerErr) console.warn('[BinDash] BIN_IN unlock:', offerErr.message)
+        else {
+          console.log('[BinDash] Unlocked', binInJobs.length, 'BIN_IN jobs → offered ✅')
+          // Also update dispatch_queue for BIN_IN to 'queued' (ready for runner to see)
+          const biDate = binInJobs[0]?.scheduled_date
+          if(biDate){
+            await _supa.from('dispatch_queue')
+              .update({ status:'queued', updated_at:new Date().toISOString() })
+              .eq('zone_id', jobs[0].zone_id)
+              .eq('scheduled_date', biDate)
+              .eq('visit_type', 'BIN_IN')
+          }
+          // Show Bin In offer to runner via existing modal flow
+          await _autoCreateBinInBatch(jobs, runnerRow)
+        }
+      } else {
+        // Fallback: no pre-created jobs found — use old creation flow
+        console.log('[BinDash] No pending BIN_IN jobs found for', binInBatchId, '— falling back to creation')
+        await _autoCreateBinInBatch(jobs, runnerRow)
+      }
     }
 
     // Mark dispatch_queue row as complete + update all matching jobs
@@ -8619,23 +8656,42 @@ async function completeBatch(batchId){
 }
 
 async function _autoCreateBinInBatch(binOutJobs, runnerRow){
+  // ── NEW ARCHITECTURE: BIN_IN jobs are pre-created at launch time ─────────
+  // This function now only: shows the offer modal to the runner.
+  // The actual jobs already exist with status='offered' (unlocked by completeBatch).
+  // Do NOT insert new jobs here — that caused duplicates and 409 conflicts.
   try {
-    const ref      = binOutJobs[0]
-    // BIN IN is always the day AFTER the BIN OUT date
-    const binOutDate = ref.scheduled_date ? new Date(ref.scheduled_date + 'T12:00:00') : new Date()
-    const binInDate  = new Date(binOutDate); binInDate.setDate(binOutDate.getDate() + 1)
-    const tomorrowStr = binInDate.toISOString().slice(0,10)
+    const ref       = binOutJobs[0]
     const inBatchId = (ref.batch_id || ref.id) + '-IN'
-    const loyaltyExpiry = new Date(Date.now() + (DISPATCH_RULES?.binInWindow||25) * 60 * 1000).toISOString()
 
-    const stopNames = binOutJobs.slice(0,3).map(j=>{
+    // Verify pre-created jobs exist
+    const { data: existingBinIn } = await _supa.from('jobs')
+      .select('id, status, scheduled_date, homeowner_email')
+      .eq('batch_id', inBatchId)
+      .in('status', ['offered', 'pending'])
+      .limit(20)
+
+    if(!existingBinIn?.length){
+      console.warn('[BinDash] _autoCreateBinInBatch: no pre-created BIN_IN jobs for', inBatchId, '— skipping modal')
+      return
+    }
+
+    const scheduledDate = existingBinIn[0]?.scheduled_date || ref.scheduled_date
+    const loyaltyExpiry = new Date(Date.now() + (DISPATCH_RULES?.binInWindow||25) * 60 * 1000).toISOString()
+    const earn = (existingBinIn.length * 3.25).toFixed(2)
+
+    // Ensure status is 'offered' (in case completeBatch already flipped them)
+    await _supa.from('jobs')
+      .update({ status: 'offered', offer_expires_at: loyaltyExpiry, updated_at: new Date().toISOString() })
+      .eq('batch_id', inBatchId).eq('status', 'pending')
+
+    const stopNames = existingBinIn.slice(0,3).map(j => {
       const hw = (NAV_STOPS||[]).find(s=>s.email===j.homeowner_email)
       return hw?.name || j.homeowner_email?.split('@')[0] || 'Stop'
     }).join(', ')
-    const moreStops = binOutJobs.length > 3 ? ` +${binOutJobs.length - 3} more` : ''
-    const earn = (binOutJobs.length * 3.25).toFixed(2)
+    const moreStops = existingBinIn.length > 3 ? ` +${existingBinIn.length - 3} more` : ''
 
-    // Show runner the Bin In offer prompt
+    // Show offer modal to runner
     document.getElementById('modal-box').innerHTML = `
     <div class="mh" style="background:rgba(245,158,11,.07)">
       <div>
@@ -8645,7 +8701,7 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
     </div>
     <div class="mb">
       <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
-        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${binOutJobs.length} Bin In stop${binOutJobs.length!==1?'s':''} available</div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${existingBinIn.length} Bin In stop${existingBinIn.length!==1?'s':''} available</div>
         <div style="font-size:12px;color:var(--sub);margin-bottom:8px">${stopNames}${moreStops}</div>
         <div style="display:flex;gap:10px">
           <div style="background:rgba(34,197,94,.1);border-radius:8px;padding:8px 14px;text-align:center;flex:1">
@@ -8659,7 +8715,7 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
         </div>
       </div>
       <div style="font-size:12px;color:var(--sub);line-height:1.6;margin-bottom:4px">
-        ☀️ Bin In happens <strong style="color:var(--text)">after the collection truck passes</strong> — typically afternoon. Accept now to lock in this route, or it goes to other runners in your zone.
+        ☀️ Bin In happens <strong style="color:var(--text)">after the collection truck passes</strong> — typically afternoon. Accept now to lock in this route.
       </div>
       <div id="bin-in-countdown" style="font-size:11px;color:#fbbf24;font-weight:700;margin-top:6px">⏳ 25:00 remaining</div>
     </div>
@@ -8669,55 +8725,7 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
     </div>`
     openM()
 
-    // ── Always create Bin In jobs in DB as 'offered' so admin sees them ──────
-    // Status = 'offered' means queued for this runner. If declined → cascade to zone.
-    const preJobs = binOutJobs.map(j => ({
-      batch_id:          inBatchId,
-      homeowner_email:   j.homeowner_email,
-      runner_id:         runnerRow?.id    || j.runner_id,
-      runner_name:       runnerRow ? ((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).trim() : j.runner_name,
-      runner_email:      runnerRow?.email?.toLowerCase() || null,
-      visit_type:        'BIN_IN',
-      job_type:          'subscription',
-      service_type:      j.service_type,
-      status:            'offered',
-      offer_type:        'loyalty',
-      offer_expires_at:  loyaltyExpiry,
-      scheduled_date:    tomorrowStr,
-      amount:            3.25,
-      zone_id:           j.zone_id,
-      created_at:        new Date().toISOString(),
-      updated_at:        new Date().toISOString(),
-    }))
-    try {
-      const { error: preErr } = await _supa.from('jobs').insert(preJobs)
-      if(preErr) console.warn('[BinDash] Bin In pre-create:', preErr.message)
-      else {
-        console.log('[BinDash] Bin In jobs created in DB ✅ — batch:', inBatchId)
-        // Write to dispatch_queue so admin sees it
-        const ref0 = binOutJobs[0]
-        await _supa.from('dispatch_queue').upsert({
-          zone_id:         ref0.zone_id || null,
-          scheduled_date:  tomorrowStr,
-          status:          'queued',
-          visit_type:      'BIN_IN',
-          runner_id:       runnerRow?.id || ref0.runner_id || null,
-          runner_email:    runnerRow?.email?.toLowerCase() || null,
-          runner_name:     runnerRow ? ((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).trim() : (ref0.runner_name||null),
-          stop_count:      binOutJobs.length,
-          zone_name:       (window.ADMIN_ZONES||[]).find(z=>z.id===ref0.zone_id)?.name || 'Bin In',
-          earn_out:        earn,
-          collection_day:  new Date(tomorrowStr+'T12:00:00').toLocaleDateString('en-US',{weekday:'long'}),
-          created_at:      new Date().toISOString(),
-          updated_at:      new Date().toISOString(),
-        }, { onConflict: 'zone_id,scheduled_date' }).select('id').maybeSingle()
-        // Refresh admin pipeline
-        window._livePipelineBatches = null
-        loadLiveJobsIntoPipeline?.()
-      }
-    } catch(e){ console.warn('[BinDash] Bin In pre-insert error:', e.message) }
-
-    // Countdown timer in modal
+    // Countdown timer
     const expiry = Date.now() + 25*60*1000
     const countdownInterval = setInterval(()=>{
       const remaining = Math.max(0, expiry - Date.now())
@@ -8728,55 +8736,16 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
       if(remaining <= 0){
         clearInterval(countdownInterval)
         closeM()
-        // Timer expired — cascade to zone runners
-        _offerBinInToZone(inBatchId, binOutJobs, runnerRow, tomorrowStr, loyaltyExpiry)
+        _offerBinInToZone(inBatchId, binOutJobs, runnerRow, scheduledDate, loyaltyExpiry)
       }
     }, 1000)
     window._binInCountdownInterval = countdownInterval
-
-    // Store batch data for accept/decline handlers
-    window._pendingBinInBatch = { inBatchId, binOutJobs, runnerRow, tomorrowStr, loyaltyExpiry, countdownInterval }
+    window._pendingBinInBatch = { inBatchId, binOutJobs, runnerRow, tomorrowStr: scheduledDate, loyaltyExpiry, countdownInterval }
 
   } catch(e){
-    console.warn('[BinDash] _autoCreateBinInBatch:', e)
+    console.warn('[BinDash] _autoCreateBinInBatch:', e?.message)
   }
 }
-
-async function _acceptBinIn(inBatchId){
-  clearInterval(window._binInCountdownInterval)
-  closeM()
-  const p = window._pendingBinInBatch
-  if(!p) return
-  const { binOutJobs, runnerRow, tomorrowStr } = p
-  const expiresAt = new Date(Date.now() + 8*60*60*1000).toISOString()
-
-  // Update pre-created jobs from offered → accepted
-  const { error } = await _supa.from('jobs')
-    .update({ status: 'accepted', offer_expires_at: expiresAt, updated_at: new Date().toISOString() })
-    .eq('batch_id', inBatchId).eq('visit_type', 'BIN_IN')
-  if(error){
-    showToast('Failed to accept Bin In: '+error.message, 'err')
-  } else {
-    showToast('☀️ Bin In accepted — '+binOutJobs.length+' stop'+(binOutJobs.length!==1?'s':'')+' locked in for tomorrow ✅', 'ok', 5000)
-    const _key = 'bin_in_emailed:'+inBatchId
-    if(!sessionStorage.getItem(_key)){
-      sessionStorage.setItem(_key, '1')
-      binOutJobs.slice(0,10).forEach(j => {
-        const hw = (NAV_STOPS||[]).find(s=>s.email===j.homeowner_email)
-        const name = hw?.name?.split(' ')[0]||'there'
-        if(j.homeowner_email) sendEmail(j.homeowner_email,
-          'Your Bin In is confirmed for tomorrow ☀️',
-          '<p>Hi '+name+',</p><p>Your runner has confirmed your Bin In for tomorrow. Your bins will be returned to your property after the collection truck passes.</p><p>— BinDash</p>',
-          'bin_in_confirmed')
-      })
-    }
-    await loadRunnerRoutes(runnerRow)
-    window._livePipelineBatches = null
-    loadLiveJobsIntoPipeline?.()
-  }
-  window._pendingBinInBatch = null
-}
-
 
 async function _declineBinIn(inBatchId){
   clearInterval(window._binInCountdownInterval)
@@ -8789,7 +8758,7 @@ async function _declineBinIn(inBatchId){
 }
 
 async function _offerBinInToZone(inBatchId, binOutJobs, originalRunner, tomorrowStr, expiresAt){
-  // Find zone runners (excluding original runner who declined/timed out)
+  // ── NEW ARCHITECTURE: UPDATE pre-created pending/offered jobs, don't INSERT ──
   const zoneId = binOutJobs[0]?.zone_id
   const zoneRunners = RUNNERS.filter(r=>
     r.status!=='INACTIVE' && r.status!=='OFF_DUTY' &&
@@ -8798,60 +8767,52 @@ async function _offerBinInToZone(inBatchId, binOutJobs, originalRunner, tomorrow
     (r.visitType==='BOTH'||r.visitType==='BIN_IN')
   )
 
-  const zoneExpiresAt = new Date(Date.now() + 45*60*1000).toISOString() // 45min zone window
+  const zoneExpiresAt = new Date(Date.now() + 45*60*1000).toISOString()
 
   if(zoneRunners.length){
-    // Offer to first zone runner
     const zoneRunner = zoneRunners[0]
-    const inJobs = binOutJobs.map(j => ({
-      batch_id:         inBatchId,
-      homeowner_email:  j.homeowner_email,
-      runner_id:        zoneRunner.id,
-      runner_name:      zoneRunner.name,
-      visit_type:       'BIN_IN',
-      job_type:         'subscription',
-      service_type:     j.service_type,
-      status:           'offered',
-      offer_type:       'zone',
-      offer_expires_at: zoneExpiresAt,
-      scheduled_date:   scheduledDateStr,
-      amount:           3.25,
-      zone_id:          j.zone_id,
-      created_at:       new Date().toISOString(),
-      updated_at:       new Date().toISOString(),
-    }))
-    await _supa.from('jobs').insert(inJobs)
-    if(zoneRunner.email) sendEmail(zoneRunner.email,
-      `☀️ Bin In route available — ${binOutJobs.length} stop${binOutJobs.length!==1?'s':''} · $${(binOutJobs.length*3.25).toFixed(2)}`,
-      `<p>Hi ${zoneRunner.name?.split(' ')[0]||'Runner'},</p><p>A Bin In route is available in your zone for tomorrow. You have <strong>45 minutes</strong> to accept before it goes to all runners.</p>`,
-      'bin_in_zone_offer')
-    showToast(`☀️ Bin In offered to ${zoneRunner.name} — 45 min window`, 'info', 4000)
+    // Reassign pre-created jobs to zone runner
+    const { error } = await _supa.from('jobs')
+      .update({
+        runner_id:        zoneRunner.id,
+        runner_name:      zoneRunner.name,
+        runner_email:     (zoneRunner.email||'').toLowerCase(),
+        status:           'offered',
+        offer_type:       'zone',
+        offer_expires_at: zoneExpiresAt,
+        updated_at:       new Date().toISOString(),
+      })
+      .eq('batch_id', inBatchId)
+      .in('status', ['offered','pending'])
+    if(error) console.warn('[BinDash] _offerBinInToZone reassign:', error.message)
+    else {
+      if(zoneRunner.email) sendEmail(zoneRunner.email,
+        `☀️ Bin In route available — ${binOutJobs.length} stop${binOutJobs.length!==1?'s':''} · $${(binOutJobs.length*3.25).toFixed(2)}`,
+        `<p>Hi ${zoneRunner.name?.split(' ')[0]||'Runner'},</p><p>A Bin In route is available in your zone. You have <strong>45 minutes</strong> to accept before it goes to all runners.</p>`,
+        'bin_in_zone_offer')
+      showToast(`☀️ Bin In offered to ${zoneRunner.name} — 45 min window`, 'info', 4000)
+    }
   } else {
-    // No zone runners — broadcast immediately
-    const inJobs = binOutJobs.map(j => ({
-      batch_id:         inBatchId,
-      homeowner_email:  j.homeowner_email,
-      runner_id:        null,
-      runner_name:      null,
-      visit_type:       'BIN_IN',
-      job_type:         'subscription',
-      service_type:     j.service_type,
-      status:           'broadcast',
-      offer_type:       'broadcast',
-      offer_expires_at: new Date(Date.now() + 2*60*60*1000).toISOString(),
-      scheduled_date:   scheduledDateStr,
-      amount:           3.25,
-      zone_id:          j.zone_id,
-      created_at:       new Date().toISOString(),
-      updated_at:       new Date().toISOString(),
-    }))
-    await _supa.from('jobs').insert(inJobs)
+    // No zone runners — broadcast (reassign to null runner, set broadcast status)
+    const { error } = await _supa.from('jobs')
+      .update({
+        runner_id:        null,
+        runner_name:      null,
+        runner_email:     null,
+        status:           'broadcast',
+        offer_type:       'broadcast',
+        offer_expires_at: new Date(Date.now() + 2*60*60*1000).toISOString(),
+        updated_at:       new Date().toISOString(),
+      })
+      .eq('batch_id', inBatchId)
+      .in('status', ['offered','pending'])
+    if(error) console.warn('[BinDash] _offerBinInToZone broadcast:', error.message)
     showToast('📡 Bin In broadcast to all available runners', 'info', 4000)
   }
-  // Refresh dispatch pipeline on admin side
   window._livePipelineBatches = null
   loadLiveJobsIntoPipeline?.()
 }
+
 
 function showCurrentOfferDetail(){
   const offerId = window._currentOfferId
@@ -18628,21 +18589,29 @@ async function _loadRunnerNoteCounts(emails){
   } catch(e){ return {} }
 }
 
-function navPhotoTaken(input){
+function navPhotoTaken(input, slotIdx){
   if(!input.files || !input.files[0]) return
-  const stopIdx = parseInt(input.id.replace('stop-photo-',''))
+  const parts = input.id.replace('stop-photo-','').split('-')
+  const stopIdx = parseInt(parts[0])
+  const slot = (slotIdx !== undefined) ? slotIdx : (parts[1] !== undefined ? parseInt(parts[1]) : 0)
   const file = input.files[0]
 
   // Store for upload on complete — also keep objectUrl for re-render restoration
-  window._navPhotoFile = file
+  // Multi-photo support: store up to 3 photos
+  if(!window._navPhotoFiles) window._navPhotoFiles = []
+  if(window._navPhotoFiles.length < 3) window._navPhotoFiles.push(file)
+  window._navPhotoFile = file  // keep for backward compat
   if(window._navPhotoObjectUrl) URL.revokeObjectURL(window._navPhotoObjectUrl)  // free old
 
   // Instant preview via createObjectURL — no FileReader delay, no memory spike
   const objectUrl = URL.createObjectURL(file)
-  window._navPhotoObjectUrl = objectUrl   // persist for re-render restore
-  const preview = document.getElementById('photo-preview-'+stopIdx)
+  if(slot === 0) window._navPhotoObjectUrl = objectUrl  // persist primary for re-render
+  // Target the correct slot div
+  const preview = document.getElementById('photo-slot-'+stopIdx+'-'+slot)
+            || document.getElementById('photo-preview-'+stopIdx)
   if(preview){
-    const placeholder = document.getElementById('photo-placeholder-'+stopIdx)
+    const placeholder = document.getElementById('photo-slot-placeholder-'+stopIdx+'-'+slot)
+                    || document.getElementById('photo-placeholder-'+stopIdx)
     if(placeholder) placeholder.style.display = 'none'
     // Remove old img if retake
     const old = preview.querySelector('img.nav-proof-img')
@@ -18777,33 +18746,42 @@ async function navComplete(){
   if(btn){ btn.disabled=true; btn.textContent='Saving...' }
 
   // Upload compressed photo if taken
+  // Upload all photos (up to 3), fall back to base64 if storage fails
   let photoUrl = null
-  if(window._navPhotoFile){
-    try {
-      const compressed = await _compressPhoto(window._navPhotoFile, 800, 0.72)
-      const fname = `jobs/${stop?.jobId||Date.now()}_stop${navStop}.jpg`
-      const { data, error } = await _supa.storage.from('job-photos').upload(fname, compressed, { upsert:true, contentType:'image/jpeg' })
-      if(error){
-        console.warn('[BinDash] Photo storage upload failed:', error.message, '— using base64 fallback')
-        // Fallback: encode as base64 and store directly in job record
-        const _file = window._navPhotoFile
-        photoUrl = await new Promise(res => {
-          const reader = new FileReader()
-          reader.onload = e => res(e.target.result)
-          reader.onerror = () => res(null)
-          reader.readAsDataURL(_file)
+  const _photoFiles = (window._navPhotoFiles||[]).filter(Boolean)
+  if(!_photoFiles.length && window._navPhotoFile) _photoFiles.push(window._navPhotoFile)
+  if(_photoFiles.length){
+    const photoUrls = []
+    for(let pi = 0; pi < _photoFiles.length; pi++){
+      const _pfile = _photoFiles[pi]
+      try {
+        const compressed = await _compressPhoto(_pfile, 800, 0.72)
+        const fname = `jobs/${stop?.jobId||Date.now()}_stop${navStop}_${pi}_${Date.now()}.jpg`
+        const { data, error } = await _supa.storage.from('job-photos').upload(fname, compressed, {
+          upsert: true, contentType: 'image/jpeg', cacheControl: '3600'
         })
-        if(photoUrl) console.log('[BinDash] Photo stored as base64 ✅ length:', photoUrl.length)
-      } else {
-        const { data:ud } = _supa.storage.from('job-photos').getPublicUrl(fname)
-        // Supabase storage returns { data: { publicUrl: '...' } }
-        photoUrl = ud?.publicUrl || null
-        if(!photoUrl) console.warn('[BinDash] getPublicUrl returned no URL — ud:', JSON.stringify(ud))
-        else console.log('[BinDash] Photo uploaded to storage ✅', fname, '| url:', photoUrl.slice(0,60))
-      }
-    } catch(e){ console.warn('[BinDash] Photo upload exception:', e.message) }
+        if(error){
+          console.warn('[BinDash] Photo', pi, 'storage upload failed:', error.message, '— base64 fallback')
+          const _b64 = await new Promise(res => {
+            const reader = new FileReader()
+            reader.onload = e => res(e.target.result)
+            reader.onerror = () => res(null)
+            reader.readAsDataURL(_pfile)
+          })
+          if(_b64) photoUrls.push(_b64)
+        } else {
+          const { data:ud } = _supa.storage.from('job-photos').getPublicUrl(fname)
+          const url = ud?.publicUrl || null
+          if(url){ photoUrls.push(url); console.log('[BinDash] Photo', pi, 'uploaded ✅', fname) }
+        }
+      } catch(e){ console.warn('[BinDash] Photo', pi, 'exception:', e.message) }
+    }
+    photoUrl = photoUrls[0] || null  // primary for DB column
+    // Store all URLs as JSON in photo_urls column if available
+    if(photoUrls.length > 1) window._lastPhotoUrls = photoUrls
     window._navPhotoFile = null
     window._navPhotoObjectUrl = null
+    window._navPhotoFiles = []
   }
 
   // Save job completion — offline-resilient queue
@@ -18814,19 +18792,29 @@ async function navComplete(){
     }, 'id', stop.jobId)
   }
 
-  // Notify homeowner — deduped per session
+  // Notify homeowner based on their notification preference
   if(stop?.email){
-    const _key = 'bin_out_emailed:'+(stop.jobId||stop.email+navBatchId)
+    const _key = 'bin_out_notified:'+(stop.jobId||stop.email+navBatchId)
     if(!sessionStorage.getItem(_key) && !stop.email.includes('.test')){
       sessionStorage.setItem(_key,'1')
       const rname = (window._rnRow?.first_name||window._currentRunnerRow?.first_name||'Your runner')
       const day = new Date().toLocaleDateString([],{weekday:'long'})
+      const pref = (stop.notifPref||'email').toLowerCase()
+      const hoName = stop.name?.split(' ')[0]||'there'
       setTimeout(()=>{
-        sendEmail(stop.email,'Your bins are at the curb! 🌙',
-          EMAIL.binOutComplete(stop.name?.split(' ')[0]||'there',rname,NAV_STOPS.length,day),'bin_out_complete')
-        // SMS notification — send if HO has a phone number
-        if(stop.phone && stop.phone !== '--')
-          sendSMS(stop.phone, SMS.binOut(stop.name?.split(' ')[0]||'there', rname, day), 'bin_out_sms')
+        // Email: send unless pref is 'sms' or 'none'
+        if(pref !== 'sms' && pref !== 'none'){
+          sendEmail(stop.email,'Your bins are at the curb! 🌙',
+            EMAIL.binOutComplete(hoName,rname,NAV_STOPS.length,day),'bin_out_complete')
+        }
+        // SMS: send if pref is 'sms' or 'both' AND phone exists
+        if((pref === 'sms' || pref === 'both') && stop.phone && stop.phone !== '--' && stop.phone.replace(/\D/g,'').length >= 10){
+          sendSMS(stop.phone, SMS.binOut(hoName, rname, day), 'bin_out_sms')
+        }
+        // Default fallback: if pref is not set, send email
+        if(pref === 'none'){
+          console.log('[BinDash] HO', stop.email, 'prefers no notifications — skipped')
+        }
       }, (navStop%5)*300)
     }
   }
@@ -20770,6 +20758,15 @@ function showHWDetailForce(hwId){
       <div class="field"><label>Phone</label><input id="hwd-phone" value="${hw.phone||''}"></div>
       <div class="field"><label>ZIP</label><input id="hwd-zip" value="${hw.zip||''}"></div>
     </div>
+    <div class="field">
+      <label>Notifications <span style="font-size:10px;color:var(--muted);font-weight:400">How to notify when bins are serviced</span></label>
+      <select id="hwd-notif-pref">
+        <option value="email" ${(hw.notifPref||hw.notification_preference||'email')==='email'?'selected':''}>📧 Email only</option>
+        <option value="sms"   ${(hw.notifPref||hw.notification_preference||'')==='sms'?'selected':''}>💬 SMS only</option>
+        <option value="both"  ${(hw.notifPref||hw.notification_preference||'')==='both'?'selected':''}>📧💬 Email + SMS</option>
+        <option value="none"  ${(hw.notifPref||hw.notification_preference||'')==='none'?'selected':''}>🔕 None</option>
+      </select>
+    </div>
     <div class="field"><label>Address</label><input id="hwd-addr" value="${hw.address||''}"></div>
     <div class="field">
       <label>Service Type</label>
@@ -20866,6 +20863,7 @@ async function saveHWDetail(hwId){
   const newName    = document.getElementById('hwd-name')?.value?.trim()    || hw.name
   const newEmail   = document.getElementById('hwd-email')?.value?.trim()   || hw.email
   const newPhone   = document.getElementById('hwd-phone')?.value?.trim()   || hw.phone
+  const newNotifPref = document.getElementById('hwd-notif-pref')?.value || hw.notification_preference || 'email'
   const newZip     = document.getElementById('hwd-zip')?.value?.trim()     || hw.zip
   const newAddr    = document.getElementById('hwd-addr')?.value?.trim()    || hw.address
   const newZone    = document.getElementById('hwd-zone')?.value            || hw.zoneId
@@ -20896,6 +20894,8 @@ async function saveHWDetail(hwId){
   hw.assignedRunner = newRunner || null
   hw.status         = newStatus
   hw.service        = newService
+  hw.notifPref      = newNotifPref
+  hw.notification_preference = newNotifPref
   hw.day            = newDay
   hw.dayRecycling   = newService==='SPLIT' ? newDayR : null
   hw.dayWaste       = newService==='SPLIT' ? newDayW : null
@@ -20921,20 +20921,21 @@ async function saveHWDetail(hwId){
 
   // homeowner_signups — all columns
   const updSignups = {
-    first_name:       newName.split(' ')[0] || '',
-    last_name:        newName.split(' ').slice(1).join(' ') || '',
-    email:            newEmail,
-    phone:            newPhone || null,
-    zip_code:         newZip   || null,
-    street_address:   newAddr  || null,
-    zone_id:          newZone  || null,
-    assigned_runner:  newRunner || null,
-    service_type:     _svcLabel[newService] || 'Recycling',
-    plan_id:          finalPlanKey,
-    collection_day:   newDay   || null,
-    collection_day_2: newDay2  || null,
-    service_notes:    newNotes || null,
-    updated_at:       new Date().toISOString(),
+    first_name:             newName.split(' ')[0] || '',
+    last_name:              newName.split(' ').slice(1).join(' ') || '',
+    email:                  newEmail,
+    phone:                  newPhone || null,
+    zip_code:               newZip   || null,
+    street_address:         newAddr  || null,
+    zone_id:                newZone  || null,
+    assigned_runner:        newRunner || null,
+    service_type:           _svcLabel[newService] || 'Recycling',
+    plan_id:                finalPlanKey,
+    collection_day:         newDay   || null,
+    collection_day_2:       newDay2  || null,
+    service_notes:          newNotes || null,
+    notification_preference: newNotifPref || 'email',
+    updated_at:             new Date().toISOString(),
   }
 
   // homeowners table — confirmed schema columns only
@@ -21366,15 +21367,26 @@ function renderActiveRouteTab(){
     </div>` : ''
 
   const _arrivedSection = isArrived ? `
-    <input type="file" accept="image/*" capture="environment" id="stop-photo-${navStop}" style="display:none" onchange="navPhotoTaken(this)">
-    <div id="photo-preview-${navStop}"
-      onclick="document.getElementById('stop-photo-${navStop}').click()"
-      style="border:2px dashed rgba(6,214,160,.35);border-radius:14px;min-height:130px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;background:rgba(6,214,160,.04);-webkit-tap-highlight-color:transparent;overflow:hidden;position:relative;margin-top:10px">
-      <div id="photo-placeholder-${navStop}" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:20px;pointer-events:none">
-        <div style="font-size:36px">📷</div>
-        <div style="font-size:14px;font-weight:700;color:var(--cyan)">Take Proof Photo</div>
-        <div style="font-size:11px;color:var(--muted);text-align:center">Optional — tap to photograph bins at curb<br>Protects you if a homeowner disputes</div>
+    <!-- Photo section: up to 3 photos, 1 required for proof -->
+    <div id="photo-section-${navStop}" style="margin-top:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Proof Photos</div>
+        <div style="font-size:10px;color:var(--muted)">1 required · up to 3 · tap to add</div>
       </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        ${[0,1,2].map(pi=>`
+        <input type="file" accept="image/*" capture="environment" id="stop-photo-${navStop}-${pi}" style="display:none" onchange="navPhotoTaken(this,${pi})">
+        <div id="photo-slot-${navStop}-${pi}"
+          onclick="document.getElementById('stop-photo-${navStop}-${pi}').click()"
+          style="border:2px dashed ${pi===0?'rgba(6,214,160,.4)':'rgba(100,116,139,.3)'};border-radius:10px;aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;background:${pi===0?'rgba(6,214,160,.04)':'rgba(100,116,139,.04)'};position:relative;overflow:hidden;-webkit-tap-highlight-color:transparent">
+          <div id="photo-slot-placeholder-${navStop}-${pi}" style="display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:none">
+            <div style="font-size:${pi===0?'28':'22'}px">${pi===0?'📷':'➕'}</div>
+            <div style="font-size:9px;color:var(--muted);text-align:center">${pi===0?'Required':'Optional'}</div>
+          </div>
+        </div>`).join('')}
+      </div>
+      <!-- legacy hidden input for backward compat -->
+      <input type="file" accept="image/*" capture="environment" id="stop-photo-${navStop}" style="display:none" onchange="navPhotoTaken(this,0)">
     </div>
     <button onclick="navReportIssue()" style="width:100%;margin-top:8px;padding:12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.22);border-radius:10px;color:#f59e0b;font-size:13px;font-weight:600;cursor:pointer">
       ⚠️ Report issue with this stop
@@ -21391,9 +21403,10 @@ function renderActiveRouteTab(){
     <button onclick="navArrived()" class="btn btn-cyan" style="width:100%;padding:14px;font-size:15px;font-weight:800;margin-top:8px;border-radius:12px;min-height:52px">
       ✓ I'm Here — Start Work
     </button>
-    <button onclick="navSkipStop()" style="width:100%;padding:10px;margin-top:6px;background:none;border:1px solid var(--border);border-radius:10px;color:var(--muted);font-size:12px;cursor:pointer">
-      ⚠️ Can't access — skip this stop
-    </button>`
+    <div style="display:flex;gap:8px;margin-top:6px">
+      ${navStop > 0 ? `<button onclick="navGoBack()" style="flex:1;padding:10px;background:none;border:1px solid rgba(99,102,241,.4);border-radius:10px;color:#a5b4fc;font-size:12px;font-weight:600;cursor:pointer">← Go Back</button>` : ''}
+      <button onclick="navSkipStop()" style="flex:1;padding:10px;background:none;border:1px solid var(--border);border-radius:10px;color:var(--muted);font-size:12px;cursor:pointer">⚠️ Skip stop</button>
+    </div>`
 
   const currentStopHtml = s ? `
     <div style="background:${isArrived?'rgba(6,214,160,.06)':'rgba(99,102,241,.05)'};border:1.5px solid ${isArrived?'rgba(6,214,160,.3)':'rgba(99,102,241,.2)'};border-radius:14px;overflow:hidden;margin-bottom:12px">
@@ -21669,6 +21682,60 @@ function navPhotoSelected(input){
   }
   const stickyBtn = document.getElementById('sticky-complete-btn')
   if(stickyBtn) stickyBtn.textContent = '✓ Done — Next Stop (photo attached)'
+}
+
+// Go back to previous stop — warns if current stop was already marked complete
+async function navGoBack(){
+  if(navStop <= 0){ showToast('Already at first stop', 'info'); return }
+
+  // Check if previous stop had a completed job — warn before going back
+  const prevStop = NAV_STOPS[navStop - 1]
+  const prevJobId = prevStop?.jobId
+
+  let warnMsg = null
+  if(prevJobId){
+    try {
+      const { data: prevJob } = await _supa.from('jobs').select('status').eq('id', prevJobId).maybeSingle()
+      if(prevJob?.status === 'complete'){
+        warnMsg = `Stop ${navStop} (${prevStop?.name||'previous'}) was already marked complete. Going back won't undo the completion — you can add notes or a photo, but the homeowner may have already been notified.`
+      }
+    } catch(e){ /* non-blocking */ }
+  }
+
+  const doGoBack = () => {
+    navStop = Math.max(0, navStop - 1)
+    navPhase = 'arrived'  // land on arrived so runner can take photo / edit
+    _saveNavState()
+    renderActiveRouteTab()
+    showToast('↩ Went back to stop ' + (navStop + 1), 'info', 3000)
+  }
+
+  if(warnMsg){
+    // Show confirm dialog with warning
+    document.getElementById('modal-box').innerHTML = `
+    <div class="mh" style="background:rgba(245,158,11,.07)">
+      <div style="font-weight:700;color:#fbbf24">⚠️ Go Back?</div>
+      <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+    </div>
+    <div class="mb">
+      <div style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:10px">${warnMsg}</div>
+      <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:#fbbf24">
+        ℹ️ If you need to re-notify the homeowner, use 📧 Send Note after going back.
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button>
+      <button class="btn btn-amber btn-sm" onclick="closeM(); navGoBackConfirmed()">Go Back Anyway</button>
+    </div>`
+    openM()
+    window._navGoBackConfirmedFn = doGoBack
+  } else {
+    doGoBack()
+  }
+}
+
+function navGoBackConfirmed(){
+  if(window._navGoBackConfirmedFn){ window._navGoBackConfirmedFn(); window._navGoBackConfirmedFn = null }
 }
 
 async function navSkipStop(){
@@ -25103,9 +25170,20 @@ async function adminLaunchBatch(zoneId, day, btnEl){
     const earnOut   = (stops.length * (runner.loyaltyRate||3.25)).toFixed(2)
     const inBatchId = zoneId + '_' + normDay(day) + '_' + scheduledDateStr
 
-    // Insert job rows
+    // ── BIN OUT job rows (offered — runner must accept) ───────────────────
+    const binOutBatchId = inBatchId
+    const binInBatchId  = inBatchId + '-IN'
+
+    // BIN_IN scheduled for the morning AFTER the BIN_OUT night
+    const binInDate = new Date(`${scheduledDateStr}T12:00:00`)
+    binInDate.setDate(binInDate.getDate() + 1)
+    const biy = binInDate.getFullYear()
+    const bim = String(binInDate.getMonth()+1).padStart(2,'0')
+    const bid = String(binInDate.getDate()).padStart(2,'0')
+    const binInDateStr = `${biy}-${bim}-${bid}`
+
     const jobRows = stops.map(hw => ({
-      batch_id:         inBatchId,
+      batch_id:         binOutBatchId,
       homeowner_email:  hw.email,
       runner_id:        runner.id   || null,
       runner_name:      runner.name || null,
@@ -25123,20 +25201,46 @@ async function adminLaunchBatch(zoneId, day, btnEl){
       updated_at:       new Date().toISOString(),
     }))
 
-    // Cancel any existing offered jobs for this zone+date before inserting new ones
-    // Prevents double-offering when admin clicks Launch more than once or after old test runs
+    // ── BIN_IN job rows (pending — unlocked when BIN_OUT completes) ───────
+    // Pre-creating here ensures dashboard shows both rows immediately,
+    // runner is assigned when BIN_OUT completes, no async creation race conditions
+    const binInJobRows = stops.map(hw => ({
+      batch_id:         binInBatchId,
+      homeowner_email:  hw.email,
+      runner_id:        runner.id   || null,  // same runner — loyalty offer first
+      runner_name:      runner.name || null,
+      runner_email:     (runner.email||'').toLowerCase(),
+      visit_type:       'BIN_IN',
+      job_type:         'subscription',
+      service_type:     hw.service==='BOTH'?'Recycling + General Waste':hw.service==='GENERAL'?'General Waste':'Recycling',
+      status:           'pending',           // locked until BIN_OUT complete
+      offer_type:       'loyalty',
+      scheduled_date:   binInDateStr,
+      amount:           runner.loyaltyRate || 3.25,
+      zone_id:          zoneId,
+      created_at:       new Date().toISOString(),
+      updated_at:       new Date().toISOString(),
+    }))
+
+    // Cancel any existing offered/pending jobs for this zone+date before inserting
     const { error: cancelErr } = await _supa.from('jobs')
       .update({ status: 'cancelled', updated_at: new Date().toISOString() })
       .eq('zone_id', zoneId)
-      .eq('scheduled_date', scheduledDateStr)
-      .in('status', ['offered', 'unassigned'])
+      .in('scheduled_date', [scheduledDateStr, binInDateStr])
+      .in('status', ['offered', 'unassigned', 'pending'])
     if(cancelErr) console.warn('[adminLaunchBatch] cancel old jobs:', cancelErr.message)
 
+    // Insert BIN_OUT jobs
     const { error: jobErr } = await _supa.from('jobs').insert(jobRows)
-    if(jobErr) throw new Error('Job insert failed: ' + jobErr.message)
-    console.log('[adminLaunchBatch] Inserted', jobRows.length, 'jobs for', scheduledDateStr, '| runner:', runner.email)
+    if(jobErr) throw new Error('BIN_OUT job insert failed: ' + jobErr.message)
+    console.log('[adminLaunchBatch] Inserted', jobRows.length, 'BIN_OUT jobs for', scheduledDateStr)
 
-    // 2. Stamp dispatch_queue as sent
+    // Insert BIN_IN jobs (non-fatal if fails — BIN_OUT must succeed)
+    const { error: binInJobErr } = await _supa.from('jobs').insert(binInJobRows)
+    if(binInJobErr) console.warn('[adminLaunchBatch] BIN_IN pre-create failed:', binInJobErr.message)
+    else console.log('[adminLaunchBatch] Pre-created', binInJobRows.length, 'BIN_IN jobs for', binInDateStr, '(pending)')
+
+    // 2. Stamp dispatch_queue for BIN_OUT as sent
     const earn = parseFloat(earnOut)
     await _supa.from('dispatch_queue').upsert({
       zone_id:              zoneId,
@@ -25154,6 +25258,24 @@ async function adminLaunchBatch(zoneId, day, btnEl){
       collection_day:       day,
       updated_at:           new Date().toISOString(),
     }, { onConflict: 'zone_id,scheduled_date' })
+
+    // Stamp dispatch_queue for BIN_IN as queued/pending (visible on next day's pill)
+    const binInDayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][binInDate.getDay()]
+    await _supa.from('dispatch_queue').insert({
+      zone_id:         zoneId,
+      scheduled_date:  binInDateStr,
+      status:          'queued',
+      visit_type:      'BIN_IN',
+      runner_id:       runner.id || null,
+      runner_email:    (runner.email||'').toLowerCase(),
+      runner_name:     runner.name || null,
+      stop_count:      stops.length,
+      zone_name:       zoneName + ' · ☀️ BIN IN',
+      earn_out:        earn,
+      collection_day:  binInDayName,
+      created_at:      new Date().toISOString(),
+      updated_at:      new Date().toISOString(),
+    }).select('id').maybeSingle()  // non-fatal conflict
 
     // 3. Send email + SMS to runner
     const stopsList = stops.map(s=>({
