@@ -25165,23 +25165,54 @@ function _cardResend(btn){
 }
 
 async function adminLaunchBatch(zoneId, day, btnEl){
-  if(btnEl){ btnEl.disabled = true; btnEl.textContent = '🚀 Launching...' }
+  // Guard against double-click / double-fire
+  if(btnEl && btnEl.dataset.launching){ console.log('[adminLaunchBatch] Already launching, ignoring duplicate'); return }
+  if(btnEl){ btnEl.disabled = true; btnEl.dataset.launching = '1'; btnEl.textContent = '🚀 Launching...' }
 
   const key = 'pending_route:'+zoneId+':'+normDay(day)
   const raw = localStorage.getItem(key)
   const memBatch = generatedBatches.find(b => b.zoneId===zoneId && normDay(b.day)===normDay(day))
 
-  if(!raw && !memBatch){
-    showToast('Route data not found — refresh dispatch and try again', 'err', 5000)
-    if(btnEl){ btnEl.disabled=false; btnEl.textContent='🚀 Launch' }
-    return
-  }
+  // If not in localStorage/generatedBatches, build from live pipeline + HOMEOWNERS
+  let batch, runner, stops, zoneName
+  const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
+  zoneName = zone?.name || zoneId
 
-  const batch = memBatch || JSON.parse(raw)
-  const runner = batch.runner
-  const stops  = batch.stops || []
-  const zone   = ADMIN_ZONES.find(z=>z.id===zoneId)
-  const zoneName = zone?.name || batch.zoneName || zoneId
+  if(raw || memBatch){
+    batch   = memBatch || JSON.parse(raw)
+    runner  = batch.runner
+    stops   = batch.stops || []
+    zoneName = zone?.name || batch.zoneName || zoneId
+  } else {
+    // Fallback: build batch from live pipeline data
+    const liveBatch = (window._livePipelineBatches||[]).find(b =>
+      b.zoneId===zoneId && normDay(b.day||'')===normDay(day)
+    )
+    if(!liveBatch){
+      showToast('Route data not found — refresh dispatch and try again', 'err', 5000)
+      if(btnEl){ btnEl.disabled=false; btnEl.textContent='🚀 Launch' }
+      return
+    }
+    // Get runner from RUNNERS list
+    const liveRunner = RUNNERS.find(r => r.id===liveBatch.runner?.id || r.name===liveBatch.runner?.name)
+      || liveBatch.runner
+    if(!liveRunner?.email){
+      showToast('No runner assigned — assign one in the dispatch card first', 'err', 5000)
+      if(btnEl){ btnEl.disabled=false; btnEl.textContent='🚀 Launch' }
+      return
+    }
+    // Get homeowners for this zone+day from HOMEOWNERS
+    const collectionDay = normDay(day)
+    const zoneStops = (window.HOMEOWNERS||[]).filter(hw => {
+      if(hw.status !== 'active') return false
+      if(hw.zoneId !== zoneId && !((zone?.zips||[]).includes(hw.zip))) return false
+      return normDay(hw.day)===collectionDay || normDay(hw.dayRecycling)===collectionDay || normDay(hw.dayWaste)===collectionDay
+    })
+    stops  = zoneStops.length ? zoneStops : liveBatch.stops || []
+    runner = liveRunner
+    batch  = { zoneId, zoneName, day, stops, runner, status:'queued' }
+    console.log('[adminLaunchBatch] Built batch from live pipeline:', stops.length, 'stops | runner:', runner.email)
+  }
 
   if(!runner?.email){
     showToast('No runner assigned to '+zoneName+' — assign a runner first', 'err', 5000)
