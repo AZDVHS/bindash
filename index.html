@@ -24573,7 +24573,9 @@ function startRouteScheduler(){
               if(gb.zoneId === zoneId && (_rank[newStatus]||0) > (_rank[gb.status]||0)){
                 gb.status = newStatus
                 gb.manualSend = true
-                if(newStatus === 'accepted') gb.sentAt = gb.sentAt || new Date().toISOString()
+                // Sync sentAt and offer expiry so badge renders correctly
+                if(!gb.sentAt) gb.sentAt = payload.new?.updated_at || new Date().toISOString()
+                if(payload.new?.offer_expires_at) gb.offerExpiresAt = payload.new.offer_expires_at
               }
             })
           }
@@ -25087,6 +25089,12 @@ function loadPendingApprovalsIntoDispatch(){
   el.style.display = 'block'
   const needApproval = pending.filter(p=>p.status==='draft'||p.status==='change_detected')
   const dayQueued = pending.filter(p=>p.status==='queued')
+  // Also include expired routes that need re-launch (jobs show offered+expired but never accepted)
+  const dayExpired = generatedBatches.filter(b => {
+    const isExpired = (b.status==='sent'||b.status==='offered') && b.offerExpiresAt && new Date(b.offerExpiresAt) < new Date()
+    const matchDay = !selectedDay || normDay(b.day)===normDay(selectedDay)
+    return isExpired && matchDay
+  })
 
   el.innerHTML = needApproval.map(p=>`
   <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
@@ -25109,6 +25117,16 @@ function loadPendingApprovalsIntoDispatch(){
         <button onclick="adminLaunchBatch('${p.zoneId}','${p.day}',this)"
           style="background:linear-gradient(135deg,#06d6a0,#22c55e);color:#07090f;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer;display:flex;align-items:center;gap:5px">
           🚀 Launch ${p.zoneName}
+        </button>`).join('')}
+    </div>
+  </div>` : '')
+  + (dayExpired.length ? `<div style="padding:7px 14px;background:rgba(239,68,68,.06);border-bottom:1px solid rgba(239,68,68,.2);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="font-size:11px;color:#ef4444;font-weight:700">⏰ ${dayExpired.length} offer${dayExpired.length!==1?'s':''} expired — runner did not accept</span>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      ${dayExpired.map(b=>`
+        <button onclick="sendRouteNow('${b.zoneId}','${b.day}',this)"
+          style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer">
+          ↻ Re-send ${b.zoneName||b.zoneId}
         </button>`).join('')}
     </div>
   </div>` : '')
@@ -26731,9 +26749,11 @@ function renderDispatchPipeline(){
     // ── DATE-AWARE STATUS CAP ──────────────────────────────────────────────
     // A future batch cannot be 'sent' — cap status by scheduled date
     const _batchDate   = b.date ? new Date(b.date+'T12:00:00') : null
+    const _phxTodayStr = typeof _phxToday === 'function' ? _phxToday() : new Date().toISOString().slice(0,10)
+    const _batchDateStr = b.date ? b.date.slice(0,10) : null
+    const _isFuture    = _batchDateStr ? _batchDateStr > _phxTodayStr : false
+    const _isToday     = _batchDateStr ? _batchDateStr === _phxTodayStr : false
     const _todayMid    = new Date(); _todayMid.setHours(0,0,0,0)
-    const _isFuture    = _batchDate && _batchDate.toDateString() !== new Date().toDateString() && _batchDate > new Date()
-    const _isToday     = _batchDate && _batchDate.toDateString() === new Date().toDateString()
     const _isPast      = _batchDate && _batchDate < _todayMid
 
     // Effective status — future batches can only be queued/draft/preview
@@ -26759,7 +26779,10 @@ function renderDispatchPipeline(){
 
     // --- Rich offer status ---
     // Expiry/countdown only apply after admin clicks Launch (manualSend=true OR sentAt set)
-    const _wasLaunched = b.manualSend || !!b.sentAt
+    // Consider launched if: admin explicitly launched (manualSend/sentAt) OR
+    // live job data shows it was sent (DB jobs are offered/expired/accepted/complete)
+    const _liveEvidenceLaunched = ['sent','offered','accepted','in_progress','complete','broadcast','expired'].includes(b.status)
+    const _wasLaunched = b.manualSend || !!b.sentAt || _liveEvidenceLaunched
     const now_ms     = Date.now()
     const expiresAt  = (_wasLaunched && !_isFuture && (b.offerExpiresAt || b._offerExpiresAt)) || null
     const sentAt     = (_wasLaunched && !_isFuture && (b.sentAt || b._sentAt)) || null
@@ -27397,6 +27420,7 @@ async function loadLiveJobsIntoPipeline(){
               b.status     = effectiveDqStatus
               b.sentAt     = dq.notification_sent_at ? (dq.sent_at || b.sentAt || null) : null
               b.manualSend = !!dq.notification_sent_at  // only true if admin actually launched
+              if(dq.sent_at) b._sentAt = dq.sent_at  // backup for _wasLaunched detection
               // If DB says complete, also mark localStorage pending_route as complete
               if(effectiveDqStatus === 'complete'){
                 const _lsKey = 'pending_route:'+b.zoneId+':'+normDay(b.day||'')
@@ -27577,6 +27601,16 @@ async function loadLiveJobsIntoPipeline(){
     })
 
     window._livePipelineBatches = Object.values(batchMap)
+    // Sync generatedBatches from live DB data — badge correct after page reload
+    window._livePipelineBatches.forEach(lb => {
+      const gb = generatedBatches.find(b => b.zoneId===lb.zoneId && normDay(b.day||'')===normDay(lb.day||''))
+      if(gb && ['offered','sent','accepted','in_progress','complete'].includes(lb.status)){
+        if(!gb.manualSend){ gb.manualSend = true; gb.sentAt = lb.sentAt || gb.sentAt }
+        if(lb.offerExpiresAt) gb.offerExpiresAt = lb.offerExpiresAt
+        const _r = { queued:1, sent:2, offered:3, accepted:4, in_progress:5, complete:6 }
+        if((_r[lb.status]||0) > (_r[gb.status]||0)) gb.status = lb.status
+      }
+    })
 
   // ── Sanitise generatedBatches — clear poisoned status ────────────────────
   const _todayStr = _phxToday()
