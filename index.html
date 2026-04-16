@@ -25312,13 +25312,13 @@ async function adminLaunchBatch(zoneId, day, btnEl){
       earn_out:             earn,
       collection_day:       day,
       updated_at:           new Date().toISOString(),
-    }, { onConflict: 'zone_id,scheduled_date' })
+    }, { onConflict: 'zone_id,scheduled_date,visit_type' })
 
     // Stamp dispatch_queue for BIN_IN as queued/pending (visible on next day's pill)
     const binInDayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][binInDate.getDay()]
     // BIN_IN dispatch_queue row — non-fatal, only works after SQL migration adds visit_type column
     try {
-      const { error: binInDqErr } = await _supa.from('dispatch_queue').insert({
+      const { error: binInDqErr } = await _supa.from('dispatch_queue').upsert({
         zone_id:         zoneId,
         scheduled_date:  binInDateStr,
         status:          'queued',
@@ -25332,8 +25332,8 @@ async function adminLaunchBatch(zoneId, day, btnEl){
         collection_day:  binInDayName,
         created_at:      new Date().toISOString(),
         updated_at:      new Date().toISOString(),
-      })
-      if(binInDqErr) console.warn('[adminLaunchBatch] BIN_IN dispatch_queue insert (non-fatal):', binInDqErr.message, '— run SQL migration to add visit_type column')
+      }, { onConflict: 'zone_id,scheduled_date,visit_type' })
+      if(binInDqErr) console.warn('[adminLaunchBatch] BIN_IN dispatch_queue upsert (non-fatal):', binInDqErr.message, '— run SQL migration to add visit_type column')
       else console.log('[adminLaunchBatch] BIN_IN dispatch_queue row created ✅ for', binInDateStr)
     } catch(e){ console.warn('[adminLaunchBatch] BIN_IN dq insert exception:', e.message) }
 
