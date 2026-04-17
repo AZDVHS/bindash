@@ -10210,12 +10210,15 @@ async function _initAdminMap(){
   geoHOs.forEach(ho => {
     try {
       const zone    = ADMIN_ZONES.find(z => z.id === ho.zoneId)
-      const isActive = zone?.status === 'live'
-      const isWait   = zone?.status === 'waitlist' || zone?.status === 'building'
+      const isActive = zone?.status === 'live' || ho.status === 'active'
+      const isWait   = zone?.status === 'waitlist' || zone?.status === 'building' || ho.status === 'waitlist'
+      // Active takes priority — if zone is live, it's active regardless of ho.status
+      const _dotActive = zone?.status === 'live' ? true : zone?.status === 'waitlist' ? false : isActive
+      const _dotWait   = !_dotActive && isWait
       const isAnchor = !_zoneFirstHO[ho.zoneId]  // first HO in this zone = anchor house
       if(isAnchor) _zoneFirstHO[ho.zoneId] = true
-      const dotColor  = isActive ? '#16a34a' : isWait ? '#d97706' : '#64748b'
-      const ringColor = isActive ? '#06d6a0' : isWait ? '#f59e0b' : '#94a3b8'
+      const dotColor  = _dotActive ? '#16a34a' : _dotWait ? '#d97706' : '#64748b'
+      const ringColor = _dotActive ? '#06d6a0' : _dotWait ? '#f59e0b' : '#94a3b8'
       const hoName    = ((ho.first_name||'')+' '+(ho.last_name||'')).trim() || ho.email?.split('@')[0] || 'Homeowner'
       const hoAddr    = ho.street_address || ho.address || 'No address'
       const dot = L.circleMarker([parseFloat(ho.lat), parseFloat(ho.lng)], {
@@ -10234,7 +10237,7 @@ async function _initAdminMap(){
         + '<div style="font-size:11px;color:#cbd5e1;margin-top:2px">📍 ' + hoAddr + '</div>'
         + '<div style="font-size:10px;color:#94a3b8;margin-top:2px">'
         + (zone ? zone.name : 'ZIP ' + (ho.zip||'')) + ' · '
-        + (isActive ? '✅ Active' : isWait ? '⏳ Waitlist' : '○ Unzoned')
+        + (_dotActive ? '✅ Active' : _dotWait ? '⏳ Waitlist' : '○ Unzoned')
         + '</div>',
         { className:'h3-tip', direction:'top', sticky:false, offset:[0,-4] }
       )
@@ -10245,13 +10248,14 @@ async function _initAdminMap(){
   console.log('[Map] Drew', window._adminHexLayers.length, 'HO layers at res-8')
 
   // ── ALSO draw homeowner_signups from DB (waitlisted + approved without geocode) ──
+  // Declared outside try so zone outlines (below) can reference sigsByZip for waitlist anchors
+  let sigsByZip = {}
   try {
     const { data: sigs } = await _supa.from('homeowner_signups')
       .select('zip_code,status,first_name,last_name,lat,lng,street_address,city,created_at')
       .not('status','in','("cancelled","rejected")')
       .order('created_at', { ascending: true })  // oldest first = anchor house is sigs[0] per ZIP
       .limit(2000)
-    const sigsByZip = {}
     ;(sigs||[]).forEach(s => {
       if(!s.zip_code) return
       if(!sigsByZip[s.zip_code]) sigsByZip[s.zip_code] = { active:0, waitlist:0, names:[], anchorLat:null, anchorLng:null, individuals:[] }
@@ -10359,7 +10363,7 @@ async function _initAdminMap(){
       || HOMEOWNERS.find(h => zips.includes(h.zip) && h.lat && h.lng)
     // Fallback: use first geocoded signup from DB for this ZIP (waitlist zones often have
     // signups in homeowner_signups but not yet in the approved HOMEOWNERS array)
-    const _sigAnchorForZone = !_anchorHO
+    const _sigAnchorForZone = (!_anchorHO && Object.keys(sigsByZip).length)
       ? zips.reduce((best, zp) => {
           const d = sigsByZip[zp]
           if(d?.anchorLat && !best) return d
