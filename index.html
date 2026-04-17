@@ -6798,6 +6798,7 @@ function filterAdminJobs(){
           <div style="font-size:11px;color:var(--muted)">📍 ${hwAddr}</div>
         </div>
         <span style="background:${jCol}22;color:${jCol};font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px;white-space:nowrap">${jIcon} ${j.status}</span>
+        ${j.photo_url?`<img src="${j.photo_url}" alt="Proof photo" data-url="${j.photo_url.replace(/"/g,'')}" onclick="event.stopPropagation();showPhotoLightbox(this.dataset.url)" style="width:32px;height:32px;object-fit:cover;border-radius:5px;border:1.5px solid rgba(6,214,160,.4);cursor:zoom-in;flex-shrink:0" title="📷 Click to view proof photo">`:''}
         ${exp?`<div onclick="event.stopPropagation();showExpiredJobActions(this)" data-jobid="${j.id}" data-email="${j.homeowner_email||''}" data-runner="${j.runner_name||''}" data-batch="${j.batch_id||j.id}" style="color:#ef4444;font-size:10px;font-weight:800;cursor:pointer;text-decoration:underline;white-space:nowrap">⚠️ Fix →</div>`:''}
         ${j.status==='accepted'||j.status==='in_progress'?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#fbbf24;padding:2px 6px" onclick="adminMarkJobLate('${j.id}')">⚠️</button>`:''}
         ${j.status==='late'?`<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#06d6a0;padding:2px 6px" onclick="adminUnflagJob('${j.id}')">↩</button>`:''}
@@ -6820,7 +6821,7 @@ function filterAdminJobs(){
             <span style="font-size:10px;color:var(--muted);font-family:monospace">${b.batchId.slice(0,20)}</span>
             ${b.routeStatus==='missed'?'<span style="background:rgba(239,68,68,.2);color:#ef4444;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px;animation:pulse 1s infinite">🚨 MISSED</span>':b.isOverdue?'<span style="background:rgba(239,68,68,.15);color:#ef4444;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px">OVERDUE</span>':''}
           </div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">📅 ${dt} &nbsp;·&nbsp; ${b.completedCount}/${b.totalCount} stops complete</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">📅 ${dt} &nbsp;·&nbsp; ${b.completedCount}/${b.totalCount} stops complete${b.jobs.filter(j=>j.photo_url).length?` &nbsp;·&nbsp; <span style='color:#06d6a0;font-weight:600'>📷 ${b.jobs.filter(j=>j.photo_url).length} photo${b.jobs.filter(j=>j.photo_url).length!==1?'s':''}</span>`:''}${b.completedCount>0&&!b.jobs.some(j=>j.photo_url)&&b.routeStatus==='complete'?` &nbsp;·&nbsp; <span style='color:#64748b;font-size:10px'>no photos</span>`:''}</div>
         </div>
         ${b.runnerName?`<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
           <div style="width:26px;height:26px;border-radius:50%;background:${runner?.color||'var(--cyan)'};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#07090f">${ri}</div>
@@ -7828,12 +7829,24 @@ async function acceptOffer(){
   const stopCount = offerJobs.length || 1
   const visitType = offerJobs[0]?.visit_type || 'BIN_OUT'
 
-  if(visitType === 'BIN_OUT' && scheduledDate){
-    const lock = getRouteLockState(scheduledDate, stopCount)
-    if(lock.locked && lock.state !== 'PRE_WINDOW'){
-      showToast(`🔒 ${lock.title} — ${lock.reason}`, 'err', 6000)
+  // Enforce date for ALL route types — can only accept on the day of service
+  if(scheduledDate){
+    const _acceptDate = scheduledDate.slice(0,10)
+    const _todayPhx = _phxToday()
+    if(_acceptDate > _todayPhx){
+      // Future date — not yet
+      const _daysAway = Math.round((new Date(_acceptDate+'T12:00:00') - new Date(_todayPhx+'T12:00:00')) / 86400000)
+      showToast(`📅 This route is for ${new Date(_acceptDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})} — come back then to accept`, 'warn', 6000)
       if(btn){ btn.disabled=false; btn.textContent='✓ Accept' }
       return
+    }
+    if(visitType === 'BIN_OUT'){
+      const lock = getRouteLockState(scheduledDate, stopCount)
+      if(lock.locked && lock.state !== 'PRE_WINDOW'){
+        showToast('🔒 '+lock.title+' — '+lock.reason, 'err', 6000)
+        if(btn){ btn.disabled=false; btn.textContent='✓ Accept' }
+        return
+      }
     }
   }
 
@@ -8348,8 +8361,8 @@ async function startBatch(batchId){
   const effectiveDate = effectiveJobs[0]?.scheduled_date || scheduledDate || new Date().toISOString().slice(0,10)
   const effectiveCount = effectiveJobs.length || stopCount
 
-  // Only enforce time locks on BIN_OUT routes (BIN_IN is morning, different rules)
-  if(visitType === 'BIN_OUT' && effectiveDate){
+  // Enforce date lock for ALL route types — must be the day of service
+  if(effectiveDate){
     const lock = getRouteLockState(effectiveDate, effectiveCount)
     if(lock.locked && (lock.state === 'TOO_EARLY' || lock.state === 'OVERDUE')){
       // Show a clear modal explaining why they can't start
@@ -8706,14 +8719,36 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
     const inBatchId = (ref.batch_id || ref.id) + '-IN'
 
     // Verify pre-created jobs exist
-    const { data: existingBinIn } = await _supa.from('jobs')
-      .select('id, status, scheduled_date, homeowner_email')
+    let { data: existingBinIn } = await _supa.from('jobs')
+      .select('id, status, scheduled_date, homeowner_email, batch_id, zone_id')
       .eq('batch_id', inBatchId)
       .in('status', ['offered', 'pending'])
       .limit(20)
 
+    // Fallback: if batch_id lookup empty, search by zone_id + next-day date
     if(!existingBinIn?.length){
-      console.warn('[BinDash] _autoCreateBinInBatch: no pre-created BIN_IN jobs for', inBatchId, '— skipping modal')
+      const _binOutDate = ref.scheduled_date
+      const _nextDay = _binOutDate ? (() => {
+        const d = new Date(_binOutDate+'T12:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10)
+      })() : null
+      if(_nextDay && ref.zone_id){
+        const { data: zoneJobs } = await _supa.from('jobs')
+          .select('id, status, scheduled_date, homeowner_email, batch_id')
+          .eq('zone_id', ref.zone_id)
+          .eq('scheduled_date', _nextDay)
+          .eq('visit_type', 'BIN_IN')
+          .in('status', ['offered','pending'])
+          .limit(20)
+        if(zoneJobs?.length){
+          console.log('[BinDash] _autoCreateBinInBatch: found', zoneJobs.length, 'BIN_IN via zone+date fallback')
+          // Reassign existingBinIn and inBatchId to matched jobs
+          existingBinIn = zoneJobs
+          inBatchId = zoneJobs[0].batch_id  // use actual batch_id from DB
+        }
+      }
+    }
+    if(!existingBinIn?.length){
+      console.warn('[BinDash] _autoCreateBinInBatch: no BIN_IN jobs for', inBatchId, '(tried zone+date fallback) — skipping modal')
       return
     }
 
@@ -23836,10 +23871,6 @@ function renderPendingHWList(){
           </span>
         </div>
       `}
-        <div style="padding:${_isWlCard?'12px 14px':'0'}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-          <div style="display:flex;align-items:center;gap:10px">
-
         <div class="cc-grid" style="margin-bottom:12px">
           <div class="dl"><div class="dl-l">Email</div><div>${app.email}</div></div>
           <div class="dl"><div class="dl-l">Phone</div><div>${app.phone}</div></div>
