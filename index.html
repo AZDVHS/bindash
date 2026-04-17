@@ -10202,26 +10202,79 @@ async function _initAdminMap(){
       window._adminHexLayers.push(m)
     } catch(e){ console.warn('[Map] Draw error:', e.message) }
   })
+
+  // ── Household dots — one circleMarker per geocoded HOMEOWNER ─────────────
+  // These render on top of hex outlines for exact address density visibility.
+  // Green = active zone, orange = waitlist zone. Anchor house (first HO) = larger + cyan.
+  const _zoneFirstHO = {}  // track first HO per zone for anchor styling
+  geoHOs.forEach(ho => {
+    try {
+      const zone    = ADMIN_ZONES.find(z => z.id === ho.zoneId)
+      const isActive = zone?.status === 'live'
+      const isWait   = zone?.status === 'waitlist' || zone?.status === 'building'
+      const isAnchor = !_zoneFirstHO[ho.zoneId]  // first HO in this zone = anchor house
+      if(isAnchor) _zoneFirstHO[ho.zoneId] = true
+      const dotColor  = isActive ? '#16a34a' : isWait ? '#d97706' : '#64748b'
+      const ringColor = isActive ? '#06d6a0' : isWait ? '#f59e0b' : '#94a3b8'
+      const hoName    = ((ho.first_name||'')+' '+(ho.last_name||'')).trim() || ho.email?.split('@')[0] || 'Homeowner'
+      const hoAddr    = ho.street_address || ho.address || 'No address'
+      const dot = L.circleMarker([parseFloat(ho.lat), parseFloat(ho.lng)], {
+        radius:      isAnchor ? 7 : 5,
+        color:       isAnchor ? '#06d6a0' : ringColor,
+        fillColor:   isAnchor ? '#06d6a0' : dotColor,
+        fillOpacity: isAnchor ? 0.95 : 0.80,
+        weight:      isAnchor ? 2.5 : 1.5,
+        opacity:     1,
+      })
+      dot.bindTooltip(
+        '<div style="font-size:12px;font-weight:700;color:#f1f5f9">'
+        + (isAnchor ? '⭐ ' : '') + hoName
+        + (isAnchor ? ' <span style="font-size:10px;color:#06d6a0">(Anchor House)</span>' : '')
+        + '</div>'
+        + '<div style="font-size:11px;color:#cbd5e1;margin-top:2px">📍 ' + hoAddr + '</div>'
+        + '<div style="font-size:10px;color:#94a3b8;margin-top:2px">'
+        + (zone ? zone.name : 'ZIP ' + (ho.zip||'')) + ' · '
+        + (isActive ? '✅ Active' : isWait ? '⏳ Waitlist' : '○ Unzoned')
+        + '</div>',
+        { className:'h3-tip', direction:'top', sticky:false, offset:[0,-4] }
+      )
+      dot.addTo(window._adminMap)
+      window._adminHexLayers.push(dot)
+    } catch(e){}
+  })
   console.log('[Map] Drew', window._adminHexLayers.length, 'HO layers at res-8')
 
   // ── ALSO draw homeowner_signups from DB (waitlisted + approved without geocode) ──
   try {
     const { data: sigs } = await _supa.from('homeowner_signups')
-      .select('zip_code,status,first_name,last_name,lat,lng').limit(2000)
+      .select('zip_code,status,first_name,last_name,lat,lng,street_address,city,created_at')
+      .not('status','in','("cancelled","rejected")')
+      .order('created_at', { ascending: true })  // oldest first = anchor house is sigs[0] per ZIP
+      .limit(2000)
     const sigsByZip = {}
     ;(sigs||[]).forEach(s => {
       if(!s.zip_code) return
-      if(!sigsByZip[s.zip_code]) sigsByZip[s.zip_code] = { active:0, waitlist:0, names:[], anchorLat:null, anchorLng:null }
-      // approved/active = green; ANY pending/waitlist status = amber demand dot
-      if(s.status==='approved') sigsByZip[s.zip_code].active++
-      else if(['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)){
-        sigsByZip[s.zip_code].waitlist++
-      }
-      sigsByZip[s.zip_code].names.push(((s.first_name||'')+' '+(s.last_name||'')).trim())
-      // Capture first geocoded signup coords as anchor — DB already has lat/lng if geocoded
-      if(!sigsByZip[s.zip_code].anchorLat && s.lat && s.lng){
-        sigsByZip[s.zip_code].anchorLat = parseFloat(s.lat)
-        sigsByZip[s.zip_code].anchorLng = parseFloat(s.lng)
+      if(!sigsByZip[s.zip_code]) sigsByZip[s.zip_code] = { active:0, waitlist:0, names:[], anchorLat:null, anchorLng:null, individuals:[] }
+      const isActive   = s.status==='approved'
+      const isWaitlist = ['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)
+      if(isActive) sigsByZip[s.zip_code].active++
+      else if(isWaitlist) sigsByZip[s.zip_code].waitlist++
+      const _name = ((s.first_name||'')+' '+(s.last_name||'')).trim()
+      sigsByZip[s.zip_code].names.push(_name)
+      // Preserve individual per-signup coords for household dot rendering
+      if(s.lat && s.lng){
+        sigsByZip[s.zip_code].individuals.push({
+          lat: parseFloat(s.lat), lng: parseFloat(s.lng),
+          name: _name || 'Homeowner', zip: s.zip_code,
+          address: [s.street_address, s.city].filter(Boolean).join(', ') || '',
+          createdAt: s.created_at || '',
+          status: isActive ? 'active' : 'waitlist',
+        })
+        // First geocoded signup becomes the anchor for the zone hex
+        if(!sigsByZip[s.zip_code].anchorLat){
+          sigsByZip[s.zip_code].anchorLat = parseFloat(s.lat)
+          sigsByZip[s.zip_code].anchorLng = parseFloat(s.lng)
+        }
       }
     })
     Object.entries(sigsByZip).forEach(([zip, data]) => {
@@ -10257,6 +10310,37 @@ async function _initAdminMap(){
         if(_anchorLat && _anchorLng) bounds.push([_anchorLat, _anchorLng])
         else if(ctr) bounds.push(ctr)
       } catch(e){}
+
+      // ── Household dots — one per geocoded signup in this ZIP ────────────
+      // Sort oldest-first so i===0 is always the true Anchor House regardless of DB insertion order
+      const _sortedInds = [...(data.individuals||[])].sort((a,b) => a.createdAt < b.createdAt ? -1 : 1)
+      _sortedInds.forEach((ind, i) => {
+        try {
+          const isActive  = ind.status === 'active'
+          const dotColor  = isActive ? '#16a34a' : '#d97706'
+          const ringColor = isActive ? '#15803d' : '#b45309'
+          const isAnchor  = i === 0  // first signup = anchor house
+          const dot = L.circleMarker([ind.lat, ind.lng], {
+            radius:      isAnchor ? 7 : 5,
+            color:       isAnchor ? '#06d6a0' : ringColor,
+            fillColor:   isAnchor ? '#06d6a0' : dotColor,
+            fillOpacity: isAnchor ? 0.95 : 0.80,
+            weight:      isAnchor ? 2.5 : 1.5,
+            opacity:     1,
+          })
+          dot.bindTooltip(
+            '<div style="font-size:12px;font-weight:700;color:#f1f5f9">'
+            + (isAnchor ? '⭐ ' : '') + ind.name
+            + (isAnchor ? ' <span style="font-size:10px;color:#06d6a0">(Anchor House)</span>' : '')
+            + '</div>'
+            + (ind.address ? '<div style="font-size:11px;color:#cbd5e1;margin-top:2px">📍 ' + ind.address + '</div>' : '')
+            + '<div style="font-size:10px;color:#94a3b8;margin-top:2px">ZIP ' + ind.zip + ' · ' + (isActive ? '✅ Active' : '⏳ Waitlist') + '</div>',
+            { className:'h3-tip', direction:'top', sticky:false, offset:[0,-4] }
+          )
+          dot.addTo(window._adminMap)
+          window._adminHexLayers.push(dot)
+        } catch(e){}
+      })  // end _sortedInds.forEach
     })
     console.log('[Map] Drew signup HOs from DB for', Object.keys(sigsByZip).length, 'ZIPs')
   } catch(e){ console.warn('[Map] signup draw:', e.message) }
@@ -10269,15 +10353,29 @@ async function _initAdminMap(){
     const isWait = z.status==='waitlist'
     const strokeCol = isLive ? '#15803d' : isWait ? '#b45309' : '#64748b'
     const fillCol   = isLive ? 'rgba(21,128,61,0.06)' : isWait ? 'rgba(180,83,9,0.06)' : 'rgba(100,116,139,0.04)'
-    // Anchor priority: first active HO in zone → first any HO in zone zip → ZIP centroid
+    // Anchor priority: (1) first active in-memory HO → (2) any in-memory HO in zip
+    // → (3) first geocoded signup from DB (sigsByZip built above) → (4) ZIP centroid
     const _anchorHO = HOMEOWNERS.find(h => h.zoneId===z.id && h.lat && h.lng && h.status==='active')
       || HOMEOWNERS.find(h => zips.includes(h.zip) && h.lat && h.lng)
+    // Fallback: use first geocoded signup from DB for this ZIP (waitlist zones often have
+    // signups in homeowner_signups but not yet in the approved HOMEOWNERS array)
+    const _sigAnchorForZone = !_anchorHO
+      ? zips.reduce((best, zp) => {
+          const d = sigsByZip[zp]
+          if(d?.anchorLat && !best) return d
+          return best
+        }, null)
+      : null
     const zc = ZIP_CENTROIDS?.[zip] || ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]
-    const lat = _anchorHO ? parseFloat(_anchorHO.lat) : (zc ? zc[0] : null)
-    const lng = _anchorHO ? parseFloat(_anchorHO.lng) : (zc ? zc[1] : null)
+    const lat = _anchorHO ? parseFloat(_anchorHO.lat)
+      : _sigAnchorForZone ? _sigAnchorForZone.anchorLat
+      : (zc ? zc[0] : null)
+    const lng = _anchorHO ? parseFloat(_anchorHO.lng)
+      : _sigAnchorForZone ? _sigAnchorForZone.anchorLng
+      : (zc ? zc[1] : null)
     if(!lat || !lng) return
-    if(_anchorHO) console.log('[Map] Zone', z.name, '— anchor: HO', _anchorHO.name, '@', lat.toFixed(5), lng.toFixed(5))
-    else console.log('[Map] Zone', z.name, '— anchor: ZIP centroid (no geocoded HO yet)')
+    const _anchorSrc = _anchorHO ? 'approved HO' : _sigAnchorForZone ? 'DB signup (waitlist)' : 'ZIP centroid ⚠️'
+    console.log('[Map] Zone', z.name, '— anchor:', _anchorSrc, '@', lat.toFixed(5), lng.toFixed(5))
     try {
       const h8 = h3.latLngToCell(lat, lng, 8)
       const h6 = h3.cellToParent(h8, 6)
