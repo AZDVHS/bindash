@@ -10648,13 +10648,74 @@ function showMicroZoneDetail(z){
 
 // Geocode all existing homeowners that don't have a hex_id yet
 // Runs in the browser, rate-limited to be polite to free geocoding APIs
+// ── syncHomeownerToHex(row, table) ───────────────────────────────────────────
+// Single source of truth for geocoding any HO row to exact lat/lng + H3 hex.
+// NEVER stores ZIP centroid. If geocode fails, skips the row entirely.
+// table: 'homeowners' | 'homeowner_signups'
+async function syncHomeownerToHex(row, table='homeowners'){
+  if(!row?.street_address || !row?.zip_code) return { ok:false, reason:'no address' }
+
+  // 1. Geocode the exact street address
+  const gc = await geocodeAddress(row.street_address, row.city||'', 'AZ', row.zip_code)
+  if(!gc?.lat || !gc?.lng) return { ok:false, reason:'geocode failed' }
+
+  const lat  = gc.lat
+  const lng  = gc.lng
+  const hex8 = latLngToHex(lat, lng, H3_RES_CLUSTER)   // res-8 ~0.74km²
+  const hex6 = hex8 ? latLngToHex(lat, lng, H3_RES_ZONE) : null  // res-6 zone
+
+  if(!hex8) return { ok:false, reason:'h3 failed' }
+
+  // 2. Update the source table — different column names per table
+  if(table === 'homeowners'){
+    await _supa.from('homeowners').update({
+      lat, lng,
+      hex_id:    hex8,   // legacy column
+      h3_index:  hex8,   // newer column (same value)
+      updated_at: new Date().toISOString(),
+    }).eq('id', row.id)
+  } else {
+    // homeowner_signups uses lat/lng/h3_index (no hex_id column)
+    await _supa.from('homeowner_signups').update({
+      lat, lng,
+      h3_index:    hex8,
+      h3_zone_res6: hex6,
+      updated_at: new Date().toISOString(),
+    }).eq('id', row.id)
+  }
+
+  // 3. Ensure a zones entry exists anchored to these exact coordinates
+  //    If zone has ZIP centroid coords, overwrite with real HO coords.
+  const existingZone = await _supa.from('zones')
+    .select('id,lat,lng,status')
+    .or('zip_prefix.eq.'+row.zip_code+',zip_codes.cs.{"'+row.zip_code+'"}')
+    .in('status',['live','waitlist','building'])
+    .order('status', { ascending:true })  // live first
+    .limit(1).maybeSingle()
+
+  if(existingZone?.data?.id){
+    const z = existingZone.data
+    // If zone has no lat/lng or was using ZIP centroid, update to first-HO anchor
+    if(!z.lat || !z.lng){
+      await _supa.from('zones').update({
+        lat, lng, h3_index: hex8, updated_at: new Date().toISOString()
+      }).eq('id', z.id)
+      console.log('[syncHex] Updated zone', z.id, 'anchor to HO coords', lat.toFixed(5), lng.toFixed(5))
+    }
+  }
+
+  return { ok:true, lat, lng, hex8, hex6 }
+}
+
+// ── geocodeExistingHomeowners ─────────────────────────────────────────────────
+// Iterates ALL homeowners in BOTH tables (active + waitlist + pending).
+// Uses syncHomeownerToHex() — never falls back to ZIP centroid.
 async function geocodeExistingHomeowners(){
   const btn      = document.getElementById('mz-geocode-btn')
   const progress = document.getElementById('mz-geocode-progress')
   if(btn) btn.disabled = true
   if(progress) progress.style.display = 'block'
 
-  let _total = 0
   const updateProgress = (msg, color='var(--cyan)', pct=null) => {
     if(!progress) return
     const bar = pct !== null
@@ -10665,106 +10726,69 @@ async function geocodeExistingHomeowners(){
   }
 
   try {
-    // Load homeowners without hex_id
-    updateProgress('Loading homeowners...')
-    const { data: hws, error } = await _supa
-      .from('homeowners')
-      .select('id, email, street_address, city, zip_code, lat, lng, hex_id')
-      .eq('status', 'active')
-      .is('hex_id', null)
-      .limit(100)
+    updateProgress('Loading all homeowners from both tables...')
 
-    if(error) throw error
-    if(!hws || !hws.length){
-      updateProgress('✅ All homeowners already have hex IDs!', '#22c55e')
-      await loadMicroZones()
+    // ── Load from homeowners table (active + waitlist) ──
+    const { data: hwRows } = await _supa.from('homeowners')
+      .select('id, email, street_address, city, zip_code, lat, lng, hex_id, h3_index, status')
+      .in('status', ['active','waitlist'])
+      .limit(500)
+
+    // ── Load from homeowner_signups (waitlist_pending, pending_review, payment_pending, approved) ──
+    const { data: sigRows } = await _supa.from('homeowner_signups')
+      .select('id, email, street_address, city, zip_code, lat, lng, h3_index, status')
+      .in('status', ['waitlist_pending','pending_review','payment_pending','approved','waitlist_approved'])
+      .limit(500)
+
+    // Build combined list — skip rows with no street address
+    const tasks = [
+      ...(hwRows||[]).filter(r=>r.street_address).map(r=>({ row:r, table:'homeowners' })),
+      ...(sigRows||[]).filter(r=>r.street_address).map(r=>({ row:r, table:'homeowner_signups' })),
+    ]
+
+    if(!tasks.length){
+      updateProgress('✅ No homeowners with addresses found to geocode.', '#22c55e')
       if(btn) btn.disabled = false
       return
     }
 
-    _total = hws.length
-    updateProgress(`Found ${hws.length} homeowners to geocode. Starting...`, 'var(--cyan)', 0)
+    updateProgress(`Found ${tasks.length} homeowners. Geocoding (real addresses only — no ZIP fallback)...`, 'var(--cyan)', 0)
 
-    let done = 0, failed = 0
+    let done = 0, skipped = 0, failed = 0
 
-    for(const hw of hws){
-      updateProgress(`📍 Geocoding ${done + 1}/${hws.length}: ${hw.street_address||hw.zip_code}...`, 'var(--cyan)', Math.round((done/hws.length)*100))
+    for(let i=0; i<tasks.length; i++){
+      const { row, table } = tasks[i]
+      const pct = Math.round((i/tasks.length)*100)
+      updateProgress(`📍 ${i+1}/${tasks.length}: ${row.street_address}, ${row.zip_code} [${table}]`, 'var(--cyan)', pct)
 
       try {
-        // Use ZIP centroid as fallback if we can't geocode
-        let lat = null, lng = null
-
-        if(hw.street_address && hw.zip_code){
-          const coords = await geocodeAddress(hw.street_address, hw.city||'', 'AZ', hw.zip_code)
-          if(coords){ lat = coords.lat; lng = coords.lng }
-        }
-
-        // Fall back to ZIP centroid
-        if(!lat && hw.zip_code && ZIP_CENTROIDS[hw.zip_code]){
-          lat = ZIP_CENTROIDS[hw.zip_code][0]
-          lng = ZIP_CENTROIDS[hw.zip_code][1]
-        }
-
-        if(!lat){ failed++; continue }
-
-        const hexId = latLngToHex(lat, lng)
-        if(!hexId){ failed++; continue }
-
-        // Update homeowner with hex_id + coords
-        await _supa.from('homeowners').update({
-          hex_id: hexId, lat, lng, updated_at: new Date().toISOString()
-        }).eq('id', hw.id)
-
-        // Create or update micro_zone for this hex
-        const { data: existing } = await _supa.from('micro_zones')
-          .select('hex_id, member_count')
-          .eq('hex_id', hexId).maybeSingle()
-
-        if(existing){
-          await _supa.from('micro_zones').update({
-            member_count: (existing.member_count||0) + 1,
-            status: (existing.member_count||0) + 1 >= 5 ? 'active' : 'pending',
-            updated_at: new Date().toISOString()
-          }).eq('hex_id', hexId)
+        const result = await syncHomeownerToHex(row, table)
+        if(result.ok){
+          done++
+          console.log('[Geocode] ✅', row.email, table, result.lat.toFixed(5), result.lng.toFixed(5), result.hex8)
         } else {
-          // Get city/zip info from homeowner
-          await _supa.from('micro_zones').upsert({
-            hex_id:     hexId,
-            resolution: 8,
-            lat, lng,
-            city:        hw.city || '',
-            state:       'AZ',
-            zip_code:    hw.zip_code || '',
-            status:      'pending',
-            member_count: 1,
-            waitlist_count: 0,
-            activation_threshold: 3,
-            zone_label:  'AZ-' + (hw.zip_code||''),
-            created_at:  new Date().toISOString(),
-            updated_at:  new Date().toISOString(),
-          }, { onConflict: 'hex_id' })
+          skipped++
+          console.warn('[Geocode] ⚠ Skipped', row.email, '—', result.reason)
         }
-
-        done++
-
-        // Rate limit: 1 geocode per 300ms to be polite to free API
-        await new Promise(r => setTimeout(r, 300))
-
       } catch(e){
-        console.warn('[Geocode] failed for', hw.email, e.message)
         failed++
+        console.warn('[Geocode] ✗ Error for', row.email, e.message)
       }
+
+      // Polite rate limit — Photon geocoder is free, don't hammer it
+      await new Promise(r => setTimeout(r, 350))
     }
 
     updateProgress(
-      `✅ Done! ${done} geocoded, ${failed} failed. Real H3 hexes created. Zone anchors updated.`,
+      `✅ Done! ${done} geocoded to real address, ${skipped} skipped (no geocode match), ${failed} errors.`,
       '#22c55e'
     )
-    // Reload map — now using real HO lat/lng as zone anchors instead of ZIP centroids
+
+    // Refresh in-memory data + map
+    await loadHomeownersFromSupabase()
     await loadMicroZones()
     if(typeof initAdminZoneMap === 'function'){
-      console.log('[Geocode] Refreshing admin zone map with first-HO anchors...')
-      setTimeout(() => initAdminZoneMap(true), 800)
+      setTimeout(() => initAdminZoneMap(true), 600)
     }
 
   } catch(e){
