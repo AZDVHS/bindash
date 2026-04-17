@@ -9537,12 +9537,25 @@ async function _h3CheckAddress(){
     _signupMap?.setView([result.lat, result.lng], 14, { animate: true })
   }
 
-  // Cache geocoded coords for hSubmit to use when creating the DB record
-  if(result?.lat){
+  // Only cache coords from REAL geocode (precise address) — not ZIP centroid fallback.
+  // If we store ZIP centroid here, hSubmit saves wrong location for waitlist signups.
+  // The fallback path (no precise result) sets result.lat = ZIP centroid lat —
+  // we skip caching that so the DB row stays null until a real geocode runs.
+  const _isPrecise = result?.lat && result.lat !== lat  // moved from ZIP centroid = precise
+  const _hasAddr = addr && addr.length > 5              // had a real address to geocode
+  if(result?.lat && (_isPrecise || _hasAddr)){
     window._hwGeoLat   = result.lat
     window._hwGeoLng   = result.lng
-    window._hwGeoHex8  = result.hexId  // Res 8 cluster
-    window._hwGeoHex6  = result.hexId ? getParentHex(result.hexId, H3_RES_ZONE) : null  // Res 6 zone
+    window._hwGeoHex8  = result.hexId  // Res 8 — actual address hex
+    window._hwGeoHex6  = result.hexId ? getParentHex(result.hexId, H3_RES_ZONE) : null
+    console.log('[H3] Caching precise geocode:', result.lat.toFixed(6), result.lng.toFixed(6), result.hexId)
+  } else if(result?.lat){
+    // ZIP centroid only — do NOT store as HO coords, but use for map display
+    console.log('[H3] ZIP centroid only — not caching as HO location (waiting for address geocode)')
+    window._hwGeoLat  = null
+    window._hwGeoLng  = null
+    window._hwGeoHex8 = null
+    window._hwGeoHex6 = null
   }
 
   // Load zones + highlight user's own hex
@@ -10198,23 +10211,34 @@ async function _initAdminMap(){
     const sigsByZip = {}
     ;(sigs||[]).forEach(s => {
       if(!s.zip_code) return
-      if(!sigsByZip[s.zip_code]) sigsByZip[s.zip_code] = { active:0, waitlist:0, names:[] }
+      if(!sigsByZip[s.zip_code]) sigsByZip[s.zip_code] = { active:0, waitlist:0, names:[], anchorLat:null, anchorLng:null }
       // approved/active = green; ANY pending/waitlist status = amber demand dot
       if(s.status==='approved') sigsByZip[s.zip_code].active++
       else if(['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)){
         sigsByZip[s.zip_code].waitlist++
       }
       sigsByZip[s.zip_code].names.push(((s.first_name||'')+' '+(s.last_name||'')).trim())
+      // Capture first geocoded signup coords as anchor — DB already has lat/lng if geocoded
+      if(!sigsByZip[s.zip_code].anchorLat && s.lat && s.lng){
+        sigsByZip[s.zip_code].anchorLat = parseFloat(s.lat)
+        sigsByZip[s.zip_code].anchorLng = parseFloat(s.lng)
+      }
     })
     Object.entries(sigsByZip).forEach(([zip, data]) => {
       if(data.active === 0 && data.waitlist === 0) return
-      // Anchor demand hex on actual signup address if geocoded; fallback to ZIP centroid
+      // Anchor: first geocoded signup from DB → in-memory HO → ZIP centroid
       const ctr = ZIP_CENTROIDS[zip]
-      // Find the earliest signup in this ZIP that has real coordinates
-      const _sigAnchor = (PENDING_HOMEOWNERS||[]).find(p => p.zip===zip && p.lat && p.lng)
-        || (WAITLIST_SIGNUPS||[]).find(s => s.zip===zip && s.lat && s.lng)
-      const _anchorLat = _sigAnchor ? parseFloat(_sigAnchor.lat) : ctr?.[0]
-      const _anchorLng = _sigAnchor ? parseFloat(_sigAnchor.lng) : ctr?.[1]
+      const _anchorLat = data.anchorLat
+        || (()=>{ const p = (PENDING_HOMEOWNERS||[]).find(p=>p.zip===zip&&p.lat&&p.lng); return p ? parseFloat(p.lat) : null })()
+        || (()=>{ const w = (WAITLIST_SIGNUPS||[]).find(s=>s.zip===zip&&s.lat&&s.lng); return w ? parseFloat(w.lat) : null })()
+        || ctr?.[0]
+      const _anchorLng = data.anchorLng
+        || (()=>{ const p = (PENDING_HOMEOWNERS||[]).find(p=>p.zip===zip&&p.lat&&p.lng); return p ? parseFloat(p.lng) : null })()
+        || (()=>{ const w = (WAITLIST_SIGNUPS||[]).find(s=>s.zip===zip&&s.lat&&s.lng); return w ? parseFloat(w.lng) : null })()
+        || ctr?.[1]
+      if(_anchorLat && _anchorLng){
+        console.log('[Map] ZIP', zip, 'anchor:', data.anchorLat ? 'DB geocoded signup' : 'fallback', _anchorLat.toFixed(5), _anchorLng.toFixed(5))
+      }
       if(!_anchorLat || !_anchorLng) return
       try {
         const h8  = h3.latLngToCell(_anchorLat, _anchorLng, 8)
@@ -10230,7 +10254,8 @@ async function _initAdminMap(){
         )
         poly.addTo(window._adminMap)
         window._adminHexLayers.push(poly)
-        bounds.push(ctr)
+        if(_anchorLat && _anchorLng) bounds.push([_anchorLat, _anchorLng])
+        else if(ctr) bounds.push(ctr)
       } catch(e){}
     })
     console.log('[Map] Drew signup HOs from DB for', Object.keys(sigsByZip).length, 'ZIPs')
@@ -23095,8 +23120,29 @@ async function confirmCreateZoneFromWaitlist(zip){
   const name=document.getElementById('wl-zone-name')?.value?.trim()||suggestZoneName(zip)
   const cap=parseInt(document.getElementById('wl-cap')?.value)||8
   const days=['Mon','Tue','Wed','Thu','Fri'].filter(d=>document.getElementById('wlz-day-'+d)?.checked)
+  // Find first geocoded signup in this ZIP to anchor the zone correctly
+  let _wlAnchorLat = null, _wlAnchorLng = null, _wlAnchorHex = null
+  try {
+    const { data: _firstSig } = await _supa.from('homeowner_signups')
+      .select('lat,lng,first_name').eq('zip_code', zip)
+      .not('lat','is',null).order('created_at',{ascending:true}).limit(1).maybeSingle()
+    if(_firstSig?.lat && _firstSig?.lng){
+      _wlAnchorLat = parseFloat(_firstSig.lat)
+      _wlAnchorLng = parseFloat(_firstSig.lng)
+      if(typeof h3 !== 'undefined'){
+        _wlAnchorHex = h3.latLngToCell(_wlAnchorLat, _wlAnchorLng, 8)
+      }
+      console.log('[BinDash] Zone anchor: first HO in ZIP', zip, '→', _firstSig.first_name, _wlAnchorLat.toFixed(5), _wlAnchorLng.toFixed(5), _wlAnchorHex)
+    } else {
+      const _zc = ZIP_CENTROIDS?.[zip]
+      if(_zc){ _wlAnchorLat=_zc[0]; _wlAnchorLng=_zc[1] }
+      console.log('[BinDash] Zone anchor: no geocoded HO yet — using ZIP centroid for', zip)
+    }
+  } catch(e){ console.warn('[BinDash] Zone anchor lookup:', e.message) }
+
   const newZone = {id: crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),name,city:zip+' area',
     zip:zip, zips:[zip],
+    lat: _wlAnchorLat, lng: _wlAnchorLng, h3_index: _wlAnchorHex,
     status:'live',pilot:false,overridden:true,runners:0,capacity:cap,homeowners:0,
     threshold:cap,collection:days,assignedRunner:null,stopOrder:[],notes:'Created from waitlist ZIP '+zip}
   ADMIN_ZONES.push(newZone)
@@ -23182,6 +23228,13 @@ async function createZoneAndApproveHW(appId){
 
   // Step 1: Save zone to DB to get real UUID back
   // Status starts as 'waitlist' — admin promotes to live when ready
+  // Anchor zone to this specific HO's address — they are the first HO in this ZIP
+  const _hoAnchorLat  = app.lat  ? parseFloat(app.lat)  : (ZIP_CENTROIDS?.[app.zip]?.[0] || null)
+  const _hoAnchorLng  = app.lng  ? parseFloat(app.lng)  : (ZIP_CENTROIDS?.[app.zip]?.[1] || null)
+  const _hoAnchorHex  = (_hoAnchorLat && _hoAnchorLng && typeof h3 !== 'undefined')
+    ? h3.latLngToCell(_hoAnchorLat, _hoAnchorLng, 8) : null
+  console.log('[BinDash] createZoneAndApproveHW — anchor:', app.name, _hoAnchorLat?.toFixed(5), _hoAnchorLng?.toFixed(5), _hoAnchorHex || '(no hex)')
+
   const zoneRow = {
     name,
     label:           (name.slice(0,3).toUpperCase()+'-'+app.zip),
@@ -23197,6 +23250,9 @@ async function createZoneAndApproveHW(appId){
     runners:         0,
     notes:           'Auto-created from pending HO approval · ZIP '+app.zip,
     area:            'A1',
+    lat:             _hoAnchorLat,
+    lng:             _hoAnchorLng,
+    h3_index:        _hoAnchorHex,
     updated_at:      new Date().toISOString(),
   }
 
