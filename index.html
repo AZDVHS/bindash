@@ -9203,6 +9203,26 @@ function latLngToHex(lat, lng, res = H3_RESOLUTION){
   if(typeof h3 === 'undefined'){ console.warn('[H3] h3-js not loaded'); return null }
   try { return h3.latLngToCell(lat, lng, res) } catch(e){ return null }
 }
+
+// ── Single unified H3 indexing utility ───────────────────────────────────────
+// Used for ALL HO signups (live and waitlist) — guarantees consistent hex anchoring.
+// Always uses the HO's exact geocoded address. ZIP centroid is NEVER stored as h3_index.
+// Returns { lat, lng, hex8, hex6 } or null if geocoding fails entirely.
+async function getH3IndexForAddress(address, city, state, zip){
+  // Try precise geocode first (Photon → Census fallback inside geocodeAddress)
+  if(address && address.trim().length > 5 && zip){
+    const gc = await geocodeAddress(address, city||'', state||'AZ', zip)
+    if(gc?.lat && gc?.lng){
+      const hex8 = latLngToHex(gc.lat, gc.lng, H3_RES_CLUSTER)  // res-8 ~0.74km²
+      const hex6 = hex8 ? latLngToHex(gc.lat, gc.lng, H3_RES_ZONE) : null  // res-6 zone
+      console.log('[H3] getH3IndexForAddress:', address, zip, '→', gc.lat.toFixed(6), gc.lng.toFixed(6), hex8)
+      return { lat: gc.lat, lng: gc.lng, hex8, hex6 }
+    }
+  }
+  // No precise geocode available — return null so caller can decide on fallback
+  console.warn('[H3] getH3IndexForAddress: could not geocode', address, zip, '— lat/lng will be null')
+  return null
+}
 function hexToLatLng(hexId){
   if(typeof h3 === 'undefined') return null
   try { const [lat, lng] = h3.cellToLatLng(hexId); return { lat, lng } } catch(e){ return null }
@@ -10210,15 +10230,16 @@ async function _initAdminMap(){
   geoHOs.forEach(ho => {
     try {
       const zone    = ADMIN_ZONES.find(z => z.id === ho.zoneId)
-      const isActive = zone?.status === 'live' || ho.status === 'active'
-      const isWait   = zone?.status === 'waitlist' || zone?.status === 'building' || ho.status === 'waitlist'
-      // Active takes priority — if zone is live, it's active regardless of ho.status
-      const _dotActive = zone?.status === 'live' ? true : zone?.status === 'waitlist' ? false : isActive
-      const _dotWait   = !_dotActive && isWait
-      const isAnchor = !_zoneFirstHO[ho.zoneId]  // first HO in this zone = anchor house
+      // Color driven purely by ho.status — set in toRow() from DB status field.
+      // 'active'   = approved HO in a live zone → GREEN
+      // 'waitlist' = unapproved/waitlisted HO   → ORANGE
+      // Anchor = first HO encountered per zone (zoneId key) → larger cyan dot
+      const _dotActive = ho.status === 'active'
+      const _dotWait   = ho.status === 'waitlist'
+      const isAnchor   = !_zoneFirstHO[ho.zoneId]
       if(isAnchor) _zoneFirstHO[ho.zoneId] = true
-      const dotColor  = _dotActive ? '#16a34a' : _dotWait ? '#d97706' : '#64748b'
-      const ringColor = _dotActive ? '#06d6a0' : _dotWait ? '#f59e0b' : '#94a3b8'
+      const dotColor  = _dotActive ? '#4ade80' : _dotWait ? '#fdba74' : '#94a3b8'
+      const ringColor = _dotActive ? '#22c55e' : _dotWait ? '#f97316' : '#64748b'
       const hoName    = ((ho.first_name||'')+' '+(ho.last_name||'')).trim() || ho.email?.split('@')[0] || 'Homeowner'
       const hoAddr    = ho.street_address || ho.address || 'No address'
       const dot = L.circleMarker([parseFloat(ho.lat), parseFloat(ho.lng)], {
@@ -10237,7 +10258,7 @@ async function _initAdminMap(){
         + '<div style="font-size:11px;color:#cbd5e1;margin-top:2px">📍 ' + hoAddr + '</div>'
         + '<div style="font-size:10px;color:#94a3b8;margin-top:2px">'
         + (zone ? zone.name : 'ZIP ' + (ho.zip||'')) + ' · '
-        + (_dotActive ? '✅ Active' : _dotWait ? '⏳ Waitlist' : '○ Unzoned')
+        + (_dotActive ? '<span style="color:#4ade80">✅ Active</span>' : _dotWait ? '<span style="color:#fdba74">⏳ Waitlist</span>' : '○ Unzoned')
         + '</div>',
         { className:'h3-tip', direction:'top', sticky:false, offset:[0,-4] }
       )
@@ -10300,8 +10321,8 @@ async function _initAdminMap(){
       try {
         const h8  = h3.latLngToCell(_anchorLat, _anchorLng, 8)
         const pts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
-        const fc  = data.active > 0 ? '#16a34a' : '#d97706'
-        const bc  = data.active > 0 ? '#15803d' : '#b45309'
+        const fc  = data.active > 0 ? '#4ade80' : '#fdba74'
+        const bc  = data.active > 0 ? '#22c55e' : '#f97316'
         const fo  = data.active > 0 ? 0.45 : 0.30
         const poly = L.polygon(pts, { color:bc, fillColor:fc, fillOpacity:fo, weight:1.5, opacity:1 })
         poly.bindTooltip(
@@ -10321,8 +10342,9 @@ async function _initAdminMap(){
       _sortedInds.forEach((ind, i) => {
         try {
           const isActive  = ind.status === 'active'
-          const dotColor  = isActive ? '#16a34a' : '#d97706'
-          const ringColor = isActive ? '#15803d' : '#b45309'
+          // Match the geoHOs dot colors exactly
+          const dotColor  = isActive ? '#4ade80' : '#fdba74'
+          const ringColor = isActive ? '#22c55e' : '#f97316'
           const isAnchor  = i === 0  // first signup = anchor house
           const dot = L.circleMarker([ind.lat, ind.lng], {
             radius:      isAnchor ? 7 : 5,
@@ -11825,6 +11847,25 @@ async function hSubmit(){
   const submitBtn = document.querySelector('#h-s6 .btn-cyan')
   if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Saving...' }
 
+  // ── Guaranteed geocode — runs even if _h3CheckAddress was never triggered ──
+  // This ensures lat/lng/h3_index are ALWAYS saved from the real street address,
+  // never from ZIP centroid. Critical for correct waitlist zone placement.
+  if(addr && addr.length > 5 && !window._hwGeoLat){
+    console.log('[hSubmit] _hwGeoLat not set — running getH3IndexForAddress now')
+    const _gc = await getH3IndexForAddress(addr, city, 'AZ', zip)
+    if(_gc){
+      window._hwGeoLat  = _gc.lat
+      window._hwGeoLng  = _gc.lng
+      window._hwGeoHex8 = _gc.hex8
+      window._hwGeoHex6 = _gc.hex6
+      console.log('[hSubmit] Geocoded at submit:', _gc.lat.toFixed(6), _gc.lng.toFixed(6), _gc.hex8)
+    }
+  } else if(window._hwGeoLat){
+    console.log('[hSubmit] Using cached geocode:', window._hwGeoLat.toFixed(6), window._hwGeoLng.toFixed(6), window._hwGeoHex8)
+  } else {
+    console.warn('[hSubmit] No address to geocode — lat/lng will be null (no ZIP centroid stored)')
+  }
+
   try {
     const pw = document.getElementById('h-pw')?.value || ''
     const { data: authData, error: authErr } = await _supa.auth.signUp({
@@ -11864,11 +11905,11 @@ async function hSubmit(){
       card_expiry:       cardExp,
       referred_by_code:  document.getElementById('h-ref-code')?.value?.trim().toUpperCase() || null,
       referred_by_runner: window._hwReferralRunner?.id || null,
-      // H3 spatial indexing — enables hex-based dispatch and national scale routing
+      // H3 spatial indexing — guaranteed via getH3IndexForAddress() run above hSubmit
       lat:               window._hwGeoLat  || null,
       lng:               window._hwGeoLng  || null,
-      h3_index:          window._hwGeoHex8 || null,  // Res 8 — cluster-level precision
-      h3_zone_res6:      window._hwGeoHex6 || null,  // Res 6 — zone containment check
+      h3_index:          window._hwGeoHex8 || null,  // Res 8 — anchored to exact address
+      h3_zone_res6:      window._hwGeoHex6 || null,  // Res 6 — zone containment
       // Detect if this ZIP is in an active zone or waitlist zone
       status: (() => {
         const matchedZone = ADMIN_ZONES.find(z => {
