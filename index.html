@@ -2472,7 +2472,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Review your details and activate your account.</div>
         <div class="card" style="margin-bottom:14px" id="h-review"></div>
         <div class="field">
-          <div class="chk-row"><input type="checkbox" id="h-terms"><div><div style="font-size:13px">I agree to the <a style="color:var(--cyan);cursor:pointer">Terms of Service</a> and <a style="color:var(--cyan);cursor:pointer">Privacy Policy</a></div></div></div>
+          <div class="chk-row"><input type="checkbox" id="h-terms"><div><div style="font-size:13px">I agree to the <a href="https://raw.githubusercontent.com/AZDVHS/bindash/main/BinDash_Terms_of_Service.pdf" target="_blank" rel="noopener" style="color:var(--cyan)">Terms of Service</a> and <a href="https://raw.githubusercontent.com/AZDVHS/bindash/main/BinDash_Privacy_Policy.pdf" target="_blank" rel="noopener" style="color:var(--cyan)">Privacy Policy</a></div></div></div>
           <div class="chk-row"><input type="checkbox" checked id="h-comms"><div><div style="font-size:13px">Send me collection reminders and updates by email</div></div></div>
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:6px">
@@ -2985,7 +2985,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         <!-- Terms -->
         <div class="chk-row" style="margin-top:8px">
           <input type="checkbox" id="confirm-terms">
-          <div><div style="font-size:13px">I confirm my details are correct and I agree to the <a style="color:var(--cyan);cursor:pointer">Terms of Service</a></div></div>
+          <div><div style="font-size:13px">I confirm my details are correct and I agree to the <a href="https://raw.githubusercontent.com/AZDVHS/bindash/main/BinDash_Terms_of_Service.pdf" target="_blank" rel="noopener" style="color:var(--cyan)">Terms of Service</a></div></div>
         </div>
         <div class="chk-row">
           <input type="checkbox" id="confirm-comms" checked>
@@ -10120,11 +10120,11 @@ async function _initAdminMap(){
   const hoByHex8 = {}
   geoHOs.forEach(ho => {
     try {
-      // Use ZIP centroid for hex placement to keep dots aligned with zone grid
-      // (geocoded lat/lng may land in adjacent res-8 hex causing misalignment)
-      const zipCtr = ZIP_CENTROIDS[ho.zip]
-      const placeLat = zipCtr ? zipCtr[0] : ho.lat
-      const placeLng = zipCtr ? zipCtr[1] : ho.lng
+      // Use HO's actual geocoded coordinates as the H3 seed — not ZIP centroid.
+      // ZIP centroid can be 2–3 miles off in large ZIPs like 85207.
+      // The hex wraps exactly around where the HO actually lives.
+      const placeLat = ho.lat
+      const placeLng = ho.lng
       const h8 = h3Ready ? h3.latLngToCell(placeLat, placeLng, 8) : null
       const key = h8 || (ho.lat.toFixed(4)+','+ho.lng.toFixed(4))
       if(!hoByHex8[key]) hoByHex8[key] = { h8, lat:ho.lat, lng:ho.lng, hos:[], status:'no activity', runnerId:null, runnerName:null }
@@ -10208,10 +10208,16 @@ async function _initAdminMap(){
     })
     Object.entries(sigsByZip).forEach(([zip, data]) => {
       if(data.active === 0 && data.waitlist === 0) return
+      // Anchor demand hex on actual signup address if geocoded; fallback to ZIP centroid
       const ctr = ZIP_CENTROIDS[zip]
-      if(!ctr) return
+      // Find the earliest signup in this ZIP that has real coordinates
+      const _sigAnchor = (PENDING_HOMEOWNERS||[]).find(p => p.zip===zip && p.lat && p.lng)
+        || (WAITLIST_SIGNUPS||[]).find(s => s.zip===zip && s.lat && s.lng)
+      const _anchorLat = _sigAnchor ? parseFloat(_sigAnchor.lat) : ctr?.[0]
+      const _anchorLng = _sigAnchor ? parseFloat(_sigAnchor.lng) : ctr?.[1]
+      if(!_anchorLat || !_anchorLng) return
       try {
-        const h8  = h3.latLngToCell(ctr[0], ctr[1], 8)
+        const h8  = h3.latLngToCell(_anchorLat, _anchorLng, 8)
         const pts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
         const fc  = data.active > 0 ? '#16a34a' : '#d97706'
         const bc  = data.active > 0 ? '#15803d' : '#b45309'
@@ -10234,13 +10240,19 @@ async function _initAdminMap(){
   ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
     const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
     const zip  = zips[0]||''
-    const zc   = ZIP_CENTROIDS?.[zip] || ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]
-    if(!zc) return
-    const [lat,lng] = zc
     const isLive = z.status==='live'
     const isWait = z.status==='waitlist'
     const strokeCol = isLive ? '#15803d' : isWait ? '#b45309' : '#64748b'
     const fillCol   = isLive ? 'rgba(21,128,61,0.06)' : isWait ? 'rgba(180,83,9,0.06)' : 'rgba(100,116,139,0.04)'
+    // Anchor priority: first active HO in zone → first any HO in zone zip → ZIP centroid
+    const _anchorHO = HOMEOWNERS.find(h => h.zoneId===z.id && h.lat && h.lng && h.status==='active')
+      || HOMEOWNERS.find(h => zips.includes(h.zip) && h.lat && h.lng)
+    const zc = ZIP_CENTROIDS?.[zip] || ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]
+    const lat = _anchorHO ? parseFloat(_anchorHO.lat) : (zc ? zc[0] : null)
+    const lng = _anchorHO ? parseFloat(_anchorHO.lng) : (zc ? zc[1] : null)
+    if(!lat || !lng) return
+    if(_anchorHO) console.log('[Map] Zone', z.name, '— anchor: HO', _anchorHO.name, '@', lat.toFixed(5), lng.toFixed(5))
+    else console.log('[Map] Zone', z.name, '— anchor: ZIP centroid (no geocoded HO yet)')
     try {
       const h8 = h3.latLngToCell(lat, lng, 8)
       const h6 = h3.cellToParent(h8, 6)
@@ -10596,11 +10608,15 @@ async function geocodeExistingHomeowners(){
     }
 
     updateProgress(
-      `✅ Done! ${done} geocoded, ${failed} failed. Real H3 hexes created.`,
+      `✅ Done! ${done} geocoded, ${failed} failed. Real H3 hexes created. Zone anchors updated.`,
       '#22c55e'
     )
-    // Reload map with new hex data
+    // Reload map — now using real HO lat/lng as zone anchors instead of ZIP centroids
     await loadMicroZones()
+    if(typeof initAdminZoneMap === 'function'){
+      console.log('[Geocode] Refreshing admin zone map with first-HO anchors...')
+      setTimeout(() => initAdminZoneMap(true), 800)
+    }
 
   } catch(e){
     updateProgress('❌ Error: ' + e.message, '#ef4444')
@@ -30566,6 +30582,19 @@ async function loadRunnersFromSupabase(){
 }
 
 // Persist a single zone to Supabase (upsert by id)
+// Returns the best anchor lat/lng for a zone — first geocoded HO → ZIP centroid fallback
+function _getZoneAnchor(zone){
+  const zips = zone.zips?.length ? zone.zips : (zone.zip ? [zone.zip] : [])
+  const ho = HOMEOWNERS.find(h => h.zoneId===zone.id && h.lat && h.lng && h.status==='active')
+    || HOMEOWNERS.find(h => zips.includes(h.zip) && h.lat && h.lng)
+  if(ho) return { lat: parseFloat(ho.lat), lng: parseFloat(ho.lng), source:'homeowner' }
+  for(const zip of zips){
+    const c = ZIP_CENTROIDS?.[zip]
+    if(c) return { lat: c[0], lng: c[1], source:'zip_centroid' }
+  }
+  return null
+}
+
 async function dbSaveZone(z){
   try {
     const row = zoneToRow(z)
