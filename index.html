@@ -25398,12 +25398,15 @@ async function adminLaunchBatch(zoneId, day, btnEl){
     batch.status     = 'sent'
     batch.manualSend = true
     batch.sentAt     = new Date().toISOString()
-    if(raw) localStorage.setItem(key, JSON.stringify(batch))
+    // Remove from localStorage so it never re-appears on dispatch board
+    if(raw) localStorage.removeItem(key)
+    // Mark in-memory generatedBatches as sent so render immediately hides it
     if(memBatch){ memBatch.status = 'sent'; memBatch.manualSend = true; memBatch.sentAt = batch.sentAt }
-    // Also mark generatedBatches entry as sent so it doesn't reset on re-render
     generatedBatches.forEach(b => {
       if(b.zoneId === zoneId && normDay(b.day) === normDay(day)){ b.status='sent'; b.manualSend=true; b.sentAt=batch.sentAt }
     })
+    // Clear live pipeline cache so next render fetches fresh data from DB
+    window._livePipelineBatches = null
 
     showToast(`🚀 Route launched — ${runner.name} notified for ${stops.length} stop${stops.length!==1?'s':''}`, 'ok', 6000)
     // ── 1-hour broadcast: if runner hasn't accepted, broadcast to zone runners ──
@@ -26691,6 +26694,22 @@ function renderDispatchPipeline(){
   if(zoneFil) batches = batches.filter(b=>b.zoneId===zoneFil)
   if(effectiveDayFil) batches = batches.filter(b=>normDay(b.day)===normDay(effectiveDayFil)||normDay(b.date?.split('T')[0])===normDay(effectiveDayFil))
 
+  // ── DISPATCH ONLY SHOWS PRE-LAUNCH ROUTES ────────────────────────────────
+  // Once a route is launched (sent/offered/accepted/in_progress/complete/missed)
+  // it leaves dispatch entirely — visible only in the Jobs section.
+  // This prevents the confusing "ready to launch" flash while DB syncs.
+  const _launchedStatuses = new Set(['sent','offered','broadcast','accepted','in_progress','complete','missed','expired'])
+  batches = batches.filter(b => {
+    // Always show queued/draft/change_detected (not yet launched)
+    if(!_launchedStatuses.has(b.status)) return true
+    // BIN_IN pending = pre-created but not yet active — keep in dispatch as a preview
+    if(b.visitType === 'BIN_IN' && b.status === 'pending') return true
+    // BIN_IN queued = unlocked after BIN_OUT completes, runner hasn't accepted yet — keep
+    if(b.visitType === 'BIN_IN' && b.status === 'queued') return true
+    // Everything else (launched BIN_OUT, accepted/complete routes) → Jobs only
+    return false
+  })
+
   // Separate BIN_OUT and BIN_IN for grouped display
   const binOutBatches = batches.filter(b=>b.visitType!=='BIN_IN'&&!b.id?.endsWith('-IN'))
   const binInBatches  = batches.filter(b=>b.visitType==='BIN_IN'||b.id?.endsWith('-IN'))
@@ -27688,19 +27707,14 @@ async function loadLiveJobsIntoPipeline(){
   generatedBatches.forEach(b => {
     if(!b.date) return
     const bDate = b.date.slice(0,10)
-    // Future batches can never be sent yet
-    if(bDate > _todayStr && ['sent','offered'].includes(b.status)){
+    // Future batches cannot be sent — cap to queued
+    // (Routes for past/today that are sent stay sent and are hidden from dispatch)
+    if(bDate > _todayStr && ['sent','offered'].includes(b.status) && !b.manualSend){
       b.status = 'queued'
       b.sentAt = null
       b.offerExpiresAt = null
     }
-    // Today's batches: if manualSend flag isn't set, treat as queued not sent
-    // manualSend is set by adminLaunchBatch when the admin actually clicks Launch
-    if(bDate === _todayStr && b.status === 'sent' && !b.manualSend && !b.sentAt){
-      b.status = 'queued'
-    }
   })
-
       // Admin-side overdue detection — flag any BIN_OUT batches from past dates still in open status
       const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0)
       const missedAdminBatches = window._livePipelineBatches.filter(b=>{
