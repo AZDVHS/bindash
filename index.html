@@ -23702,6 +23702,19 @@ function switchRNTab(tab){
   renderPendingRunnerList()
 }
 
+function _refreshPendingHWRunners(appId, zoneId){
+  const sel = document.getElementById('hwpc-runner-'+appId)
+  if(!sel) return
+  const cur = sel.value
+  sel.innerHTML = '<option value="">Auto-assign zone runner</option>'
+    + RUNNERS.filter(r=>r.status!=='INACTIVE').map(r=>{
+        const isMatch = r.zoneId===zoneId || (r.coverageZones||[]).includes(zoneId)
+        const rZone = ADMIN_ZONES.find(z=>z.id===r.zoneId)
+        return `<option value="${r.id}" ${r.id===cur?'selected':''} style="${isMatch?'font-weight:700;color:var(--cyan)':'color:var(--muted)'}">
+          ${isMatch?'★ ':''}${r.name||r.email}${rZone?' · '+rZone.name:''}</option>`
+      }).join('')
+}
+
 function renderPendingHWList(){
   const el = document.getElementById('pending-hw-list')
   if(!el) return
@@ -23906,7 +23919,7 @@ function renderPendingHWList(){
           ${noRunner ? `<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.25);border-radius:7px;padding:7px 10px;margin-bottom:6px;font-size:11px;color:#ef4444">
             🚫 No runner in ${matchedZoneObj?.name||'this zone'} — HO will be unassigned after approval. Recruit a runner for ZIP ${app.zip} first, or approve and assign manually.
           </div>` : ''}
-          <select id="hwpc-zone-${app.id}" style="font-size:12px">
+          <select id="hwpc-zone-${app.id}" style="font-size:12px" onchange="_refreshPendingHWRunners('${app.id}',this.value)">
             <option value="">-- Select zone --</option>
             ${ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>{
               const isAssigned = app.zoneId===z.id
@@ -23919,6 +23932,20 @@ function renderPendingHWList(){
             <option value="_new">+ Create new zone for ZIP ${app.zip}</option>
           </select>`
         })()}
+      </div>
+
+      <div class="field" style="margin-bottom:10px">
+        <label style="font-size:11px">Assign Runner <span style="font-size:10px;color:var(--muted);font-weight:400">— optional, auto-selects zone runner if blank</span></label>
+        <select id="hwpc-runner-${app.id}" style="font-size:12px">
+          <option value="">Auto-assign zone runner</option>
+          ${RUNNERS.filter(r=>r.status!=='INACTIVE').map(r=>{
+            const rZone = ADMIN_ZONES.find(z=>z.id===r.zoneId)
+            const isZoneMatch = r.zoneId===app.zoneId || (r.coverageZones||[]).includes(app.zoneId)
+            return `<option value="${r.id}" ${isZoneMatch?'':''} style="${isZoneMatch?'font-weight:700;color:var(--cyan)':''}">
+              ${isZoneMatch?'★ ':''}${r.name||r.email} ${rZone?'· '+rZone.name:''} ${r.status==='AVAILABLE'?'· Available':''}
+            </option>`
+          }).join('')}
+        </select>
       </div>
 
       <div class="field" style="margin-bottom:12px">
@@ -24138,8 +24165,12 @@ async function approveHW(appId, directZoneId){
   if(zoneVal === '_new'){ approveHWWithZoneCheck(appId); return }
 
   const zoneId = zoneVal
+  // Check if admin manually selected a runner from the card dropdown
+  const _selectedRunnerId = document.getElementById('hwpc-runner-'+appId)?.value || ''
+  const _manualRunner = _selectedRunnerId ? RUNNERS.find(r=>r.id===_selectedRunnerId) : null
+  // Fall back to zone runner if no manual selection
   const zoneRunners = RUNNERS.filter(r=>r.zoneId===zoneId&&r.status!=='INACTIVE')
-  const autoRunner = zoneRunners.length ? zoneRunners[0] : RUNNERS.find(r=>r.status==='AVAILABLE')||null
+  const autoRunner = _manualRunner || (zoneRunners.length ? zoneRunners[0] : RUNNERS.find(r=>r.status==='AVAILABLE')||null)
   const colors = ['linear-gradient(135deg,var(--cyan),var(--blue))','linear-gradient(135deg,#22c55e,#06b6d4)','linear-gradient(135deg,#f59e0b,var(--red))','linear-gradient(135deg,#ec4899,#8b5cf6)']
   const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
   // Capture waitlist flag BEFORE changing app.status
