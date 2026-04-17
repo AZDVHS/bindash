@@ -8605,10 +8605,31 @@ async function completeBatch(batchId){
     // When BIN_OUT completes, flip them to 'offered' so the runner gets the offer.
     if(visitType === 'BIN_OUT' && jobs?.length){
       const binInBatchId = (jobs[0].batch_id || batchId) + '-IN'
-      const { data: binInJobs, error: biErr } = await _supa.from('jobs')
-        .select('id, status, scheduled_date, homeowner_email')
+      // Calculate tomorrow's date for zone+date fallback lookup
+      const _binOutDate = jobs[0].scheduled_date
+      const _binInDateFallback = _binOutDate ? (() => {
+        const d = new Date(_binOutDate + 'T12:00:00'); d.setDate(d.getDate()+1)
+        return d.toISOString().slice(0,10)
+      })() : null
+
+      // Primary lookup: by batch_id
+      let { data: binInJobs, error: biErr } = await _supa.from('jobs')
+        .select('id, status, scheduled_date, homeowner_email, batch_id')
         .eq('batch_id', binInBatchId)
         .eq('status', 'pending')
+
+      // Fallback: search by zone_id + next day + visit_type if batch_id lookup empty
+      if(!binInJobs?.length && _binInDateFallback && jobs[0].zone_id){
+        console.log('[BinDash] BIN_IN batch_id lookup empty — trying zone+date fallback for', _binInDateFallback)
+        const { data: fallbackJobs } = await _supa.from('jobs')
+          .select('id, status, scheduled_date, homeowner_email, batch_id')
+          .eq('zone_id', jobs[0].zone_id)
+          .eq('scheduled_date', _binInDateFallback)
+          .eq('visit_type', 'BIN_IN')
+          .eq('status', 'pending')
+        if(fallbackJobs?.length){ binInJobs = fallbackJobs; console.log('[BinDash] Found', fallbackJobs.length, 'BIN_IN via zone+date fallback') }
+      }
+
       if(biErr) console.warn('[BinDash] BIN_IN unlock fetch:', biErr.message)
       else if(binInJobs?.length){
         const offerExpiresAt = new Date(Date.now() + 25*60*1000).toISOString()
@@ -25398,14 +25419,12 @@ async function adminLaunchBatch(zoneId, day, btnEl){
     batch.status     = 'sent'
     batch.manualSend = true
     batch.sentAt     = new Date().toISOString()
-    // Remove from localStorage so it never re-appears on dispatch board
+    // Remove from localStorage permanently — route is now in Jobs, not Dispatch
     if(raw) localStorage.removeItem(key)
-    // Mark in-memory generatedBatches as sent so render immediately hides it
-    if(memBatch){ memBatch.status = 'sent'; memBatch.manualSend = true; memBatch.sentAt = batch.sentAt }
-    generatedBatches.forEach(b => {
-      if(b.zoneId === zoneId && normDay(b.day) === normDay(day)){ b.status='sent'; b.manualSend=true; b.sentAt=batch.sentAt }
-    })
-    // Clear live pipeline cache so next render fetches fresh data from DB
+    // Remove from generatedBatches array entirely so it can't come back
+    const _gbIdx = generatedBatches.findIndex(b => b.zoneId===zoneId && normDay(b.day)===normDay(day))
+    if(_gbIdx >= 0) generatedBatches.splice(_gbIdx, 1)
+    // Clear live pipeline cache so next render fetches fresh (route will be filtered as launched)
     window._livePipelineBatches = null
 
     showToast(`🚀 Route launched — ${runner.name} notified for ${stops.length} stop${stops.length!==1?'s':''}`, 'ok', 6000)
@@ -27691,11 +27710,12 @@ async function loadLiveJobsIntoPipeline(){
     })
 
     window._livePipelineBatches = Object.values(batchMap)
-    // Sync generatedBatches from live DB data — badge correct after page reload
+    // Sync generatedBatches from live DB data — but NEVER re-add removed routes
+    // Routes that have been launched are removed from generatedBatches and stay removed
     window._livePipelineBatches.forEach(lb => {
+      if(['sent','offered','accepted','in_progress','complete','missed'].includes(lb.status)) return  // launched → Jobs only
       const gb = generatedBatches.find(b => b.zoneId===lb.zoneId && normDay(b.day||'')===normDay(lb.day||''))
-      if(gb && ['offered','sent','accepted','in_progress','complete'].includes(lb.status)){
-        if(!gb.manualSend){ gb.manualSend = true; gb.sentAt = lb.sentAt || gb.sentAt }
+      if(gb){
         if(lb.offerExpiresAt) gb.offerExpiresAt = lb.offerExpiresAt
         const _r = { queued:1, sent:2, offered:3, accepted:4, in_progress:5, complete:6 }
         if((_r[lb.status]||0) > (_r[gb.status]||0)) gb.status = lb.status
