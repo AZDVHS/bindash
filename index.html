@@ -10525,6 +10525,37 @@ async function _updateAdminMapLayers(){
     }
   })
 
+  // ── Dots for homeowner_signups that have been geocoded ──────────────────
+  // These are waitlist/pending HOs not yet in the homeowners table
+  // They have coords from syncHomeownerToHex but aren't in HOMEOWNERS array
+  try {
+    const { data: _sigDots } = await _supa.from('homeowner_signups')
+      .select('first_name,last_name,email,street_address,zip_code,lat,lng,h3_index,status')
+      .not('lat','is',null).not('lng','is',null)
+      .in('status',['waitlist_pending','pending_review','payment_pending','approved','waitlist_approved'])
+      .limit(500)
+    ;(_sigDots||[]).forEach(s => {
+      try {
+        const sLat = parseFloat(s.lat), sLng = parseFloat(s.lng)
+        if(!sLat || !sLng || isNaN(sLat)) return
+        // Don't double-draw if already in HOMEOWNERS
+        if(HOMEOWNERS.find(h => h.email?.toLowerCase()===s.email?.toLowerCase())) return
+        const sName = ((s.first_name||'')+' '+(s.last_name||'')).trim() || s.email?.split('@')[0] || 'HO'
+        const isWl = ['waitlist_pending','pending_review','payment_pending'].includes(s.status)
+        const dot = L.circleMarker([sLat, sLng], {
+          radius:5, color:'#f97316', fillColor:'#fdba74', fillOpacity:0.80, weight:1.5, opacity:1
+        })
+        dot.bindTooltip(
+          '<div style="font-size:12px;font-weight:700;color:#f1f5f9">'+sName+'</div>'
+          +'<div style="font-size:11px;color:#cbd5e1;margin-top:2px">📍 '+(s.street_address||'')+'</div>'
+          +'<div style="font-size:10px;color:#fdba74;margin-top:2px">⏳ Waitlist signup</div>',
+          { className:'h3-tip', direction:'top', sticky:false, offset:[0,-4] }
+        )
+        dot.addTo(map); window._adminHexLayers.push(dot)
+      } catch(e){}
+    })
+  } catch(e){ console.warn('[Map] signup dots:', e.message) }
+
   // Zone res-6 outlines (using zone.lat/lng — no ZIP centroid)
   ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
     const zips=(z.zips?.length?z.zips:[z.zip]).filter(Boolean)
@@ -11243,22 +11274,34 @@ async function syncHomeownerToHex(row, table='homeowners'){
 
   if(!hex8) return { ok:false, reason:'h3 failed' }
 
-  // 2. Update the source table — different column names per table
+  // 2. Update the source table — graceful column detection
   if(table === 'homeowners'){
-    await _supa.from('homeowners').update({
+    // Try full payload first; if columns missing, fall back to just lat/lng
+    const { error: hwErr } = await _supa.from('homeowners').update({
       lat, lng,
-      hex_id:    hex8,   // legacy column
-      h3_index:  hex8,   // newer column (same value)
+      hex_id:    hex8,
+      h3_index:  hex8,
       updated_at: new Date().toISOString(),
     }).eq('id', row.id)
+    if(hwErr){
+      console.warn('[syncHex] Full homeowners update failed ('+hwErr.message+') — trying lat/lng only')
+      await _supa.from('homeowners').update({
+        lat, lng, updated_at: new Date().toISOString()
+      }).eq('id', row.id)
+    }
   } else {
-    // homeowner_signups uses lat/lng/h3_index (no hex_id column)
-    await _supa.from('homeowner_signups').update({
+    const { error: sigErr } = await _supa.from('homeowner_signups').update({
       lat, lng,
-      h3_index:    hex8,
+      h3_index:     hex8,
       h3_zone_res6: hex6,
-      updated_at: new Date().toISOString(),
+      updated_at:   new Date().toISOString(),
     }).eq('id', row.id)
+    if(sigErr){
+      console.warn('[syncHex] Full signups update failed ('+sigErr.message+') — trying lat/lng only')
+      await _supa.from('homeowner_signups').update({
+        lat, lng, updated_at: new Date().toISOString()
+      }).eq('id', row.id)
+    }
   }
 
   // 3. Ensure a zones entry exists anchored to these exact coordinates
@@ -11374,13 +11417,24 @@ async function geocodeExistingHomeowners(){
       '#22c55e'
     )
 
-    // Refresh in-memory data + map + runner layer (seed hexes move with anchor)
+    // Refresh in-memory data + map
     await loadHomeownersFromSupabase()
     await loadMicroZones()
-    if(typeof initAdminZoneMap === 'function'){
-      setTimeout(() => initAdminZoneMap(true), 600)
-    }
-    // Runner coverage refreshed automatically via _scheduleMapLayerUpdate above
+    // After geocode, zoom map to show the HOs that now have coordinates
+    setTimeout(() => {
+      const map = window._adminMap
+      if(!map || !window._adminMapInitialized) return
+      // Collect all geocoded HO positions
+      const pts = HOMEOWNERS
+        .filter(h => h.lat && h.lng && (h.status==='active'||h.status==='waitlist'))
+        .map(h => [parseFloat(h.lat), parseFloat(h.lng)])
+      if(pts.length > 0){
+        try {
+          map.fitBounds(pts, { padding:[60,60], maxZoom:13, animate:true })
+          console.log('[Geocode] Zoomed to', pts.length, 'geocoded HOs')
+        } catch(e){}
+      }
+    }, 800)
 
   } catch(e){
     updateProgress('❌ Error: ' + e.message, '#ef4444')
