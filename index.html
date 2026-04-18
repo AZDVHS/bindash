@@ -10424,8 +10424,8 @@ async function _adDrawRunnerCoverage(map){
               try {
                 const pts = h3.cellToBoundary(midH6).map(([la,ln])=>[la,ln])
                 const connector = L.polygon(pts, {
-                  color: STROKE, fillColor: 'rgba(79,70,229,0.06)',
-                  fillOpacity: 1, weight: 1, opacity: 0.4, dashArray: '4 6',
+                  color: '#6366f1', fillColor: '#6366f1',
+                  fillOpacity: 0.15, weight: 1.5, opacity: 0.5, dashArray: '5 4',
                 })
                 connector.bindTooltip(
                   '<div style="font-size:11px;color:#a5b4fc">🔗 '+name+' coverage corridor</div>'
@@ -10694,11 +10694,12 @@ async function _updateAdminMapLayers(){
     const isLive=z.status==='live'; const isWait=z.status==='waitlist'
     const strokeCol=isLive?'#15803d':isWait?'#b45309':'#64748b'
     const fillCol=isLive?'rgba(21,128,61,0.06)':isWait?'rgba(180,83,9,0.06)':'rgba(100,116,139,0.04)'
-    const _anchorHO=HOMEOWNERS.find(h=>h.zoneId===z.id&&h.lat&&h.lng&&h.status==='active')||HOMEOWNERS.find(h=>zips.includes(h.zip)&&h.lat&&h.lng)
-    const _sigAnchorForZone=(!_anchorHO&&Object.keys(sigsByZip).length)?zips.reduce((best,zp)=>{ const d=sigsByZip[zp]; if(d?.anchorLat&&!best)return d; return best },null):null
-    const zc=ZIP_CENTROIDS?.[zip]||ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]
-    const lat=z.lat||(_anchorHO?parseFloat(_anchorHO.lat):_sigAnchorForZone?_sigAnchorForZone.anchorLat:zc?.[0])
-    const lng=z.lng||(_anchorHO?parseFloat(_anchorHO.lng):_sigAnchorForZone?_sigAnchorForZone.anchorLng:zc?.[1])
+    // Same 4-tier anchor priority as _initAdminMap — zone.lat/lng is authoritative
+    let lat = null, lng = null
+    if(z.lat && z.lng){ lat=parseFloat(z.lat); lng=parseFloat(z.lng) }
+    if(!lat){ const _ho=HOMEOWNERS.find(h=>h.zoneId===z.id&&h.lat&&h.lng)||HOMEOWNERS.find(h=>zips.includes(h.zip)&&h.lat&&h.lng); if(_ho){lat=parseFloat(_ho.lat);lng=parseFloat(_ho.lng)} }
+    if(!lat){ const _sig=sigsByZip[zip]; if(_sig?.anchorLat){lat=_sig.anchorLat;lng=_sig.anchorLng} }
+    if(!lat){ const zc=ZIP_CENTROIDS?.[zip]||ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]; if(zc){lat=zc[0];lng=zc[1]} }
     if(!lat||!lng) return
     try {
       const h8=h3.latLngToCell(lat,lng,8); const h6=h3.cellToParent(h8,6)
@@ -10808,10 +10809,15 @@ async function _initAdminMap(){
   let defLat = 33.5387, defLng = -112.186
   if(geoHOs.length){ defLat = geoHOs[0].lat; defLng = geoHOs[0].lng }
   else if(ADMIN_ZONES.length){
-    const z0 = ADMIN_ZONES.find(z=>z.lat&&z.lng) || ADMIN_ZONES[0]
-    const zip = (z0?.zips?.[0]||z0?.zip||'')
-    const zc = ZIP_CENTROIDS?.[zip]
-    if(zc){ defLat=zc[0]; defLng=zc[1] }
+    // Use zone's own stored lat/lng first (set by syncHomeownerToHex)
+    const z0 = ADMIN_ZONES.find(z=>z.lat&&z.lng)
+    if(z0){ defLat=parseFloat(z0.lat); defLng=parseFloat(z0.lng) }
+    else {
+      const zFallback = ADMIN_ZONES[0]
+      const zip = (zFallback?.zips?.[0]||zFallback?.zip||'')
+      const zc = ZIP_CENTROIDS?.[zip]
+      if(zc){ defLat=zc[0]; defLng=zc[1] }
+    }
   }
   console.log('[Map] Center:', defLat, defLng)
 
@@ -11067,28 +11073,32 @@ async function _initAdminMap(){
     const isWait = z.status==='waitlist'
     const strokeCol = isLive ? '#15803d' : isWait ? '#b45309' : '#64748b'
     const fillCol   = isLive ? 'rgba(21,128,61,0.06)' : isWait ? 'rgba(180,83,9,0.06)' : 'rgba(100,116,139,0.04)'
-    // Anchor priority: (1) first active in-memory HO → (2) any in-memory HO in zip
-    // → (3) first geocoded signup from DB (sigsByZip built above) → (4) ZIP centroid
-    const _anchorHO = HOMEOWNERS.find(h => h.zoneId===z.id && h.lat && h.lng && h.status==='active')
-      || HOMEOWNERS.find(h => zips.includes(h.zip) && h.lat && h.lng)
-    // Fallback: use first geocoded signup from DB for this ZIP (waitlist zones often have
-    // signups in homeowner_signups but not yet in the approved HOMEOWNERS array)
-    const _sigAnchorForZone = (!_anchorHO && Object.keys(sigsByZip).length)
-      ? zips.reduce((best, zp) => {
-          const d = sigsByZip[zp]
-          if(d?.anchorLat && !best) return d
-          return best
-        }, null)
-      : null
-    const zc = ZIP_CENTROIDS?.[zip] || ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]
-    const lat = _anchorHO ? parseFloat(_anchorHO.lat)
-      : _sigAnchorForZone ? _sigAnchorForZone.anchorLat
-      : (zc ? zc[0] : null)
-    const lng = _anchorHO ? parseFloat(_anchorHO.lng)
-      : _sigAnchorForZone ? _sigAnchorForZone.anchorLng
-      : (zc ? zc[1] : null)
+    // Anchor resolution — strict priority, ZIP centroid only as last resort display
+    // (0) zone.lat/lng from zones table — set by syncHomeownerToHex (most accurate)
+    // (1) first active HO with this zone_id and real coords
+    // (2) first HO in zip with real coords
+    // (3) first geocoded signup from homeowner_signups
+    // (4) ZIP centroid — display only, never stored to DB
+    let lat = null, lng = null, _anchorSrc = 'none'
+
+    if(z.lat && z.lng){
+      lat = parseFloat(z.lat); lng = parseFloat(z.lng); _anchorSrc = 'zones.lat/lng ✅'
+    }
+    if(!lat){
+      const _ho = HOMEOWNERS.find(h => h.zoneId===z.id && h.lat && h.lng && h.status==='active')
+             || HOMEOWNERS.find(h => h.zoneId===z.id && h.lat && h.lng)
+             || HOMEOWNERS.find(h => zips.includes(h.zip) && h.lat && h.lng)
+      if(_ho){ lat=parseFloat(_ho.lat); lng=parseFloat(_ho.lng); _anchorSrc='approved HO' }
+    }
+    if(!lat && Object.keys(sigsByZip).length){
+      const _sig = zips.reduce((best,zp)=>{ const d=sigsByZip[zp]; return(d?.anchorLat&&!best)?d:best }, null)
+      if(_sig){ lat=_sig.anchorLat; lng=_sig.anchorLng; _anchorSrc='DB signup' }
+    }
+    if(!lat){
+      const zc = ZIP_CENTROIDS?.[zip] || ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]
+      if(zc){ lat=zc[0]; lng=zc[1]; _anchorSrc='ZIP centroid ⚠️ (run Geocode HOs to fix)' }
+    }
     if(!lat || !lng) return
-    const _anchorSrc = _anchorHO ? 'approved HO' : _sigAnchorForZone ? 'DB signup (waitlist)' : 'ZIP centroid ⚠️'
     console.log('[Map] Zone', z.name, '— anchor:', _anchorSrc, '@', lat.toFixed(5), lng.toFixed(5))
     try {
       const h8 = h3.latLngToCell(lat, lng, 8)
@@ -14697,7 +14707,28 @@ async function _rnRequestExpansionZone(hexId, opts){
   const zoneName = existingZone?.name || ('ZIP '+zip+' area')
   const isSecondary = opts.hasRunner
 
-    const msg = 'Add zone: '+zoneName+'. '+hoInfo+(isSecondary?' You would be added as secondary runner.':' You would be the primary runner.')+' Send request to admin?'
+    // ── Adjacency pre-check (client-side warning) ───────────────────────────
+  // Warns runner before submitting — admin has final override on approval
+  let _adjWarning = ''
+  if(typeof h3 !== 'undefined' && existingZone?.lat && existingZone?.lng){
+    try {
+      const _runnerH6s = await _runnerRes6Hexes(email)
+      if(_runnerH6s.size > 0){
+        const _newH8 = h3.latLngToCell(
+          existingZone.lat, existingZone.lng, 8
+        )
+        const _newH6 = h3.cellToParent(_newH8, 6)
+        let _isAdj = false
+        for(const _eh6 of _runnerH6s){
+          try { if(h3.areNeighborCells(_eh6, _newH6)){ _isAdj = true; break } } catch(e){}
+          if(new Set(h3.gridDisk(_eh6, 1)).has(_newH6)){ _isAdj = true; break }
+        }
+        if(!_isAdj) _adjWarning = '\n\nWarning: this zone is not adjacent to your current zones. There may be a gap in coverage. Admin can still approve it.'
+      }
+    } catch(e){}
+  }
+
+  const msg = 'Add zone: '+zoneName+'. '+hoInfo+(isSecondary?' You would be added as secondary runner.':' You would be the primary runner.')+' Send request to admin?'+_adjWarning
   if(!confirm(msg)) return
 
   try {
@@ -14711,7 +14742,24 @@ async function _rnRequestExpansionZone(hexId, opts){
       type:            'zone_expansion',
       zone_role:       isSecondary ? 'standby' : 'runner',
       notes:           'Runner requesting expansion to res-6 zone '+hex6+(isSecondary?' (secondary — existing runner present)':''),
-      requested_hexes: JSON.stringify([hexId]),
+      // Store the full res-8 path from runner's anchor to this hex
+      // so the map always renders a contiguous filled corridor, not just endpoints
+      requested_hexes: (() => {
+        try {
+          const runnerRow = window._rnRow || {}
+          const anchorH8 = runnerRow.anchor_hex7 || runnerRow.anchor_hex6
+            ? h3.latLngToCell(parseFloat(runnerRow.lat||0), parseFloat(runnerRow.lng||0), 8)
+            : null
+          if(anchorH8 && typeof h3.gridPathCells === 'function'){
+            const pathCells = h3.gridPathCells(anchorH8, hexId)
+            // Include 1-ring around each path cell for visual width
+            const allCells = new Set(pathCells)
+            pathCells.forEach(h => { try { h3.gridDisk(h,1).forEach(n=>allCells.add(n)) } catch(e){} })
+            return JSON.stringify([...allCells])
+          }
+        } catch(e){}
+        return JSON.stringify([hexId])
+      })(),
       created_at:      new Date().toISOString(),
     })
     showToast('Zone request sent for '+zoneName+' — admin will review shortly','ok',5000)
@@ -31679,10 +31727,15 @@ async function loadRunnersFromSupabase(){
 // Persist a single zone to Supabase (upsert by id)
 // Returns the best anchor lat/lng for a zone — first geocoded HO → ZIP centroid fallback
 function _getZoneAnchor(zone){
+  // Tier 0: zone's own stored lat/lng (set by syncHomeownerToHex — most accurate)
+  if(zone.lat && zone.lng) return { lat: parseFloat(zone.lat), lng: parseFloat(zone.lng), source:'zones_table' }
+  // Tier 1: first geocoded HO in zone
   const zips = zone.zips?.length ? zone.zips : (zone.zip ? [zone.zip] : [])
   const ho = HOMEOWNERS.find(h => h.zoneId===zone.id && h.lat && h.lng && h.status==='active')
+    || HOMEOWNERS.find(h => h.zoneId===zone.id && h.lat && h.lng)
     || HOMEOWNERS.find(h => zips.includes(h.zip) && h.lat && h.lng)
   if(ho) return { lat: parseFloat(ho.lat), lng: parseFloat(ho.lng), source:'homeowner' }
+  // Tier 2: ZIP centroid — display only, never stored to DB
   for(const zip of zips){
     const c = ZIP_CENTROIDS?.[zip]
     if(c) return { lat: c[0], lng: c[1], source:'zip_centroid' }
@@ -33616,11 +33669,23 @@ async function _isZoneContiguous(runnerEmail, newZoneId){
 
     if(existingH6s.size === 0) return { ok:true, reason:'runner has no existing zones — first zone always valid' }
 
-    // kRing(hex, 1) = the hex itself + its 6 immediate neighbors
+    // Use h3.areNeighborCells for exact neighbor check (same res required)
+    // Also check self-match (same zone) as always valid
     for(const existH6 of existingH6s){
-      const neighbors = new Set(h3.gridDisk(existH6, 1))  // gridDisk = kRing in h3-js v4
-      if(neighbors.has(newH6)){
-        return { ok:true, reason:`res-6 ${newH6} is neighbor of ${existH6}` }
+      if(existH6 === newH6){
+        return { ok:true, reason:`same res-6 hex ${newH6}` }
+      }
+      // areNeighborCells returns true if two cells share an edge
+      try {
+        if(h3.areNeighborCells(existH6, newH6)){
+          return { ok:true, reason:`res-6 ${newH6} neighbors ${existH6} (areNeighborCells=true)` }
+        }
+      } catch(e){
+        // Fallback if areNeighborCells throws (different res or invalid hex)
+        const ring = new Set(h3.gridDisk(existH6, 1))
+        if(ring.has(newH6)){
+          return { ok:true, reason:`res-6 ${newH6} in gridDisk(1) of ${existH6}` }
+        }
       }
     }
     // Not a neighbor of any existing zone
@@ -33680,6 +33745,18 @@ async function approveZoneExpansionRequest(reqId, runnerEmail, runnerName, zoneI
     sendEmail(runnerEmail, `✅ Zone approved — ${zoneName}`,
       `<p>Hi ${runnerName?.split(' ')[0]||'there'},</p><p>Your request to work in <strong>${zoneName}</strong> has been approved. You'll receive batch offers for this zone going forward.</p><p>— The BinDash Team</p>`,
       'zone_expansion_approved')
+
+    // Persist the full gridPath corridor hexes to the approved request row
+    // so rendering always uses contiguous cells, not just endpoints
+    try {
+      const { data: req } = await _supa.from('runner_zone_requests')
+        .select('requested_hexes').eq('id', reqId).maybeSingle()
+      if(req?.requested_hexes){
+        const storedHexes = JSON.parse(req.requested_hexes)
+        console.log('[Expansion] Approved with', storedHexes.length, 'path hexes stored')
+      }
+    } catch(e){}
+
     renderRunnerZoneRequests()
     showToast(`${runnerName} approved for ${zoneName} ✅`, 'ok')
   } catch(e){ showToast('Error: '+String(e?.message||e),'err') }
