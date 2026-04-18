@@ -9987,86 +9987,66 @@ async function _adDrawRunnerCoverage(map){
     // No zones — skip (no phantom outlines)
     if(zoneIds.size === 0) return
 
+    // ── Draw each runner zone — keyed by zone_id, no zip dependency ────────
     zoneIds.forEach(zid => {
       const zone = ADMIN_ZONES.find(z=>z.id===zid)
-      const zips = zone?.zips || (zone?.zip ? [zone.zip] : [])
-      if(!zips.length) return
+      if(!zone) return
 
-      zips.forEach(zip => {
-        try {
-          // ── Anchor resolution — NO ZIP centroid required ─────────────────
-          // Priority: (1) zone's stored lat/lng (set by syncHomeownerToHex)
-          //           (2) runner's geocoded address
-          //           (3) first geocoded HO in this specific zone
-          //           (4) first geocoded HO in this ZIP
-          //           (5) ZIP centroid (last resort display only)
-          //           (6) skip if nothing available
-          let _aLat = null, _aLng = null, _anchorSrc = 'none'
+      try {
+        // ── Anchor: zone_id-first, strict priority, no ZIP centroid stored ──
+        // (1) zone.lat/lng — set by syncHomeownerToHex (real geocoded address)
+        // (2) runner.lat/lng — geocoded runner home
+        // (3) first geocoded HO with zoneId===zid (zone-exact)
+        // (4) ZIP centroid display-only (last resort — never stored to DB)
+        let _aLat = null, _aLng = null, _anchorSrc = 'none'
 
-          // (1) Zone's own stored anchor (most accurate — set by auto-geocode)
-          const _zoneObj = ADMIN_ZONES.find(z=>z.id===zid)
-          if(_zoneObj?.lat && _zoneObj?.lng){
-            _aLat = parseFloat(_zoneObj.lat); _aLng = parseFloat(_zoneObj.lng)
-            _anchorSrc = 'zone.lat/lng'
+        if(zone.lat && zone.lng){
+          _aLat = zone.lat; _aLng = zone.lng
+          _anchorSrc = 'zone.lat/lng ✅'
+        }
+        if(!_aLat){
+          const _rn = RUNNERS.find(rx => rx.id === r.id)
+          if(_rn?.lat && _rn?.lng){ _aLat = parseFloat(_rn.lat); _aLng = parseFloat(_rn.lng); _anchorSrc = 'runner.lat/lng' }
+        }
+        if(!_aLat){
+          const _ho = HOMEOWNERS.find(h => h.zoneId===zid && h.lat && h.lng)
+          if(_ho){ _aLat = parseFloat(_ho.lat); _aLng = parseFloat(_ho.lng); _anchorSrc = 'zone HO: '+_ho.name }
+        }
+        // Last resort: ZIP centroid (display only — never use for DB writes)
+        if(!_aLat){
+          const _zip = zone.zip || zone.zips?.[0]
+          if(_zip && ZIP_CENTROIDS[_zip]){
+            _aLat = ZIP_CENTROIDS[_zip][0]; _aLng = ZIP_CENTROIDS[_zip][1]
+            _anchorSrc = 'ZIP centroid ⚠️ — run Geocode HOs to fix'
           }
+        }
+        if(!_aLat || !_aLng){
+          console.log('[AdminMap] No anchor for', zone.name, '— skipping (run Geocode HOs)')
+          return
+        }
 
-          // (2) Runner's geocoded home address
-          if(!_aLat){
-            const _rnMem = RUNNERS.find(rx => rx.id === r.id)
-            if(_rnMem?.lat && _rnMem?.lng){
-              _aLat = parseFloat(_rnMem.lat); _aLng = parseFloat(_rnMem.lng)
-              _anchorSrc = 'runner.lat/lng'
-            }
-          }
+        console.log('[AdminMap]', zone.name, '| src:', _anchorSrc, '|', _aLat.toFixed(5), _aLng.toFixed(5))
 
-          // (3) First geocoded HO in THIS zone (zone_id match — no cross-zone bleed)
-          if(!_aLat){
-            const _zoneHO = HOMEOWNERS.find(h => h.zoneId===zid && h.lat && h.lng)
-            if(_zoneHO){
-              _aLat = parseFloat(_zoneHO.lat); _aLng = parseFloat(_zoneHO.lng)
-              _anchorSrc = 'zone HO: '+_zoneHO.name
-            }
-          }
+        // ── H3 cells ─────────────────────────────────────────────────────────
+        // runnerHex = the zone's exact anchor cell — ALWAYS rendered purple
+        const runnerHex = h3.latLngToCell(_aLat, _aLng, 8)
+        const zoneH6    = h3.cellToParent(runnerHex, 6)
 
-          // (4) First geocoded HO in this ZIP (any zone)
-          if(!_aLat){
-            const _zipHO = HOMEOWNERS.find(h => h.zip===zip && h.lat && h.lng)
-            if(_zipHO){
-              _aLat = parseFloat(_zipHO.lat); _aLng = parseFloat(_zipHO.lng)
-              _anchorSrc = 'zip HO: '+_zipHO.name
-            }
-          }
+        // ── Zone-scoped HO counts — strict zone_id filter, no cross-zone bleed
+        const zoneHoActive   = {}
+        const zoneHoWaitlist = {}
+        HOMEOWNERS.filter(h => h.zoneId===zid && h.lat && h.lng).forEach(h => {
+          try {
+            const hh = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8)
+            if(!hh) return
+            if(h.status==='active') zoneHoActive[hh] = (zoneHoActive[hh]||0) + 1
+            else zoneHoWaitlist[hh] = (zoneHoWaitlist[hh]||0) + 1
+          } catch(e){}
+        })
 
-          // (5) ZIP centroid — display only, not ideal
-          if(!_aLat && ZIP_CENTROIDS[zip]){
-            _aLat = ZIP_CENTROIDS[zip][0]; _aLng = ZIP_CENTROIDS[zip][1]
-            _anchorSrc = 'ZIP centroid ⚠️'
-          }
-
-          // (6) Nothing — skip this zip entirely
-          if(!_aLat || !_aLng){
-            console.log('[AdminMap] No anchor for zone', _zoneObj?.name||zid, 'ZIP', zip, '— skipping')
-            return
-          }
-
-          console.log('[AdminMap] Zone', _zoneObj?.name||zid, '| anchor:', _anchorSrc, '|', _aLat.toFixed(5), _aLng.toFixed(5))
-
-          const anchorH8 = h3.latLngToCell(_aLat, _aLng, 8)
-          const anchorH6 = h3.cellToParent(anchorH8, 6)
-
-          // ── Zone-scoped HO activity counts — NO cross-zone bleed ────────
-          // Only count HOs that belong to THIS zone (zoneId===zid).
-          // This prevents hexes from adjacent zones appearing purple here.
-          const zoneHoActive   = {}
-          const zoneHoWaitlist = {}
-          HOMEOWNERS.filter(h => h.zoneId===zid && h.lat && h.lng).forEach(h => {
-            try {
-              const hh = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8)
-              if(!hh) return
-              if(h.status==='active') zoneHoActive[hh] = (zoneHoActive[hh]||0) + 1
-              else zoneHoWaitlist[hh] = (zoneHoWaitlist[hh]||0) + 1
-            } catch(e){}
-          })
+        // Aliases for legacy references below
+        const anchorH8 = runnerHex
+        const anchorH6 = zoneH6
 
           // Draw res-6 outline
           const b6 = h3.cellToBoundary(anchorH6).map(([la,ln])=>[la,ln])
@@ -10153,8 +10133,8 @@ async function _adDrawRunnerCoverage(map){
               hex.addTo(map); layers.push(hex)
             } catch(e){}
           })
-        } catch(e){ console.warn('[AdminMap]', zip, e.message) }
-      })
+        } catch(e){ console.warn('[AdminMap] zone draw:', zone?.name, e.message) }
+      // end zoneIds.forEach
     })
   })
 }
@@ -10911,12 +10891,25 @@ async function syncHomeownerToHex(row, table='homeowners'){
 
   if(existingZone?.data?.id){
     const z = existingZone.data
-    // If zone has no lat/lng or was using ZIP centroid, update to first-HO anchor
     if(!z.lat || !z.lng){
-      await _supa.from('zones').update({
-        lat, lng, h3_index: hex8, updated_at: new Date().toISOString()
-      }).eq('id', z.id)
-      console.log('[syncHex] Updated zone', z.id, 'anchor to HO coords', lat.toFixed(5), lng.toFixed(5))
+      try {
+        const { error: zUpErr } = await _supa.from('zones').update({
+          lat, lng, h3_index: hex8, updated_at: new Date().toISOString()
+        }).eq('id', z.id)
+        if(zUpErr){
+          if(zUpErr.message?.includes('column') && zUpErr.message?.includes('lat')){
+            console.warn('[syncHex] zones table missing lat/lng columns — run migration:')
+            console.warn('  ALTER TABLE zones ADD COLUMN IF NOT EXISTS lat double precision, ADD COLUMN IF NOT EXISTS lng double precision, ADD COLUMN IF NOT EXISTS h3_index text;')
+          } else {
+            console.warn('[syncHex] zone update error:', zUpErr.message)
+          }
+        } else {
+          console.log('[syncHex] Updated zone', z.id, 'anchor →', lat.toFixed(5), lng.toFixed(5))
+          // Also update in-memory ADMIN_ZONES so map re-renders immediately
+          const _mem = ADMIN_ZONES.find(az => az.id === z.id)
+          if(_mem){ _mem.lat = lat; _mem.lng = lng; _mem.h3_index = hex8 }
+        }
+      } catch(e){ console.warn('[syncHex] zone update failed:', e.message) }
     }
   }
 
@@ -23529,7 +23522,7 @@ async function confirmCreateZoneFromWaitlist(zip){
 
   const newZone = {id: crypto.randomUUID ? crypto.randomUUID() : 'z-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),name,city:zip+' area',
     zip:zip, zips:[zip],
-    lat: _wlAnchorLat, lng: _wlAnchorLng, h3_index: _wlAnchorHex,
+    ...(_wlAnchorLat ? { lat: _wlAnchorLat, lng: _wlAnchorLng, h3_index: _wlAnchorHex } : {}),
     status:'live',pilot:false,overridden:true,runners:0,capacity:cap,homeowners:0,
     threshold:cap,collection:days,assignedRunner:null,stopOrder:[],notes:'Created from waitlist ZIP '+zip}
   ADMIN_ZONES.push(newZone)
@@ -23622,6 +23615,9 @@ async function createZoneAndApproveHW(appId){
     ? h3.latLngToCell(_hoAnchorLat, _hoAnchorLng, 8) : null
   console.log('[BinDash] createZoneAndApproveHW — anchor:', app.name, _hoAnchorLat?.toFixed(5), _hoAnchorLng?.toFixed(5), _hoAnchorHex || '(no hex)')
 
+  // Note: lat/lng/h3_index columns require migration:
+  // ALTER TABLE zones ADD COLUMN IF NOT EXISTS lat double precision, ADD COLUMN IF NOT EXISTS lng double precision, ADD COLUMN IF NOT EXISTS h3_index text;
+  const _hasGeoColumns = true  // set false if migration not yet run to skip silently
   const zoneRow = {
     name,
     label:           (name.slice(0,3).toUpperCase()+'-'+app.zip),
@@ -23637,9 +23633,7 @@ async function createZoneAndApproveHW(appId){
     runners:         0,
     notes:           'Auto-created from pending HO approval · ZIP '+app.zip,
     area:            'A1',
-    lat:             _hoAnchorLat,
-    lng:             _hoAnchorLng,
-    h3_index:        _hoAnchorHex,
+    ...(_hasGeoColumns && _hoAnchorLat ? { lat: _hoAnchorLat, lng: _hoAnchorLng, h3_index: _hoAnchorHex } : {}),
     updated_at:      new Date().toISOString(),
   }
 
@@ -25118,10 +25112,25 @@ function _setupAutoGeocodeChannel(){
       await new Promise(r => setTimeout(r, 1500))
       const result = await syncHomeownerToHex(row, 'homeowner_signups')
       if(result.ok){
-        console.log('[AutoGeocode] ✅ Auto-geocoded', row.email, '→', result.lat?.toFixed(5), result.lng?.toFixed(5), result.hex8)
-        // If admin Zones map is open, refresh it
+        console.log('[AutoGeocode] ✅', row.email, '→', result.lat?.toFixed(5), result.lng?.toFixed(5), result.hex8)
+        // Update in-memory ADMIN_ZONES anchor so map re-renders immediately without reload
+        const _relatedZone = ADMIN_ZONES.find(z =>
+          z.id === row.zone_id ||
+          (z.zips||[]).includes(row.zip_code) ||
+          z.zip === row.zip_code
+        )
+        if(_relatedZone && !_relatedZone.lat){
+          _relatedZone.lat = result.lat
+          _relatedZone.lng = result.lng
+          _relatedZone.h3_index = result.hex8
+          console.log('[AutoGeocode] Updated in-memory zone anchor:', _relatedZone.name, result.lat.toFixed(5), result.lng.toFixed(5))
+        }
+        // Re-draw runner coverage map if open (dependencies: zone anchor + HO coords)
         if(window._adminMap && typeof initAdminZoneMap === 'function'){
           setTimeout(() => initAdminZoneMap(true), 800)
+        }
+        if(typeof _refreshAdminMapRunners === 'function'){
+          setTimeout(() => _refreshAdminMapRunners(), 1000)
         }
       } else {
         console.warn('[AutoGeocode] ⚠ Could not geocode', row.email, '—', result.reason)
@@ -30573,7 +30582,7 @@ async function loadZonesFromSupabase(){
         id:              row.id,
         name:            row.name,
         label:           row.label || '',
-        city:            row.label || '',   // use label as city fallback for display
+        city:            row.label || '',
         zip:             (row.zip_prefix && row.zip_prefix.length === 5) ? row.zip_prefix : (row.zip_codes?.[0] || ''),
         zips:            row.zip_codes?.filter(z => z && z.length === 5) || ((row.zip_prefix && row.zip_prefix.length === 5) ? [row.zip_prefix] : []),
         area:            row.area || 'A1',
@@ -30588,6 +30597,10 @@ async function loadZonesFromSupabase(){
         assignedRunner:  row.assigned_runner || null,
         stopOrder:       row.stop_order || [],
         notes:           row.notes || '',
+        // ── Geocoded anchor — critical for correct map placement ──
+        lat:             row.lat    ? parseFloat(row.lat)    : null,
+        lng:             row.lng    ? parseFloat(row.lng)    : null,
+        h3_index:        row.h3_index || null,
       })
     })
     syncZoneData()
