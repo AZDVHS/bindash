@@ -504,11 +504,26 @@ async function launchStripeCheckout(){
     const data = await res.json()
     if(data.error || !data.url) throw new Error(data.error || 'No checkout URL returned')
 
-    // 4. Store Stripe session ID
+    // 4. Store Stripe session ID in both tables
     if(data.sessionId && em){
       await _supa.from('homeowner_signups')
-        .update({ stripe_session_id: data.sessionId, stripe_customer_id: data.customerId||null })
+        .update({ stripe_session_id: data.sessionId, stripe_customer_id: data.customerId||null, updated_at: new Date().toISOString() })
         .eq('email', em)
+      // Also update homeowners table if this HO is already in it (waitlist-promoted)
+      await _supa.from('homeowners')
+        .update({ stripe_customer_id: data.customerId||null, stripe_session_id: data.sessionId, updated_at: new Date().toISOString() })
+        .eq('email', em)
+      // After payment completes, re-check pending completion state
+      if(typeof _isHOPendingCompletion === 'function' && window._hwProfileRow){
+        window._hwProfileRow.stripe_customer_id = data.customerId || 'paid'
+        const stillPending = _isHOPendingCompletion(window._hwProfileRow)
+        if(stillPending) _showHOPendingCompletionBanner(window._hwProfileRow)
+        else {
+          const pcBanner = document.getElementById('hw-pending-completion-banner')
+          if(pcBanner) pcBanner.style.display = 'none'
+          showToast('Payment set up ✅ — complete your property details to finish activation', 'ok', 5000)
+        }
+      }
     }
 
     // 5. Send pending email
@@ -809,8 +824,21 @@ const EMAIL = {
       <div class="row"><div class="lbl">Your Zone</div><div class="val">${zone}</div></div>
       <div class="row"><div class="lbl">Next Step</div><div class="val">Log in and confirm your service</div></div>
     </div>
-    <a href="${BRAND.url}?login=${encodeURIComponent(email||'')}" class="btn">Confirm My Service -></a>
+    <a href="${BRAND.url}?login=${encodeURIComponent(email||'')}" class="btn">Confirm My Service →</a>
     <p style="font-size:13px;color:#475569">Takes 2 minutes. No payment until your first collection is confirmed.</p>
+  `),
+
+  pendingCompletion: (name, zone, email, planLabel) => emailBase(`
+    <h1>Your spot is reserved — 2 quick steps to activate 🎉</h1>
+    <p>Hi ${name}, a runner is now available in your area! You've been moved off the waitlist.</p>
+    <p>To lock in your service, please complete these two steps within <strong>48 hours</strong>:</p>
+    <div class="card">
+      <div class="row"><div class="lbl">Step 1</div><div class="val"><strong>Set up payment</strong> — ${planLabel||'subscription'}</div></div>
+      <div class="row"><div class="lbl">Step 2</div><div class="val"><strong>Confirm property details</strong> — bin location, gate code, any notes for your runner</div></div>
+      <div class="row"><div class="lbl">Your Zone</div><div class="val">${zone}</div></div>
+    </div>
+    <a href="${BRAND.url}?login=${encodeURIComponent(email||'')}" class="btn">Complete My Activation →</a>
+    <p style="font-size:13px;color:#475569">Your spot will be released after 48 hours if steps are not completed.</p>
   `),
 
   runnerInvite: (name, code) => emailBase(`
@@ -3033,6 +3061,36 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
                 <div style="font-size:12px;color:var(--muted);margin-top:2px">Account saved — scheduling locked until payment complete.</div></div>
               </div>
               <button class="btn btn-sm" style="background:#f59e0b;color:#07090f;border:none;font-weight:700;flex-shrink:0" onclick="hwCompletePayment()">Complete Payment →</button>
+            </div>
+          </div>
+
+          <!-- Pending completion banner — shown to waitlist-approved HOs missing payment/property details -->
+          <div id="hw-pending-completion-banner" style="display:none;background:linear-gradient(135deg,rgba(99,102,241,.08),rgba(6,214,160,.05));border:1.5px solid rgba(99,102,241,.35);border-radius:12px;padding:16px;margin-bottom:14px">
+            <div style="display:flex;align-items:flex-start;gap:12px">
+              <span style="font-size:28px;flex-shrink:0">🎉</span>
+              <div style="flex:1">
+                <div style="font-weight:700;font-size:15px;color:#a5b4fc;margin-bottom:4px">A runner just became available in your area!</div>
+                <div style="font-size:13px;color:var(--sub);margin-bottom:12px">You're being moved from the waitlist to active service. Complete two quick steps to lock in your spot.</div>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+                  <div id="hwpc-step1" style="display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.15);border-radius:8px;padding:10px 12px">
+                    <div id="hwpc-step1-icon" style="width:24px;height:24px;border-radius:50%;background:rgba(245,158,11,.3);border:1.5px solid #f59e0b;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fbbf24;flex-shrink:0">1</div>
+                    <div style="flex:1">
+                      <div style="font-size:13px;font-weight:600;color:var(--text)">Set up payment</div>
+                      <div style="font-size:11px;color:var(--muted)">Connect a card so your runner gets paid automatically</div>
+                    </div>
+                    <button id="hwpc-pay-btn" class="btn btn-sm" style="background:#6366f1;color:#fff;border:none;font-weight:700;flex-shrink:0" onclick="hwPendingCompletionStep('payment')">Set Up →</button>
+                  </div>
+                  <div id="hwpc-step2" style="display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.15);border-radius:8px;padding:10px 12px">
+                    <div id="hwpc-step2-icon" style="width:24px;height:24px;border-radius:50%;background:rgba(245,158,11,.3);border:1.5px solid #f59e0b;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fbbf24;flex-shrink:0">2</div>
+                    <div style="flex:1">
+                      <div style="font-size:13px;font-weight:600;color:var(--text)">Confirm property details</div>
+                      <div style="font-size:11px;color:var(--muted)">Bin location, gate code, pet info — so your runner can serve you</div>
+                    </div>
+                    <button id="hwpc-prop-btn" class="btn btn-sm" style="background:#6366f1;color:#fff;border:none;font-weight:700;flex-shrink:0" onclick="hwPendingCompletionStep('property')">Review →</button>
+                  </div>
+                </div>
+                <div style="font-size:11px;color:var(--muted)">⏱ Your spot is reserved for <strong style="color:#fbbf24" id="hwpc-deadline">48 hours</strong>. Complete both steps to activate service.</div>
+              </div>
             </div>
           </div>
 
@@ -5313,6 +5371,80 @@ function setCurrentUser(supabaseUser){
 // Global helper — wraps Supabase queries that may throw (e.g. maybeSingle on empty)
 async function safeQuery(q){ try { return await q } catch(e){ console.warn('[BinDash] safeQuery:', String(e?.message||e)); return null } }
 
+// ── Pending completion check ─────────────────────────────────────────────────
+// Returns true when a waitlist-promoted HO needs to complete payment + property steps
+function _isHOPendingCompletion(row){
+  if(!row) return false
+  const isActivated = ['waitlist_approved','waitlist','active','approved'].includes(row.status)
+  if(!isActivated) return false
+  const hasPayment  = !!(row.stripe_customer_id || row.stripe_subscription_id)
+  const hasProperty = !!(row.bin_location || row.gate_type || row.service_notes || row.pet_info)
+  return !hasPayment || !hasProperty
+}
+
+// ── _showHOPendingCompletionBanner() ─────────────────────────────────────────
+// Renders the pending completion banner with correct step states
+function _showHOPendingCompletionBanner(row){
+  const banner = document.getElementById('hw-pending-completion-banner')
+  if(!banner) return
+
+  const hasPayment  = !!(row.stripe_customer_id || row.stripe_subscription_id)
+  const hasProperty = !!(row.bin_location || row.gate_type || row.service_notes || row.pet_info)
+
+  // Step 1 — payment
+  const step1Icon = document.getElementById('hwpc-step1-icon')
+  const payBtn    = document.getElementById('hwpc-pay-btn')
+  if(step1Icon && payBtn){
+    if(hasPayment){
+      step1Icon.textContent = '✓'; step1Icon.style.background = 'rgba(34,197,94,.2)'; step1Icon.style.borderColor = '#22c55e'; step1Icon.style.color = '#22c55e'
+      payBtn.textContent = '✓ Done'; payBtn.style.background = 'rgba(34,197,94,.15)'; payBtn.style.color = '#22c55e'; payBtn.disabled = true
+    }
+  }
+
+  // Step 2 — property
+  const step2Icon = document.getElementById('hwpc-step2-icon')
+  const propBtn   = document.getElementById('hwpc-prop-btn')
+  if(step2Icon && propBtn){
+    if(hasProperty){
+      step2Icon.textContent = '✓'; step2Icon.style.background = 'rgba(34,197,94,.2)'; step2Icon.style.borderColor = '#22c55e'; step2Icon.style.color = '#22c55e'
+      propBtn.textContent = '✓ Done'; propBtn.style.background = 'rgba(34,197,94,.15)'; propBtn.style.color = '#22c55e'; propBtn.disabled = true
+    }
+  }
+
+  // Deadline — 48h from reviewed_at or created_at
+  const startDate = new Date(row.reviewed_at || row.updated_at || row.created_at || Date.now())
+  const deadline  = new Date(startDate.getTime() + 48*60*60*1000)
+  const hoursLeft = Math.max(0, Math.round((deadline - Date.now()) / 3600000))
+  const deadlineEl = document.getElementById('hwpc-deadline')
+  if(deadlineEl) deadlineEl.textContent = hoursLeft > 0 ? hoursLeft+'h remaining' : 'Deadline passed — please complete ASAP'
+
+  banner.style.display = 'block'
+  // Hide the regular payment banner if both are shown
+  const payBanner = document.getElementById('hw-payment-banner')
+  if(payBanner) payBanner.style.display = 'none'
+}
+
+// ── hwPendingCompletionStep() ─────────────────────────────────────────────────
+// Called by the banner buttons — routes to payment or property section
+async function hwPendingCompletionStep(step){
+  const row = window._hwProfileRow
+  if(step === 'payment'){
+    // Trigger Stripe checkout for the plan they signed up with
+    const planKey = row?.plan_id || row?.plan || 'plan_a'
+    window._checkoutPlanKey = planKey
+    window._hwPendingEmail  = row?.email || currentUser?.email
+    hwCompletePayment()
+  } else if(step === 'property'){
+    // Navigate to My Property tab and open the edit form
+    hwNav(document.querySelector('[onclick*="hw-property"]'), 'hw-property')
+    setTimeout(() => {
+      const editBtn = document.getElementById('hw-property-edit-btn')
+      if(editBtn) editBtn.click()
+      else showToast('Update your bin location, gate code, and any special instructions below', 'info', 5000)
+    }, 300)
+  }
+}
+
 async function populateHWDashboard(){
   if(!currentUser) return
   try {
@@ -5429,11 +5561,27 @@ async function populateHWDashboard(){
       _populateHWDashData(row, fn, ln, initials)
       loadHWCollections(row.email || _userEmail)
       setTimeout(_renderHWPayHistory, 600)
-      const payBanner = document.getElementById('hw-payment-banner')
-      if(payBanner) payBanner.style.display = 'none'
+
+      // ── Pending completion check — waitlist-promoted HOs missing payment/property ──
+      const _pendingCompletion = _isHOPendingCompletion(row)
+      if(_pendingCompletion){
+        console.log('[BinDash] HO pending completion — missing', !row.stripe_customer_id ? 'payment' : '', !row.bin_location&&!row.gate_type ? 'property' : '')
+        _showHOPendingCompletionBanner(row)
+        // Don't hide payment banner — it's replaced by the pending_completion banner
+      } else {
+        const payBanner = document.getElementById('hw-payment-banner')
+        if(payBanner) payBanner.style.display = 'none'
+        const pcBanner = document.getElementById('hw-pending-completion-banner')
+        if(pcBanner) pcBanner.style.display = 'none'
+      }
+
       if(window._showPortalReturnToast){
         window._showPortalReturnToast = false
-        setTimeout(()=>{ showToast('Payment method updated ✅','ok'); populateHWDashboard() }, 500)
+        // After portal return, re-check pending completion (payment may now be complete)
+        setTimeout(async ()=>{
+          showToast('Payment method updated ✅','ok')
+          await populateHWDashboard()
+        }, 500)
       }
 
     } else if(status === 'payment_pending'){
@@ -5756,19 +5904,20 @@ function showShareNeighborhoodModal(){
 }
 
 async function hwCompletePayment(){
-  const planKey = window._hwPendingPlanKey || 'plan_a'
-  const email   = window._hwPendingEmail  || currentUser?.email
-  if(!email){ showToast('Session error -- please log in again', 'err'); return }
+  const row     = window._hwProfileRow
+  const planKey = window._hwPendingPlanKey || row?.plan_id || row?.plan || 'plan_a'
+  const email   = window._hwPendingEmail  || row?.email || currentUser?.email
+  if(!email){ showToast('Session error — please log in again', 'err'); return }
 
-  // Set the checkout plan key so launchStripeCheckout uses it
   _checkoutPlanKey = planKey
 
-  // Pre-fill email field if possible
   const emEl = document.getElementById('h-em')
   if(emEl) emEl.value = email
 
-  // Launch checkout
-  const btn = document.querySelector('#hw-payment-banner button')
+  // Disable whichever button triggered this (payment banner or pending completion banner)
+  const btn1 = document.querySelector('#hw-payment-banner button')
+  const btn2 = document.getElementById('hwpc-pay-btn')
+  const btn  = btn2 || btn1
   if(btn){ btn.disabled = true; btn.textContent = 'Opening Stripe...' }
 
   try {
@@ -18024,6 +18173,33 @@ async function saveEditProperty(){
 
     closeM()
     showToast('Property updated ✅', 'ok')
+
+    // Re-check pending completion — property step may now be satisfied
+    if(window._hwProfileRow && typeof _isHOPendingCompletion === 'function'){
+      const _pr = window._hwProfileRow
+      // Update in-memory profile with saved values
+      if(payload.bin_location) _pr.bin_location = payload.bin_location
+      if(payload.gate_type)    _pr.gate_type    = payload.gate_type
+      if(payload.service_notes)_pr.service_notes= payload.service_notes
+      if(payload.pet_info)     _pr.pet_info     = payload.pet_info
+
+      if(_isHOPendingCompletion(_pr)){
+        _showHOPendingCompletionBanner(_pr)  // Update step 2 to ✓ if property now done
+      } else {
+        // Both steps complete — fully activate the homeowner
+        const pcBanner = document.getElementById('hw-pending-completion-banner')
+        if(pcBanner) pcBanner.style.display = 'none'
+        try {
+          await _supa.from('homeowners').update({ status:'active', updated_at:new Date().toISOString() }).eq('email', currentUser.email)
+          await _supa.from('homeowner_signups').update({ status:'approved', updated_at:new Date().toISOString() }).eq('email', currentUser.email)
+          if(_pr) _pr.status = 'active'
+          const badge = document.getElementById('hw-acct-status-badge')
+          if(badge){ badge.textContent = '● Active'; badge.style.color = '#06d6a0'; badge.style.background = 'rgba(6,214,160,.12)' }
+          setTimeout(() => showToast('🎉 Your account is fully activated! Service starts on your next collection day.', 'ok', 7000), 500)
+          console.log('[BinDash] HO fully activated after completing both pending_completion steps')
+        } catch(e){ console.warn('[BinDash] Full activation:', e.message) }
+      }
+    }
   } catch(e){
     if(errEl){ errEl.textContent = String(e?.message||e); errEl.style.display='block' }
     if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
@@ -24251,8 +24427,13 @@ function renderPendingHWList(){
     // Payment status -- drives urgency
     const isPaid      = app.stripeSessionId && app.status !== 'payment_pending'
     const isUnpaid    = app.status === 'payment_pending' || (!app.stripeSessionId)
+    // Check for pending completion state: waitlist-approved but missing payment or property
+    const _isWlPending = (app.isWaitlist || app.status === 'waitlist_pending') &&
+      (!app.stripeSessionId || (!app.storage || app.storage === '--'))
     const payBadge    = isPaid
       ? `<span class="badge" style="background:rgba(34,197,94,.15);color:#22c55e;margin-left:6px;font-size:10px">💳 Paid</span>`
+      : _isWlPending
+      ? `<span class="badge" style="background:rgba(99,102,241,.15);color:#818cf8;margin-left:6px;font-size:10px">⚡ Pending Completion</span>`
       : `<span class="badge" style="background:rgba(245,158,11,.15);color:#f59e0b;margin-left:6px;font-size:10px">⏳ Unpaid</span>`
 
     // Card border + urgency strip
@@ -24628,7 +24809,15 @@ async function approveHW(appId, directZoneId){
   const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
   // Capture waitlist flag BEFORE changing app.status
   const _isWlEntry = app.isWaitlist || app.status === 'waitlist_pending'
+  // Waitlist entries: check if they have payment info from their original signup
+  // If not, status stays 'waitlist' so the pending_completion banner shows on login
+  const _hasPayment  = !!(app.stripeSessionId || app.stripeCustomerId)
+  const _hasProperty = !!(app.storage && app.storage !== '--') || !!(app.svcNotes) || !!(app.gate && app.gate !== '--')
   const _hoStatus  = _isWlEntry ? 'waitlist' : 'active'
+  // Log the completion state so admin can see it in console
+  if(_isWlEntry && (!_hasPayment || !_hasProperty)){
+    console.log('[approveHW] Waitlist HO missing:', !_hasPayment ? 'payment' : '', !_hasProperty ? 'property details' : '', '— pending_completion banner will show on login')
+  }
 
   HOMEOWNERS.push({
     id:'C'+String(++nextHWId).padStart(3,'0'),
@@ -24653,6 +24842,20 @@ async function approveHW(appId, directZoneId){
   const badge=document.getElementById('hw-pcount')
   if(badge){ badge.textContent=PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length; badge.style.display=PENDING_HOMEOWNERS.filter(a=>a.status==='pending').length>0?'inline':'none' }
   const runnerNote=autoRunner?' . assigned to '+autoRunner.name:'. no runner assigned yet'
+
+  // If this is a waitlist-promoted HO, send them the pending completion email
+  if(_isWlEntry && app.email){
+    const _planLabels = { plan_a:'1 Can — $34.99/mo', plan_b:'2 Cans Same Day — $44.99/mo', plan_c:'2 Cans Split Days — $54.99/mo', oan_a:'Bin Out As Needed' }
+    const _zoneName = zone?.name || ('ZIP '+app.zip)
+    const _planLabel = _planLabels[app.plan] || app.plan || 'your plan'
+    sendEmail(
+      app.email,
+      '🎉 A runner is available — 2 steps to activate your BinDash service',
+      EMAIL.pendingCompletion(app.name.split(' ')[0]||app.name, _zoneName, app.email, _planLabel),
+      'pending_completion'
+    )
+    console.log('[BinDash] Sent pendingCompletion email to waitlist HO:', app.email)
+  }
 
   // Persist to Supabase -- both homeowner_signups (status) and homeowners (active record)
   ;(async()=>{
@@ -30881,6 +31084,8 @@ async function loadHomeownersFromSupabase(){
         referredBy:     row.referred_by||row.referred_by_runner||null,
         referredByEmail:row.referred_by_email||null,
         status:         (['waitlist_approved','waitlist','waitlist_pending'].includes(row.status)) ? 'waitlist' : 'active',
+        pendingCompletion: (['waitlist_approved','waitlist'].includes(row.status)) &&
+          (!row.stripe_customer_id && !row.stripe_subscription_id),
         bins:           isSplit || service==='BOTH' ? 2 : 1,
         storage:        row.bin_location  || '--',
         gate:           row.gate_type     || '--',
