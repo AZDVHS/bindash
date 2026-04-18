@@ -10387,6 +10387,185 @@ function _moveSignupPin(lat, lng, label){
 }
 
 // Load zones from Supabase and render admin map
+// ── Map update debouncer ─────────────────────────────────────────────────────
+// Batches rapid realtime updates so we don't redraw the map 10x in a second
+let _mapUpdateTimer = null
+function _scheduleMapLayerUpdate(delayMs = 200){
+  if(_mapUpdateTimer) clearTimeout(_mapUpdateTimer)
+  _mapUpdateTimer = setTimeout(async () => {
+    _mapUpdateTimer = null
+    if(!window._adminMap) return  // map not initialized yet
+    console.log('[Map] Debounced layer update firing')
+    await _updateAdminMapLayers()
+  }, delayMs)
+}
+
+// ── _updateAdminMapLayers() — layer-only refresh, NO zoom/center change ──────
+// Called for realtime updates. Replaces hex/dot layers without touching the map
+// instance, viewport, zoom level, or pan position.
+async function _updateAdminMapLayers(){
+  const map = window._adminMap
+  if(!map) return
+
+  // Preserve current viewport
+  const _savedCenter = map.getCenter()
+  const _savedZoom   = map.getZoom()
+
+  // Clear only the data layers (hex polygons, dots, runner overlays)
+  ;(window._adminHexLayers||[]).forEach(l => { try { l.remove() } catch(e){} })
+  window._adminHexLayers = []
+  ;(window._adMapRunnerLayers||[]).forEach(l => { try { l.remove() } catch(e){} })
+  window._adMapRunnerLayers = []
+
+  // Rebuild homeownerData from current HOMEOWNERS
+  window.homeownerData = {}
+  const h3Ready = typeof h3 !== 'undefined' && typeof h3.latLngToCell === 'function'
+  const geoHOs  = HOMEOWNERS.filter(h => (h.status==='active'||h.status==='waitlist') && h.lat && h.lng)
+
+  geoHOs.forEach(ho => {
+    try {
+      const hex = h3Ready ? h3.latLngToCell(ho.lat, ho.lng, 9) : null
+      const zone = ADMIN_ZONES.find(z => z.id === ho.zoneId)
+      const key = hex || (ho.lat.toFixed(5)+','+ho.lng.toFixed(5))
+      if(!window.homeownerData[key]){
+        window.homeownerData[key] = { h3Index:hex, lat:ho.lat, lng:ho.lng,
+          status: zone?.status==='live' ? 'active' : 'waitlist',
+          zone:zone||null, homeowners:[] }
+      }
+      window.homeownerData[key].homeowners.push({
+        name: ((ho.first_name||'')+' '+(ho.last_name||'')).trim()||ho.email?.split('@')[0]||'--',
+        email:ho.email, address:ho.street_address||ho.address||'--', zip:ho.zip||''
+      })
+    } catch(e){}
+  })
+
+  // Re-draw all layers (same logic as _initAdminMap but NO fitBounds)
+  const h3ReadyDraw = typeof h3 !== 'undefined' && h3.latLngToCell
+  const bounds = []
+
+  // HO hex cells
+  const hoByHex8 = {}
+  geoHOs.forEach(ho => {
+    try {
+      const h8 = h3ReadyDraw ? h3.latLngToCell(ho.lat, ho.lng, 8) : null
+      const key = h8 || (ho.lat.toFixed(4)+','+ho.lng.toFixed(4))
+      if(!hoByHex8[key]) hoByHex8[key] = { h8, lat:ho.lat, lng:ho.lng, hos:[], status:'no activity', runnerId:null, runnerName:null }
+      const zone   = ADMIN_ZONES.find(z => z.id===ho.zoneId)
+      const runner = RUNNERS.find(r => r.id===ho.assignedRunner||r.name===ho.assignedRunner)
+      const _st = zone?.status==='live' ? 'active' : (zone?.status==='waitlist'||zone?.status==='building') ? 'waitlist' : ho.status==='waitlist' ? 'waitlist' : 'no activity'
+      if(_st==='active'||hoByHex8[key].status==='no activity') hoByHex8[key].status = _st
+      if(runner){ hoByHex8[key].runnerId=runner.id; hoByHex8[key].runnerName=runner.name }
+      hoByHex8[key].hos.push({ name:((ho.first_name||'')+' '+(ho.last_name||'')).trim()||ho.email?.split('@')[0]||'--', email:ho.email, address:ho.street_address||ho.address||'--', zip:ho.zip||'', day:ho.day||'--' })
+    } catch(e){}
+  })
+
+  Object.entries(hoByHex8).forEach(([key, cell]) => {
+    try {
+      const style = getZoneStyleGlobal(cell.status, !!cell.runnerId)
+      if(h3ReadyDraw && cell.h8){
+        const boundary = h3.cellToBoundary(cell.h8).map(([lt,ln])=>[lt,ln])
+        const poly = L.polygon(boundary, { color:style.color, fillColor:style.fillColor, fillOpacity:style.fillOpacity+0.15, weight:2, opacity:1 })
+        const _tipNames = cell.hos.slice(0,3).map(h=>h.name).join(', ')+(cell.hos.length>3?' +more':'')
+        poly.bindTooltip('<div style="font-weight:700">'+cell.hos.length+' HO'+(cell.hos.length!==1?'s':'')+(cell.status==='active'?' · ✅ Active':' · ⏳ Waitlist')+'</div><div style="opacity:.8;margin-top:2px">'+_tipNames+'</div>', { className:'h3-tip', direction:'top', sticky:false })
+        _bindHexPopup(poly, {...cell, homeowners:cell.hos}, key)
+        poly.addTo(map); window._adminHexLayers.push(poly)
+      }
+      const count = cell.hos.length
+      const dotColor = cell.status==='active'?'#15803d':cell.status==='waitlist'?'#b45309':'#475569'
+      const dotBg    = cell.status==='active'?'#dcfce7':cell.status==='waitlist'?'#fef3c7':'#f1f5f9'
+      const pin = L.divIcon({ html:'<div style="width:24px;height:24px;background:'+dotBg+';border:2px solid '+dotColor+';border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:'+dotColor+';box-shadow:0 2px 4px rgba(0,0,0,.15)">'+count+'</div>', className:'', iconAnchor:[12,12] })
+      const m = L.marker([cell.lat, cell.lng], { icon:pin })
+      _bindHexPopup(m, {...cell, homeowners:cell.hos}, 'pin:'+key)
+      m.addTo(map); window._adminHexLayers.push(m)
+    } catch(e){}
+  })
+
+  // Household dots — exact lat/lng from DB (NOT hex center)
+  const _zoneFirstHO = {}
+  geoHOs.forEach(ho => {
+    try {
+      const zone     = ADMIN_ZONES.find(z => z.id===ho.zoneId)
+      const _dotActive = ho.status==='active'
+      const _dotWait   = ho.status==='waitlist'
+      const isAnchor   = !_zoneFirstHO[ho.zoneId]
+      if(isAnchor) _zoneFirstHO[ho.zoneId] = true
+      const dotColor  = _dotActive ? '#4ade80' : _dotWait ? '#fdba74' : '#94a3b8'
+      const ringColor = _dotActive ? '#22c55e' : _dotWait ? '#f97316' : '#64748b'
+      const hoName = ((ho.first_name||'')+' '+(ho.last_name||'')).trim()||ho.email?.split('@')[0]||'Homeowner'
+      const hoAddr = ho.street_address||ho.address||'No address'
+      // Use EXACT lat/lng from profile — never use hex centroid
+      const dot = L.circleMarker([parseFloat(ho.lat), parseFloat(ho.lng)], {
+        radius: isAnchor ? 7 : 5,
+        color:       isAnchor ? '#06d6a0' : ringColor,
+        fillColor:   isAnchor ? '#06d6a0' : dotColor,
+        fillOpacity: isAnchor ? 0.95 : 0.80,
+        weight:      isAnchor ? 2.5 : 1.5, opacity:1,
+      })
+      dot.bindTooltip(
+        '<div style="font-size:12px;font-weight:700;color:#f1f5f9">'+(isAnchor?'⭐ ':'')+hoName+(isAnchor?' <span style="font-size:10px;color:#06d6a0">(Anchor House)</span>':'')+'</div>'
+        +'<div style="font-size:11px;color:#cbd5e1;margin-top:2px">📍 '+hoAddr+'</div>'
+        +'<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+(zone?zone.name:'ZIP '+(ho.zip||''))+' · '+(_dotActive?'<span style="color:#4ade80">✅ Active</span>':_dotWait?'<span style="color:#fdba74">⏳ Waitlist</span>':'○ Unzoned')+'</div>',
+        { className:'h3-tip', direction:'top', sticky:false, offset:[0,-4] }
+      )
+      dot.addTo(map); window._adminHexLayers.push(dot)
+    } catch(e){}
+  })
+
+  // Zone outlines (no fitBounds — view preserved)
+  let sigsByZip = {}
+  try {
+    const { data: sigs } = await _supa.from('homeowner_signups')
+      .select('zip_code,status,first_name,last_name,lat,lng,street_address,city,created_at')
+      .not('status','in','("cancelled","rejected")')
+      .order('created_at',{ascending:true}).limit(2000)
+    ;(sigs||[]).forEach(s => {
+      if(!s.zip_code) return
+      if(!sigsByZip[s.zip_code]) sigsByZip[s.zip_code] = { active:0, waitlist:0, names:[], anchorLat:null, anchorLng:null, individuals:[] }
+      const isActive = s.status==='approved'
+      const isWaitlist = ['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)
+      if(isActive) sigsByZip[s.zip_code].active++
+      else if(isWaitlist) sigsByZip[s.zip_code].waitlist++
+      const _name = ((s.first_name||'')+' '+(s.last_name||'')).trim()
+      sigsByZip[s.zip_code].names.push(_name)
+      if(s.lat && s.lng){
+        sigsByZip[s.zip_code].individuals.push({ lat:parseFloat(s.lat), lng:parseFloat(s.lng), name:_name||'Homeowner', zip:s.zip_code, address:[s.street_address,s.city].filter(Boolean).join(', ')||'', createdAt:s.created_at||'', status:isActive?'active':'waitlist' })
+        if(!sigsByZip[s.zip_code].anchorLat){ sigsByZip[s.zip_code].anchorLat=parseFloat(s.lat); sigsByZip[s.zip_code].anchorLng=parseFloat(s.lng) }
+      }
+    })
+  } catch(e){ console.warn('[Map] sigsByZip update:', e.message) }
+
+  // Zone res-6 outlines (using zone.lat/lng — no ZIP centroid)
+  ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
+    const zips=(z.zips?.length?z.zips:[z.zip]).filter(Boolean)
+    const zip=zips[0]||''
+    const isLive=z.status==='live'; const isWait=z.status==='waitlist'
+    const strokeCol=isLive?'#15803d':isWait?'#b45309':'#64748b'
+    const fillCol=isLive?'rgba(21,128,61,0.06)':isWait?'rgba(180,83,9,0.06)':'rgba(100,116,139,0.04)'
+    const _anchorHO=HOMEOWNERS.find(h=>h.zoneId===z.id&&h.lat&&h.lng&&h.status==='active')||HOMEOWNERS.find(h=>zips.includes(h.zip)&&h.lat&&h.lng)
+    const _sigAnchorForZone=(!_anchorHO&&Object.keys(sigsByZip).length)?zips.reduce((best,zp)=>{ const d=sigsByZip[zp]; if(d?.anchorLat&&!best)return d; return best },null):null
+    const zc=ZIP_CENTROIDS?.[zip]||ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]
+    const lat=z.lat||(_anchorHO?parseFloat(_anchorHO.lat):_sigAnchorForZone?_sigAnchorForZone.anchorLat:zc?.[0])
+    const lng=z.lng||(_anchorHO?parseFloat(_anchorHO.lng):_sigAnchorForZone?_sigAnchorForZone.anchorLng:zc?.[1])
+    if(!lat||!lng) return
+    try {
+      const h8=h3.latLngToCell(lat,lng,8); const h6=h3.cellToParent(h8,6)
+      const pts=h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
+      const ol=L.polygon(pts,{color:strokeCol,fillColor:fillCol,fillOpacity:1,weight:isLive?2:1.5,dashArray:isLive?null:'6,4',opacity:0.85})
+      ol.bindTooltip('<div style="font-size:12px;font-weight:700;color:#1e293b">'+z.name+'</div><div style="font-size:11px;color:#475569">ZIP '+zip+' · '+(isLive?'Live':'Building')+'</div>',{className:'h3-tip',direction:'top'})
+      ol.addTo(map); window._adminHexLayers.push(ol)
+    } catch(e){}
+  })
+
+  // Runner coverage overlay
+  if(window._adMapMode==='both'||window._adMapMode==='runners'){
+    await _adDrawRunnerCoverage(map)
+  }
+
+  // ── Restore the preserved viewport — no zoom/pan change ───────────────
+  // (Nothing to do — we never moved the map. This is just a safety check.)
+  console.log('[Map] Layer update complete — viewport preserved at', _savedCenter.lat.toFixed(4), _savedCenter.lng.toFixed(4), 'zoom', _savedZoom)
+}
+
 async function _initAdminMap(){
   console.log('[Map] _initAdminMap called')
   await _loadMapLibs()
@@ -10417,6 +10596,18 @@ async function _initAdminMap(){
     return
   }
   console.log('[Map] Leaflet v'+L.version+' ready')
+
+  // ── FIRST LOAD GUARD ────────────────────────────────────────────────────
+  // If the map already exists and the container is visible with real dimensions,
+  // don't recreate it — just update the layers. This preserves zoom/pan.
+  // Check container still has the map attached (navigating away/back can detach it)
+  const _mapEl = document.getElementById('mz-admin-map')
+  const _mapHasContent = _mapEl && _mapEl.querySelector('.leaflet-container')
+  if(window._adminMap && window._adminMapInitialized && _mapHasContent){
+    console.log('[Map] Map already initialized — running layer update only (viewport preserved)')
+    await _updateAdminMapLayers()
+    return
+  }
 
   // ── DESTROY stale map instance (prevents grey/black tiles on re-open) ──
   if(window._adminMap){
@@ -10810,7 +11001,8 @@ async function _initAdminMap(){
     } catch(e){}
   }
   adMapToggle(window._adMapMode)
-  console.log('[Map] Init complete ✅')
+  window._adminMapInitialized = true  // prevent future calls from recreating the map
+  console.log('[Map] Init complete ✅ — subsequent updates will use _updateAdminMapLayers()')
   setTimeout(doInvalidate, 500)
 }
 
@@ -25329,11 +25521,9 @@ function _setupAutoGeocodeChannel(){
           console.log('[AutoGeocode] Updated in-memory zone anchor:', _relatedZone.name, result.lat.toFixed(5), result.lng.toFixed(5))
         }
         // Re-draw runner coverage map if open (dependencies: zone anchor + HO coords)
-        if(window._adminMap && typeof initAdminZoneMap === 'function'){
-          setTimeout(() => initAdminZoneMap(true), 800)
-        }
-        if(typeof _refreshAdminMapRunners === 'function'){
-          setTimeout(() => _refreshAdminMapRunners(), 1000)
+        // Use debounced layer update — preserves zoom/pan, no map recreation
+        if(window._adminMap && window._adminMapInitialized){
+          _scheduleMapLayerUpdate(800)
         }
       } else {
         console.warn('[AutoGeocode] ⚠ Could not geocode', row.email, '—', result.reason)
@@ -28800,8 +28990,12 @@ async function loadMicroZones(){
   const statsEl = document.getElementById('mz-stats')
   if(listEl) listEl.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:20px">Loading...</div>'
 
-  // Init map from ADMIN_ZONES (always accurate)
-  _initAdminMap()
+  // Init map on first load; update layers only on subsequent calls (preserves zoom/pan)
+  if(window._adminMap && window._adminMapInitialized){
+    _scheduleMapLayerUpdate(200)  // debounced — batches rapid updates
+  } else {
+    _initAdminMap()
+  }
 
   // Build zone stats from ADMIN_ZONES — the single source of truth
   const zones = ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>{
