@@ -10147,29 +10147,52 @@ async function _adDrawRunnerCoverage(map){
         //           (2) zone.lat/lng from DB (if migration run)
         //           (3) runner.lat/lng
         //           (4) ZIP centroid — display only, logs warning
+        // ── Anchor: coordinate-first, H3-derived fallback, NO zip centroid ──
+        // Order: HO coords → zone DB coords → runner H3 anchor → runner address → SKIP
         let _aLat = null, _aLng = null, _src = ''
 
+        // (1) First geocoded HO in this exact zone
         const _zoneHO = HOMEOWNERS.find(h => h.zoneId===zid && h.lat && h.lng)
         if(_zoneHO){
           _aLat = parseFloat(_zoneHO.lat); _aLng = parseFloat(_zoneHO.lng)
-          _src = 'HO:'+_zoneHO.name
+          _src = 'HO'
         }
+
+        // (2) Zone's own stored coords (from DB after migration)
         if(!_aLat && zone.lat && zone.lng){
-          _aLat = zone.lat; _aLng = zone.lng; _src = 'zone.lat/lng'
+          _aLat = zone.lat; _aLng = zone.lng; _src = 'zone'
         }
+
+        // (3) Runner's stored lat/lng (geocoded during onboarding)
+        const _rn = RUNNERS.find(rx=>rx.id===r.id)
+        if(!_aLat && _rn?.lat && _rn?.lng){
+          _aLat = parseFloat(_rn.lat); _aLng = parseFloat(_rn.lng); _src = 'runner.latLng'
+        }
+
+        // (4) Derive from runner's anchor_hex6 via H3 cellToLatLng — no DB migration needed
+        // This is the key fallback: anchor_hex6 is set during runner onboarding
+        if(!_aLat && _rn?.anchorHex6){
+          try {
+            const [_hLat, _hLng] = h3.cellToLatLng(_rn.anchorHex6)
+            if(_hLat && _hLng){ _aLat = _hLat; _aLng = _hLng; _src = 'anchor_hex6' }
+          } catch(e){}
+        }
+
+        // (5) Derive from runner's anchorHex7 (res-7 anchor, also set during onboarding)
+        if(!_aLat && _rn?.anchorHex7){
+          try {
+            const [_hLat, _hLng] = h3.cellToLatLng(_rn.anchorHex7)
+            if(_hLat && _hLng){ _aLat = _hLat; _aLng = _hLng; _src = 'anchor_hex7' }
+          } catch(e){}
+        }
+
+        // (6) NO ZIP centroid — if we have nothing, skip this zone entirely
+        // Admin must set zone.lat/lng or runner must geocode their address
         if(!_aLat){
-          const _rn = RUNNERS.find(rx=>rx.id===r.id)
-          if(_rn?.lat && _rn?.lng){ _aLat = parseFloat(_rn.lat); _aLng = parseFloat(_rn.lng); _src = 'runner' }
+          console.warn('[RunnerMap] No coordinate anchor for', zone.name,
+            '— runner needs address geocoded or zone needs lat/lng set in DB')
+          return
         }
-        if(!_aLat){
-          const _zip = zone.zip || zone.zips?.[0]
-          if(_zip && ZIP_CENTROIDS[_zip]){
-            _aLat = ZIP_CENTROIDS[_zip][0]; _aLng = ZIP_CENTROIDS[_zip][1]
-            _src = 'ZIP⚠️'
-            console.warn('[RunnerMap]', zone.name, '— ZIP centroid fallback. Run Geocode HOs.')
-          }
-        }
-        if(!_aLat){ console.log('[RunnerMap] No anchor for', zone.name); return }
 
         // ── Compute H3 cells ──────────────────────────────────────────────
         const seedH8 = h3.latLngToCell(_aLat, _aLng, 8)
@@ -10909,9 +10932,14 @@ async function _initAdminMap(){
       const _sig = zips.reduce((best,zp)=>{ const d=sigsByZip[zp]; return(d?.anchorLat&&!best)?d:best }, null)
       if(_sig){ lat=_sig.anchorLat; lng=_sig.anchorLng; _anchorSrc='DB signup' }
     }
+    // Try deriving from stored h3_index before touching ZIP centroid
+    if(!lat && z.h3_index){
+      try { const [_dl,_dg]=h3.cellToLatLng(z.h3_index); if(_dl){ lat=_dl; lng=_dg; _anchorSrc='h3_index→latLng' } } catch(e){}
+    }
     if(!lat){
+      // ZIP centroid last resort — zone outline will be approximate
       const zc = ZIP_CENTROIDS?.[zip] || ZIP_CENTROIDS?.[zips.find(zp=>ZIP_CENTROIDS?.[zp])]
-      if(zc){ lat=zc[0]; lng=zc[1]; _anchorSrc='ZIP centroid ⚠️ (run Geocode HOs to fix)' }
+      if(zc){ lat=zc[0]; lng=zc[1]; _anchorSrc='ZIP centroid ⚠️ (run Geocode HOs)' }
     }
     if(!lat || !lng) return
     console.log('[Map] Zone', z.name, '— anchor:', _anchorSrc, '@', lat.toFixed(5), lng.toFixed(5))
@@ -12495,8 +12523,8 @@ async function hSubmit(){
       // H3 spatial indexing — guaranteed via getH3IndexForAddress() run above hSubmit
       lat:               window._hwGeoLat  || null,
       lng:               window._hwGeoLng  || null,
-      h3_index:          window._hwGeoHex8 || null,  // Res 8 — anchored to exact address
-      h3_zone_res6:      window._hwGeoHex6 || null,  // Res 6 — zone containment
+      h3_index:          window._hwGeoHex8 || null,  // Res 8 — exact address cell
+      h3_zone_res6:      window._hwGeoHex6 || (window._hwGeoHex8 ? (() => { try { return h3.cellToParent(window._hwGeoHex8, 6) } catch(e){ return null } })() : null),
       // Detect if this ZIP is in an active zone or waitlist zone
       status: (() => {
         const matchedZone = ADMIN_ZONES.find(z => {
@@ -13540,7 +13568,28 @@ async function _rnGeocodeSaveAnchor(addr, city, zip){
     // Persist anchor to DB for faster future loads
     const email = currentUser?.email
     if(email){
-      await _supa.from('runners').update({ anchor_hex6: a6, anchor_hex7: a7, updated_at: new Date().toISOString() }).ilike('email', email)
+      // Also update in-memory runner object
+      if(r){ r.lat=coords.lat; r.lng=coords.lng; r.anchorHex6=a6; r.anchorHex7=a8 }
+      const _runnerUpdatePayload = { anchor_hex6: a6, anchor_hex7: a7, updated_at: new Date().toISOString() }
+      // If runner has lat/lng, store those too so map anchor works without HOs
+      if(coords?.lat && coords?.lng){
+        _runnerUpdatePayload.lat = coords.lat
+        _runnerUpdatePayload.lng = coords.lng
+      }
+      await _supa.from('runners').update(_runnerUpdatePayload).ilike('email', email)
+      // Backfill zone.lat/lng from runner anchor if zone lacks coords
+      if(r?.zoneId && a6){
+        try {
+          const [_zLat, _zLng] = h3.cellToLatLng(a6)
+          await _supa.from('zones').update({
+            lat: _zLat, lng: _zLng, h3_index: a6, updated_at: new Date().toISOString()
+          }).eq('id', r.zoneId).is('lat', null)
+          // Update in-memory zone too
+          const _memZ = ADMIN_ZONES.find(z=>z.id===r.zoneId)
+          if(_memZ && !_memZ.lat){ _memZ.lat=_zLat; _memZ.lng=_zLng; _memZ.h3_index=a6 }
+          console.log('[RunnerAnchor] Zone', r.zoneId, 'anchored to', _zLat.toFixed(5), _zLng.toFixed(5))
+        } catch(e){ console.warn('[RunnerAnchor] zone update:', e.message) }
+      }
     }
     if(window._rnRow){ window._rnRow.anchor_hex6=a6; window._rnRow.anchor_hex7=a7 }
   } catch(e){ console.warn('[Anchor] geocode save:', e) }
@@ -14023,10 +14072,12 @@ async function renderRunnerHeatmap(){
     const gc = await _rnPickerGeocode(rnAddr, rnCity, 'AZ', rnZip)
     if(gc){ anchorLat=gc.lat; anchorLng=gc.lng }
   }
-  // Final fallback: ZIP centroid
-  if(!anchorLat && rnZip && ZIP_CENTROIDS[rnZip]){
-    anchorLat = ZIP_CENTROIDS[rnZip][0]
-    anchorLng = ZIP_CENTROIDS[rnZip][1]
+  // Final fallback: derive from stored anchor_hex6 (no ZIP centroid)
+  if(!anchorLat && runnerRow?.anchor_hex6){
+    try {
+      const [_hLat, _hLng] = h3.cellToLatLng(runnerRow.anchor_hex6)
+      if(_hLat){ anchorLat = _hLat; anchorLng = _hLng }
+    } catch(e){}
   }
 
   // ── 4. Build ALL of the runner's assigned zones + adjacent rings ──
@@ -33551,11 +33602,49 @@ async function approveZoneExpansionRequest(reqId, runnerEmail, runnerName, zoneI
     if(zoneId){
       const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
       if(zone){ zone.runners=(zone.runners||0)+1; dbSaveZone(zone) }
-      // Only set zone_id if runner doesn't have a primary zone yet
       await _supa.from('runners').update({ zone_id:zoneId, updated_at:new Date().toISOString() }).eq('email', runnerEmail).is('zone_id', null)
-      // Always add to coverage_zones
       const rn = RUNNERS.find(r => r.email?.toLowerCase()===runnerEmail?.toLowerCase())
       if(rn) await assignRunner(zoneId, rn.id, rn.name)
+
+      // ── gridPath gap-fill: store all path cells between anchor and new zone ──
+      // This ensures ZERO holes between Larry's current zone and the new one
+      if(rn?.anchorHex6 && zone?.h3_index && typeof h3 !== 'undefined'){
+        try {
+          const pathH6s = h3.gridPathCells(rn.anchorHex6, zone.h3_index)
+          if(pathH6s.length > 2){
+            // Middle cells are gap-fills — find or create zone entries for them
+            const gapH6s = pathH6s.slice(1, -1)  // exclude start (anchor) and end (new zone)
+            console.log('[Expansion] gridPath gap-fill: painting', gapH6s.length, 'bridge hex(es) between zones')
+            for(const gapH6 of gapH6s){
+              try {
+                const [gLat, gLng] = h3.cellToLatLng(gapH6)
+                // Check if a zone already exists for this h3_index
+                const { data: existingGap } = await _supa.from('zones')
+                  .select('id').eq('h3_index', gapH6).maybeSingle()
+                if(!existingGap){
+                  // Create a bridge zone (waitlist, auto-named)
+                  const gapZoneRow = {
+                    name:        zone.name + ' Bridge',
+                    label:       'bridge',
+                    status:      'waitlist',
+                    lat:         gLat, lng: gLng,
+                    h3_index:    gapH6,
+                    pilot:       true,
+                    capacity:    10, threshold: 5,
+                    homeowners:  0, runners: 0,
+                    notes:       'Auto-created gridPath bridge between runner zones',
+                    updated_at:  new Date().toISOString(),
+                  }
+                  const { data: gapZone } = await _supa.from('zones').insert(gapZoneRow).select('id').single()
+                  if(gapZone?.id && rn) await assignRunner(gapZone.id, rn.id, rn.name)
+                } else if(existingGap?.id && rn){
+                  await assignRunner(existingGap.id, rn.id, rn.name)
+                }
+              } catch(e){ console.warn('[Expansion] gap zone:', e.message) }
+            }
+          }
+        } catch(e){ console.warn('[Expansion] gridPath gap-fill:', e.message) }
+      }
     }
     sendEmail(runnerEmail, `✅ Zone approved — ${zoneName}`,
       `<p>Hi ${runnerName?.split(' ')[0]||'there'},</p><p>Your request to work in <strong>${zoneName}</strong> has been approved. You'll receive batch offers for this zone going forward.</p><p>— The BinDash Team</p>`,
