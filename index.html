@@ -7407,8 +7407,10 @@ async function loadRunnerRoutes(runnerRow){
       window._currentRunnerRow = runnerRow
       startOfferCountdown(offer.offer_expires_at, windowMins)
 
-      offerBanner.style.display = 'block'
-      offerBanner.innerHTML = `
+      // Offer is shown in the batch card. Banner div kept in DOM but stays hidden.
+      offerBanner.style.display = 'none'
+      // REMOVED: offerBanner.innerHTML — no longer used
+      if(false){ offerBanner.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:18px">📬</span>
@@ -7444,6 +7446,7 @@ async function loadRunnerRoutes(runnerRow){
         <button class="btn btn-outline btn-sm" onclick="showCurrentOfferDetail()">View Details</button>
         <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="declineOffer()">✕ Decline</button>
       </div>`
+    }  // end dead banner block
     } else if(offerBanner){
       offerBanner.style.display = 'none'
     }
@@ -7548,10 +7551,23 @@ async function loadRunnerRoutes(runnerRow){
           </div>
         </div>
         ${urgencyBar}
-        ${isOffer ? `<div style="background:rgba(245,158,11,.06);border-bottom:1px solid rgba(245,158,11,.2);padding:8px 16px;font-size:12px;color:#fbbf24;display:flex;align-items:center;gap:8px">
-          📬 <strong>Route offer pending</strong> — respond before the window closes
-          <button class="btn btn-cyan btn-sm" style="margin-left:auto" onclick="acceptOffer()">✓ Accept $${earn}</button>
-          <button class="btn btn-ghost btn-sm" style="color:#ef4444;font-size:11px" onclick="declineOffer('${batch.id}')">Decline</button>
+        ${isOffer ? `<div style="background:rgba(245,158,11,.08);border-bottom:1px solid rgba(245,158,11,.25);padding:12px 16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <span style="font-size:16px">📬</span>
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:700;color:#fbbf24">Route offer — respond before it expires</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">Expires in <span id="offer-countdown" style="font-weight:700;color:#f59e0b">--:--</span></div>
+            </div>
+            <div style="background:rgba(245,158,11,.2);border-radius:8px;padding:4px 10px;text-align:center;flex-shrink:0">
+              <div style="font-size:9px;color:var(--muted)">EARN</div>
+              <div style="font-size:16px;font-weight:800;color:#fbbf24">$${earn}</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-cyan" style="flex:1;font-size:14px;font-weight:800;padding:10px" onclick="acceptOffer()">✓ Accept — $${earn}</button>
+            <button class="btn btn-outline btn-sm" onclick="showCurrentOfferDetail()">Details</button>
+            <button class="btn btn-ghost btn-sm" style="color:#ef4444" onclick="declineOffer('${batch.id}')">✕ Decline</button>
+          </div>
         </div>` : ''}
         <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
           ${_getRnStopOrder(batch.id, batch.stops).map((s,i)=>`
@@ -9390,48 +9406,118 @@ const ZIP_CENTROIDS = {
   '85323':[33.4454,-112.3194],'85326':[33.3721,-112.5469],'85392':[33.4818,-112.2861],
 }
 
+// ── Geocoding distance validator ─────────────────────────────────────────────
+// Rejects results that are implausibly far from the ZIP centroid.
+// Catches Photon returning a city center instead of the actual street.
+function _geocodeValidate(lat, lng, zip, label){
+  if(!lat || !lng) return false
+  // If we have a ZIP centroid, check distance (Haversine approximation)
+  const ctr = ZIP_CENTROIDS[zip]
+  if(ctr){
+    const dLat = (lat - ctr[0]) * Math.PI / 180
+    const dLng = (lng - ctr[1]) * Math.PI / 180
+    const a = Math.sin(dLat/2)**2 + Math.cos(ctr[0]*Math.PI/180)*Math.cos(lat*Math.PI/180)*Math.sin(dLng/2)**2
+    const distKm = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+    if(distKm > 60){
+      console.warn('[Geocode] '+label+' result rejected — '+distKm.toFixed(1)+'km from ZIP centroid (likely city-level match)')
+      return false
+    }
+    console.log('[Geocode] '+label+' validated — '+distKm.toFixed(2)+'km from ZIP centroid ✅')
+  } else {
+    // No centroid for this ZIP (e.g. Flagstaff) — accept if lat/lng are plausible US coords
+    if(lat < 24 || lat > 50 || lng < -125 || lng > -66){
+      console.warn('[Geocode] '+label+' result rejected — coords outside continental US')
+      return false
+    }
+    console.log('[Geocode] '+label+' accepted (no ZIP centroid to validate against)')
+  }
+  return true
+}
+
 async function geocodeAddress(address, city, state, zip){
-  // 1. Try full address geocode if address provided
-  if(address && address.length > 5 && zip){
-    // Try Photon geocoder (Komoot) — CORS-friendly, no API key, very accurate for US
-    try {
-      const q = encodeURIComponent([address, city, state||'AZ', zip, 'USA'].filter(Boolean).join(' '))
-      const res = await fetch(
-        `https://photon.komoot.io/api/?q=${q}&limit=1&lang=en`,
-        { signal: AbortSignal.timeout(5000) }
-      )
-      const data = await res.json()
-      const feat = data?.features?.[0]
-      if(feat){
-        const [lng, lat] = feat.geometry.coordinates
-        console.log('[H3] Photon match:', feat.properties?.name, feat.properties?.street, lat, lng)
-        return { lat, lng }
-      }
-    } catch(e){ console.warn('[H3] Photon geocode failed:', e.message) }
+  if(!address || address.length <= 5) return null
 
-    // Fallback: Census geocoder
-    try {
-      const parts = [address, city, state||'AZ', zip].filter(Boolean).join(', ')
-      const encoded = encodeURIComponent(parts)
-      const res = await fetch(
-        `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encoded}&benchmark=Public_AR_Current&format=json`,
-        { signal: AbortSignal.timeout(6000) }
-      )
-      const data = await res.json()
-      const match = data?.result?.addressMatches?.[0]
-      if(match){
-        console.log('[H3] Census match:', match.matchedAddress)
-        return { lat: parseFloat(match.coordinates.y), lng: parseFloat(match.coordinates.x) }
-      }
-    } catch(e){ console.warn('[H3] Census geocode failed:', e.message) }
-  }
+  const fullQuery = [address, city, state||'AZ', zip, 'USA'].filter(Boolean).join(' ')
+  const stateStr  = state || 'AZ'
 
-  // 2. Fall back to ZIP centroid
-  if(zip && ZIP_CENTROIDS[zip]){
-    const [lat, lng] = ZIP_CENTROIDS[zip]
-    console.log('[H3] Using ZIP centroid for', zip)
-    return { lat, lng }
-  }
+  // ── Provider 1: Nominatim (OSM) ─────────────────────────────────────────
+  // Best for precise US street addresses including rural/new streets
+  try {
+    const q = encodeURIComponent(fullQuery)
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=3&countrycodes=us&addressdetails=1`,
+      { signal: AbortSignal.timeout(6000), headers: { 'Accept-Language': 'en-US' } }
+    )
+    const data = await res.json()
+    // Pick the result with the most specific type (house > road > suburb > city)
+    const ranked = (data||[]).sort((a,b) => {
+      const order = ['house','building','place','road','neighbourhood','suburb','quarter','city','county','state']
+      return (order.indexOf(a.type)||99) - (order.indexOf(b.type)||99)
+    })
+    const best = ranked[0]
+    if(best?.lat && best?.lon){
+      const lat = parseFloat(best.lat), lng = parseFloat(best.lon)
+      console.log('[Geocode] Nominatim:', best.display_name?.split(',')[0], '| type:', best.type, '|', lat.toFixed(5), lng.toFixed(5))
+      if(_geocodeValidate(lat, lng, zip, 'Nominatim')){
+        // Extra check: reject if result type is city/county/state (too coarse for HO placement)
+        if(['city','county','state','country'].includes(best.type)){
+          console.warn('[Geocode] Nominatim — coarse result type "'+best.type+'" — trying next provider')
+        } else {
+          return { lat, lng, provider: 'nominatim', quality: best.type }
+        }
+      }
+    }
+  } catch(e){ console.warn('[Geocode] Nominatim failed:', e.message) }
+
+  // ── Provider 2: Photon (Komoot) ─────────────────────────────────────────
+  // Good for structured addresses — rejects city-level results
+  try {
+    const q = encodeURIComponent(fullQuery)
+    const res = await fetch(
+      `https://photon.komoot.io/api/?q=${q}&limit=3&lang=en`,
+      { signal: AbortSignal.timeout(5000) }
+    )
+    const data = await res.json()
+    const features = data?.features || []
+    // Pick the most specific result (has housenumber > street only > city)
+    const best = features.find(f => f.properties?.housenumber)
+      || features.find(f => f.properties?.street)
+      || features[0]
+    if(best){
+      const [lng, lat] = best.geometry.coordinates
+      const props = best.properties
+      console.log('[Geocode] Photon:', props?.name||'', props?.street||'', props?.city||'', '|', lat.toFixed(5), lng.toFixed(5))
+      // Reject if no street info — likely a city-center result
+      if(!props?.street && !props?.housenumber){
+        console.warn('[Geocode] Photon — no street match, skipping (city-level result)')
+      } else if(_geocodeValidate(lat, lng, zip, 'Photon')){
+        return { lat, lng, provider: 'photon', quality: props?.housenumber ? 'house' : 'street' }
+      }
+    }
+  } catch(e){ console.warn('[Geocode] Photon failed:', e.message) }
+
+  // ── Provider 3: US Census Geocoder ──────────────────────────────────────
+  // Street-level precision for addressed US properties (not rural/new)
+  try {
+    const parts = [address, city, stateStr, zip].filter(Boolean).join(', ')
+    const res = await fetch(
+      `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(parts)}&benchmark=Public_AR_Current&format=json`,
+      { signal: AbortSignal.timeout(7000) }
+    )
+    const data = await res.json()
+    const match = data?.result?.addressMatches?.[0]
+    if(match){
+      const lat = parseFloat(match.coordinates.y), lng = parseFloat(match.coordinates.x)
+      console.log('[Geocode] Census:', match.matchedAddress, '|', lat.toFixed(5), lng.toFixed(5))
+      if(_geocodeValidate(lat, lng, zip, 'Census')){
+        return { lat, lng, provider: 'census', quality: 'street' }
+      }
+    }
+  } catch(e){ console.warn('[Geocode] Census failed:', e.message) }
+
+  // ── All providers failed — return null (never store ZIP centroid as HO location) ──
+  console.warn('[Geocode] All providers failed for:', address, zip, '— returning null')
+  return null
   return null
 }
 
@@ -10718,12 +10804,13 @@ function showMicroZoneDetail(z){
 async function syncHomeownerToHex(row, table='homeowners'){
   if(!row?.street_address || !row?.zip_code) return { ok:false, reason:'no address' }
 
-  // 1. Geocode the exact street address
-  const gc = await geocodeAddress(row.street_address, row.city||'', 'AZ', row.zip_code)
-  if(!gc?.lat || !gc?.lng) return { ok:false, reason:'geocode failed' }
+  // 1. Geocode the exact street address — multi-provider with validation
+  const gc = await geocodeAddress(row.street_address, row.city||'', row.state||'AZ', row.zip_code)
+  if(!gc?.lat || !gc?.lng) return { ok:false, reason:'geocode failed — no provider matched at street level' }
 
   const lat  = gc.lat
   const lng  = gc.lng
+  console.log('[syncHex]', row.street_address, row.zip_code, '→', lat.toFixed(5), lng.toFixed(5), '('+( gc.provider||'?')+' / '+(gc.quality||'?')+')')
   const hex8 = latLngToHex(lat, lng, H3_RES_CLUSTER)   // res-8 ~0.74km²
   const hex6 = hex8 ? latLngToHex(lat, lng, H3_RES_ZONE) : null  // res-6 zone
 
@@ -24940,6 +25027,72 @@ function detectRouteChanges(zoneId, day, newStops, newRunnerId){
 // 10am edge fn: dispatch-scheduler (fallback + admin reminder email)
 // 1pm edge fn: dispatch-scheduler (final check)
 // 9:15pm edge fn: escalate-missed-routes
+// ── Auto-geocode channel — fires when homeowner address is inserted or updated ──
+// This means any new signup or address edit automatically geocodes to real lat/lng
+// without the admin needing to click "Geocode HOs".
+function _setupAutoGeocodeChannel(){
+  if(!_supa || typeof syncHomeownerToHex !== 'function') return
+
+  // Watch homeowner_signups — new signups with an address
+  _supa.channel('auto-geocode-signups')
+    .on('postgres_changes', {
+      event: '*', schema: 'public', table: 'homeowner_signups',
+    }, async (payload) => {
+      const row = payload.new
+      if(!row?.street_address || !row?.id) return
+      // Skip if already has good coords (lat/lng set and not ZIP centroid)
+      const hasCoords = row.lat && row.lng
+      const isInsert  = payload.eventType === 'INSERT'
+      const addrChanged = payload.eventType === 'UPDATE'
+        && (payload.old?.street_address !== row.street_address || payload.old?.zip_code !== row.zip_code)
+      if(!isInsert && !addrChanged && hasCoords) return
+
+      console.log('[AutoGeocode] Detected', payload.eventType, 'on homeowner_signups:', row.street_address, row.zip_code)
+      // Small delay so the DB row is fully committed
+      await new Promise(r => setTimeout(r, 1500))
+      const result = await syncHomeownerToHex(row, 'homeowner_signups')
+      if(result.ok){
+        console.log('[AutoGeocode] ✅ Auto-geocoded', row.email, '→', result.lat?.toFixed(5), result.lng?.toFixed(5), result.hex8)
+        // If admin Zones map is open, refresh it
+        if(window._adminMap && typeof initAdminZoneMap === 'function'){
+          setTimeout(() => initAdminZoneMap(true), 800)
+        }
+      } else {
+        console.warn('[AutoGeocode] ⚠ Could not geocode', row.email, '—', result.reason)
+      }
+    })
+    .subscribe()
+
+  // Watch homeowners table — address updates from admin editing HO records
+  _supa.channel('auto-geocode-homeowners')
+    .on('postgres_changes', {
+      event: '*', schema: 'public', table: 'homeowners',
+    }, async (payload) => {
+      const row = payload.new
+      if(!row?.street_address || !row?.id) return
+      const addrChanged = payload.eventType === 'UPDATE'
+        && (payload.old?.street_address !== row.street_address || payload.old?.zip_code !== row.zip_code)
+      const isInsert = payload.eventType === 'INSERT'
+      if(!isInsert && !addrChanged) return
+
+      console.log('[AutoGeocode] Detected', payload.eventType, 'on homeowners:', row.street_address, row.zip_code)
+      await new Promise(r => setTimeout(r, 1500))
+      const result = await syncHomeownerToHex(row, 'homeowners')
+      if(result.ok){
+        console.log('[AutoGeocode] ✅ Auto-geocoded homeowner', row.email, '→', result.lat?.toFixed(5), result.lng?.toFixed(5))
+        // Refresh zone anchor if this is the first HO in their zone
+        if(result.hex8 && typeof initAdminZoneMap === 'function' && window._adminMap){
+          setTimeout(() => initAdminZoneMap(true), 1000)
+        }
+      } else {
+        console.warn('[AutoGeocode] ⚠ Could not geocode homeowner', row.email, '—', result.reason)
+      }
+    })
+    .subscribe()
+
+  console.log('[BinDash] Auto-geocode channels active — homeowners and homeowner_signups watched')
+}
+
 function startRouteScheduler(){
   if(window._routeSchedulerRunning) return
   window._routeSchedulerRunning = true
@@ -27803,6 +27956,8 @@ async function initDispatchPage(){
 
   // Start the 10am generate / 1pm release scheduler (idempotent)
   startRouteScheduler()
+  // Auto-geocode channel — listens for new/updated HO addresses and geocodes immediately
+  if(typeof _setupAutoGeocodeChannel === 'function') _setupAutoGeocodeChannel()
 
   // On startup: load live jobs from DB for today. If none exist, auto-generate preview.
   await loadLiveJobsIntoPipeline()
