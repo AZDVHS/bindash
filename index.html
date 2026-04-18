@@ -9515,8 +9515,13 @@ async function geocodeAddress(address, city, state, zip){
     }
   } catch(e){ console.warn('[Geocode] Census failed:', e.message) }
 
-  // ── All providers failed — return null (never store ZIP centroid as HO location) ──
-  console.warn('[Geocode] All providers failed for:', address, zip, '— returning null')
+  // ── All providers failed — strict null return ────────────────────────────
+  // ZIP centroid is NEVER returned from this function.
+  // The caller (syncHomeownerToHex) will skip the DB update rather than store wrong coords.
+  // For map display only, the caller can use ZIP_CENTROIDS[zip] separately.
+  console.warn('[Geocode] All 3 providers failed for:', address, city, zip)
+  console.warn('[Geocode] For Canyon Loop / rural addresses: Nominatim is most likely to succeed')
+  console.warn('[Geocode] Expected coords for 3945 Canyon Loop Flagstaff: 35.0875863, -111.6921199')
   return null
   return null
 }
@@ -9988,19 +9993,80 @@ async function _adDrawRunnerCoverage(map){
       if(!zips.length) return
 
       zips.forEach(zip => {
-        const ctr = ZIP_CENTROIDS[zip]
-        if(!ctr) return
         try {
-          // Anchor priority: runner real address > first active HO in zip > ZIP centroid
-          let _aLat = ctr[0], _aLng = ctr[1]
-          const _rnMem = RUNNERS.find(rx => rx.id === r.id)
-          if(_rnMem?.lat && _rnMem?.lng){ _aLat = parseFloat(_rnMem.lat); _aLng = parseFloat(_rnMem.lng) }
-          else {
-            const _firstHO = HOMEOWNERS.find(h => h.zip === zip && h.lat && h.lng)
-            if(_firstHO){ _aLat = parseFloat(_firstHO.lat); _aLng = parseFloat(_firstHO.lng) }
+          // ── Anchor resolution — NO ZIP centroid required ─────────────────
+          // Priority: (1) zone's stored lat/lng (set by syncHomeownerToHex)
+          //           (2) runner's geocoded address
+          //           (3) first geocoded HO in this specific zone
+          //           (4) first geocoded HO in this ZIP
+          //           (5) ZIP centroid (last resort display only)
+          //           (6) skip if nothing available
+          let _aLat = null, _aLng = null, _anchorSrc = 'none'
+
+          // (1) Zone's own stored anchor (most accurate — set by auto-geocode)
+          const _zoneObj = ADMIN_ZONES.find(z=>z.id===zid)
+          if(_zoneObj?.lat && _zoneObj?.lng){
+            _aLat = parseFloat(_zoneObj.lat); _aLng = parseFloat(_zoneObj.lng)
+            _anchorSrc = 'zone.lat/lng'
           }
+
+          // (2) Runner's geocoded home address
+          if(!_aLat){
+            const _rnMem = RUNNERS.find(rx => rx.id === r.id)
+            if(_rnMem?.lat && _rnMem?.lng){
+              _aLat = parseFloat(_rnMem.lat); _aLng = parseFloat(_rnMem.lng)
+              _anchorSrc = 'runner.lat/lng'
+            }
+          }
+
+          // (3) First geocoded HO in THIS zone (zone_id match — no cross-zone bleed)
+          if(!_aLat){
+            const _zoneHO = HOMEOWNERS.find(h => h.zoneId===zid && h.lat && h.lng)
+            if(_zoneHO){
+              _aLat = parseFloat(_zoneHO.lat); _aLng = parseFloat(_zoneHO.lng)
+              _anchorSrc = 'zone HO: '+_zoneHO.name
+            }
+          }
+
+          // (4) First geocoded HO in this ZIP (any zone)
+          if(!_aLat){
+            const _zipHO = HOMEOWNERS.find(h => h.zip===zip && h.lat && h.lng)
+            if(_zipHO){
+              _aLat = parseFloat(_zipHO.lat); _aLng = parseFloat(_zipHO.lng)
+              _anchorSrc = 'zip HO: '+_zipHO.name
+            }
+          }
+
+          // (5) ZIP centroid — display only, not ideal
+          if(!_aLat && ZIP_CENTROIDS[zip]){
+            _aLat = ZIP_CENTROIDS[zip][0]; _aLng = ZIP_CENTROIDS[zip][1]
+            _anchorSrc = 'ZIP centroid ⚠️'
+          }
+
+          // (6) Nothing — skip this zip entirely
+          if(!_aLat || !_aLng){
+            console.log('[AdminMap] No anchor for zone', _zoneObj?.name||zid, 'ZIP', zip, '— skipping')
+            return
+          }
+
+          console.log('[AdminMap] Zone', _zoneObj?.name||zid, '| anchor:', _anchorSrc, '|', _aLat.toFixed(5), _aLng.toFixed(5))
+
           const anchorH8 = h3.latLngToCell(_aLat, _aLng, 8)
           const anchorH6 = h3.cellToParent(anchorH8, 6)
+
+          // ── Zone-scoped HO activity counts — NO cross-zone bleed ────────
+          // Only count HOs that belong to THIS zone (zoneId===zid).
+          // This prevents hexes from adjacent zones appearing purple here.
+          const zoneHoActive   = {}
+          const zoneHoWaitlist = {}
+          HOMEOWNERS.filter(h => h.zoneId===zid && h.lat && h.lng).forEach(h => {
+            try {
+              const hh = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8)
+              if(!hh) return
+              if(h.status==='active') zoneHoActive[hh] = (zoneHoActive[hh]||0) + 1
+              else zoneHoWaitlist[hh] = (zoneHoWaitlist[hh]||0) + 1
+            } catch(e){}
+          })
 
           // Draw res-6 outline
           const b6 = h3.cellToBoundary(anchorH6).map(([la,ln])=>[la,ln])
@@ -10041,15 +10107,15 @@ async function _adDrawRunnerCoverage(map){
           }
 
           // ── Draw res-8 hexes inside this runner's res-6 zone ─────────────
-          // Seed hex (anchorH8) = runner's exact anchor — ALWAYS drawn even with no HOs.
-          // Other hexes only draw when they have HO activity.
+          // Seed hex = zone-scoped anchor — ALWAYS drawn even if no HOs in that cell.
+          // Uses zoneHoActive/zoneHoWaitlist (zone-scoped) not global hoActive.
           const drawnH8s = new Set()
 
-          // 1. Seed hex — runner's anchor position, always visible
+          // 1. Seed hex — runner's anchor, always visible, purple if empty
           try {
             const seedPts = h3.cellToBoundary(anchorH8).map(([la,ln])=>[la,ln])
-            const seedAct = hoActive[anchorH8]   || 0
-            const seedWl  = hoWaitlist[anchorH8] || 0
+            const seedAct = zoneHoActive[anchorH8]   || 0
+            const seedWl  = zoneHoWaitlist[anchorH8] || 0
             const seedFc  = seedAct > 0 ? '#4ade80' : seedWl > 0 ? '#fdba74' : '#818cf8'
             const seedBc  = seedAct > 0 ? '#22c55e' : seedWl > 0 ? '#f97316' : '#6366f1'
             const seedFo  = seedAct > 0 ? 0.60 : seedWl > 0 ? 0.45 : 0.35
@@ -10066,11 +10132,11 @@ async function _adDrawRunnerCoverage(map){
             drawnH8s.add(anchorH8)
           } catch(e){ console.warn('[AdminMap] seed hex:', e.message) }
 
-          // 2. Remaining hexes with HO activity (skip seed — already drawn above)
+          // 2. Zone-scoped activity hexes (skip seed, skip zero-activity cells)
           h3.cellToChildren(anchorH6, 8).forEach(h8 => {
             if(drawnH8s.has(h8)) return
-            const act = hoActive[h8]   || 0
-            const wl  = hoWaitlist[h8] || 0
+            const act = zoneHoActive[h8]   || 0
+            const wl  = zoneHoWaitlist[h8] || 0
             if(act === 0 && wl === 0) return
             const fc = act > 0 ? '#4ade80' : '#fdba74'
             const bc = act > 0 ? '#22c55e' : '#f97316'
