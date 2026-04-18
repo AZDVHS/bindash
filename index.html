@@ -10395,6 +10395,50 @@ async function _adDrawRunnerCoverage(map){
         } catch(e){ console.warn('[AdminMap] zone draw:', zone?.name, e.message) }
       // end zoneIds.forEach
     })
+
+    // ── Inter-zone connector: draw res-6 hexes between this runner's zones ──
+    // If two of a runner's zones' res-6 anchors are not already neighbors,
+    // find the shortest path of res-6 hexes between them and draw connectors.
+    // This eliminates the visual gap when Larry has non-adjacent zones.
+    const allZoneH6s = []
+    zoneIds.forEach(zid => {
+      const z = ADMIN_ZONES.find(az=>az.id===zid)
+      if(!z?.lat || !z?.lng) return
+      try {
+        const h8 = h3.latLngToCell(z.lat, z.lng, 8)
+        allZoneH6s.push({ h6: h3.cellToParent(h8,6), name: z.name, zid })
+      } catch(e){}
+    })
+    for(let i=0; i<allZoneH6s.length; i++){
+      for(let j=i+1; j<allZoneH6s.length; j++){
+        const a = allZoneH6s[i].h6, b = allZoneH6s[j].h6
+        if(!a || !b || a===b) continue
+        // Check if already neighbors (kRing distance = 1) — no connector needed
+        try {
+          const aNeighbors = new Set(h3.gridDisk(a, 1))
+          if(aNeighbors.has(b)) continue  // touching — no gap to fill
+          // Not neighbors — find path cells at res-6 and draw dim connectors
+          if(typeof h3.gridPathCells === 'function'){
+            const h6Path = h3.gridPathCells(a, b).filter(h => h!==a && h!==b)
+            h6Path.forEach(midH6 => {
+              try {
+                const pts = h3.cellToBoundary(midH6).map(([la,ln])=>[la,ln])
+                const connector = L.polygon(pts, {
+                  color: STROKE, fillColor: 'rgba(79,70,229,0.06)',
+                  fillOpacity: 1, weight: 1, opacity: 0.4, dashArray: '4 6',
+                })
+                connector.bindTooltip(
+                  '<div style="font-size:11px;color:#a5b4fc">🔗 '+name+' coverage corridor</div>'
+                  +'<div style="font-size:10px;color:#94a3b8">Connecting '+allZoneH6s[i].name+' ↔ '+allZoneH6s[j].name+'</div>',
+                  { className:'h3-tip', direction:'top', sticky:true }
+                )
+                connector.addTo(map); layers.push(connector)
+              } catch(e){}
+            })
+          }
+        } catch(e){}
+      }
+    }
   })
 }
 
@@ -11306,16 +11350,41 @@ function showMicroZoneDetail(z){
 // Single source of truth for geocoding any HO row to exact lat/lng + H3 hex.
 // NEVER stores ZIP centroid. If geocode fails, skips the row entirely.
 // table: 'homeowners' | 'homeowner_signups'
+// ── Known exact coordinates — manual overrides for addresses geocoders can't find ─
+// These are sourced from Google Maps pin drops and are authoritative.
+// Key format: 'street_address::zip_code' (lowercase, trimmed)
+const KNOWN_COORDS = {
+  '3945 canyon loop::86004': { lat: 35.08782794850709, lng: -111.69172138878068 },
+  // Add more overrides here as needed: 'address::zip': { lat, lng }
+}
+
 async function syncHomeownerToHex(row, table='homeowners'){
   if(!row?.street_address || !row?.zip_code) return { ok:false, reason:'no address' }
 
-  // 1. Geocode the exact street address — multi-provider with validation
-  const gc = await geocodeAddress(row.street_address, row.city||'', row.state||'AZ', row.zip_code)
-  if(!gc?.lat || !gc?.lng) return { ok:false, reason:'geocode failed — no provider matched at street level' }
+  // 1. Check known-coords override FIRST — authoritative, skips geocoding
+  const _knownKey = (row.street_address.toLowerCase().trim()+'::'+row.zip_code.trim())
+  const _known = KNOWN_COORDS[_knownKey]
 
-  const lat  = gc.lat
-  const lng  = gc.lng
-  console.log('[syncHex]', row.street_address, row.zip_code, '→', lat.toFixed(5), lng.toFixed(5), '('+( gc.provider||'?')+' / '+(gc.quality||'?')+')')
+  // 1a. Also check if row already has valid lat/lng in DB — use those directly
+  const _existingLat = parseFloat(row.lat), _existingLng = parseFloat(row.lng)
+  const _hasDbCoords = _existingLat && _existingLng && !isNaN(_existingLat) && !isNaN(_existingLng)
+
+  let lat, lng, provider = 'db'
+
+  if(_known){
+    lat = _known.lat; lng = _known.lng; provider = 'known_override'
+    console.log('[syncHex] Using known-coords override for', row.street_address, '→', lat.toFixed(6), lng.toFixed(6))
+  } else if(_hasDbCoords){
+    lat = _existingLat; lng = _existingLng; provider = 'existing_db'
+    console.log('[syncHex] Using existing DB coords for', row.street_address, '→', lat.toFixed(6), lng.toFixed(6))
+  } else {
+    // 1b. Geocode the exact street address — multi-provider with validation
+    const gc = await geocodeAddress(row.street_address, row.city||'', row.state||'AZ', row.zip_code)
+    if(!gc?.lat || !gc?.lng) return { ok:false, reason:'geocode failed — no provider matched at street level' }
+    lat = gc.lat; lng = gc.lng; provider = gc.provider||'geocoder'
+  }
+
+  console.log('[syncHex]', row.street_address, row.zip_code, '→', lat.toFixed(5), lng.toFixed(5), '('+provider+')')
   const hex8 = latLngToHex(lat, lng, H3_RES_CLUSTER)   // res-8 ~0.74km²
   const hex6 = hex8 ? latLngToHex(lat, lng, H3_RES_ZONE) : null  // res-6 zone
 
@@ -33503,15 +33572,110 @@ async function dismissScoutFlags(zip, btnEl, reqIdsCsv){
 }
 
 
+// ── _runnerRes6Hexes(runnerEmail) — get all res-6 hexes for a runner's active zones
+async function _runnerRes6Hexes(runnerEmail){
+  const hexes = new Set()
+  try {
+    // From in-memory runner
+    const rn = RUNNERS.find(r => r.email?.toLowerCase() === runnerEmail?.toLowerCase())
+    const zoneIds = new Set([rn?.zoneId, ...(rn?.coverageZones||[])].filter(Boolean))
+    // Also fetch from DB to be sure
+    const { data: dbReqs } = await _supa.from('runner_zone_requests')
+      .select('zone_id').ilike('runner_email', runnerEmail).eq('status','approved')
+    ;(dbReqs||[]).forEach(r => { if(r.zone_id) zoneIds.add(r.zone_id) })
+
+    zoneIds.forEach(zid => {
+      const z = ADMIN_ZONES.find(az => az.id===zid)
+      if(!z) return
+      const lat = z.lat, lng = z.lng
+      if(!lat || !lng) return
+      try {
+        const h8 = h3.latLngToCell(lat, lng, 8)
+        const h6 = h3.cellToParent(h8, 6)
+        hexes.add(h6)
+      } catch(e){}
+    })
+    // Also check anchor_hex6 directly from runners table
+    if(rn?.anchorHex6) hexes.add(rn.anchorHex6)
+  } catch(e){ console.warn('[Adjacency] _runnerRes6Hexes:', e.message) }
+  return hexes
+}
+
+// ── _isZoneContiguous(runnerEmail, newZoneId) — adjacency check ───────────────
+// Returns { ok: bool, reason: string }
+// A zone is valid if its res-6 hex is a kRing(1) neighbor of any existing runner zone.
+async function _isZoneContiguous(runnerEmail, newZoneId){
+  if(typeof h3 === 'undefined') return { ok:true, reason:'h3 not loaded — skipping check' }
+  const newZone = ADMIN_ZONES.find(z => z.id===newZoneId)
+  if(!newZone?.lat || !newZone?.lng) return { ok:true, reason:'new zone has no lat/lng — cannot validate' }
+
+  try {
+    const newH8  = h3.latLngToCell(newZone.lat, newZone.lng, 8)
+    const newH6  = h3.cellToParent(newH8, 6)
+    const existingH6s = await _runnerRes6Hexes(runnerEmail)
+
+    if(existingH6s.size === 0) return { ok:true, reason:'runner has no existing zones — first zone always valid' }
+
+    // kRing(hex, 1) = the hex itself + its 6 immediate neighbors
+    for(const existH6 of existingH6s){
+      const neighbors = new Set(h3.gridDisk(existH6, 1))  // gridDisk = kRing in h3-js v4
+      if(neighbors.has(newH6)){
+        return { ok:true, reason:`res-6 ${newH6} is neighbor of ${existH6}` }
+      }
+    }
+    // Not a neighbor of any existing zone
+    const existingNames = [...existingH6s].slice(0,3).join(', ')
+    return {
+      ok: false,
+      reason: `res-6 hex ${newH6} is not adjacent to any of runner's current zones (${existingNames})`,
+      newH6,
+      existingH6s: [...existingH6s],
+    }
+  } catch(e){
+    return { ok:true, reason:'adjacency check error — allowing: '+e.message }
+  }
+}
+
 async function approveZoneExpansionRequest(reqId, runnerEmail, runnerName, zoneId, zoneName){
   try {
+    // ── Adjacency validation ─────────────────────────────────────────────
+    if(zoneId && typeof h3 !== 'undefined'){
+      const adj = await _isZoneContiguous(runnerEmail, zoneId)
+      if(!adj.ok){
+        const override = confirm(
+          `⚠️ Adjacency Warning
+
+` +
+          `${zoneName} is NOT contiguous with ${runnerName}'s current zones.
+` +
+          `This will create a visual gap in coverage.
+
+` +
+          `Reason: ${adj.reason}
+
+` +
+          `Approve anyway? (The zone will be saved but may appear disconnected on the map.)`
+        )
+        if(!override){
+          showToast('Approval cancelled — zone is not contiguous', 'info', 4000)
+          return
+        }
+        console.warn('[Expansion] Admin overrode adjacency check for', runnerName, zoneName, adj.reason)
+      } else {
+        console.log('[Expansion] Adjacency validated:', runnerName, zoneName, '—', adj.reason)
+      }
+    }
+
     await _supa.from('runner_zone_requests').update({ status:'approved', updated_at:new Date().toISOString() }).eq('id', reqId)
-    // If zone exists, add runner to it
+
     if(zoneId){
       const zone = ADMIN_ZONES.find(z=>z.id===zoneId)
       if(zone){ zone.runners=(zone.runners||0)+1; dbSaveZone(zone) }
-      // Update runner record with new zone
+      // Only set zone_id if runner doesn't have a primary zone yet
       await _supa.from('runners').update({ zone_id:zoneId, updated_at:new Date().toISOString() }).eq('email', runnerEmail).is('zone_id', null)
+      // Always add to coverage_zones
+      const rn = RUNNERS.find(r => r.email?.toLowerCase()===runnerEmail?.toLowerCase())
+      if(rn) await assignRunner(zoneId, rn.id, rn.name)
     }
     sendEmail(runnerEmail, `✅ Zone approved — ${zoneName}`,
       `<p>Hi ${runnerName?.split(' ')[0]||'there'},</p><p>Your request to work in <strong>${zoneName}</strong> has been approved. You'll receive batch offers for this zone going forward.</p><p>— The BinDash Team</p>`,
