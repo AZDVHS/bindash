@@ -10072,8 +10072,8 @@ async function _adDrawRunnerCoverage(map){
   if(typeof h3 === 'undefined' || typeof L === 'undefined') return
   const layers = window._adMapRunnerLayers
 
-  // ── 1. Fresh approved zone assignments from DB ─────────────────────────
-  const runnerZoneMap = {}  // runner_email (lower) -> Set of zone_ids
+  // ── 1. Load approved zone assignments from DB ─────────────────────────────
+  const runnerZoneMap = {}
   try {
     const { data: reqs } = await _supa.from('runner_zone_requests')
       .select('runner_email,zone_id').eq('status','approved').not('zone_id','is',null)
@@ -10083,9 +10083,9 @@ async function _adDrawRunnerCoverage(map){
       if(!runnerZoneMap[em]) runnerZoneMap[em] = new Set()
       runnerZoneMap[em].add(r.zone_id)
     })
-  } catch(e){ console.warn('[AdminMap] reqs:', e.message) }
+  } catch(e){ console.warn('[RunnerMap] zone requests:', e.message) }
 
-  // Merge DB coverage_zones into in-memory RUNNERS
+  // Merge DB coverage into in-memory RUNNERS
   try {
     const { data: dbR } = await _supa.from('runners')
       .select('id,email,zone_id,coverage_zones').not('status','eq','inactive')
@@ -10093,8 +10093,9 @@ async function _adDrawRunnerCoverage(map){
       const r = RUNNERS.find(x=>x.id===row.id)
       if(!r) return
       try {
-        const raw = row.coverage_zones
-        const ids = raw ? (typeof raw==='string'?JSON.parse(raw):raw) : []
+        const ids = row.coverage_zones
+          ? (typeof row.coverage_zones==='string' ? JSON.parse(row.coverage_zones) : row.coverage_zones)
+          : []
         if(ids.length) r.coverageZones = ids
       } catch(e){}
       if(row.zone_id && !r.zoneId) r.zoneId = row.zone_id
@@ -10104,342 +10105,156 @@ async function _adDrawRunnerCoverage(map){
         r.coverageZones = [...merged]
       }
     })
-  } catch(e){ console.warn('[AdminMap] runner refresh:', e.message) }
+  } catch(e){ console.warn('[RunnerMap] runner refresh:', e.message) }
 
-  // ── 2. HO demand by res-8 hex — use real geocoded h3_index, not ZIP centroid ──
-  const hoActive   = {}  // h8 -> count
-  const hoWaitlist = {}  // h8 -> count
-  try {
-    const { data: sigs } = await _supa.from('homeowner_signups')
-      .select('zip_code,status,h3_index,lat,lng').limit(3000)
-    ;(sigs||[]).forEach(s => {
-      try {
-        // Priority: (1) stored h3_index (real geocoded address hex)
-        //           (2) lat/lng if available → compute hex now
-        //           (3) ZIP centroid only if absolutely nothing else
-        let h8 = s.h3_index || null
-        if(!h8 && s.lat && s.lng){
-          h8 = h3.latLngToCell(parseFloat(s.lat), parseFloat(s.lng), 8)
-        }
-        if(!h8 && s.zip_code && ZIP_CENTROIDS[s.zip_code]){
-          const ctr = ZIP_CENTROIDS[s.zip_code]
-          h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
-        }
-        if(!h8) return
-        if(s.status === 'approved') hoActive[h8] = (hoActive[h8]||0) + 1
-        else if(['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)){
-          hoWaitlist[h8] = (hoWaitlist[h8]||0) + 1
-        }
-      } catch(e){}
-    })
-    // Also count from homeowners table (approved HOs who may have real h3_index)
-    const { data: hwRows } = await _supa.from('homeowners')
-      .select('h3_index,hex_id,lat,lng,status').in('status',['active','waitlist']).limit(2000)
-    ;(hwRows||[]).forEach(hw => {
-      try {
-        let h8 = hw.h3_index || hw.hex_id || null
-        if(!h8 && hw.lat && hw.lng) h8 = h3.latLngToCell(parseFloat(hw.lat), parseFloat(hw.lng), 8)
-        if(!h8) return
-        if(hw.status === 'active') hoActive[h8] = (hoActive[h8]||0) + 1
-        else hoWaitlist[h8] = (hoWaitlist[h8]||0) + 1
-      } catch(e){}
-    })
-  } catch(e){ console.warn('[AdminMap] HO demand:', e.message) }
+  // ── 2. Zone-scoped HO activity — keyed by zone_id → h8 → count ──────────
+  // Uses HOMEOWNERS in-memory (exact geocoded coords, already loaded)
+  // Only counts HOs that have real lat/lng (not ZIP centroid)
+  const hoByZone = {}  // zone_id -> { h8 -> { active: N, waitlist: N } }
+  HOMEOWNERS.filter(h => h.lat && h.lng && h.zoneId).forEach(h => {
+    try {
+      const h8 = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8)
+      if(!h8) return
+      if(!hoByZone[h.zoneId]) hoByZone[h.zoneId] = {}
+      if(!hoByZone[h.zoneId][h8]) hoByZone[h.zoneId][h8] = { active:0, waitlist:0 }
+      if(h.status==='active') hoByZone[h.zoneId][h8].active++
+      else hoByZone[h.zoneId][h8].waitlist++
+    } catch(e){}
+  })
 
-  // ── 3. Draw each runner ────────────────────────────────────────────────
   const STROKE = '#4f46e5'
-  const FILL   = 'rgba(79,70,229,0.08)'
+  const FILL   = 'rgba(79,70,229,0.10)'
 
+  // ── 3. Draw each runner ───────────────────────────────────────────────────
   RUNNERS.filter(r => r.status !== 'INACTIVE').forEach(r => {
     const name = r.name || 'Runner'
     const em   = (r.email||'').toLowerCase()
 
-    // All zone IDs for this runner
     const zoneIds = new Set([
       ...(r.coverageZones||[]),
       r.zoneId||'',
       ...(runnerZoneMap[em]||[]),
     ].filter(Boolean))
-
-    // No zones — skip (no phantom outlines)
     if(zoneIds.size === 0) return
 
-    // ── Draw each runner zone — keyed by zone_id, no zip dependency ────────
     zoneIds.forEach(zid => {
       const zone = ADMIN_ZONES.find(z=>z.id===zid)
       if(!zone) return
 
       try {
-        // ── Anchor: zone_id-first, strict priority, no ZIP centroid stored ──
-        // (1) zone.lat/lng — set by syncHomeownerToHex (real geocoded address)
-        // (2) runner.lat/lng — geocoded runner home
-        // (3) first geocoded HO with zoneId===zid (zone-exact)
-        // (4) ZIP centroid display-only (last resort — never stored to DB)
-        let _aLat = null, _aLng = null, _anchorSrc = 'none'
+        // ── Anchor resolution: real coords, no ZIP centroid stored ──────────
+        // Priority: (1) first geocoded HO in this zone
+        //           (2) zone.lat/lng from DB (if migration run)
+        //           (3) runner.lat/lng
+        //           (4) ZIP centroid — display only, logs warning
+        let _aLat = null, _aLng = null, _src = ''
 
-        if(zone.lat && zone.lng){
-          _aLat = zone.lat; _aLng = zone.lng
-          _anchorSrc = 'zone.lat/lng ✅'
+        const _zoneHO = HOMEOWNERS.find(h => h.zoneId===zid && h.lat && h.lng)
+        if(_zoneHO){
+          _aLat = parseFloat(_zoneHO.lat); _aLng = parseFloat(_zoneHO.lng)
+          _src = 'HO:'+_zoneHO.name
+        }
+        if(!_aLat && zone.lat && zone.lng){
+          _aLat = zone.lat; _aLng = zone.lng; _src = 'zone.lat/lng'
         }
         if(!_aLat){
-          const _rn = RUNNERS.find(rx => rx.id === r.id)
-          if(_rn?.lat && _rn?.lng){ _aLat = parseFloat(_rn.lat); _aLng = parseFloat(_rn.lng); _anchorSrc = 'runner.lat/lng' }
+          const _rn = RUNNERS.find(rx=>rx.id===r.id)
+          if(_rn?.lat && _rn?.lng){ _aLat = parseFloat(_rn.lat); _aLng = parseFloat(_rn.lng); _src = 'runner' }
         }
-        if(!_aLat){
-          const _ho = HOMEOWNERS.find(h => h.zoneId===zid && h.lat && h.lng)
-          if(_ho){ _aLat = parseFloat(_ho.lat); _aLng = parseFloat(_ho.lng); _anchorSrc = 'zone HO: '+_ho.name }
-        }
-        // Last resort: ZIP centroid (display only — never use for DB writes)
         if(!_aLat){
           const _zip = zone.zip || zone.zips?.[0]
           if(_zip && ZIP_CENTROIDS[_zip]){
             _aLat = ZIP_CENTROIDS[_zip][0]; _aLng = ZIP_CENTROIDS[_zip][1]
-            _anchorSrc = 'ZIP centroid ⚠️ — run Geocode HOs to fix'
+            _src = 'ZIP⚠️'
+            console.warn('[RunnerMap]', zone.name, '— ZIP centroid fallback. Run Geocode HOs.')
           }
         }
-        if(!_aLat || !_aLng){
-          console.log('[AdminMap] No anchor for', zone.name, '— skipping (run Geocode HOs)')
-          return
-        }
+        if(!_aLat){ console.log('[RunnerMap] No anchor for', zone.name); return }
 
-        console.log('[AdminMap]', zone.name, '| src:', _anchorSrc, '|', _aLat.toFixed(5), _aLng.toFixed(5))
+        // ── Compute H3 cells ──────────────────────────────────────────────
+        const seedH8 = h3.latLngToCell(_aLat, _aLng, 8)
+        const zoneH6 = h3.cellToParent(seedH8, 6)
+        const isPrimary = zid === r.zoneId
 
-        // ── H3 cells ─────────────────────────────────────────────────────────
-        // runnerHex = the zone's exact anchor cell — ALWAYS rendered purple
-        const runnerHex = h3.latLngToCell(_aLat, _aLng, 8)
-        const zoneH6    = h3.cellToParent(runnerHex, 6)
-
-        // ── Bridge hexes between this zone and runner's other zones ─────────
-        // Fills gaps so adjacent zones are visually contiguous (no holes)
-        const _bridgeHexes = new Set()
-        const _otherZoneIds = [...zoneIds].filter(oz => oz !== zid)
-        _otherZoneIds.forEach(oz => {
-          const _oz = ADMIN_ZONES.find(z=>z.id===oz)
-          const _ozLat = _oz?.lat || null, _ozLng = _oz?.lng || null
-          if(!_ozLat || !_ozLng) return
-          try {
-            const _ozHex = h3.latLngToCell(_ozLat, _ozLng, 8)
-            // gridPathCells: straight-line corridor between the two zone anchors
-            // Each path cell also gets a gridDisk(1) ring so the corridor is
-            // visually solid rather than a dotted single-cell-wide line
-            if(typeof h3.gridPathCells === 'function'){
-              const pathCells = h3.gridPathCells(runnerHex, _ozHex)
-              pathCells.forEach(h => {
-                _bridgeHexes.add(h)
-                try { h3.gridDisk(h, 1).forEach(n => _bridgeHexes.add(n)) } catch(e){}
-              })
-            } else {
-              // h3-js < 3.7 fallback: disk around midpoint
-              const midLat = (_aLat + _ozLat) / 2, midLng = (_aLng + _ozLng) / 2
-              h3.gridDisk(h3.latLngToCell(midLat, midLng, 8), 2).forEach(h => _bridgeHexes.add(h))
-            }
-          } catch(e){}
+        // ── Draw res-6 zone outline ───────────────────────────────────────
+        const b6 = h3.cellToBoundary(zoneH6).map(([la,ln])=>[la,ln])
+        const ol = L.polygon(b6, {
+          color:      STROKE,
+          fillColor:  FILL,
+          fillOpacity: 1,
+          weight:     isPrimary ? 2.5 : 1.5,
+          dashArray:  isPrimary ? null : '6 4',
+          opacity:    1,
         })
+        ol.bindTooltip(
+          '<div style="font-size:12px;font-weight:700;color:#f1f5f9">🚐 '+name+'</div>'
+          +'<div style="font-size:11px;color:#cbd5e1;margin-top:2px">'+(zone.name||'Zone')+'</div>'
+          +(isPrimary
+            ? '<div style="font-size:10px;color:#4ade80;margin-top:2px">● Lead zone · '+_src+'</div>'
+            : '<div style="font-size:10px;color:#94a3b8;margin-top:2px">+ Additional · '+_src+'</div>'),
+          { direction:'top', className:'h3-tip', sticky:false }
+        )
+        ol.addTo(map); layers.push(ol)
 
-        // ── Zone-scoped HO counts — strict zone_id filter, no cross-zone bleed
-        const zoneHoActive   = {}
-        const zoneHoWaitlist = {}
-        HOMEOWNERS.filter(h => h.zoneId===zid && h.lat && h.lng).forEach(h => {
+        // ── Runner initials badge (primary zone only) ─────────────────────
+        if(isPrimary){
           try {
-            const hh = h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8)
-            if(!hh) return
-            if(h.status==='active') zoneHoActive[hh] = (zoneHoActive[hh]||0) + 1
-            else zoneHoWaitlist[hh] = (zoneHoWaitlist[hh]||0) + 1
-          } catch(e){}
-        })
-
-        // Aliases for legacy references below
-        const anchorH8 = runnerHex
-        const anchorH6 = zoneH6
-
-          // Draw res-6 outline
-          const b6 = h3.cellToBoundary(anchorH6).map(([la,ln])=>[la,ln])
-          const isPrimary = zid === r.zoneId
-          const ol = L.polygon(b6, {
-            color: STROKE, fillColor: FILL, fillOpacity: 1,
-            weight: isPrimary ? 2.5 : 1.5,
-            dashArray: isPrimary ? null : '6,4',
-            opacity: 1,
-          })
-          ol.bindTooltip(
-            '<div style="font-size:12px;font-weight:700;color:#f1f5f9">🚐 '+name+'</div>'
-            +'<div style="font-size:11px;color:#cbd5e1;margin-top:2px">'+(zone?.name||('ZIP '+zip))+'</div>'
-            +(isPrimary
-              ? '<div style="font-size:10px;color:#4ade80;margin-top:2px">● Lead zone</div>'
-              : '<div style="font-size:10px;color:#94a3b8;margin-top:2px">+ Additional zone</div>'),
-            { direction:'top', className:'h3-tip', sticky:false }
-          )
-          ol.addTo(map); layers.push(ol)
-
-          // ── Adjacent res-6 fill for gap elimination ──────────────────────
-          // If this runner has other zones whose res-6 anchor is adjacent to
-          // this one, draw the connecting cells so the coverage looks continuous
-          try {
-            const myNeighbors6 = h3.gridDisk(zoneH6, 1).filter(h => h !== zoneH6)
-            const otherZone6s = [...zoneIds]
-              .filter(oz => oz !== zid)
-              .map(oz => {
-                const _oz = ADMIN_ZONES.find(z=>z.id===oz)
-                if(!_oz?.lat || !_oz?.lng) return null
-                try {
-                  const _oh8 = h3.latLngToCell(_oz.lat, _oz.lng, 8)
-                  return h3.cellToParent(_oh8, 6)
-                } catch(e){ return null }
-              })
-              .filter(Boolean)
-
-            myNeighbors6.forEach(nh6 => {
-              // Only draw if: (a) this neighbor is one of the runner's other zones
-              // OR (b) there's a res-6 gap hex between two of the runner's zones
-              const isRunnerZone = otherZone6s.includes(nh6)
-              if(!isRunnerZone) return
-              try {
-                const gapPts = h3.cellToBoundary(nh6).map(([la,ln])=>[la,ln])
-                // Already drawn by the other zone iteration — just add a bridge marker
-                const gapLine = L.polygon(gapPts, {
-                  color: STROKE, fillColor: 'transparent',
-                  weight: 1, opacity: 0.3, dashArray: '4 4',
-                })
-                gapLine.addTo(map); layers.push(gapLine)
-              } catch(e){}
+            const initials = name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'R'
+            const pin = L.divIcon({
+              html: '<div style="width:26px;height:26px;background:#4f46e5;border:2px solid #818cf8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.4)">'+initials+'</div>',
+              className:'', iconAnchor:[13,13],
             })
+            const mk = L.marker([_aLat, _aLng], { icon:pin, zIndexOffset:1000 })
+            mk.bindTooltip('<div style="font-size:12px;font-weight:700;color:#f1f5f9">🚐 '+name+'</div><div style="font-size:10px;color:#94a3b8">'+zone.name+'</div>', { className:'h3-tip', direction:'top' })
+            mk.addTo(map); layers.push(mk)
           } catch(e){}
+        }
 
-          // Runner anchor dot — initials badge at exact lat/lng (primary zone only)
-          if(isPrimary && _aLat && _aLng){
-            try {
-              const initials = name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'R'
-              const pin = L.divIcon({
-                html: '<div style="width:26px;height:26px;background:#4f46e5;border:2px solid #818cf8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35)">'+initials+'</div>',
-                className:'', iconAnchor:[13,13],
-              })
-              const runnerMarker = L.marker([_aLat, _aLng], { icon:pin, zIndexOffset:1000 })
-              runnerMarker.bindTooltip(
-                '<div style="font-size:12px;font-weight:700;color:#f1f5f9">🚐 '+name+'</div>'
-                +'<div style="font-size:11px;color:#818cf8;margin-top:2px">Runner anchor</div>'
-                +'<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+(zone?.name||('ZIP '+zip))+'</div>',
-                { className:'h3-tip', direction:'top', sticky:false }
-              )
-              runnerMarker.addTo(map); layers.push(runnerMarker)
-            } catch(e){}
-          }
+        // ── Seed hex (anchor) — always filled purple ──────────────────────
+        const zoneActivity = hoByZone[zid] || {}
+        const drawnH8s = new Set()
+        try {
+          const seedAct = zoneActivity[seedH8]?.active   || 0
+          const seedWl  = zoneActivity[seedH8]?.waitlist || 0
+          const seedFc  = seedAct > 0 ? '#4ade80' : seedWl > 0 ? '#fdba74' : '#818cf8'
+          const seedBc  = seedAct > 0 ? '#22c55e' : seedWl > 0 ? '#f97316' : '#6366f1'
+          const seedPts = h3.cellToBoundary(seedH8).map(([la,ln])=>[la,ln])
+          const seedPoly = L.polygon(seedPts, { color:seedBc, fillColor:seedFc, fillOpacity:0.55, weight:2.5, opacity:1 })
+          seedPoly.bindTooltip(
+            '<div style="font-size:12px;font-weight:700;color:#f1f5f9">📍 '+name+' anchor</div>'
+            +(seedAct>0 ? '<div style="font-size:11px;color:#4ade80">'+seedAct+' active HO'+(seedAct!==1?'s':'')+'</div>' : '')
+            +(seedWl>0  ? '<div style="font-size:11px;color:#fdba74">'+seedWl+' waitlisted</div>' : '')
+            +(seedAct===0&&seedWl===0 ? '<div style="font-size:11px;color:#818cf8">⚡ No HOs yet</div>' : ''),
+            { className:'h3-tip', direction:'top', sticky:false }
+          )
+          seedPoly.addTo(map); layers.push(seedPoly)
+          drawnH8s.add(seedH8)
+        } catch(e){ console.warn('[RunnerMap] seed hex:', e.message) }
 
-          // ── Draw res-8 hexes inside this runner's res-6 zone ─────────────
-          // Seed hex = zone-scoped anchor — ALWAYS drawn even if no HOs in that cell.
-          // Uses zoneHoActive/zoneHoWaitlist (zone-scoped) not global hoActive.
-          const drawnH8s = new Set()
-
-          // 0. Bridge hexes — fill the visual gap between runner's zone centers
-          // These live OUTSIDE the zone's res-6 cell — do NOT filter by zoneH6.
-          // Only skip hexes already drawn (seed or activity hex from this zone).
-          _bridgeHexes.forEach(h8 => {
-            if(drawnH8s.has(h8)) return
-            try {
-              const bridgePts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
-              const bridgeHex = L.polygon(bridgePts, {
-                color:'#6366f1', fillColor:'#6366f1', fillOpacity:0.18,
-                weight:1.5, opacity:0.6,
-              })
-              bridgeHex.bindTooltip(
-                '<div style="font-size:11px;font-weight:700;color:#f1f5f9">🔗 '+name+' (bridge)</div>'
-                +'<div style="font-size:10px;color:#94a3b8">Connecting '+name+' zones</div>',
-                { className:'h3-tip', direction:'top', sticky:true }
-              )
-              bridgeHex.addTo(map); layers.push(bridgeHex)
-              drawnH8s.add(h8)
-            } catch(e){}
-          })
-
-          // 1. Seed hex — runner's anchor, always visible, purple if empty
+        // ── HO activity hexes inside this zone's res-6 ───────────────────
+        h3.cellToChildren(zoneH6, 8).forEach(h8 => {
+          if(drawnH8s.has(h8)) return
+          const act = zoneActivity[h8]?.active   || 0
+          const wl  = zoneActivity[h8]?.waitlist || 0
+          if(act === 0 && wl === 0) return
           try {
-            const seedPts = h3.cellToBoundary(anchorH8).map(([la,ln])=>[la,ln])
-            const seedAct = zoneHoActive[anchorH8]   || 0
-            const seedWl  = zoneHoWaitlist[anchorH8] || 0
-            const seedFc  = seedAct > 0 ? '#4ade80' : seedWl > 0 ? '#fdba74' : '#818cf8'
-            const seedBc  = seedAct > 0 ? '#22c55e' : seedWl > 0 ? '#f97316' : '#6366f1'
-            const seedFo  = seedAct > 0 ? 0.60 : seedWl > 0 ? 0.45 : 0.35
-            const seedHex = L.polygon(seedPts, { color:seedBc, fillColor:seedFc, fillOpacity:seedFo, weight:2.5, opacity:1 })
-            seedHex.bindTooltip(
-              '<div style="font-size:12px;font-weight:700;color:#f1f5f9">📍 '+name+' Anchor Hex</div>'
-              +(seedAct>0?'<div style="font-size:11px;color:#4ade80;margin-top:2px">🟢 '+seedAct+' active HO'+(seedAct!==1?'s':'')+'</div>':'')
-              +(seedWl>0?'<div style="font-size:11px;color:#fdba74;margin-top:2px">🟡 '+seedWl+' waitlisted</div>':'')
-              +(seedAct===0&&seedWl===0?'<div style="font-size:11px;color:#818cf8;margin-top:2px">⚡ Runner anchor — no HOs yet</div>':'')
-              +'<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+(zone?.name||('ZIP '+zip))+'</div>',
-              { className:'h3-tip', direction:'top', sticky:false }
-            )
-            seedHex.addTo(map); layers.push(seedHex)
-            drawnH8s.add(anchorH8)
-          } catch(e){ console.warn('[AdminMap] seed hex:', e.message) }
-
-          // 2. Zone-scoped activity hexes (skip seed, skip zero-activity cells)
-          h3.cellToChildren(anchorH6, 8).forEach(h8 => {
-            if(drawnH8s.has(h8)) return
-            const act = zoneHoActive[h8]   || 0
-            const wl  = zoneHoWaitlist[h8] || 0
-            if(act === 0 && wl === 0) return
             const fc = act > 0 ? '#4ade80' : '#fdba74'
             const bc = act > 0 ? '#22c55e' : '#f97316'
-            const fo = act > 0 ? 0.55 : 0.35
-            try {
-              const pts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
-              const hex = L.polygon(pts, { color:bc, fillColor:fc, fillOpacity:fo, weight:1.5, opacity:1 })
-              hex.bindTooltip(
-                '<div style="font-size:11px;font-weight:700;color:#f1f5f9">'
-                +(act>0?'🟢 '+act+' active HO'+(act!==1?'s':''):'🟡 '+wl+' waitlisted')
-                +'</div><div style="font-size:10px;color:#94a3b8">'+name+' zone</div>',
-                { className:'h3-tip', direction:'top', sticky:true }
-              )
-              hex.addTo(map); layers.push(hex)
-            } catch(e){}
-          })
-        } catch(e){ console.warn('[AdminMap] zone draw:', zone?.name, e.message) }
-      // end zoneIds.forEach
-    })
+            const pts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
+            const hex = L.polygon(pts, { color:bc, fillColor:fc, fillOpacity:0.50, weight:1.5, opacity:1 })
+            hex.bindTooltip(
+              '<div style="font-size:11px;font-weight:700;color:#f1f5f9">'+(act>0?'🟢 '+act+' active':'🟡 '+wl+' waitlisted')+'</div>'
+              +'<div style="font-size:10px;color:#94a3b8">'+name+' · '+zone.name+'</div>',
+              { className:'h3-tip', direction:'top', sticky:true }
+            )
+            hex.addTo(map); layers.push(hex)
+            drawnH8s.add(h8)
+          } catch(e){}
+        })
 
-    // ── Inter-zone connector: draw res-6 hexes between this runner's zones ──
-    // If two of a runner's zones' res-6 anchors are not already neighbors,
-    // find the shortest path of res-6 hexes between them and draw connectors.
-    // This eliminates the visual gap when Larry has non-adjacent zones.
-    const allZoneH6s = []
-    zoneIds.forEach(zid => {
-      const z = ADMIN_ZONES.find(az=>az.id===zid)
-      if(!z?.lat || !z?.lng) return
-      try {
-        const h8 = h3.latLngToCell(z.lat, z.lng, 8)
-        allZoneH6s.push({ h6: h3.cellToParent(h8,6), name: z.name, zid })
-      } catch(e){}
-    })
-    for(let i=0; i<allZoneH6s.length; i++){
-      for(let j=i+1; j<allZoneH6s.length; j++){
-        const a = allZoneH6s[i].h6, b = allZoneH6s[j].h6
-        if(!a || !b || a===b) continue
-        // Check if already neighbors (kRing distance = 1) — no connector needed
-        try {
-          const aNeighbors = new Set(h3.gridDisk(a, 1))
-          if(aNeighbors.has(b)) continue  // touching — no gap to fill
-          // Not neighbors — find path cells at res-6 and draw dim connectors
-          if(typeof h3.gridPathCells === 'function'){
-            const h6Path = h3.gridPathCells(a, b).filter(h => h!==a && h!==b)
-            h6Path.forEach(midH6 => {
-              try {
-                const pts = h3.cellToBoundary(midH6).map(([la,ln])=>[la,ln])
-                const connector = L.polygon(pts, {
-                  color: '#6366f1', fillColor: '#6366f1',
-                  fillOpacity: 0.15, weight: 1.5, opacity: 0.5, dashArray: '5 4',
-                })
-                connector.bindTooltip(
-                  '<div style="font-size:11px;color:#a5b4fc">🔗 '+name+' coverage corridor</div>'
-                  +'<div style="font-size:10px;color:#94a3b8">Connecting '+allZoneH6s[i].name+' ↔ '+allZoneH6s[j].name+'</div>',
-                  { className:'h3-tip', direction:'top', sticky:true }
-                )
-                connector.addTo(map); layers.push(connector)
-              } catch(e){}
-            })
-          }
-        } catch(e){}
-      }
-    }
-  })
+      } catch(e){ console.warn('[RunnerMap] zone', zone?.name, e.message) }
+    })  // end zoneIds.forEach
+  })  // end RUNNERS.forEach
 }
 
 async function _initSignupMap(lat, lng, zones){
