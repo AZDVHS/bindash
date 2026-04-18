@@ -10219,11 +10219,19 @@ async function _adDrawRunnerCoverage(map){
           if(!_ozLat || !_ozLng) return
           try {
             const _ozHex = h3.latLngToCell(_ozLat, _ozLng, 8)
-            // Use gridDisk to find intermediate cells between zone centers
-            // gridPathCells gives a straight line, gridDisk gives a cluster
+            // gridPathCells: straight-line corridor between the two zone anchors
+            // Each path cell also gets a gridDisk(1) ring so the corridor is
+            // visually solid rather than a dotted single-cell-wide line
             if(typeof h3.gridPathCells === 'function'){
-              // gridPathCells: cells along the line from runnerHex to _ozHex
-              h3.gridPathCells(runnerHex, _ozHex).forEach(h => _bridgeHexes.add(h))
+              const pathCells = h3.gridPathCells(runnerHex, _ozHex)
+              pathCells.forEach(h => {
+                _bridgeHexes.add(h)
+                try { h3.gridDisk(h, 1).forEach(n => _bridgeHexes.add(n)) } catch(e){}
+              })
+            } else {
+              // h3-js < 3.7 fallback: disk around midpoint
+              const midLat = (_aLat + _ozLat) / 2, midLng = (_aLng + _ozLng) / 2
+              h3.gridDisk(h3.latLngToCell(midLat, midLng, 8), 2).forEach(h => _bridgeHexes.add(h))
             }
           } catch(e){}
         })
@@ -10321,17 +10329,22 @@ async function _adDrawRunnerCoverage(map){
           // Uses zoneHoActive/zoneHoWaitlist (zone-scoped) not global hoActive.
           const drawnH8s = new Set()
 
-          // 0. Bridge hexes — fill gaps between this zone and adjacent runner zones
+          // 0. Bridge hexes — fill the visual gap between runner's zone centers
+          // These live OUTSIDE the zone's res-6 cell — do NOT filter by zoneH6.
+          // Only skip hexes already drawn (seed or activity hex from this zone).
           _bridgeHexes.forEach(h8 => {
             if(drawnH8s.has(h8)) return
-            // Only draw bridges that are inside this zone's res-6 boundary
             try {
-              if(h3.cellToParent(h8, 6) !== zoneH6) return
               const bridgePts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
               const bridgeHex = L.polygon(bridgePts, {
-                color:'#6366f1', fillColor:'#6366f1', fillOpacity:0.12,
-                weight:1, opacity:0.4, dashArray:'3 3',
+                color:'#6366f1', fillColor:'#6366f1', fillOpacity:0.18,
+                weight:1.5, opacity:0.6,
               })
+              bridgeHex.bindTooltip(
+                '<div style="font-size:11px;font-weight:700;color:#f1f5f9">🔗 '+name+' (bridge)</div>'
+                +'<div style="font-size:10px;color:#94a3b8">Connecting '+name+' zones</div>',
+                { className:'h3-tip', direction:'top', sticky:true }
+              )
               bridgeHex.addTo(map); layers.push(bridgeHex)
               drawnH8s.add(h8)
             } catch(e){}
@@ -10590,8 +10603,14 @@ async function _updateAdminMapLayers(){
       const ringColor = _dotActive ? '#22c55e' : _dotWait ? '#f97316' : '#64748b'
       const hoName = ((ho.first_name||'')+' '+(ho.last_name||'')).trim()||ho.email?.split('@')[0]||'Homeowner'
       const hoAddr = ho.street_address||ho.address||'No address'
-      // Use EXACT lat/lng from profile — never use hex centroid
-      const dot = L.circleMarker([parseFloat(ho.lat), parseFloat(ho.lng)], {
+      // EXACT lat/lng from DB record — ZIP centroid is never used here
+      // If ho.lat/ho.lng are null, the filter above (h.lat && h.lng) skips this HO
+      const _hoLat = parseFloat(ho.lat), _hoLng = parseFloat(ho.lng)
+      if(!_hoLat || !_hoLng || isNaN(_hoLat) || isNaN(_hoLng)){
+        console.warn('[Map] Skipping dot for', ho.email, '— no valid coords')
+        return
+      }
+      const dot = L.circleMarker([_hoLat, _hoLng], {
         radius: isAnchor ? 7 : 5,
         color:       isAnchor ? '#06d6a0' : ringColor,
         fillColor:   isAnchor ? '#06d6a0' : dotColor,
