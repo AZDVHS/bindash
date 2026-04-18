@@ -9838,19 +9838,25 @@ async function _adDrawRunnerCoverage(map){
     })
   } catch(e){ console.warn('[AdminMap] runner refresh:', e.message) }
 
-  // ── 2. HO demand by res-8 hex ──────────────────────────────────────────
+  // ── 2. HO demand by res-8 hex — use real geocoded h3_index, not ZIP centroid ──
   const hoActive   = {}  // h8 -> count
   const hoWaitlist = {}  // h8 -> count
   try {
     const { data: sigs } = await _supa.from('homeowner_signups')
-      .select('zip_code,status,h3_index').limit(3000)
+      .select('zip_code,status,h3_index,lat,lng').limit(3000)
     ;(sigs||[]).forEach(s => {
       try {
-        // Always use ZIP centroid for consistency — h3_index may have bad geocodes
-        // that place dots in wrong zip areas (e.g. 85383 when they're in 85207)
-        const ctr = ZIP_CENTROIDS[s.zip_code]
-        if(!ctr) return
-        const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+        // Priority: (1) stored h3_index (real geocoded address hex)
+        //           (2) lat/lng if available → compute hex now
+        //           (3) ZIP centroid only if absolutely nothing else
+        let h8 = s.h3_index || null
+        if(!h8 && s.lat && s.lng){
+          h8 = h3.latLngToCell(parseFloat(s.lat), parseFloat(s.lng), 8)
+        }
+        if(!h8 && s.zip_code && ZIP_CENTROIDS[s.zip_code]){
+          const ctr = ZIP_CENTROIDS[s.zip_code]
+          h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+        }
         if(!h8) return
         if(s.status === 'approved') hoActive[h8] = (hoActive[h8]||0) + 1
         else if(['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)){
@@ -9858,7 +9864,19 @@ async function _adDrawRunnerCoverage(map){
         }
       } catch(e){}
     })
-  } catch(e){ console.warn('[AdminMap] HO:', e.message) }
+    // Also count from homeowners table (approved HOs who may have real h3_index)
+    const { data: hwRows } = await _supa.from('homeowners')
+      .select('h3_index,hex_id,lat,lng,status').in('status',['active','waitlist']).limit(2000)
+    ;(hwRows||[]).forEach(hw => {
+      try {
+        let h8 = hw.h3_index || hw.hex_id || null
+        if(!h8 && hw.lat && hw.lng) h8 = h3.latLngToCell(parseFloat(hw.lat), parseFloat(hw.lng), 8)
+        if(!h8) return
+        if(hw.status === 'active') hoActive[h8] = (hoActive[h8]||0) + 1
+        else hoWaitlist[h8] = (hoWaitlist[h8]||0) + 1
+      } catch(e){}
+    })
+  } catch(e){ console.warn('[AdminMap] HO demand:', e.message) }
 
   // ── 3. Draw each runner ────────────────────────────────────────────────
   const STROKE = '#4f46e5'
@@ -9917,14 +9935,59 @@ async function _adDrawRunnerCoverage(map){
           )
           ol.addTo(map); layers.push(ol)
 
-          // Draw only res-8 hexes that have HO activity
+          // Runner anchor dot — initials badge at exact lat/lng (primary zone only)
+          if(isPrimary && _aLat && _aLng){
+            try {
+              const initials = name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'R'
+              const pin = L.divIcon({
+                html: '<div style="width:26px;height:26px;background:#4f46e5;border:2px solid #818cf8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35)">'+initials+'</div>',
+                className:'', iconAnchor:[13,13],
+              })
+              const runnerMarker = L.marker([_aLat, _aLng], { icon:pin, zIndexOffset:1000 })
+              runnerMarker.bindTooltip(
+                '<div style="font-size:12px;font-weight:700;color:#f1f5f9">🚐 '+name+'</div>'
+                +'<div style="font-size:11px;color:#818cf8;margin-top:2px">Runner anchor</div>'
+                +'<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+(zone?.name||('ZIP '+zip))+'</div>',
+                { className:'h3-tip', direction:'top', sticky:false }
+              )
+              runnerMarker.addTo(map); layers.push(runnerMarker)
+            } catch(e){}
+          }
+
+          // ── Draw res-8 hexes inside this runner's res-6 zone ─────────────
+          // Seed hex (anchorH8) = runner's exact anchor — ALWAYS drawn even with no HOs.
+          // Other hexes only draw when they have HO activity.
+          const drawnH8s = new Set()
+
+          // 1. Seed hex — runner's anchor position, always visible
+          try {
+            const seedPts = h3.cellToBoundary(anchorH8).map(([la,ln])=>[la,ln])
+            const seedAct = hoActive[anchorH8]   || 0
+            const seedWl  = hoWaitlist[anchorH8] || 0
+            const seedFc  = seedAct > 0 ? '#4ade80' : seedWl > 0 ? '#fdba74' : '#818cf8'
+            const seedBc  = seedAct > 0 ? '#22c55e' : seedWl > 0 ? '#f97316' : '#6366f1'
+            const seedFo  = seedAct > 0 ? 0.60 : seedWl > 0 ? 0.45 : 0.35
+            const seedHex = L.polygon(seedPts, { color:seedBc, fillColor:seedFc, fillOpacity:seedFo, weight:2.5, opacity:1 })
+            seedHex.bindTooltip(
+              '<div style="font-size:12px;font-weight:700;color:#f1f5f9">📍 '+name+' Anchor Hex</div>'
+              +(seedAct>0?'<div style="font-size:11px;color:#4ade80;margin-top:2px">🟢 '+seedAct+' active HO'+(seedAct!==1?'s':'')+'</div>':'')
+              +(seedWl>0?'<div style="font-size:11px;color:#fdba74;margin-top:2px">🟡 '+seedWl+' waitlisted</div>':'')
+              +(seedAct===0&&seedWl===0?'<div style="font-size:11px;color:#818cf8;margin-top:2px">⚡ Runner anchor — no HOs yet</div>':'')
+              +'<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+(zone?.name||('ZIP '+zip))+'</div>',
+              { className:'h3-tip', direction:'top', sticky:false }
+            )
+            seedHex.addTo(map); layers.push(seedHex)
+            drawnH8s.add(anchorH8)
+          } catch(e){ console.warn('[AdminMap] seed hex:', e.message) }
+
+          // 2. Remaining hexes with HO activity (skip seed — already drawn above)
           h3.cellToChildren(anchorH6, 8).forEach(h8 => {
+            if(drawnH8s.has(h8)) return
             const act = hoActive[h8]   || 0
             const wl  = hoWaitlist[h8] || 0
             if(act === 0 && wl === 0) return
-
-            const fc = act > 0 ? '#16a34a' : '#d97706'
-            const bc = act > 0 ? '#15803d' : '#b45309'
+            const fc = act > 0 ? '#4ade80' : '#fdba74'
+            const bc = act > 0 ? '#22c55e' : '#f97316'
             const fo = act > 0 ? 0.55 : 0.35
             try {
               const pts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
@@ -10784,11 +10847,15 @@ async function geocodeExistingHomeowners(){
       '#22c55e'
     )
 
-    // Refresh in-memory data + map
+    // Refresh in-memory data + map + runner layer (seed hexes move with anchor)
     await loadHomeownersFromSupabase()
     await loadMicroZones()
     if(typeof initAdminZoneMap === 'function'){
       setTimeout(() => initAdminZoneMap(true), 600)
+    }
+    // Also refresh runner coverage so seed hexes re-anchor to updated coords
+    if(typeof _refreshAdminMapRunners === 'function'){
+      setTimeout(() => _refreshAdminMapRunners(), 1200)
     }
 
   } catch(e){
