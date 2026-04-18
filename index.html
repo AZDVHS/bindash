@@ -9567,8 +9567,10 @@ function _geocodeValidate(lat, lng, zip, label){
     const dLng = (lng - ctr[1]) * Math.PI / 180
     const a = Math.sin(dLat/2)**2 + Math.cos(ctr[0]*Math.PI/180)*Math.cos(lat*Math.PI/180)*Math.sin(dLng/2)**2
     const distKm = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-    if(distKm > 60){
-      console.warn('[Geocode] '+label+' result rejected — '+distKm.toFixed(1)+'km from ZIP centroid (likely city-level match)')
+    // 80km threshold: covers Phoenix metro (Mesa to Surprise = ~60km)
+    // Flagstaff is 220km from Phoenix — correctly rejected if ZIP centroid available
+    if(distKm > 80){
+      console.warn('[Geocode] '+label+' result rejected — '+distKm.toFixed(1)+'km from ZIP centroid (likely wrong city)')
       return false
     }
     console.log('[Geocode] '+label+' validated — '+distKm.toFixed(2)+'km from ZIP centroid ✅')
@@ -9589,31 +9591,58 @@ async function geocodeAddress(address, city, state, zip){
   const fullQuery = [address, city, state||'AZ', zip, 'USA'].filter(Boolean).join(' ')
   const stateStr  = state || 'AZ'
 
-  // ── Provider 1: Nominatim (OSM) ─────────────────────────────────────────
-  // Best for precise US street addresses including rural/new streets
+  // ── Provider 1: Nominatim (OSM) — structured search for best accuracy ──
+  // Uses city+state+zip as separate fields to avoid wrong-city matches
   try {
-    const q = encodeURIComponent(fullQuery)
+    // Structured query: street + city + state + postalcode → most precise
+    // Add geographic bias toward the address's region using ZIP centroid
+    // This forces Nominatim to prefer results near where the address should be
+    const _ctr = (zip && ZIP_CENTROIDS[zip]) ? ZIP_CENTROIDS[zip] : [33.45, -112.07]
+    const _bias = 0.8  // degrees (~90km) bounding box around ZIP centroid
+    const nomParams = new URLSearchParams({
+      street:      address,
+      city:        city || '',
+      state:       stateStr,
+      postalcode:  zip,
+      country:     'US',
+      format:      'json',
+      limit:       '5',
+      addressdetails: '1',
+      // Viewbox nudges result ranking toward this area (not a hard filter)
+      viewbox:     `${_ctr[1]-_bias},${_ctr[0]-_bias},${_ctr[1]+_bias},${_ctr[0]+_bias}`,
+      bounded:     '0',  // 0 = prefer viewbox but still match outside if needed
+    }).toString()
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=3&countrycodes=us&addressdetails=1`,
-      { signal: AbortSignal.timeout(6000), headers: { 'Accept-Language': 'en-US' } }
+      `https://nominatim.openstreetmap.org/search?${nomParams}`,
+      { signal: AbortSignal.timeout(7000), headers: { 'Accept-Language': 'en-US', 'User-Agent': 'BinDash/1.0' } }
     )
     const data = await res.json()
-    // Pick the result with the most specific type (house > road > suburb > city)
+    // Rank: house number match > building > road > anything coarser
+    const typeOrder = ['house','building','place','road','neighbourhood','suburb','quarter','city','county','state']
     const ranked = (data||[]).sort((a,b) => {
-      const order = ['house','building','place','road','neighbourhood','suburb','quarter','city','county','state']
-      return (order.indexOf(a.type)||99) - (order.indexOf(b.type)||99)
+      const ai = typeOrder.indexOf(a.type), bi = typeOrder.indexOf(b.type)
+      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi)
     })
     const best = ranked[0]
     if(best?.lat && best?.lon){
       const lat = parseFloat(best.lat), lng = parseFloat(best.lon)
-      console.log('[Geocode] Nominatim:', best.display_name?.split(',')[0], '| type:', best.type, '|', lat.toFixed(5), lng.toFixed(5))
-      if(_geocodeValidate(lat, lng, zip, 'Nominatim')){
-        // Extra check: reject if result type is city/county/state (too coarse for HO placement)
-        if(['city','county','state','country'].includes(best.type)){
-          console.warn('[Geocode] Nominatim — coarse result type "'+best.type+'" — trying next provider')
-        } else {
-          return { lat, lng, provider: 'nominatim', quality: best.type }
+      console.log('[Geocode] Nominatim structured:', best.display_name?.split(',').slice(0,2).join(','), '| type:', best.type, '|', lat.toFixed(5), lng.toFixed(5))
+      if(['city','county','state','country','administrative'].includes(best.type)){
+        console.warn('[Geocode] Nominatim — coarse type "'+best.type+'" for', address, '— trying freetext fallback')
+        // Try again with free-text query (catches unusual street names like Canyon Loop)
+        const q2 = encodeURIComponent([address, zip, 'USA'].join(' '))
+        const res2 = await fetch(`https://nominatim.openstreetmap.org/search?q=${q2}&format=json&limit=3&countrycodes=us&addressdetails=1`, { signal: AbortSignal.timeout(5000), headers:{'Accept-Language':'en-US','User-Agent':'BinDash/1.0'} })
+        const data2 = await res2.json()
+        const best2 = (data2||[]).filter(r => !['city','county','state','country','administrative'].includes(r.type))[0]
+        if(best2?.lat && best2?.lon){
+          const lat2=parseFloat(best2.lat), lng2=parseFloat(best2.lon)
+          console.log('[Geocode] Nominatim freetext hit:', best2.display_name?.split(',')[0], '| type:', best2.type, '|', lat2.toFixed(5), lng2.toFixed(5))
+          if(_geocodeValidate(lat2, lng2, zip, 'Nominatim-freetext')){
+            return { lat:lat2, lng:lng2, provider:'nominatim', quality:best2.type }
+          }
         }
+      } else if(_geocodeValidate(lat, lng, zip, 'Nominatim')){
+        return { lat, lng, provider:'nominatim', quality:best.type }
       }
     }
   } catch(e){ console.warn('[Geocode] Nominatim failed:', e.message) }
@@ -9671,7 +9700,6 @@ async function geocodeAddress(address, city, state, zip){
   console.warn('[Geocode] All 3 providers failed for:', address, city, zip)
   console.warn('[Geocode] For Canyon Loop / rural addresses: Nominatim is most likely to succeed')
   console.warn('[Geocode] Expected coords for 3945 Canyon Loop Flagstaff: 35.0875863, -111.6921199')
-  return null
   return null
 }
 
@@ -10181,6 +10209,25 @@ async function _adDrawRunnerCoverage(map){
         const runnerHex = h3.latLngToCell(_aLat, _aLng, 8)
         const zoneH6    = h3.cellToParent(runnerHex, 6)
 
+        // ── Bridge hexes between this zone and runner's other zones ─────────
+        // Fills gaps so adjacent zones are visually contiguous (no holes)
+        const _bridgeHexes = new Set()
+        const _otherZoneIds = [...zoneIds].filter(oz => oz !== zid)
+        _otherZoneIds.forEach(oz => {
+          const _oz = ADMIN_ZONES.find(z=>z.id===oz)
+          const _ozLat = _oz?.lat || null, _ozLng = _oz?.lng || null
+          if(!_ozLat || !_ozLng) return
+          try {
+            const _ozHex = h3.latLngToCell(_ozLat, _ozLng, 8)
+            // Use gridDisk to find intermediate cells between zone centers
+            // gridPathCells gives a straight line, gridDisk gives a cluster
+            if(typeof h3.gridPathCells === 'function'){
+              // gridPathCells: cells along the line from runnerHex to _ozHex
+              h3.gridPathCells(runnerHex, _ozHex).forEach(h => _bridgeHexes.add(h))
+            }
+          } catch(e){}
+        })
+
         // ── Zone-scoped HO counts — strict zone_id filter, no cross-zone bleed
         const zoneHoActive   = {}
         const zoneHoWaitlist = {}
@@ -10216,6 +10263,40 @@ async function _adDrawRunnerCoverage(map){
           )
           ol.addTo(map); layers.push(ol)
 
+          // ── Adjacent res-6 fill for gap elimination ──────────────────────
+          // If this runner has other zones whose res-6 anchor is adjacent to
+          // this one, draw the connecting cells so the coverage looks continuous
+          try {
+            const myNeighbors6 = h3.gridDisk(zoneH6, 1).filter(h => h !== zoneH6)
+            const otherZone6s = [...zoneIds]
+              .filter(oz => oz !== zid)
+              .map(oz => {
+                const _oz = ADMIN_ZONES.find(z=>z.id===oz)
+                if(!_oz?.lat || !_oz?.lng) return null
+                try {
+                  const _oh8 = h3.latLngToCell(_oz.lat, _oz.lng, 8)
+                  return h3.cellToParent(_oh8, 6)
+                } catch(e){ return null }
+              })
+              .filter(Boolean)
+
+            myNeighbors6.forEach(nh6 => {
+              // Only draw if: (a) this neighbor is one of the runner's other zones
+              // OR (b) there's a res-6 gap hex between two of the runner's zones
+              const isRunnerZone = otherZone6s.includes(nh6)
+              if(!isRunnerZone) return
+              try {
+                const gapPts = h3.cellToBoundary(nh6).map(([la,ln])=>[la,ln])
+                // Already drawn by the other zone iteration — just add a bridge marker
+                const gapLine = L.polygon(gapPts, {
+                  color: STROKE, fillColor: 'transparent',
+                  weight: 1, opacity: 0.3, dashArray: '4 4',
+                })
+                gapLine.addTo(map); layers.push(gapLine)
+              } catch(e){}
+            })
+          } catch(e){}
+
           // Runner anchor dot — initials badge at exact lat/lng (primary zone only)
           if(isPrimary && _aLat && _aLng){
             try {
@@ -10239,6 +10320,22 @@ async function _adDrawRunnerCoverage(map){
           // Seed hex = zone-scoped anchor — ALWAYS drawn even if no HOs in that cell.
           // Uses zoneHoActive/zoneHoWaitlist (zone-scoped) not global hoActive.
           const drawnH8s = new Set()
+
+          // 0. Bridge hexes — fill gaps between this zone and adjacent runner zones
+          _bridgeHexes.forEach(h8 => {
+            if(drawnH8s.has(h8)) return
+            // Only draw bridges that are inside this zone's res-6 boundary
+            try {
+              if(h3.cellToParent(h8, 6) !== zoneH6) return
+              const bridgePts = h3.cellToBoundary(h8).map(([la,ln])=>[la,ln])
+              const bridgeHex = L.polygon(bridgePts, {
+                color:'#6366f1', fillColor:'#6366f1', fillOpacity:0.12,
+                weight:1, opacity:0.4, dashArray:'3 3',
+              })
+              bridgeHex.addTo(map); layers.push(bridgeHex)
+              drawnH8s.add(h8)
+            } catch(e){}
+          })
 
           // 1. Seed hex — runner's anchor, always visible, purple if empty
           try {
@@ -10511,28 +10608,21 @@ async function _updateAdminMapLayers(){
     } catch(e){}
   })
 
-  // Zone outlines (no fitBounds — view preserved)
-  let sigsByZip = {}
-  try {
-    const { data: sigs } = await _supa.from('homeowner_signups')
-      .select('zip_code,status,first_name,last_name,lat,lng,street_address,city,created_at')
-      .not('status','in','("cancelled","rejected")')
-      .order('created_at',{ascending:true}).limit(2000)
-    ;(sigs||[]).forEach(s => {
-      if(!s.zip_code) return
-      if(!sigsByZip[s.zip_code]) sigsByZip[s.zip_code] = { active:0, waitlist:0, names:[], anchorLat:null, anchorLng:null, individuals:[] }
-      const isActive = s.status==='approved'
-      const isWaitlist = ['waitlisted','waitlist_pending','pending_review','payment_pending'].includes(s.status)
-      if(isActive) sigsByZip[s.zip_code].active++
-      else if(isWaitlist) sigsByZip[s.zip_code].waitlist++
-      const _name = ((s.first_name||'')+' '+(s.last_name||'')).trim()
-      sigsByZip[s.zip_code].names.push(_name)
-      if(s.lat && s.lng){
-        sigsByZip[s.zip_code].individuals.push({ lat:parseFloat(s.lat), lng:parseFloat(s.lng), name:_name||'Homeowner', zip:s.zip_code, address:[s.street_address,s.city].filter(Boolean).join(', ')||'', createdAt:s.created_at||'', status:isActive?'active':'waitlist' })
-        if(!sigsByZip[s.zip_code].anchorLat){ sigsByZip[s.zip_code].anchorLat=parseFloat(s.lat); sigsByZip[s.zip_code].anchorLng=parseFloat(s.lng) }
-      }
-    })
-  } catch(e){ console.warn('[Map] sigsByZip update:', e.message) }
+  // Zone outlines — build sigsByZip from in-memory HOMEOWNERS (no extra Supabase fetch)
+  // This avoids async race conditions during debounced updates
+  const sigsByZip = {}
+  HOMEOWNERS.forEach(h => {
+    const zip = h.zip || ''
+    if(!zip) return
+    if(!sigsByZip[zip]) sigsByZip[zip] = { active:0, waitlist:0, anchorLat:null, anchorLng:null }
+    if(h.status==='active') sigsByZip[zip].active++
+    else sigsByZip[zip].waitlist++
+    // Use exact geocoded lat/lng — not ZIP centroid
+    if(h.lat && h.lng && !sigsByZip[zip].anchorLat){
+      sigsByZip[zip].anchorLat = parseFloat(h.lat)
+      sigsByZip[zip].anchorLng = parseFloat(h.lng)
+    }
+  })
 
   // Zone res-6 outlines (using zone.lat/lng — no ZIP centroid)
   ADMIN_ZONES.filter(z=>z.status!=='inactive').forEach(z=>{
@@ -10957,18 +11047,25 @@ async function _initAdminMap(){
     } catch(e){ console.warn('[Map] zone outline:', e.message) }
   })
 
-  // ── FIT BOUNDS ─────────────────────────────────────────────────────────
-  if(bounds.length > 0){
-    try {
-      window._adminMap.fitBounds(bounds, {padding:[40,40], maxZoom:15, animate:false})
-      console.log('[Map] fitBounds complete, points:', bounds.length)
-    } catch(e){
+  // ── FIT BOUNDS — FIRST LOAD ONLY ──────────────────────────────────────
+  // Only call fitBounds/setView during the very first initialization.
+  // _adminMapInitialized is set AFTER this block runs, so this check is safe.
+  const _isFirstInit = !window._adminMapInitialized
+  if(_isFirstInit){
+    if(bounds.length > 0){
+      try {
+        window._adminMap.fitBounds(bounds, {padding:[40,40], maxZoom:15, animate:false})
+        console.log('[Map] First-load fitBounds, points:', bounds.length)
+      } catch(e){
+        window._adminMap.setView([defLat, defLng], 12)
+        console.warn('[Map] fitBounds failed, using default view:', e.message)
+      }
+    } else {
       window._adminMap.setView([defLat, defLng], 12)
-      console.warn('[Map] fitBounds failed, using default view:', e.message)
+      console.log('[Map] First-load default view at', defLat, defLng)
     }
   } else {
-    window._adminMap.setView([defLat, defLng], 12)
-    console.log('[Map] No bounds — default view at', defLat, defLng)
+    console.log('[Map] Re-init skipped fitBounds — viewport preserved at zoom', window._adminMap.getZoom())
   }
 
   // ── INVALIDATE SIZE — critical after container was hidden ───────────────
@@ -10992,11 +11089,13 @@ async function _initAdminMap(){
           else if(l.getLatLng) rPts.push(l.getLatLng())
         } catch(e){}
       })
-      if(rPts.length && bounds.length){
-        const allPts = [...bounds.map(b=>Array.isArray(b)?b:null).filter(Boolean), ...rPts]
-        window._adminMap.fitBounds(allPts, { padding:[30,30], maxZoom:13, animate:false })
-      } else if(rPts.length){
-        window._adminMap.fitBounds(rPts, { padding:[30,30], maxZoom:13, animate:false })
+      if(_isFirstInit){
+        if(rPts.length && bounds.length){
+          const allPts = [...bounds.map(b=>Array.isArray(b)?b:null).filter(Boolean), ...rPts]
+          window._adminMap.fitBounds(allPts, { padding:[30,30], maxZoom:13, animate:false })
+        } else if(rPts.length){
+          window._adminMap.fitBounds(rPts, { padding:[30,30], maxZoom:13, animate:false })
+        }
       }
     } catch(e){}
   }
@@ -11340,10 +11439,7 @@ async function geocodeExistingHomeowners(){
     if(typeof initAdminZoneMap === 'function'){
       setTimeout(() => initAdminZoneMap(true), 600)
     }
-    // Also refresh runner coverage so seed hexes re-anchor to updated coords
-    if(typeof _refreshAdminMapRunners === 'function'){
-      setTimeout(() => _refreshAdminMapRunners(), 1200)
-    }
+    // Runner coverage refreshed automatically via _scheduleMapLayerUpdate above
 
   } catch(e){
     updateProgress('❌ Error: ' + e.message, '#ef4444')
@@ -16629,22 +16725,10 @@ async function _refreshAdminMapRunners(){
     ;(window._adMapRunnerLayers||[]).forEach(l=>{ try{l.remove()}catch(e){} })
     window._adMapRunnerLayers = []
     await _adDrawRunnerCoverage(map)
-    // After runner layers load, extend fitBounds to show them too
-    try {
-      const allPts = []
-      ;(window._adMapRunnerLayers||[]).forEach(l => {
-        try {
-          const bounds = l.getBounds ? l.getBounds() : null
-          if(bounds) { allPts.push(bounds.getNorthEast()); allPts.push(bounds.getSouthWest()) }
-          else if(l.getLatLng) allPts.push(l.getLatLng())
-        } catch(e){}
-      })
-      if(allPts.length > 2){
-        const current = map.getBounds()
-        const extended = L.latLngBounds([...allPts, current.getNorthEast(), current.getSouthWest()])
-        map.fitBounds(extended, { padding:[30,30], maxZoom:14, animate:true })
-      }
-    } catch(e){}
+    // ── NO fitBounds here — user's zoom/pan is preserved ──────────────────
+    // Runner layers are drawn at their actual lat/lng positions.
+    // Only the first _initAdminMap() call is allowed to set the viewport.
+    console.log('[Map] Runner layers refreshed — viewport preserved (zoom:', map.getZoom(), ')')
   }
 }
 
