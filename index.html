@@ -22355,6 +22355,12 @@ async function saveHWDetail(hwId){
   const newZone    = document.getElementById('hwd-zone')?.value            || hw.zoneId
   const newRunner  = document.getElementById('hwd-runner')?.value          || null
   const newStatus  = document.getElementById('hwd-status')?.value          || hw.status
+  // Guard: never silently promote waitlist → active via edit form
+  // Admin must explicitly choose Active in the dropdown
+  const _statusSel = document.getElementById('hwd-status')
+  const _finalStatus = (_statusSel && _statusSel.value)
+    ? _statusSel.value
+    : hw.status  // keep whatever DB has if field missing
   const newNotes   = document.getElementById('hwd-notes')?.value?.trim()   || ''
   // Coordinate edit — optional, only update if fields exist and values are valid
   const _newLatRaw = document.getElementById('hwd-lat-'+hwId)?.value
@@ -22451,7 +22457,7 @@ async function saveHWDetail(hwId){
     collection_day:   newDay   || null,
     collection_day_2: newDay2  || null,
     plan_id:          finalPlanKey,
-    status:           newStatus,
+    status:           _finalStatus || newStatus,
     ...(_coordsChanged ? {
       lat:     _newLat,
       lng:     _newLng,
@@ -22504,10 +22510,17 @@ function showReassignZone(hwId){
   openM()
 }
 
-function assignHWZone(hwId, zoneId){
+async function assignHWZone(hwId, zoneId){
   const hw=HOMEOWNERS.find(x=>x.id===hwId); if(!hw) return
   hw.zoneId=zoneId; renderHomeownerList()
   showToast(hw.name+' moved to '+getHWZoneName(hw)+' ✅','ok')
+  // Persist to both tables — do NOT change status
+  try {
+    const _upd = { zone_id: zoneId, updated_at: new Date().toISOString() }
+    await _supa.from('homeowners').update(_upd).eq('email', hw.email)
+    await _supa.from('homeowner_signups').update(_upd).ilike('email', hw.email)
+    console.log('[BinDash] Zone reassigned:', hw.name, '->', zoneId)
+  } catch(e){ console.warn('[BinDash] assignHWZone save:', e.message) }
 }
 
 function showReassignRunner(hwId){
@@ -32370,9 +32383,17 @@ async function loadHomeownersFromSupabase(){
       seenEmails.add(key)
       // Merge: supplement homeowners row with signup row for fields only in signups
       const signup = signupsByEmail[key] || {}
+      // Determine correct status: if signup says waitlist(_approved/_pending), honour that
+      // even if homeowners.status was accidentally set to 'active'
+      const _wlStatuses = ['waitlist_approved','waitlist','waitlist_pending','waitlisted']
+      const _signupIsWl = _wlStatuses.includes(signup.status)
+      const _hwIsWl     = _wlStatuses.includes(row.status)
+      const _mergedStatus = (_signupIsWl || _hwIsWl) ? 'waitlist' : (row.status || signup.status || 'active')
       const merged = {
         ...signup,   // signup fields as base (has collection_day_2, service_notes etc)
-        ...row,      // homeowners fields override (more authoritative for status, zone etc)
+        ...row,      // homeowners fields override (more authoritative for zone, runner etc)
+        // Status: waitlist wins if EITHER table indicates it
+        status: _mergedStatus,
         // Explicitly prefer signup values for split-day fields if homeowners row is blank
         collection_day_2: row.collection_day_2 || signup.collection_day_2 || null,
         service_notes:    row.service_notes    || signup.service_notes    || null,
