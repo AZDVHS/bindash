@@ -1493,10 +1493,15 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
   padding: 7px 11px !important;
   font-size: 12px !important;
   box-shadow: 0 4px 12px rgba(0,0,0,.4) !important;
-  max-width: 240px !important;
-  line-height: 1.5 !important;
+  max-width: 280px !important;
+  min-width: 160px !important;
+  line-height: 1.6 !important;
   white-space: normal !important;
 }
+.h3-tip hr { border:none; border-top:1px solid rgba(255,255,255,.12) !important; margin:5px 0 !important; }
+.h3-tip .tip-label { font-size:9px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; opacity:.5; }
+.h3-tip .tip-val   { font-size:11px; font-weight:600; }
+.h3-tip .tip-pill  { display:inline-block; padding:1px 6px; border-radius:99px; font-size:10px; font-weight:700; }
 .h3-tip::before,
 .leaflet-tooltip.h3-tip::before { border-top-color: #0f172a !important; }
 /* Force ALL descendant text light — Leaflet resets to black */
@@ -10209,13 +10214,12 @@ async function _adDrawRunnerCoverage(map){
           dashArray:  isPrimary ? null : '6 4',
           opacity:    1,
         })
+        // Count HOs in this specific zone
+        const _zHoCount    = HOMEOWNERS.filter(h=>h.zoneId===zid).length
+        const _zActiveCount = HOMEOWNERS.filter(h=>h.zoneId===zid&&h.status==='active').length
         ol.bindTooltip(
-          '<div style="font-size:12px;font-weight:700;color:#f1f5f9">🚐 '+name+'</div>'
-          +'<div style="font-size:11px;color:#cbd5e1;margin-top:2px">'+(zone.name||'Zone')+'</div>'
-          +(isPrimary
-            ? '<div style="font-size:10px;color:#4ade80;margin-top:2px">● Lead zone · '+_src+'</div>'
-            : '<div style="font-size:10px;color:#94a3b8;margin-top:2px">+ Additional · '+_src+'</div>'),
-          { direction:'top', className:'h3-tip', sticky:false }
+          _buildRunnerZoneTooltip(r, zone, isPrimary, _zHoCount, _zActiveCount),
+          { direction:'top', className:'h3-tip', sticky:true }
         )
         ol.addTo(map); layers.push(ol)
 
@@ -10228,7 +10232,7 @@ async function _adDrawRunnerCoverage(map){
               className:'', iconAnchor:[13,13],
             })
             const mk = L.marker([_aLat, _aLng], { icon:pin, zIndexOffset:1000 })
-            mk.bindTooltip('<div style="font-size:12px;font-weight:700;color:#f1f5f9">🚐 '+name+'</div><div style="font-size:10px;color:#94a3b8">'+zone.name+'</div>', { className:'h3-tip', direction:'top' })
+            mk.bindTooltip(_buildRunnerZoneTooltip(r, zone, true, HOMEOWNERS.filter(h=>h.zoneId===zid).length, HOMEOWNERS.filter(h=>h.zoneId===zid&&h.status==='active').length), { className:'h3-tip', direction:'top' })
             mk.addTo(map); layers.push(mk)
           } catch(e){}
         }
@@ -10395,6 +10399,135 @@ function _scheduleMapLayerUpdate(delayMs = 200){
 // ── _updateAdminMapLayers() — layer-only refresh, NO zoom/center change ──────
 // Called for realtime updates. Replaces hex/dot layers without touching the map
 // instance, viewport, zoom level, or pan position.
+// ── _buildHOTooltip — rich hover tooltip for any homeowner dot ──────────────
+// All optional chaining so null data never crashes the map render loop.
+function _buildHOTooltip(ho, zone){
+  const hoName    = ((ho?.first_name||'') + ' ' + (ho?.last_name||'')).trim() || ho?.email?.split('@')[0] || 'Homeowner'
+  const hoAddr    = ho?.street_address || ho?.address || '—'
+  const hoPhone   = ho?.phone && ho.phone !== '--' ? ho.phone : null
+  const hoEmail   = ho?.email || null
+  const hoDay     = ho?.day && ho.day !== '--' ? ho.day : (ho?.collection_day || null)
+  const hoDay2    = ho?.dayWaste || ho?.collection_day_2 || null
+  const hoService = ho?.service || ho?.service_type || null
+  const hoPlan    = ho?.plan || null
+
+  // Runner lookup — assignedRunner can be a name string or an id
+  const _rn = ho?.assignedRunner
+    ? (RUNNERS.find(r => r.id === ho.assignedRunner || r.name === ho.assignedRunner || r.email?.toLowerCase() === ho.assignedRunner?.toLowerCase()))
+    : (zone ? RUNNERS.find(r => r.zoneId === zone.id || r.coverageZones?.includes(zone.id)) : null)
+  const rnName = _rn?.name || ho?.assignedRunner || 'Unassigned'
+  const rnBadge = _rn ? ('<span class="tip-pill" style="background:rgba(79,70,229,.25);color:#a5b4fc">🚐 '+rnName+'</span>') : '<span style="opacity:.5">No runner assigned</span>'
+
+  const isActive  = ho?.status === 'active'
+  const isWait    = ho?.status === 'waitlist'
+  const statusPill = isActive
+    ? '<span class="tip-pill" style="background:rgba(34,197,94,.2);color:#4ade80">✅ Active</span>'
+    : isWait
+    ? '<span class="tip-pill" style="background:rgba(249,115,22,.2);color:#fdba74">⏳ Waitlist</span>'
+    : '<span class="tip-pill" style="background:rgba(100,116,139,.2);color:#94a3b8">○ Unzoned</span>'
+
+  const dayLabel = hoDay
+    ? (hoDay2 ? hoDay + ' / ' + hoDay2 : hoDay)
+    : '—'
+  const serviceLabel = hoService ? hoService.replace(/_/g,' ') : (hoPlan ? hoPlan : '—')
+
+  return [
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">',
+    '  <div style="font-size:13px;font-weight:700;flex:1">'+hoName+'</div>',
+    '  <div>'+statusPill+'</div>',
+    '</div>',
+    '<hr>',
+    '<div class="tip-label">Address</div>',
+    '<div class="tip-val">'+hoAddr+'</div>',
+    zone ? '<div style="font-size:10px;opacity:.6;margin-top:1px">'+zone.name+'</div>' : '',
+    '<div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px">',
+    '  <div><div class="tip-label">Service Day</div><div class="tip-val">'+dayLabel+'</div></div>',
+    '  <div><div class="tip-label">Service</div><div class="tip-val">'+serviceLabel+'</div></div>',
+    '</div>',
+    '<hr>',
+    '<div class="tip-label">Lead Runner</div>',
+    '<div style="margin-top:2px">'+rnBadge+'</div>',
+    (hoPhone || hoEmail) ? '<hr>' : '',
+    hoPhone ? '<div style="margin-top:2px"><span class="tip-label">Phone </span><a href="tel:'+hoPhone+'" style="color:#818cf8;font-size:11px">'+hoPhone+'</a></div>' : '',
+    hoEmail ? '<div style="margin-top:1px"><span class="tip-label">Email </span><a href="mailto:'+hoEmail+'" style="color:#818cf8;font-size:10px">'+hoEmail+'</a></div>' : '',
+  ].filter(Boolean).join('')
+}
+
+// ── _buildZoneTooltip — rich hover tooltip for zone hex polygons ─────────────
+function _buildZoneTooltip(zone, allRunners){
+  if(!zone) return '<div style="font-size:12px;font-weight:700">Unknown Zone</div>'
+
+  // All runners assigned to this zone
+  const zoneRunners = allRunners.filter(r =>
+    r.zoneId === zone.id || r.coverageZones?.includes(zone.id)
+  )
+  const leadRunner  = zoneRunners.find(r => r.zoneId === zone.id) || zoneRunners[0]
+  const extraCount  = Math.max(0, zoneRunners.length - 1)
+
+  const hoCount = HOMEOWNERS.filter(h => h.zoneId === zone.id).length
+  const activeCount  = HOMEOWNERS.filter(h => h.zoneId === zone.id && h.status === 'active').length
+  const waitCount    = HOMEOWNERS.filter(h => h.zoneId === zone.id && h.status === 'waitlist').length
+
+  const statusPill = zone.status === 'live'
+    ? '<span class="tip-pill" style="background:rgba(34,197,94,.2);color:#4ade80">🟢 Live</span>'
+    : zone.status === 'waitlist'
+    ? '<span class="tip-pill" style="background:rgba(249,115,22,.2);color:#fdba74">🟡 Waitlist</span>'
+    : '<span class="tip-pill" style="background:rgba(100,116,139,.2);color:#94a3b8">○ Building</span>'
+
+  const rnBadge = leadRunner
+    ? '<span class="tip-pill" style="background:rgba(79,70,229,.25);color:#a5b4fc">🚐 '+leadRunner.name+'</span>'
+      + (extraCount > 0 ? ' <span style="font-size:10px;opacity:.6">+'+extraCount+' more</span>' : '')
+    : '<span style="opacity:.5">No runner assigned</span>'
+
+  const demandBar = hoCount > 0
+    ? '<div style="margin-top:4px;background:rgba(255,255,255,.08);border-radius:3px;height:4px;overflow:hidden">'
+      + '<div style="height:100%;border-radius:3px;background:linear-gradient(90deg,#4ade80,#06b6d4);width:'+Math.min(100,Math.round(activeCount/Math.max(1,zone.capacity||8)*100))+'%"></div>'
+      + '</div>'
+    : ''
+
+  return [
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">',
+    '  <div style="font-size:13px;font-weight:700;flex:1">'+zone.name+'</div>',
+    '  <div>'+statusPill+'</div>',
+    '</div>',
+    '<hr>',
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">',
+    '  <div><div class="tip-label">HO Count</div><div class="tip-val">'+hoCount+(zone.capacity?' / '+zone.capacity:'')+'</div>'+demandBar+'</div>',
+    '  <div><div class="tip-label">Active / Wait</div><div class="tip-val">'+activeCount+' / '+waitCount+'</div></div>',
+    '</div>',
+    '<hr>',
+    '<div class="tip-label">Lead Runner</div>',
+    '<div style="margin-top:2px">'+rnBadge+'</div>',
+    zone.h3_index ? '<div style="margin-top:4px;font-size:9px;opacity:.35;font-family:monospace">'+zone.h3_index+'</div>' : '',
+  ].filter(Boolean).join('')
+}
+
+// ── _buildRunnerZoneTooltip — for res-6 runner coverage hexes ───────────────
+function _buildRunnerZoneTooltip(runner, zone, isPrimary, hoCount, activeCount){
+  const hoBar = hoCount > 0
+    ? '<div style="margin-top:4px;background:rgba(255,255,255,.08);border-radius:3px;height:4px;overflow:hidden">'
+      + '<div style="height:100%;border-radius:3px;background:linear-gradient(90deg,#818cf8,#06b6d4);width:'+Math.min(100,hoCount*12)+'%"></div>'
+      + '</div>'
+    : ''
+  return [
+    '<div style="display:flex;align-items:center;gap:8px">',
+    '  <div style="width:28px;height:28px;background:#4f46e5;border:2px solid #818cf8;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">',
+    '    '+(runner?.name?.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'??'),
+    '  </div>',
+    '  <div>',
+    '    <div style="font-size:13px;font-weight:700">'+(runner?.name||'Runner')+'</div>',
+    '    <div style="font-size:10px;opacity:.6">'+(isPrimary?'🏠 Lead zone':'+ Additional zone')+'</div>',
+    '  </div>',
+    '</div>',
+    '<hr>',
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">',
+    '  <div><div class="tip-label">Zone</div><div class="tip-val">'+(zone?.name||'—')+'</div></div>',
+    '  <div><div class="tip-label">HOs Here</div><div class="tip-val">'+activeCount+' active'+(hoCount>activeCount?' · '+(hoCount-activeCount)+' wait':'')+'</div>'+hoBar+'</div>',
+    '</div>',
+    zone?.h3_index ? '<div style="margin-top:4px;font-size:9px;opacity:.35;font-family:monospace">'+zone.h3_index+'</div>' : '',
+  ].filter(Boolean).join('')
+}
+
 async function _updateAdminMapLayers(){
   const map = window._adminMap
   if(!map) return
@@ -10508,10 +10641,9 @@ async function _updateAdminMapLayers(){
         weight:      isAnchor ? 2.5 : 1.5, opacity:1,
       })
       dot.bindTooltip(
-        '<div style="font-size:12px;font-weight:700;color:#f1f5f9">'+(isAnchor?'⭐ ':'')+hoName+(isAnchor?' <span style="font-size:10px;color:#06d6a0">(Anchor House)</span>':'')+'</div>'
-        +'<div style="font-size:11px;color:#cbd5e1;margin-top:2px">📍 '+hoAddr+'</div>'
-        +'<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+(zone?zone.name:'ZIP '+(ho.zip||''))+' · '+(_dotActive?'<span style="color:#4ade80">✅ Active</span>':_dotWait?'<span style="color:#fdba74">⏳ Waitlist</span>':'○ Unzoned')+'</div>',
-        { className:'h3-tip', direction:'top', sticky:false, offset:[0,-4] }
+        (isAnchor ? '<div style="font-size:10px;color:#06d6a0;font-weight:700;margin-bottom:3px">⭐ Anchor House</div>' : '')
+        + _buildHOTooltip(ho, zone),
+        { className:'h3-tip', direction:'top', sticky:false, offset:[0,-8] }
       )
       dot.addTo(map); window._adminHexLayers.push(dot)
     } catch(e){}
@@ -10560,10 +10692,8 @@ async function _updateAdminMapLayers(){
           radius:5, color:'#f97316', fillColor:'#fdba74', fillOpacity:0.80, weight:1.5, opacity:1
         })
         dot.bindTooltip(
-          '<div style="font-size:12px;font-weight:700;color:#f1f5f9">'+sName+'</div>'
-          +'<div style="font-size:11px;color:#cbd5e1;margin-top:2px">📍 '+(s.street_address||'')+'</div>'
-          +'<div style="font-size:10px;color:#fdba74;margin-top:2px">⏳ Waitlist signup</div>',
-          { className:'h3-tip', direction:'top', sticky:false, offset:[0,-4] }
+          _buildHOTooltip({ ...s, first_name: s.first_name||sName, status:'waitlist' }, null),
+          { className:'h3-tip', direction:'top', sticky:false, offset:[0,-8] }
         )
         dot.addTo(map); window._adminHexLayers.push(dot)
       } catch(e){}
@@ -10996,11 +11126,7 @@ async function _initAdminMap(){
         color: strokeCol, fillColor: fillCol, fillOpacity: 1,
         weight: isLive ? 2 : 1.5, dashArray: isLive ? null : '6,4', opacity: 0.85,
       })
-      ol.bindTooltip(
-        '<div style="font-size:12px;font-weight:700;color:#1e293b">'+z.name+'</div>'
-        +'<div style="font-size:11px;color:#475569">ZIP '+zip+' · '+(isLive?'Live':'Building')+'</div>',
-        { className:'h3-tip', direction:'top' }
-      )
+      ol.bindTooltip(_buildZoneTooltip(z, RUNNERS), { className:'h3-tip', direction:'top', sticky:true })
       ol.addTo(window._adminMap)
       window._adminHexLayers.push(ol)
       bounds.push(...pts)
