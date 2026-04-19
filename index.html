@@ -10472,10 +10472,23 @@ async function _updateAdminMapLayers(){
     } catch(e){}
   })
 
-  // Household dots — exact lat/lng from DB (NOT hex center)
+  // ── Household dots — exact lat/lng from DB (never hex center, never ZIP) ──
+  // Every HO with coordinates gets a dot. Any HO without coords is logged and skipped.
   const _zoneFirstHO = {}
+  const _skippedNullCoords = []
   geoHOs.forEach(ho => {
     try {
+      // Guard: skip and log any HO missing lat/lng — never crash the loop
+      const _rawLat = ho.lat, _rawLng = ho.lng
+      if(_rawLat === null || _rawLat === undefined || _rawLng === null || _rawLng === undefined){
+        _skippedNullCoords.push({ id: ho.id||ho.email, reason:'null lat/lng in DB' })
+        return
+      }
+      const _hoLat = parseFloat(_rawLat), _hoLng = parseFloat(_rawLng)
+      if(isNaN(_hoLat) || isNaN(_hoLng) || _hoLat === 0 || _hoLng === 0){
+        _skippedNullCoords.push({ id: ho.id||ho.email, lat:_rawLat, lng:_rawLng, reason:'invalid coords' })
+        return
+      }
       const zone     = ADMIN_ZONES.find(z => z.id===ho.zoneId)
       const _dotActive = ho.status==='active'
       const _dotWait   = ho.status==='waitlist'
@@ -10487,11 +10500,6 @@ async function _updateAdminMapLayers(){
       const hoAddr = ho.street_address||ho.address||'No address'
       // EXACT lat/lng from DB record — ZIP centroid is never used here
       // If ho.lat/ho.lng are null, the filter above (h.lat && h.lng) skips this HO
-      const _hoLat = parseFloat(ho.lat), _hoLng = parseFloat(ho.lng)
-      if(!_hoLat || !_hoLng || isNaN(_hoLat) || isNaN(_hoLng)){
-        console.warn('[Map] Skipping dot for', ho.email, '— no valid coords')
-        return
-      }
       const dot = L.circleMarker([_hoLat, _hoLng], {
         radius: isAnchor ? 7 : 5,
         color:       isAnchor ? '#06d6a0' : ringColor,
@@ -10508,6 +10516,12 @@ async function _updateAdminMapLayers(){
       dot.addTo(map); window._adminHexLayers.push(dot)
     } catch(e){}
   })
+
+  if(_skippedNullCoords.length > 0){
+    console.warn('[Map] Skipped', _skippedNullCoords.length, 'HO dots — missing/invalid coordinates:',
+      _skippedNullCoords.map(x=>x.id+' ('+x.reason+')').join(', '))
+    console.warn('[Map] Fix: run Geocode HOs button, or set lat/lng manually in Supabase for these records.')
+  }
 
   // Zone outlines — build sigsByZip from in-memory HOMEOWNERS (no extra Supabase fetch)
   // This avoids async race conditions during debounced updates
@@ -23811,13 +23825,51 @@ async function _autoCreateWaitlistZoneForRunner(fn, ln, em, zip){
   }
 }
 
-function suggestZoneName(zip){
-  const prefix = zip || ''
-  const cityMap = {'853':'Glendale/Surprise','850':'Phoenix','852':'Scottsdale','851':'Tempe/Chandler'}
-  const city = cityMap[prefix]||'Area '+zip
-  const existing = ADMIN_ZONES.filter(z=>z.zips?.includes(zip) || z.zip===zip&&z.status!=='inactive').length
-  const suffix = existing===0?'':existing===1?' East':existing===2?' West':' '+(existing+1)
-  return city+suffix
+// suggestZoneName: coordinate-first naming — never puts the ZIP code in the name
+// Priority: (1) neighborhood from geocoder (stored in app.neighborhood)
+//           (2) city + cardinal direction based on Phoenix metro position
+//           (3) generic Area label
+function suggestZoneName(zip, lat, lng){
+  // Known named areas — expand as needed
+  const knownAreas = {
+    '86004': 'Flagstaff East',   '86001': 'Flagstaff West',   '86005': 'Flagstaff South',
+    '85308': 'Glendale West',    '85301': 'Glendale Central',  '85302': 'Glendale East',
+    '85303': 'Glendale North',   '85304': 'Glendale Northwest','85305': 'Glendale South',
+    '85306': 'Deer Valley',      '85307': 'Luke Area',         '85310': 'Arrowhead',
+    '85345': 'Peoria West',      '85381': 'Peoria East',       '85382': 'Peoria North',
+    '85383': 'Vistancia',        '85374': 'Surprise West',     '85379': 'Surprise East',
+    '85387': 'Surprise North',   '85388': 'Surprise South',    '85396': 'Buckeye North',
+    '85326': 'Buckeye South',    '85338': 'Goodyear West',     '85395': 'Goodyear East',
+    '85297': 'Gilbert South',    '85298': 'Gilbert Southeast', '85299': 'Gilbert East',
+    '85295': 'Gilbert West',     '85296': 'Gilbert Central',   '85233': 'Chandler West',
+    '85224': 'Chandler Central', '85225': 'Chandler East',     '85226': 'Chandler South',
+    '85248': 'Chandler North',   '85249': 'Chandler Northeast','85286': 'Chandler Southeast',
+    '85209': 'Mesa East',        '85212': 'Mesa Southeast',    '85207': 'Mesa North',
+    '85213': 'Mesa Northeast',   '85215': 'Mesa Northeast',    '85201': 'Mesa Central',
+    '85203': 'Mesa Northwest',   '85204': 'Mesa West',         '85205': 'Mesa Northeast',
+    '85206': 'Mesa East',        '85208': 'Mesa Southeast',
+  }
+  if(knownAreas[zip]) {
+    // If multiple zones exist for this area, add a number suffix
+    const base = knownAreas[zip]
+    const existing = ADMIN_ZONES.filter(z=>z.name?.startsWith(base)&&z.status!=='inactive').length
+    return existing === 0 ? base : base+' '+(existing+1)
+  }
+  // Coordinate-based cardinal naming for Phoenix metro
+  if(lat && lng){
+    const phxLat = 33.4484, phxLng = -112.0740
+    const dLat = lat - phxLat, dLng = lng - phxLng
+    const cardinal = dLat > 0.3 ? (Math.abs(dLng) < 0.2 ? 'North' : dLng < 0 ? 'Northwest' : 'Northeast')
+                   : dLat < -0.3 ? (Math.abs(dLng) < 0.2 ? 'South' : dLng < 0 ? 'Southwest' : 'Southeast')
+                   : dLng < -0.2 ? 'West' : dLng > 0.2 ? 'East' : 'Central'
+    const cityLabel = lat > 34.5 ? 'Northern AZ' : lat > 33.8 ? 'North Valley' : 'Valley'
+    const base = cityLabel+' '+cardinal
+    const existing = ADMIN_ZONES.filter(z=>z.name?.startsWith(base)&&z.status!=='inactive').length
+    return existing === 0 ? base : base+' '+(existing+1)
+  }
+  // Last resort — generic without ZIP
+  const existing = ADMIN_ZONES.filter(z=>z.status!=='inactive').length
+  return 'Service Area '+(existing+1)
 }
 
 // -- DENSITY ALERTS --------------------------------
@@ -24107,30 +24159,41 @@ function approveHWWithZoneCheck(appId){
 
 async function createZoneAndApproveHW(appId){
   const app = PENDING_HOMEOWNERS.find(x=>x.id===appId); if(!app) return
-  const name = document.getElementById('new-zone-name')?.value?.trim() || suggestZoneName(app.zip)
+  // ── Coordinate-first zone creation ───────────────────────────────────────
+  // anchor comes strictly from the HO's geocoded address — never ZIP centroid
+  const _hoAnchorLat = app.lat ? parseFloat(app.lat) : null
+  const _hoAnchorLng = app.lng ? parseFloat(app.lng) : null
+
+  if(!_hoAnchorLat || !_hoAnchorLng){
+    showToast('Cannot create zone — homeowner has no geocoded coordinates. Run Geocode HOs first.', 'err', 6000)
+    return
+  }
+
+  // Derive H3 cells from exact coordinates
+  const _hoAnchorH8 = (typeof h3 !== 'undefined') ? h3.latLngToCell(_hoAnchorLat, _hoAnchorLng, 8) : null
+  const _hoAnchorH6 = _hoAnchorH8 ? h3.cellToParent(_hoAnchorH8, 6) : null
+  // Zone center = center of the res-6 hex (for consistent zone boundary)
+  const [_zoneLat, _zoneLng] = _hoAnchorH6 ? h3.cellToLatLng(_hoAnchorH6) : [_hoAnchorLat, _hoAnchorLng]
+
+  // Zone name: coordinate-aware, no ZIP in the name
+  const _suggestedName = suggestZoneName(app.zip, _hoAnchorLat, _hoAnchorLng)
+  const name = document.getElementById('new-zone-name')?.value?.trim() || _suggestedName
   const cap  = parseInt(document.getElementById('nz-cap')?.value) || 8
   const days = ['Mon','Tue','Wed','Thu','Fri'].filter(d=>document.getElementById('nz-day-'+d)?.checked)
+
+  console.log('[Zone] Creating coordinate-anchored zone:', name,
+    '| HO coords:', _hoAnchorLat.toFixed(6), _hoAnchorLng.toFixed(6),
+    '| h8:', _hoAnchorH8, '| h6:', _hoAnchorH6,
+    '| zone center:', _zoneLat.toFixed(6), _zoneLng.toFixed(6))
 
   const btn = document.querySelector('#modal-box .btn-cyan')
   if(btn){ btn.disabled=true; btn.textContent='Creating...' }
 
-  // Step 1: Save zone to DB to get real UUID back
-  // Status starts as 'waitlist' — admin promotes to live when ready
-  // Anchor zone to this specific HO's address — they are the first HO in this ZIP
-  const _hoAnchorLat  = app.lat  ? parseFloat(app.lat)  : (ZIP_CENTROIDS?.[app.zip]?.[0] || null)
-  const _hoAnchorLng  = app.lng  ? parseFloat(app.lng)  : (ZIP_CENTROIDS?.[app.zip]?.[1] || null)
-  const _hoAnchorHex  = (_hoAnchorLat && _hoAnchorLng && typeof h3 !== 'undefined')
-    ? h3.latLngToCell(_hoAnchorLat, _hoAnchorLng, 8) : null
-  console.log('[BinDash] createZoneAndApproveHW — anchor:', app.name, _hoAnchorLat?.toFixed(5), _hoAnchorLng?.toFixed(5), _hoAnchorHex || '(no hex)')
-
-  // Note: lat/lng/h3_index columns require migration:
-  // ALTER TABLE zones ADD COLUMN IF NOT EXISTS lat double precision, ADD COLUMN IF NOT EXISTS lng double precision, ADD COLUMN IF NOT EXISTS h3_index text;
-  const _hasGeoColumns = true  // set false if migration not yet run to skip silently
   const zoneRow = {
     name,
-    label:           (name.slice(0,3).toUpperCase()+'-'+app.zip),
-    zip_prefix:      app.zip,
-    zip_codes:       [app.zip],
+    label:           name.slice(0,3).toUpperCase()+'-'+(name.slice(-3)||'ZNE'),
+    zip_prefix:      app.zip || '',
+    zip_codes:       app.zip ? [app.zip] : [],
     status:          'waitlist',
     pilot:           true,
     overridden:      false,
@@ -24139,9 +24202,11 @@ async function createZoneAndApproveHW(appId){
     collection_days: days,
     homeowners:      0,
     runners:         0,
-    notes:           'Auto-created from pending HO approval · ZIP '+app.zip,
+    notes:           'Auto-created from HO approval · anchored to '+_hoAnchorLat.toFixed(6)+','+_hoAnchorLng.toFixed(6),
     area:            'A1',
-    ...(_hasGeoColumns && _hoAnchorLat ? { lat: _hoAnchorLat, lng: _hoAnchorLng, h3_index: _hoAnchorHex } : {}),
+    lat:             _zoneLat,
+    lng:             _zoneLng,
+    h3_index:        _hoAnchorH6,
     updated_at:      new Date().toISOString(),
   }
 
