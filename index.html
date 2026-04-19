@@ -10780,8 +10780,11 @@ async function _updateAdminMapLayers(){
           zone:zone||null, homeowners:[] }
       }
       window.homeownerData[key].homeowners.push({
-        name: ((ho.first_name||'')+' '+(ho.last_name||'')).trim()||ho.email?.split('@')[0]||'--',
-        email:ho.email, address:ho.street_address||ho.address||'--', zip:ho.zip||''
+        name:     ((ho.first_name||'')+' '+(ho.last_name||'')).trim()||ho.email?.split('@')[0]||'--',
+        email:    ho.email,
+        address:  ho.street_address||ho.address||'--',
+        zip:      ho.zip||'',
+        h3_index: ho.h3_index||null,  // needed for H3-based zone lookup in _bindHexPopup
       })
     } catch(e){}
   })
@@ -11506,7 +11509,12 @@ function assignRunner(h3Index, runnerName, runnerId){
 
   // Find the zone for this hex — needed to assign runner properly
   const hexZip  = (cell.homeowners?.[0]?.zip || '').replace(/-.*$/,'').slice(0,5)
-  const hexZone = ADMIN_ZONES.find(z => (z.zips||[z.zip]).map(zz=>(zz||'').slice(0,5)).includes(hexZip))
+  const _cellH3 = cell.homeowners?.[0]?.h3_index || cell.h3Index || null
+  // ZIP lookup first, then H3 parent match as authoritative fallback
+  let hexZone = ADMIN_ZONES.find(z => (z.zips||[z.zip]).map(zz=>(zz||'').slice(0,5)).includes(hexZip))
+  if(!hexZone && _cellH3 && typeof h3 !== 'undefined'){
+    try { hexZone = ADMIN_ZONES.find(z => z.h3_index === h3.cellToParent(_cellH3, 6)) } catch(e){}
+  }
   const zoneId  = hexZone?.id || cell.zone || null
 
   // Find runner object
@@ -11570,12 +11578,32 @@ function _bindHexPopup(layer, cell, key){
   const statusDot = cell.status === 'active' ? '#2ecc71' : cell.status === 'waitlist' ? '#f1c40f' : '#95a5a6'
   const hos = cell.homeowners || []
 
-  // Check if a zone exists for this hex's ZIP
-  const _hexZip  = (hos[0]?.zip || '').replace(/-.*$/,'').slice(0,5)  // normalize ZIP+4 → 5-digit
-  const _hexZone = ADMIN_ZONES.find(z => (z.zips||[z.zip]).map(zz=>(zz||'').slice(0,5)).includes(_hexZip))
-  const _noZoneWarn = _hexZip && !_hexZone
+  // Zone lookup — ZIP first, then H3 parent match (handles ZIP+4 / ZIP mismatch)
+  const _hexZip  = (hos[0]?.zip || '').replace(/-.*$/,'').slice(0,5)
+  const _hoH3    = hos[0]?.h3_index || cell.h3Index || null
+
+  // 1. ZIP match
+  let _hexZone = ADMIN_ZONES.find(z => (z.zips||[z.zip]).map(zz=>(zz||'').slice(0,5)).includes(_hexZip))
+
+  // 2. H3 parent match — authoritative when ZIP codes differ (e.g. 86004 zone, 86005 HO)
+  if(!_hexZone && _hoH3 && typeof h3 !== 'undefined'){
+    try {
+      const _hoH6 = h3.cellToParent(_hoH3, 6)
+      _hexZone = ADMIN_ZONES.find(z => z.h3_index === _hoH6)
+    } catch(e){}
+  }
+
+  // 3. Also try matching by zone's zip_prefix against any of the HO zips
+  if(!_hexZone){
+    _hexZone = ADMIN_ZONES.find(z => {
+      const zp = (z.zip||'').slice(0,5)
+      return zp && hos.some(ho => (ho.zip||'').slice(0,5) === zp)
+    })
+  }
+
+  const _noZoneWarn = !_hexZone
     ? `<div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:5px;padding:5px 8px;font-size:10px;color:#92400e;margin-bottom:8px">⚠️ No zone for ZIP ${_hexZip} — assign a runner here will only update HO records. <strong>Create a zone first</strong> for full dispatch assignment.</div>`
-    : (_hexZone ? `<div style="font-size:10px;color:#059669;margin-bottom:6px">📍 ${_hexZone.name}</div>` : '')
+    : `<div style="font-size:10px;color:#059669;margin-bottom:6px">📍 ${_hexZone.name}${_hexZone.status==='waitlist'?' · <span style=\"color:#f59e0b\">Waitlist zone — no runner yet</span>':''}</div>`
 
   // Runner options for dropdown
   const runnerOpts = RUNNERS
@@ -11677,7 +11705,8 @@ function showMicroZoneDetail(z){
 // These are sourced from Google Maps pin drops and are authoritative.
 // Key format: 'street_address::zip_code' (lowercase, trimmed)
 const KNOWN_COORDS = {
-  '3945 canyon loop::86004': { lat: 35.08759567878481, lng: -111.69211467852905 },
+  '3945 canyon loop::86004':    { lat: 35.08759567878481, lng: -111.69211467852905 },
+  '3945 canyon loop::86005':    { lat: 35.08759567878481, lng: -111.69211467852905 },  // DB stores 86005-3719
   // Add more overrides here as needed: 'address::zip': { lat, lng }
 }
 
