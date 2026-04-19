@@ -10881,6 +10881,45 @@ async function _updateAdminMapLayers(){
     console.warn('[Map] Fix: run Geocode HOs button, or set lat/lng manually in Supabase for these records.')
   }
 
+  // ── Pending HO dots — geocoded pending_review / waitlist_pending ─────────
+  // Shown as indigo outline dots so admin can see pending demand on the map
+  ;(PENDING_HOMEOWNERS||[]).forEach(p => {
+    try {
+      const pLat = parseFloat(p.lat), pLng = parseFloat(p.lng)
+      if(!pLat || !pLng || isNaN(pLat) || isNaN(pLng)) return
+      // Don't double-draw if this email is already in HOMEOWNERS
+      if(HOMEOWNERS.find(h => h.email?.toLowerCase() === p.email?.toLowerCase())) return
+      const isWl = p.isWaitlist || p.status === 'waitlist_pending'
+      const dot = L.circleMarker([pLat, pLng], {
+        radius: 6,
+        color:       isWl ? '#818cf8' : '#f59e0b',
+        fillColor:   isWl ? '#4f46e5' : '#d97706',
+        fillOpacity: 0.65,
+        weight:      2,
+        dashArray:   '3 3',   // dashed ring = pending (not yet approved)
+        opacity:     1,
+        pane:        'dotsPane',
+        bubblingMouseEvents: false,
+      })
+      const pName = p.name || p.email?.split('@')[0] || 'Pending HO'
+      const pAddr = p.address || p.street_address || '—'
+      const pStatus = isWl ? 'Waitlist' : 'Pending Review'
+      // Simple tooltip — full popup via _buildHOPopup
+      dot.bindTooltip(
+        '<div style="font-size:12px;font-weight:700">' + pName + '</div>'
+        + '<div style="font-size:10px;opacity:.7;margin-top:2px">⏳ ' + pStatus + '</div>'
+        + '<div style="font-size:10px;opacity:.6;margin-top:1px">📍 ' + pAddr + '</div>',
+        { className:'h3-tip', direction:'top', sticky:false, offset:[0,-8] }
+      )
+      // Full popup with coordinate editor — pass _table so save goes to right table
+      dot.bindPopup(
+        _buildHOPopup({ ...p, status: isWl ? 'waitlist' : 'waitlist', _table:'homeowner_signups' }, null),
+        { maxWidth:320, className:'ho-popup-wrap' }
+      )
+      dot.addTo(map); window._adminHexLayers.push(dot)
+    } catch(e){}
+  })
+
   // Zone outlines — build sigsByZip from in-memory HOMEOWNERS (no extra Supabase fetch)
   // This avoids async race conditions during debounced updates
   const sigsByZip = {}
@@ -24642,6 +24681,15 @@ function renderPendingRunnerList(){
   const el = document.getElementById('pending-runner-list')
   if(!el) return
 
+  // Ensure batch bar container exists
+  let _batchBar = document.getElementById('hwl-batch-bar')
+  if(!_batchBar){
+    _batchBar = document.createElement('div')
+    _batchBar.id = 'hwl-batch-bar'
+    _batchBar.style.display = 'none'
+    el.parentNode.insertBefore(_batchBar, el)
+  }
+
   // Update tab counts
   const counts = { pending:0, info:0, rejected:0, waitlist:0 }
   PENDING_RUNNERS.forEach(a => {
@@ -25116,6 +25164,73 @@ function switchRNTab(tab){
   renderPendingRunnerList()
 }
 
+// ── savePendingHWCard — saves zone/runner/notes changes from the pending HO card
+// Called by the "Save Changes" button inline on each pending HO card
+async function savePendingHWCard(appId){
+  const app = PENDING_HOMEOWNERS.find(x => x.id === appId)
+  if(!app){ showToast('Application not found','err'); return }
+
+  const btn      = document.getElementById('hwpc-save-'+appId)
+  const zoneEl   = document.getElementById('hwpc-zone-'+appId)
+  const runnerEl = document.getElementById('hwpc-runner-'+appId)
+  const notesEl  = document.getElementById('hwpc-notes-'+appId)
+  const latEl    = document.getElementById('hwpc-lat-'+appId)
+  const lngEl    = document.getElementById('hwpc-lng-'+appId)
+
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…' }
+
+  const newZoneId   = zoneEl?.value   || null
+  const newRunnerId = runnerEl?.value  || null
+  const newNotes    = notesEl?.value?.trim() || null
+
+  // Coordinate update (optional — only if fields exist and have been changed)
+  let newLat = latEl?.value ? parseFloat(latEl.value) : null
+  let newLng = lngEl?.value ? parseFloat(lngEl.value) : null
+  if(newLat && (newLat < 20 || newLat > 50 || newLng < -130 || newLng > -60)){
+    showToast('Invalid coordinates — check lat/lng values','err')
+    if(btn){ btn.disabled = false; btn.textContent = 'Save Changes' }
+    return
+  }
+
+  // Compute H3 if coords changed
+  let newH8 = null, newH6 = null
+  if(newLat && newLng && typeof h3 !== 'undefined'){
+    try { newH8 = h3.latLngToCell(newLat, newLng, 8); newH6 = h3.cellToParent(newH8, 6) } catch(e){}
+  }
+
+  // Update in-memory
+  if(newZoneId && newZoneId !== '_new') app.zoneId = newZoneId
+  if(newRunnerId) app.assignedRunner = newRunnerId
+  if(newNotes !== null) app.svcNotes = newNotes
+  if(newLat){ app.lat = newLat; app.lng = newLng; app.h3_index = newH8; app.h3_zone_res6 = newH6 }
+
+  // Persist to Supabase
+  try {
+    const payload = { updated_at: new Date().toISOString() }
+    if(newZoneId && newZoneId !== '_new') payload.zone_id = newZoneId
+    if(newRunnerId) payload.assigned_runner = newRunnerId
+    if(newNotes !== null) payload.service_notes = newNotes
+    if(newLat){ payload.lat = newLat; payload.lng = newLng }
+    if(newH8)  payload.h3_index = newH8
+    if(newH6)  payload.h3_zone_res6 = newH6
+
+    const { error } = await _supa.from('homeowner_signups').update(payload).eq('id', appId)
+    if(error) throw new Error(error.message)
+
+    // If zone changed to _new, trigger zone creation flow
+    if(zoneEl?.value === '_new'){ approveHWWithZoneCheck(appId); return }
+
+    showToast('Changes saved ✅' + (newLat ? ' · Coordinates updated + H3 recalculated' : ''), 'ok', 4000)
+    renderPendingHWList()
+    // Refresh map so pending dot moves to new coords if they changed
+    if(newLat) _scheduleMapLayerUpdate(400)
+  } catch(e){
+    showToast('Save failed: '+e.message, 'err')
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Save Changes' }
+  }
+}
+
 function _refreshPendingHWRunners(appId, zoneId){
   const sel = document.getElementById('hwpc-runner-'+appId)
   if(!sel) return
@@ -25161,13 +25276,23 @@ function renderPendingHWList(){
   if(_hwActiveTab === 'info')     list = PENDING_HOMEOWNERS.filter(a=>a.status==='info_requested')
   if(_hwActiveTab === 'rejected') list = PENDING_HOMEOWNERS.filter(a=>a.status==='rejected')
   if(_hwActiveTab === 'waitlist'){
-    // Show waitlist_pending entries — exclude if already in HO Management (any status)
-    // Rule: once in homeowners table (waitlist or active), remove from Pending Waitlist
     const _hoEmails = new Set(HOMEOWNERS.map(h=>(h.email||'').toLowerCase()))
     list = PENDING_HOMEOWNERS.filter(a =>
       (a.status==='waitlist_pending'||a.isWaitlist) &&
       !_hoEmails.has((a.email||'').toLowerCase())
     )
+    // Show bulk-action bar when zone-assigned HOs are ready to move
+    const _wlReady = list.filter(a => a.zoneId)
+    const _batchBar = document.getElementById('hwl-batch-bar')
+    if(_batchBar && _wlReady.length > 0){
+      _batchBar.style.display = 'block'
+      _batchBar.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;margin-bottom:12px">'
+        + '<div style="font-size:13px;color:#4ade80;font-weight:700">✅ '+_wlReady.length+' homeowner'+(_wlReady.length!==1?'s':'')+' have zones — ready to move to HO Management</div>'
+        + '<button onclick="_bulkMoveWaitlistToHOManagement()" style="padding:7px 16px;background:#22c55e;border:none;border-radius:7px;color:#0f172a;font-size:12px;font-weight:700;cursor:pointer">Move All to HO Management →</button>'
+        + '</div>'
+    } else if(_batchBar){
+      _batchBar.style.display = 'none'
+    }
   }
 
   if(!list.length){
@@ -25367,9 +25492,49 @@ function renderPendingHWList(){
         </select>
       </div>
 
-      <div class="field" style="margin-bottom:12px">
+      <div class="field" style="margin-bottom:10px">
         <label style="font-size:11px">Admin notes (optional)</label>
         <input id="hwpc-notes-${app.id}" placeholder="e.g. Verified address -- good to go" style="font-size:12px">
+      </div>
+
+      <!-- ── Location Precision — coordinate editor for pending HOs ─────────── -->
+      <div style="margin-bottom:12px;padding:10px 12px;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.18);border-radius:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#a5b4fc">📍 Location Precision</div>
+          <div style="font-size:10px;color:var(--muted)">${app.lat ? '✅ Geocoded · '+parseFloat(app.lat).toFixed(5)+', '+parseFloat(app.lng).toFixed(5) : '⚠️ Not geocoded — run Geocode HOs'}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+          <div>
+            <label style="font-size:9px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Latitude</label>
+            <input id="hwpc-lat-${app.id}" type="number" step="0.00000001"
+              value="${app.lat ? parseFloat(app.lat).toFixed(8) : ''}"
+              placeholder="e.g. 33.52518"
+              style="font-size:11px;font-family:'DM Mono',monospace;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:9px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Longitude</label>
+            <input id="hwpc-lng-${app.id}" type="number" step="0.00000001"
+              value="${app.lng ? parseFloat(app.lng).toFixed(8) : ''}"
+              placeholder="e.g. -112.19421"
+              style="font-size:11px;font-family:'DM Mono',monospace;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <div style="font-size:9px;color:var(--muted);flex:1">H3 res-8: <span style="font-family:'DM Mono',monospace;color:#818cf8">${app.h3_index || '—'}</span></div>
+          <button onclick="(async()=>{ const btn=this; btn.disabled=true; btn.textContent='Geocoding…'; try{ const gc=await geocodeAddress('${(app.address||app.street_address||'').replace(/'/g,"\'")}','${(app.city||'').replace(/'/g,"\'")}','AZ','${app.zip||app.zip_code||''}'); if(!gc?.lat){showToast('No geocode result','err');return;} const lEl=document.getElementById('hwpc-lat-${app.id}'); const gEl=document.getElementById('hwpc-lng-${app.id}'); if(lEl)lEl.value=gc.lat.toFixed(8); if(gEl)gEl.value=gc.lng.toFixed(8); showToast('Fresh coords loaded — click Save Changes to apply','info',4000) }catch(e){showToast(e.message,'err')} finally{btn.disabled=false;btn.textContent='Re-geocode'} })()"
+            style="padding:4px 10px;background:transparent;border:1px solid rgba(99,102,241,.4);border-radius:6px;color:#a5b4fc;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">Re-geocode</button>
+        </div>
+      </div>
+
+      <!-- ── Save Changes (zone/runner/notes/coords) ─────────────────────── -->
+      <div style="margin-bottom:12px">
+        <button id="hwpc-save-${app.id}"
+          onclick="savePendingHWCard('${app.id}')"
+          style="width:100%;padding:9px 16px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);border-radius:8px;color:#a5b4fc;font-size:13px;font-weight:700;cursor:pointer;transition:all .15s"
+          onmouseover="this.style.background='rgba(99,102,241,.25)'"
+          onmouseout="this.style.background='rgba(99,102,241,.15)'">
+          💾 Save Changes
+        </button>
       </div>
 
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -25384,7 +25549,7 @@ function renderPendingHWList(){
           ${isWaitlistZone
             ? (app.zoneId
                 ? `<button class="btn btn-sm" style="background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#4ade80;cursor:default" disabled>✅ Zone Active — ZIP ${app.zip}</button>
-                   <button class="btn btn-outline btn-sm" onclick="approveHW('${app.id}')">✅ Approve &amp; Activate Account</button>`
+                   <button class="btn btn-green btn-sm" onclick="approveHW('${app.id}')">✅ Move to HO Management</button>`
                 : `<button class="btn btn-sm" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:#f59e0b" onclick="activateWaitlistZone('${app.zip}','${app.id}')">🚀 Activate Waitlist Zone</button>
                    <button class="btn btn-outline btn-sm" onclick="approveHW('${app.id}')">✅ Approve anyway</button>`)
             : `<button class="btn btn-green btn-sm" onclick="approveHW('${app.id}')">✅ Approve &amp; Activate</button>`
@@ -25512,6 +25677,84 @@ function getZoneSuggestion(zip){
   return match ? `suggested: ${match.name}` : 'no existing zone -- will create new'
 }
 
+// ── _bulkMoveWaitlistToHOManagement — move all zone-assigned pending HOs at once ─
+// Called from the batch action bar in the Waitlist tab of Pending Homeowners.
+// For each pending HO that has a zoneId, inserts into homeowners as 'waitlist'.
+async function _bulkMoveWaitlistToHOManagement(){
+  const toProcess = PENDING_HOMEOWNERS.filter(a =>
+    (a.isWaitlist || a.status === 'waitlist_pending') && a.zoneId
+  )
+  if(!toProcess.length){ showToast('No waitlist HOs with zones to move', 'info'); return }
+
+  showToast('Moving ' + toProcess.length + ' homeowners…', 'info', 3000)
+
+  let moved = 0, failed = 0
+  for(const app of toProcess){
+    try {
+      const zone = ADMIN_ZONES.find(z => z.id === app.zoneId)
+      if(!zone){ failed++; continue }
+
+      // Check not already in homeowners
+      const { data: exists } = await _supa.from('homeowners')
+        .select('id').ilike('email', app.email).maybeSingle()
+      if(exists){ moved++; continue }
+
+      const fn = (app.name||'').split(' ')[0] || ''
+      const ln = (app.name||'').split(' ').slice(1).join(' ') || ''
+      const svc = (app.service||'').toLowerCase()
+      const planId = app.plan
+        || (app.day && app.dayWaste && app.dayWaste !== app.day ? 'plan_c'
+           : svc.includes('both') || svc.includes('same day') ? 'plan_b'
+           : 'plan_a')
+
+      const { error: insErr } = await _supa.from('homeowners').insert({
+        signup_id:       app.id,
+        first_name:      fn,
+        last_name:       ln,
+        email:           app.email,
+        phone:           app.phone || '',
+        street_address:  app.address || app.street_address || '',
+        city:            app.city || '',
+        zip_code:        app.zip || app.zip_code || '',
+        zone_id:         app.zoneId,
+        service_type:    app.service || 'Recycling',
+        collection_day:  app.day || '',
+        plan_id:         planId,
+        assigned_runner: app.assignedRunner || null,
+        lat:             app.lat || null,
+        lng:             app.lng || null,
+        h3_index:        app.h3_index || null,
+        hex_id:          app.h3_index || null,
+        status:          'waitlist',
+        created_at:      new Date().toISOString(),
+      })
+      if(insErr && !insErr.message?.includes('duplicate') && !insErr.message?.includes('unique')){
+        console.warn('[BulkMove] Insert failed for', app.email, insErr.message)
+        failed++; continue
+      }
+
+      // Mark signup as waitlist_approved
+      await _supa.from('homeowner_signups').update({
+        status:      'waitlist_approved',
+        reviewed_at: new Date().toISOString(),
+        updated_at:  new Date().toISOString(),
+      }).eq('id', app.id)
+
+      moved++
+    } catch(e){ console.warn('[BulkMove]', app.email, e.message); failed++ }
+  }
+
+  // Reload data
+  await loadHomeownersFromSupabase()
+  await loadSignupsFromSupabase()
+  renderPendingHWList()
+  renderHomeownerList?.()
+  updateOverviewCounts?.()
+
+  const msg = moved + ' moved to HO Management' + (failed > 0 ? ', ' + failed + ' failed' : '') + ' ✅'
+  showToast(msg, failed > 0 ? 'info' : 'ok', 6000)
+}
+
 async function activateWaitlistZone(zip, appId){
   try {
     // Use zoneToRow column names — zones table uses zip_prefix and zip_codes, not zip/zips
@@ -25566,14 +25809,119 @@ async function activateWaitlistZone(zip, appId){
 
     // Link ALL waitlist homeowners in this ZIP to the zone + update count
     await _linkHomeownersToNewZone(zone)
+
+    // ── Auto-approve into homeowners table ────────────────────────────────
+    // This moves them from "Pending Homeowners" to "HO Management" as Waitlist.
+    // They keep status='waitlist' (amber) until payment + runner assignment.
+    await _bulkApproveToHomeowners(zone, zip)
+
     syncZoneData()
     renderAdminZones?.()
+    await loadHomeownersFromSupabase()
     await loadSignupsFromSupabase()
     renderPendingHWList()
-    showToast('✅ Waitlist zone active — '+zip+' now shows on all heatmaps', 'ok', 5000)
+    renderHomeownerList?.()
+    updateOverviewCounts?.()
+    showToast('✅ Zone activated — homeowners moved to HO Management', 'ok', 5000)
   } catch(e){
     console.error('[BinDash] activateWaitlistZone error:', e)
     showToast('Error: '+e.message, 'err')
+  }
+}
+
+// ── _bulkApproveToHomeowners — inserts waitlist signups into homeowners table ──
+// Called after a waitlist zone is created. Moves everyone from Pending → HO Mgmt.
+async function _bulkApproveToHomeowners(zone, zip){
+  try {
+    const zips = zone.zips?.length ? zone.zips : [zip].filter(Boolean)
+    // Fetch all pending signups for this zone that aren't already in homeowners table
+    const { data: sigs } = await _supa.from('homeowner_signups')
+      .select('*')
+      .in('zip_code', zips)
+      .in('status', ['waitlist_pending', 'pending_review', 'waitlisted'])
+    if(!sigs?.length){ console.log('[BulkApprove] No signups to move for', zone.name); return }
+
+    // Get existing homeowner emails to avoid duplicates
+    const { data: existing } = await _supa.from('homeowners').select('email')
+    const existingEmails = new Set((existing||[]).map(e => (e.email||'').toLowerCase()))
+
+    const toInsert = sigs.filter(s => !existingEmails.has((s.email||'').toLowerCase()))
+    if(!toInsert.length){ console.log('[BulkApprove] All already in homeowners table'); return }
+
+    // Build homeowners rows
+    const rows = toInsert.map(s => {
+      const fn = s.first_name || s.full_name?.split(' ')[0] || ''
+      const ln = s.last_name  || s.full_name?.split(' ').slice(1).join(' ') || ''
+      // Resolve plan_id
+      const svc = (s.service_type||'').toLowerCase()
+      const planId = s.plan_id
+        || (s.collection_day_2 || svc.includes('split') ? 'plan_c'
+           : svc.includes('both') || svc.includes('same day') || svc.includes('2 can') ? 'plan_b'
+           : svc.includes('bin out') || svc.startsWith('oan') ? 'oan_a'
+           : 'plan_a')
+      return {
+        signup_id:       s.id,
+        first_name:      fn,
+        last_name:       ln,
+        email:           s.email,
+        phone:           s.phone || '',
+        street_address:  s.street_address || '',
+        city:            s.city || '',
+        zip_code:        s.zip_code || zip,
+        zone_id:         zone.id,
+        service_type:    s.service_type || 'Recycling',
+        frequency:       s.frequency || 'weekly',
+        collection_day:  s.collection_day || '',
+        collection_day_2:s.collection_day_2 || null,
+        plan_id:         planId,
+        assigned_runner: s.assigned_runner || null,
+        lat:             s.lat ? parseFloat(s.lat) : null,
+        lng:             s.lng ? parseFloat(s.lng) : null,
+        h3_index:        s.h3_index || null,
+        hex_id:          s.h3_index || null,
+        status:          'waitlist',   // amber — not active until payment confirmed
+        created_at:      new Date().toISOString(),
+      }
+    })
+
+    const { error: insErr } = await _supa.from('homeowners').insert(rows)
+    if(insErr){
+      // Upsert on conflict (email already exists from a previous partial run)
+      if(insErr.message?.includes('duplicate') || insErr.message?.includes('unique')){
+        // Insert one-by-one, skipping duplicates
+        for(const row of rows){
+          await _supa.from('homeowners').insert(row).then(r => {
+            if(r.error && !r.error.message?.includes('duplicate') && !r.error.message?.includes('unique'))
+              console.warn('[BulkApprove] Row insert:', r.error.message, row.email)
+          })
+        }
+      } else {
+        console.warn('[BulkApprove] Bulk insert error:', insErr.message)
+      }
+    }
+
+    // Mark signups as waitlist_approved so they no longer show in Pending tab
+    const ids = toInsert.map(s => s.id)
+    await _supa.from('homeowner_signups').update({
+      status:      'waitlist_approved',
+      zone_id:     zone.id,
+      reviewed_at: new Date().toISOString(),
+      updated_at:  new Date().toISOString(),
+    }).in('id', ids)
+
+    // Update in-memory PENDING_HOMEOWNERS — remove approved entries
+    const approvedEmails = new Set(toInsert.map(s => (s.email||'').toLowerCase()))
+    for(let i = PENDING_HOMEOWNERS.length-1; i >= 0; i--){
+      if(approvedEmails.has((PENDING_HOMEOWNERS[i].email||'').toLowerCase())){
+        PENDING_HOMEOWNERS.splice(i, 1)
+      }
+    }
+
+    console.log('[BulkApprove] Moved', toInsert.length, 'homeowners to HO Management for', zone.name)
+    showToast(toInsert.length + ' homeowner' + (toInsert.length!==1?'s':'') + ' moved to HO Management as Waitlist', 'info', 5000)
+  } catch(e){
+    console.warn('[BulkApprove] Error:', e.message)
+    showToast('Could not auto-approve all HOs: '+e.message, 'err')
   }
 }
 
@@ -29593,10 +29941,32 @@ async function loadMicroZones(){
   // Build zone stats from ADMIN_ZONES — the single source of truth
   const zones = ADMIN_ZONES.filter(z=>z.status!=='inactive').map(z=>{
     const zips = (z.zips?.length?z.zips:[z.zip]).filter(Boolean)
-    const hwCount = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))).length
+    const _zH6mz = z.h3_index || null
+    const hwCount = HOMEOWNERS.filter(h => {
+      if(h.status !== 'active') return false
+      if(h.zoneId === z.id || zips.includes(h.zip)) return true
+      if(_zH6mz && h.h3_index && typeof h3 !== 'undefined'){
+        try { return h3.cellToParent(h.h3_index, 6) === _zH6mz } catch(e){}
+      }
+      return false
+    }).length
     const rnCount = RUNNERS.filter(r=>r.status!=='INACTIVE'&&(r.zoneId===z.id||r.coverageZones?.includes(z.id))).length
-    const wlCount = HOMEOWNERS.filter(h=>h.status==='waitlist'&&(zips.includes(h.zip)||h.zoneId===z.id)).length
-    return { ...z, hwCount, rnCount, wlCount, zips }
+    // wlCount: approved waitlist HOs + pending waitlist signups for this zone
+    const _zH6 = z.h3_index || null
+    const wlApproved = HOMEOWNERS.filter(h => {
+      if(h.status !== 'waitlist') return false
+      if(h.zoneId === z.id || zips.includes(h.zip)) return true
+      if(_zH6 && h.h3_index && typeof h3 !== 'undefined'){
+        try { return h3.cellToParent(h.h3_index, 6) === _zH6 } catch(e){}
+      }
+      return false
+    }).length
+    const wlPending = (PENDING_HOMEOWNERS||[]).filter(p =>
+      (p.isWaitlist || p.status === 'waitlist_pending') &&
+      (zips.includes(p.zip) || zips.includes(p.zip_code) || p.zoneId === z.id)
+    ).length
+    const wlCount = wlApproved + wlPending
+    return { ...z, hwCount, rnCount, wlCount, wlApproved, wlPending, zips }
   }).sort((a,b)=>b.hwCount-a.hwCount)
 
   try {
@@ -29605,11 +29975,16 @@ async function loadMicroZones(){
     const shadow  = 0
     const totalHO = zones.reduce((t,z)=>t+z.hwCount,0)
     const totalWL = zones.reduce((t,z)=>t+z.wlCount,0)
+    // Also count unzoned pending waitlist HOs (not yet matched to a zone)
+    const unzonedPendingWl = (PENDING_HOMEOWNERS||[]).filter(p =>
+      (p.isWaitlist || p.status === 'waitlist_pending') && !p.zoneId
+    ).length
+    const displayWL = totalWL + unzonedPendingWl
 
     if(statsEl) statsEl.innerHTML = [
       ['Live',     active,  '#22c55e', 'live'],
       ['Waitlist', pending, '#f59e0b', 'waitlist'],
-      ['All HOs',  totalHO+' ('+totalWL+' wl)', 'var(--cyan)', 'all'],
+      ['All HOs',  totalHO+' ('+displayWL+' wl)', 'var(--cyan)', 'all'],
       ['No Runner',zones.filter(z=>z.rnCount===0&&z.status==='live').length, '#ef4444', 'no-runner'],
     ].map(([label,val,color,filter])=>`
       <div onclick="mzFilterList('${filter}')" style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center;cursor:pointer;transition:all .15s" 
@@ -29632,6 +30007,9 @@ function _renderMicroZoneCard(z){
   const isLive = z.status === 'live'
   const sc     = isLive ? '#22c55e' : z.status==='waitlist' ? '#f59e0b' : '#6b7280'
   const sl     = isLive ? '✅ Live'  : z.status==='waitlist' ? '⏳ Waitlist' : '⬜ Inactive'
+  const _wlLabel = z.wlPending > 0
+    ? z.wlCount + ' wl (' + z.wlPending + ' pending)'
+    : z.wlCount + ' wl'
   const pct    = z.threshold > 0 ? Math.min(100, Math.round(z.hwCount / z.threshold * 100)) : 100
   const lead   = RUNNERS.find(r =>
     (r.zoneRoles && r.zoneRoles[z.id] && r.zoneRoles[z.id].role === 'lead') ||
@@ -31721,6 +32099,13 @@ async function loadSignupsFromSupabase(){
         referredByRunner:row.referred_by_runner  || null,
         // Waitlist zone flag — pending_review but in a waitlist zone
         isWaitlist:      row.is_waitlist === true || row.status === 'waitlisted',
+        // Geocoded coordinates — needed for map rendering and coordinate editor
+        lat:             row.lat ? parseFloat(row.lat) : null,
+        lng:             row.lng ? parseFloat(row.lng) : null,
+        h3_index:        row.h3_index || null,
+        h3_zone_res6:    row.h3_zone_res6 || null,
+        street_address:  row.street_address || null,  // for geocode reset
+        zip_code:        row.zip_code || null,
       }
       // Route ALL signups into PENDING_HOMEOWNERS — waitlist_pending shows with WAITLIST badge
       if(row.status === 'waitlisted'){
