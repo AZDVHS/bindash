@@ -22290,14 +22290,17 @@ function showHWDetailForce(hwId){
         <button onclick="(async()=>{
           const b=this; b.disabled=true; b.textContent='Geocoding…';
           try{
-            const gc=await geocodeAddress(hw.address||'','${(hw.city||'').replace(/'/g,"\'")}','AZ','${hw.zip||''}');
-            if(!gc?.lat){showToast('No geocode result','err');return;}
+            const _addr='${(hw.address||hw.street_address||'').replace(/'/g,'')}';
+            const _city='${(hw.city||'').replace(/'/g,'')}';
+            const _zip='${(hw.zip||hw.zip_code||'').replace(/-.*$/,'').slice(0,5)}';
+            const gc=await geocodeAddress(_addr,_city,'AZ',_zip);
+            if(!gc?.lat){showToast('No geocode result for: '+_addr+', '+_zip,'err');return;}
             const lEl=document.getElementById('hwd-lat-${hwId}');
             const gEl=document.getElementById('hwd-lng-${hwId}');
             if(lEl)lEl.value=gc.lat.toFixed(8);
             if(gEl)gEl.value=gc.lng.toFixed(8);
-            showToast('Fresh coords loaded — click Save Changes to apply','info',4000)
-          }catch(e){showToast(e.message,'err')}
+            showToast('📍 '+gc.lat.toFixed(6)+', '+gc.lng.toFixed(6)+' ('+( gc.provider||'geocoder')+') — click Save Changes to apply','info',5000)
+          }catch(e){showToast('Geocode error: '+e.message,'err')}
           finally{b.disabled=false;b.textContent='Re-geocode'}
         })()"
           style="padding:4px 10px;background:transparent;border:1px solid rgba(99,102,241,.4);border-radius:6px;color:#a5b4fc;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">Re-geocode</button>
@@ -22367,8 +22370,10 @@ async function saveHWDetail(hwId){
   const _newLngRaw = document.getElementById('hwd-lng-'+hwId)?.value
   const _newLat = _newLatRaw ? parseFloat(_newLatRaw) : null
   const _newLng = _newLngRaw ? parseFloat(_newLngRaw) : null
+  // _coordsChanged: true if valid coords in fields — always save if present
+  // Don't compare to existing value (floating point precision issues cause false negatives)
   const _coordsChanged = _newLat && _newLng && !isNaN(_newLat) && !isNaN(_newLng)
-    && (_newLat !== parseFloat(hw.lat||0) || _newLng !== parseFloat(hw.lng||0))
+    && _newLat > 20 && _newLat < 50 && _newLng > -130 && _newLng < -60  // continental US
   const _newH8 = _coordsChanged && typeof h3 !== 'undefined'
     ? (() => { try { return h3.latLngToCell(_newLat, _newLng, 8) } catch(e){ return null } })()
     : null
@@ -22481,8 +22486,22 @@ async function saveHWDetail(hwId){
     if(!ok1 && !ok2){
       showToast('Save failed — check console for details', 'err')
     }
+    // Update in-memory lat/lng NOW so map uses new coords even before DB reload
+    if(_coordsChanged){
+      hw.lat = _newLat; hw.lng = _newLng
+      if(_newH8){ hw.h3_index = _newH8; hw.hexId = _newH8 }
+    }
     await loadHomeownersFromSupabase()
-    if(_coordsChanged) _scheduleMapLayerUpdate(400)  // redraw dot at new position
+    // Always refresh map after a save — coords may have changed
+    if(window._adminMap && window._adminMapInitialized){
+      _scheduleMapLayerUpdate(300)
+    }
+    showToast(
+      (_coordsChanged
+        ? '✅ Saved · coords updated · dot moving on map'
+        : '✅ Saved'),
+      'ok', 4000
+    )
   } catch(e){
     console.warn('[BinDash] saveHWDetail exception:', String(e?.message||e))
     showToast('Save error: ' + String(e?.message||e).slice(0,60), 'err')
