@@ -1512,9 +1512,23 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
 }
 
 /* Leaflet popup — ensure dark text on white background */
-.leaflet-popup-content { color: #0f172a !important; font-family: inherit !important; }
-.leaflet-popup-content-wrapper { border-radius: 10px !important; box-shadow: 0 4px 16px rgba(0,0,0,.12) !important; }
+.leaflet-popup-content { color: #0f172a !important; font-family: inherit !important; margin:0 !important; }
+.leaflet-popup-content-wrapper { border-radius: 12px !important; box-shadow: 0 8px 32px rgba(0,0,0,.18) !important; padding:0 !important; overflow:hidden; border:1px solid #e2e8f0 !important; }
 .leaflet-popup-tip-container .leaflet-popup-tip { background: #fff !important; }
+/* HO popup card */
+.ho-popup { font-family:system-ui,-apple-system,sans-serif; min-width:260px; max-width:300px; font-size:12px; color:#0f172a; }
+.ho-popup-header { background:linear-gradient(135deg,#0f172a,#1e293b); color:#f1f5f9; padding:12px 14px; }
+.ho-popup-body { padding:12px 14px; }
+.ho-popup-row { display:flex; align-items:flex-start; gap:8px; padding:4px 0; border-bottom:1px solid #f1f5f9; }
+.ho-popup-row:last-child { border-bottom:none; }
+.ho-popup-label { font-size:9px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:#94a3b8; min-width:58px; padding-top:1px; }
+.ho-popup-val { font-size:12px; color:#1e293b; flex:1; word-break:break-word; }
+.ho-popup-pill { display:inline-block; padding:1px 7px; border-radius:99px; font-size:10px; font-weight:700; }
+.ho-popup-actions { display:flex; gap:6px; padding:10px 14px; background:#f8fafc; border-top:1px solid #e2e8f0; }
+.ho-popup-btn { flex:1; padding:6px 10px; border:none; border-radius:7px; font-size:11px; font-weight:700; cursor:pointer; transition:opacity .15s; }
+.ho-popup-btn:hover { opacity:.85; }
+.ho-popup-input { width:100%; padding:5px 8px; border:1px solid #cbd5e1; border-radius:6px; font-size:11px; font-family:monospace; box-sizing:border-box; margin-top:2px; }
+.ho-popup-input:focus { outline:none; border-color:#818cf8; box-shadow:0 0 0 2px rgba(129,140,248,.2); }
 
 /* Default Leaflet tooltip — dark text */
 .leaflet-tooltip { color: #1e293b !important; font-family: inherit !important; font-size: 11px !important; }
@@ -10399,6 +10413,179 @@ function _scheduleMapLayerUpdate(delayMs = 200){
 // ── _updateAdminMapLayers() — layer-only refresh, NO zoom/center change ──────
 // Called for realtime updates. Replaces hex/dot layers without touching the map
 // instance, viewport, zoom level, or pan position.
+
+// ── HO Popup Actions ─────────────────────────────────────────────────────────
+// These are called from bindPopup HTML onclick= strings, so must be window-global.
+
+window._hoPopupEdit = function(popupId){
+  const view  = document.getElementById('ho-view-'+popupId)
+  const edit  = document.getElementById('ho-edit-'+popupId)
+  if(view) view.style.display = 'none'
+  if(edit) edit.style.display = 'block'
+}
+
+window._hoPopupCancel = function(popupId){
+  const view = document.getElementById('ho-view-'+popupId)
+  const edit = document.getElementById('ho-edit-'+popupId)
+  if(view) view.style.display = 'block'
+  if(edit) edit.style.display = 'none'
+}
+
+window._hoPopupSave = async function(popupId, hoId, table){
+  const latEl = document.getElementById('ho-lat-'+popupId)
+  const lngEl = document.getElementById('ho-lng-'+popupId)
+  const btn   = document.getElementById('ho-save-btn-'+popupId)
+  if(!latEl || !lngEl) return
+  const newLat = parseFloat(latEl.value), newLng = parseFloat(lngEl.value)
+  if(isNaN(newLat) || isNaN(newLng) || newLat < 20 || newLat > 50 || newLng < -130 || newLng > -60){
+    latEl.style.borderColor = '#ef4444'; lngEl.style.borderColor = '#ef4444'
+    return
+  }
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…' }
+  try {
+    // Derive new H3 indexes from updated coordinates
+    const newH8 = (typeof h3 !== 'undefined') ? h3.latLngToCell(newLat, newLng, 8) : null
+    const newH6 = newH8 ? h3.cellToParent(newH8, 6) : null
+    const payload = { lat:newLat, lng:newLng, updated_at:new Date().toISOString() }
+    if(newH8) payload.h3_index = newH8
+    if(table === 'homeowners' && newH8) payload.hex_id = newH8
+    if(table === 'homeowner_signups' && newH6) payload.h3_zone_res6 = newH6
+    const { error } = await _supa.from(table).update(payload).eq('id', hoId)
+    if(error) throw new Error(error.message)
+    // Update in-memory HOMEOWNERS
+    const mem = HOMEOWNERS.find(h => h.id === hoId)
+    if(mem){ mem.lat = newLat; mem.lng = newLng; if(newH8) mem.h3_index = newH8 }
+    window._adminMap?.closePopup?.()
+    _scheduleMapLayerUpdate(300)
+    showToast('Coordinates saved — h3_res8: '+(newH8||'—'), 'ok', 5000)
+  } catch(e){
+    if(btn){ btn.disabled = false; btn.textContent = 'Save' }
+    showToast('Save failed: '+e.message, 'err')
+  }
+}
+
+window._hoPopupReset = async function(popupId, hoId, table, address, city, zip){
+  const btn = document.getElementById('ho-reset-btn-'+popupId)
+  if(btn){ btn.disabled = true; btn.textContent = 'Geocoding…' }
+  try {
+    const gc = await geocodeAddress(address, city || '', 'AZ', zip)
+    if(!gc?.lat) throw new Error('Geocoder returned no result for this address')
+    const latEl = document.getElementById('ho-lat-'+popupId)
+    const lngEl = document.getElementById('ho-lng-'+popupId)
+    if(latEl) latEl.value = gc.lat.toFixed(8)
+    if(lngEl) lngEl.value = gc.lng.toFixed(8)
+    // Show edit section if not already
+    window._hoPopupEdit(popupId)
+    if(btn){ btn.disabled = false; btn.textContent = 'Reset to Address' }
+    showToast('Fresh geocode: '+gc.lat.toFixed(6)+', '+gc.lng.toFixed(6)+' ('+( gc.provider||'geocoder')+')', 'info', 5000)
+  } catch(e){
+    if(btn){ btn.disabled = false; btn.textContent = 'Reset to Address' }
+    showToast('Geocode failed: '+e.message, 'err')
+  }
+}
+
+
+// ── _buildHOPopup — editable click popup for homeowner dots ─────────────────
+// Returns L.popup-ready HTML with view mode + edit mode for coordinates.
+function _buildHOPopup(ho, zone){
+  const hoId    = ho?.id || ho?.email || Math.random().toString(36).slice(2)
+  const popupId = String(hoId).replace(/[^a-zA-Z0-9]/g,'_').slice(0,20)
+  const hoName  = ((ho?.first_name||'') + ' ' + (ho?.last_name||'')).trim() || ho?.email?.split('@')[0] || 'Homeowner'
+  const hoAddr  = ho?.street_address || ho?.address || '—'
+  const hoCity  = ho?.city || ''
+  const hoZip   = ho?.zip || ho?.zip_code || ''
+  const hoPhone = ho?.phone && ho.phone !== '--' ? ho.phone : null
+  const hoEmail = ho?.email || null
+  const hoDay   = ho?.day && ho.day !== '--' ? ho.day : (ho?.collection_day || '—')
+  const hoDay2  = ho?.dayWaste || ho?.collection_day_2 || null
+  const hoPlan  = ho?.plan || ho?.service_type || '—'
+  const hoLat   = ho?.lat ? parseFloat(ho.lat) : null
+  const hoLng   = ho?.lng ? parseFloat(ho.lng) : null
+  const hoH8    = ho?.h3_index || ho?.hex_id || null
+  const table   = ho?._table || (ho?.h3_zone_res6 ? 'homeowner_signups' : 'homeowners')
+
+  const _rn = ho?.assignedRunner
+    ? RUNNERS.find(r => r.id===ho.assignedRunner || r.name===ho.assignedRunner)
+    : (zone ? RUNNERS.find(r => r.zoneId===zone.id) : null)
+  const rnName = _rn?.name || ho?.assignedRunner || 'Unassigned'
+
+  const isActive = ho?.status === 'active'
+  const statusColor = isActive ? '#22c55e' : '#f97316'
+  const statusLabel = isActive ? '✅ Active' : '⏳ Waitlist'
+
+  const precisionLabel = hoLat
+    ? (hoLat.toFixed(5)+', '+hoLng.toFixed(5))
+    : '⚠️ No coordinates'
+  const h3Label = hoH8 || '—'
+
+  return `
+<div class="ho-popup">
+  <div class="ho-popup-header">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div style="font-size:14px;font-weight:700;line-height:1.2">${hoName}</div>
+        <div style="font-size:10px;opacity:.6;margin-top:2px">${zone?.name||('ZIP '+(hoZip||'—'))}</div>
+      </div>
+      <div style="background:${isActive?'rgba(34,197,94,.25)':'rgba(249,115,22,.25)'};color:${statusColor};padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;white-space:nowrap">${statusLabel}</div>
+    </div>
+  </div>
+  <div class="ho-popup-body">
+    <div class="ho-popup-row">
+      <div class="ho-popup-label">Address</div>
+      <div class="ho-popup-val">${hoAddr}${hoCity?' · '+hoCity:''}${hoZip?' '+hoZip:''}</div>
+    </div>
+    <div class="ho-popup-row">
+      <div class="ho-popup-label">Runner</div>
+      <div class="ho-popup-val"><span style="background:rgba(79,70,229,.1);color:#4f46e5;padding:1px 7px;border-radius:5px;font-weight:600">🚐 ${rnName}</span></div>
+    </div>
+    <div class="ho-popup-row">
+      <div class="ho-popup-label">Service</div>
+      <div class="ho-popup-val">${hoPlan.replace(/_/g,' ')} · ${hoDay}${hoDay2?' / '+hoDay2:''}</div>
+    </div>
+    ${hoPhone||hoEmail ? `<div class="ho-popup-row">
+      <div class="ho-popup-label">Contact</div>
+      <div class="ho-popup-val">
+        ${hoPhone?`<a href="tel:${hoPhone}" style="color:#4f46e5;text-decoration:none">📞 ${hoPhone}</a><br>`:''}
+        ${hoEmail?`<a href="mailto:${hoEmail}" style="color:#4f46e5;text-decoration:none;font-size:11px">✉️ ${hoEmail}</a>`:''}
+      </div>
+    </div>` : ''}
+    <!-- Location Precision section -->
+    <div style="margin-top:8px;padding:8px 10px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#94a3b8">Location Precision</div>
+        <button class="ho-popup-btn" onclick="window._hoPopupEdit('${popupId}')"
+          style="background:#4f46e5;color:#fff;flex:none;padding:2px 8px;font-size:10px">✏️ Edit</button>
+      </div>
+      <!-- VIEW mode -->
+      <div id="ho-view-${popupId}">
+        <div style="font-family:monospace;font-size:11px;color:#334155">${precisionLabel}</div>
+        <div style="font-size:9px;color:#94a3b8;margin-top:2px">H3 res-8: ${h3Label}</div>
+      </div>
+      <!-- EDIT mode (hidden by default) -->
+      <div id="ho-edit-${popupId}" style="display:none">
+        <label style="font-size:9px;color:#64748b;font-weight:600">Latitude</label>
+        <input id="ho-lat-${popupId}" class="ho-popup-input" type="number" step="0.00000001"
+          value="${hoLat?.toFixed(8)||''}" placeholder="e.g. 33.48456">
+        <label style="font-size:9px;color:#64748b;font-weight:600;margin-top:5px;display:block">Longitude</label>
+        <input id="ho-lng-${popupId}" class="ho-popup-input" type="number" step="0.00000001"
+          value="${hoLng?.toFixed(8)||''}" placeholder="e.g. -111.83201">
+        <div style="display:flex;gap:5px;margin-top:7px">
+          <button id="ho-save-btn-${popupId}" class="ho-popup-btn"
+            style="background:#22c55e;color:#fff"
+            onclick="window._hoPopupSave('${popupId}','${hoId}','${table}')">Save</button>
+          <button id="ho-reset-btn-${popupId}" class="ho-popup-btn"
+            style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0"
+            onclick="window._hoPopupReset('${popupId}','${hoId}','${table}','${hoAddr.replace(/'/g,'\'')}','${hoCity}','${hoZip}')">Reset to Address</button>
+          <button class="ho-popup-btn"
+            style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;flex:none;padding:2px 8px"
+            onclick="window._hoPopupCancel('${popupId}')">✕</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>`
+}
+
 // ── _buildHOTooltip — rich hover tooltip for any homeowner dot ──────────────
 // All optional chaining so null data never crashes the map render loop.
 function _buildHOTooltip(ho, zone){
@@ -10645,6 +10832,7 @@ async function _updateAdminMapLayers(){
         + _buildHOTooltip(ho, zone),
         { className:'h3-tip', direction:'top', sticky:false, offset:[0,-8] }
       )
+      dot.bindPopup(_buildHOPopup(ho, zone), { maxWidth:320, className:'ho-popup-wrap' })
       dot.addTo(map); window._adminHexLayers.push(dot)
     } catch(e){}
   })
@@ -10691,10 +10879,12 @@ async function _updateAdminMapLayers(){
         const dot = L.circleMarker([sLat, sLng], {
           radius:5, color:'#f97316', fillColor:'#fdba74', fillOpacity:0.80, weight:1.5, opacity:1
         })
+        const _sigHoObj = { ...s, first_name: s.first_name||sName, status:'waitlist', _table:'homeowner_signups' }
         dot.bindTooltip(
-          _buildHOTooltip({ ...s, first_name: s.first_name||sName, status:'waitlist' }, null),
+          _buildHOTooltip(_sigHoObj, null),
           { className:'h3-tip', direction:'top', sticky:false, offset:[0,-8] }
         )
+        dot.bindPopup(_buildHOPopup(_sigHoObj, null), { maxWidth:320, className:'ho-popup-wrap' })
         dot.addTo(map); window._adminHexLayers.push(dot)
       } catch(e){}
     })
