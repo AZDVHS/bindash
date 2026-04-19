@@ -11618,10 +11618,26 @@ async function _initAdminMap(){
       lat = parseFloat(z.lat); lng = parseFloat(z.lng); _anchorSrc = 'zones.lat/lng ✅'
     }
     if(!lat){
-      const _ho = HOMEOWNERS.find(h => h.zoneId===z.id && h.lat && h.lng && h.status==='active')
-             || HOMEOWNERS.find(h => h.zoneId===z.id && h.lat && h.lng)
-             || HOMEOWNERS.find(h => zips.includes(h.zip) && h.lat && h.lng)
-      if(_ho){ lat=parseFloat(_ho.lat); lng=parseFloat(_ho.lng); _anchorSrc='approved HO' }
+      // Only use HO as zone anchor if their H3 res-6 matches the zone's stored h3_index
+      // This prevents a single HO with bad coordinates from moving the zone hex
+      const _validHO = (h) => {
+        if(!h.lat || !h.lng) return false
+        if(!z.h3_index || typeof h3 === 'undefined') return true  // no zone H3 to validate against
+        try {
+          const _hoH6 = h3.cellToParent(h3.latLngToCell(parseFloat(h.lat), parseFloat(h.lng), 8), 6)
+          return _hoH6 === z.h3_index
+        } catch(e){ return false }
+      }
+      // Priority: active HO in zone with valid coords → any HO in zone → HO in ZIP
+      const _ho = HOMEOWNERS.find(h => h.zoneId===z.id && h.status==='active' && _validHO(h))
+             || HOMEOWNERS.find(h => h.zoneId===z.id && _validHO(h))
+             || HOMEOWNERS.find(h => zips.includes(h.zip) && _validHO(h))
+      if(_ho){
+        lat=parseFloat(_ho.lat); lng=parseFloat(_ho.lng); _anchorSrc='approved HO (H3-validated)'
+      } else if(HOMEOWNERS.some(h => h.zoneId===z.id && h.lat && h.lng)){
+        // HOs exist but H3 mismatch — warn, use zone h3_index center instead if available
+        console.warn('[Map] Zone', z.name, '— HO coords do not match zone H3. Using zone h3_index center instead. Run Geocode HOs to fix.')
+      }
     }
     if(!lat && Object.keys(sigsByZip).length){
       const _sig = zips.reduce((best,zp)=>{ const d=sigsByZip[zp]; return(d?.anchorLat&&!best)?d:best }, null)
