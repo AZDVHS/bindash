@@ -10462,7 +10462,7 @@ window._hoPopupSave = async function(popupId, hoId, table){
 
     const payload = { lat:newLat, lng:newLng, updated_at:new Date().toISOString() }
     if(newH8) payload.h3_index = newH8
-    if(table === 'homeowners' && newH8)        payload.hex_id       = newH8
+    // hex_id has a FK constraint to micro_zones — do not write arbitrary H3 strings to it
     if(table === 'homeowner_signups' && newH6) payload.h3_zone_res6 = newH6
 
     const { error } = await _supa.from(table).update(payload).eq('id', dbId)
@@ -10941,7 +10941,7 @@ async function _updateAdminMapLayers(){
   // They have coords from syncHomeownerToHex but aren't in HOMEOWNERS array
   try {
     const { data: _sigDots, error: _sigErr } = await _supa.from('homeowner_signups')
-      .select('id,first_name,last_name,full_name,email,phone,street_address,city,zip_code,lat,lng,h3_index,h3_zone_res6,status,collection_day,collection_day_2,service_type,plan_id,assigned_runner')
+      .select('id,first_name,last_name,email,phone,street_address,city,zip_code,lat,lng,h3_index,h3_zone_res6,status,collection_day,collection_day_2,service_type,plan_id,assigned_runner')
       .not('lat','is',null).not('lng','is',null)
       .in('status',['waitlist_pending','pending_review','payment_pending','approved','waitlist_approved'])
       .order('created_at', { ascending: false })
@@ -11677,7 +11677,7 @@ function showMicroZoneDetail(z){
 // These are sourced from Google Maps pin drops and are authoritative.
 // Key format: 'street_address::zip_code' (lowercase, trimmed)
 const KNOWN_COORDS = {
-  '3945 canyon loop::86004': { lat: 35.08782794850709, lng: -111.69172138878068 },
+  '3945 canyon loop::86004': { lat: 35.08759567878481, lng: -111.69211467852905 },
   // Add more overrides here as needed: 'address::zip': { lat, lng }
 }
 
@@ -11716,14 +11716,14 @@ async function syncHomeownerToHex(row, table='homeowners'){
   // 2. Update the source table — graceful column detection
   if(table === 'homeowners'){
     // Try full payload first; if columns missing, fall back to just lat/lng
+    // hex_id has FK to micro_zones — only write h3_index (no constraint)
     const { error: hwErr } = await _supa.from('homeowners').update({
       lat, lng,
-      hex_id:    hex8,
       h3_index:  hex8,
       updated_at: new Date().toISOString(),
     }).eq('id', row.id)
     if(hwErr){
-      console.warn('[syncHex] Full homeowners update failed ('+hwErr.message+') — trying lat/lng only')
+      console.warn('[syncHex] homeowners update failed ('+hwErr.message+') — trying lat/lng only')
       await _supa.from('homeowners').update({
         lat, lng, updated_at: new Date().toISOString()
       }).eq('id', row.id)
@@ -11802,7 +11802,7 @@ async function geocodeExistingHomeowners(){
 
     // ── Load from homeowners table (active + waitlist) ──
     const { data: hwRows } = await _supa.from('homeowners')
-      .select('id, email, street_address, city, zip_code, lat, lng, hex_id, h3_index, status')
+      .select('id, email, street_address, city, zip_code, lat, lng, h3_index, status')
       .in('status', ['active','waitlist'])
       .limit(500)
 
@@ -22442,7 +22442,7 @@ async function saveHWDetail(hwId){
     collection_day:         newDay   || null,
     collection_day_2:       newDay2  || null,
     service_notes:          newNotes || null,
-    notification_preference: newNotifPref || 'email',
+    // notification_preference is NOT in homeowner_signups — homeowners table only
     ...(_coordsChanged ? { lat: _newLat, lng: _newLng, h3_index: _newH8 } : {}),
     updated_at:             new Date().toISOString(),
   }
@@ -22464,10 +22464,10 @@ async function saveHWDetail(hwId){
     plan_id:          finalPlanKey,
     status:           _finalStatus || newStatus,
     ...(_coordsChanged ? {
-      lat:     _newLat,
-      lng:     _newLng,
+      lat:      _newLat,
+      lng:      _newLng,
       h3_index: _newH8,
-      hex_id:   _newH8,
+      // hex_id intentionally omitted — FK constraint to micro_zones prevents writing here
     } : {}),
     updated_at:       new Date().toISOString(),
   }
@@ -22489,7 +22489,8 @@ async function saveHWDetail(hwId){
     // Update in-memory lat/lng NOW so map uses new coords even before DB reload
     if(_coordsChanged){
       hw.lat = _newLat; hw.lng = _newLng
-      if(_newH8){ hw.h3_index = _newH8; hw.hexId = _newH8 }
+      if(_newH8) hw.h3_index = _newH8
+      // hw.hexId not updated — maps to hex_id FK column, don't touch
     }
     await loadHomeownersFromSupabase()
     // Always refresh map after a save — coords may have changed
@@ -25306,6 +25307,7 @@ async function savePendingHWCard(appId){
     if(newLat){ payload.lat = newLat; payload.lng = newLng }
     if(newH8)  payload.h3_index = newH8
     if(newH6)  payload.h3_zone_res6 = newH6
+    // hex_id intentionally omitted from all coord saves — FK constraint to micro_zones
 
     const { error } = await _supa.from('homeowner_signups').update(payload).eq('id', appId)
     if(error) throw new Error(error.message)
@@ -25817,7 +25819,7 @@ async function _bulkMoveWaitlistToHOManagement(){
         lat:             app.lat || null,
         lng:             app.lng || null,
         h3_index:        app.h3_index || null,
-        hex_id:          app.h3_index || null,
+        hex_id:          null,  // FK to micro_zones — leave null
         status:          'waitlist',
         created_at:      new Date().toISOString(),
       })
@@ -25971,7 +25973,7 @@ async function _bulkApproveToHomeowners(zone, zip){
         lat:             s.lat ? parseFloat(s.lat) : null,
         lng:             s.lng ? parseFloat(s.lng) : null,
         h3_index:        s.h3_index || null,
-        hex_id:          s.h3_index || null,
+        hex_id:          null,  // FK to micro_zones — leave null, h3_index carries the value
         status:          'waitlist',   // amber — not active until payment confirmed
         created_at:      new Date().toISOString(),
       }
@@ -26158,7 +26160,9 @@ async function approveHW(appId, directZoneId){
         collection_day:   app.day || '',
         plan_id:          _planId,
         assigned_runner:  autoRunner?.id || null,
-        hex_id:           app.hexId || null,
+        // hex_id has FK to micro_zones — only set if getOrCreateMicroZone confirms it exists
+        // Leave null here; micro_zone registration below handles hex_id linkage
+        hex_id:           null,
         lat:              _hoLat,
         lng:              _hoLng,
         status:           _isWlEntry ? 'waitlist' : 'active',
