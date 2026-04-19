@@ -10436,28 +10436,47 @@ window._hoPopupSave = async function(popupId, hoId, table){
   const lngEl = document.getElementById('ho-lng-'+popupId)
   const btn   = document.getElementById('ho-save-btn-'+popupId)
   if(!latEl || !lngEl) return
+
   const newLat = parseFloat(latEl.value), newLng = parseFloat(lngEl.value)
   if(isNaN(newLat) || isNaN(newLng) || newLat < 20 || newLat > 50 || newLng < -130 || newLng > -60){
     latEl.style.borderColor = '#ef4444'; lngEl.style.borderColor = '#ef4444'
+    showToast('Invalid coordinates — lat must be 20–50, lng must be -130 to -60', 'err', 4000)
     return
   }
   if(btn){ btn.disabled = true; btn.textContent = 'Saving…' }
+
   try {
+    // Resolve the real DB record id — popupId is sanitised, look up original
+    // For homeowners: match by id. For signups: match by id or email.
+    const mem = HOMEOWNERS.find(h => {
+      const hSafe = String(h.id||h.email||'').replace(/[^a-zA-Z0-9]/g,'_').slice(0,32)
+      return hSafe === popupId
+    })
+    // Use real DB id if found, else fall back to popupId (may work if UUID has no special chars)
+    const dbId = mem?.id || hoId
+
     // Derive new H3 indexes from updated coordinates
     const newH8 = (typeof h3 !== 'undefined') ? h3.latLngToCell(newLat, newLng, 8) : null
     const newH6 = newH8 ? h3.cellToParent(newH8, 6) : null
+
     const payload = { lat:newLat, lng:newLng, updated_at:new Date().toISOString() }
     if(newH8) payload.h3_index = newH8
-    if(table === 'homeowners' && newH8) payload.hex_id = newH8
+    if(table === 'homeowners' && newH8)        payload.hex_id       = newH8
     if(table === 'homeowner_signups' && newH6) payload.h3_zone_res6 = newH6
-    const { error } = await _supa.from(table).update(payload).eq('id', hoId)
+
+    const { error } = await _supa.from(table).update(payload).eq('id', dbId)
     if(error) throw new Error(error.message)
-    // Update in-memory HOMEOWNERS
-    const mem = HOMEOWNERS.find(h => h.id === hoId)
+
+    // Update in-memory record so map redraws at new position immediately
     if(mem){ mem.lat = newLat; mem.lng = newLng; if(newH8) mem.h3_index = newH8 }
+
     window._adminMap?.closePopup?.()
     _scheduleMapLayerUpdate(300)
-    showToast('Coordinates saved — h3_res8: '+(newH8||'—'), 'ok', 5000)
+    showToast(
+      'Saved ✅ lat '+newLat.toFixed(6)+', lng '+newLng.toFixed(6)
+      +(newH8 ? ' · h3: '+newH8 : ''),
+      'ok', 6000
+    )
   } catch(e){
     if(btn){ btn.disabled = false; btn.textContent = 'Save' }
     showToast('Save failed: '+e.message, 'err')
@@ -10468,16 +10487,26 @@ window._hoPopupReset = async function(popupId, hoId, table, address, city, zip){
   const btn = document.getElementById('ho-reset-btn-'+popupId)
   if(btn){ btn.disabled = true; btn.textContent = 'Geocoding…' }
   try {
-    const gc = await geocodeAddress(address, city || '', 'AZ', zip)
-    if(!gc?.lat) throw new Error('Geocoder returned no result for this address')
+    // Resolve address from in-memory if data attributes were truncated
+    const mem = HOMEOWNERS.find(h => {
+      const hSafe = String(h.id||h.email||'').replace(/[^a-zA-Z0-9]/g,'_').slice(0,32)
+      return hSafe === popupId
+    })
+    const _addr = address || mem?.street_address || mem?.address || ''
+    const _city = city   || mem?.city || ''
+    const _zip  = zip    || mem?.zip  || mem?.zip_code || ''
+    if(!_addr){ showToast('No address to geocode', 'err'); if(btn){btn.disabled=false;btn.textContent='Reset to Address'} return }
+
+    const gc = await geocodeAddress(_addr, _city, 'AZ', _zip)
+    if(!gc?.lat) throw new Error('Geocoder returned no result — try editing coordinates manually')
+
     const latEl = document.getElementById('ho-lat-'+popupId)
     const lngEl = document.getElementById('ho-lng-'+popupId)
     if(latEl) latEl.value = gc.lat.toFixed(8)
     if(lngEl) lngEl.value = gc.lng.toFixed(8)
-    // Show edit section if not already
-    window._hoPopupEdit(popupId)
+    window._hoPopupEdit(popupId)  // open edit section so user can verify before saving
     if(btn){ btn.disabled = false; btn.textContent = 'Reset to Address' }
-    showToast('Fresh geocode: '+gc.lat.toFixed(6)+', '+gc.lng.toFixed(6)+' ('+( gc.provider||'geocoder')+')', 'info', 5000)
+    showToast('Fresh geocode: '+gc.lat.toFixed(6)+', '+gc.lng.toFixed(6)+' ('+( gc.provider||'geocoder')+') — click Save to apply', 'info', 6000)
   } catch(e){
     if(btn){ btn.disabled = false; btn.textContent = 'Reset to Address' }
     showToast('Geocode failed: '+e.message, 'err')
@@ -10488,8 +10517,10 @@ window._hoPopupReset = async function(popupId, hoId, table, address, city, zip){
 // ── _buildHOPopup — editable click popup for homeowner dots ─────────────────
 // Returns L.popup-ready HTML with view mode + edit mode for coordinates.
 function _buildHOPopup(ho, zone){
-  const hoId    = ho?.id || ho?.email || Math.random().toString(36).slice(2)
-  const popupId = String(hoId).replace(/[^a-zA-Z0-9]/g,'_').slice(0,20)
+  // Use a stable, DOM-safe ID. Email fallback ensures uniqueness even without DB id.
+  const _rawId  = ho?.id || ho?.email || ('ho_'+Math.random().toString(36).slice(2))
+  const hoId    = String(_rawId)           // full original — stored in dataset, not onclick
+  const popupId = hoId.replace(/[^a-zA-Z0-9]/g,'_').slice(0,32)  // DOM-safe element id
   const hoName  = ((ho?.first_name||'') + ' ' + (ho?.last_name||'')).trim() || ho?.email?.split('@')[0] || 'Homeowner'
   const hoAddr  = ho?.street_address || ho?.address || '—'
   const hoCity  = ho?.city || ''
@@ -10572,10 +10603,13 @@ function _buildHOPopup(ho, zone){
         <div style="display:flex;gap:5px;margin-top:7px">
           <button id="ho-save-btn-${popupId}" class="ho-popup-btn"
             style="background:#22c55e;color:#fff"
-            onclick="window._hoPopupSave('${popupId}','${hoId}','${table}')">Save</button>
+            data-popup-id="${popupId}" data-ho-id="${popupId}" data-table="${table}"
+            onclick="window._hoPopupSave(this.dataset.popupId, this.dataset.hoId, this.dataset.table)">Save</button>
           <button id="ho-reset-btn-${popupId}" class="ho-popup-btn"
             style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0"
-            onclick="window._hoPopupReset('${popupId}','${hoId}','${table}','${hoAddr.replace(/'/g,'\'')}','${hoCity}','${hoZip}')">Reset to Address</button>
+            data-popup-id="${popupId}" data-ho-id="${popupId}" data-table="${table}"
+            data-address="${hoAddr.replace(/"/g,'&quot;')}" data-city="${(hoCity||'').replace(/"/g,'&quot;')}" data-zip="${hoZip}"
+            onclick="const d=this.dataset; window._hoPopupReset(d.popupId,d.hoId,d.table,d.address,d.city,d.zip)">Reset to Address</button>
           <button class="ho-popup-btn"
             style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;flex:none;padding:2px 8px"
             onclick="window._hoPopupCancel('${popupId}')">✕</button>
@@ -10864,7 +10898,7 @@ async function _updateAdminMapLayers(){
   // They have coords from syncHomeownerToHex but aren't in HOMEOWNERS array
   try {
     const { data: _sigDots } = await _supa.from('homeowner_signups')
-      .select('first_name,last_name,email,street_address,zip_code,lat,lng,h3_index,status')
+      .select('id,first_name,last_name,full_name,email,phone,street_address,city,zip_code,lat,lng,h3_index,h3_zone_res6,status,collection_day,collection_day_2,service_type,plan_id,assigned_runner')
       .not('lat','is',null).not('lng','is',null)
       .in('status',['waitlist_pending','pending_review','payment_pending','approved','waitlist_approved'])
       .limit(500)
@@ -10879,7 +10913,25 @@ async function _updateAdminMapLayers(){
         const dot = L.circleMarker([sLat, sLng], {
           radius:5, color:'#f97316', fillColor:'#fdba74', fillOpacity:0.80, weight:1.5, opacity:1
         })
-        const _sigHoObj = { ...s, first_name: s.first_name||sName, status:'waitlist', _table:'homeowner_signups' }
+        // Normalise signup row into the same shape _buildHOPopup expects
+        const _sigFn = s.first_name || s.full_name?.split(' ')[0] || sName
+        const _sigLn = s.last_name  || s.full_name?.split(' ').slice(1).join(' ') || ''
+        const _sigHoObj = {
+          ...s,
+          id:             s.id,           // critical — used by _hoPopupSave
+          first_name:     _sigFn,
+          last_name:      _sigLn,
+          address:        s.street_address,
+          zip:            s.zip_code,
+          phone:          s.phone || '--',
+          day:            s.collection_day || '--',
+          dayWaste:       s.collection_day_2 || null,
+          plan:           s.plan_id || 'plan_a',
+          service:        s.service_type || 'RECYCLING',
+          assignedRunner: s.assigned_runner || null,
+          status:         'waitlist',
+          _table:         'homeowner_signups',
+        }
         dot.bindTooltip(
           _buildHOTooltip(_sigHoObj, null),
           { className:'h3-tip', direction:'top', sticky:false, offset:[0,-8] }
