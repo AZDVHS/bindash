@@ -4860,6 +4860,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
               <div style="font-size:13px;font-weight:700">H3 Micro Zones <span style="font-size:11px;font-weight:400;color:var(--muted)">(Resolution 8 · ~0.74km² per hex)</span></div>
               <div style="display:flex;gap:6px">
                 <button class="btn btn-outline btn-sm" onclick="geocodeExistingHomeowners()" id="mz-geocode-btn" title="Convert existing homeowner addresses to real H3 hex IDs">📍 Geocode HOs</button>
+          <button onclick="_evalAllZones().then(()=>showToast('Zone statuses re-evaluated','ok',3000))" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);border-radius:8px;color:#22c55e;font-size:12px;font-weight:700;cursor:pointer">⚡ Sync Status</button>
                 <button class="btn btn-outline btn-sm" onclick="loadMicroZones()">⟳ Refresh</button>
               </div>
             </div>
@@ -10855,11 +10856,14 @@ async function _updateAdminMapLayers(){
       // EXACT lat/lng from DB record — ZIP centroid is never used here
       // If ho.lat/ho.lng are null, the filter above (h.lat && h.lng) skips this HO
       const dot = L.circleMarker([_hoLat, _hoLng], {
-        radius: isAnchor ? 7 : 5,
+        radius: isAnchor ? 8 : 6,
         color:       isAnchor ? '#06d6a0' : ringColor,
         fillColor:   isAnchor ? '#06d6a0' : dotColor,
-        fillOpacity: isAnchor ? 0.95 : 0.80,
-        weight:      isAnchor ? 2.5 : 1.5, opacity:1,
+        fillOpacity: isAnchor ? 0.95 : 0.85,
+        weight:      isAnchor ? 2.5 : 2,
+        opacity:     1,
+        pane:        'dotsPane',    // above hex polygons — always clickable
+        bubblingMouseEvents: false, // stop click bubbling to hex beneath
       })
       dot.bindTooltip(
         (isAnchor ? '<div style="font-size:10px;color:#06d6a0;font-weight:700;margin-bottom:3px">⭐ Anchor House</div>' : '')
@@ -10897,11 +10901,13 @@ async function _updateAdminMapLayers(){
   // These are waitlist/pending HOs not yet in the homeowners table
   // They have coords from syncHomeownerToHex but aren't in HOMEOWNERS array
   try {
-    const { data: _sigDots } = await _supa.from('homeowner_signups')
+    const { data: _sigDots, error: _sigErr } = await _supa.from('homeowner_signups')
       .select('id,first_name,last_name,full_name,email,phone,street_address,city,zip_code,lat,lng,h3_index,h3_zone_res6,status,collection_day,collection_day_2,service_type,plan_id,assigned_runner')
       .not('lat','is',null).not('lng','is',null)
       .in('status',['waitlist_pending','pending_review','payment_pending','approved','waitlist_approved'])
-      .limit(500)
+      .order('created_at', { ascending: false })
+      .limit(200)
+    if(_sigErr) console.warn('[Map] signup dots query:', _sigErr.message)
     ;(_sigDots||[]).forEach(s => {
       try {
         const sLat = parseFloat(s.lat), sLng = parseFloat(s.lng)
@@ -10911,7 +10917,8 @@ async function _updateAdminMapLayers(){
         const sName = ((s.first_name||'')+' '+(s.last_name||'')).trim() || s.email?.split('@')[0] || 'HO'
         const isWl = ['waitlist_pending','pending_review','payment_pending'].includes(s.status)
         const dot = L.circleMarker([sLat, sLng], {
-          radius:5, color:'#f97316', fillColor:'#fdba74', fillOpacity:0.80, weight:1.5, opacity:1
+          radius:6, color:'#f97316', fillColor:'#fdba74', fillOpacity:0.85, weight:2, opacity:1,
+          pane:'dotsPane', bubblingMouseEvents:false,
         })
         // Normalise signup row into the same shape _buildHOPopup expects
         const _sigFn = s.first_name || s.full_name?.split(' ')[0] || sName
@@ -11084,6 +11091,14 @@ async function _initAdminMap(){
     attributionControl: true,
     preferCanvas: false,
   })
+  // ── Custom panes — controls z-order for click events ─────────────────────
+  // Polygons at 300, HO dots at 450, runner badges at 500 (above all hex fills)
+  const _dotsPane = window._adminMap.createPane('dotsPane')
+  _dotsPane.style.zIndex = 450
+  _dotsPane.style.pointerEvents = 'auto'
+  const _badgePane = window._adminMap.createPane('badgePane')
+  _badgePane.style.zIndex = 500
+  _badgePane.style.pointerEvents = 'auto'
   console.log('[Map] L.map created')
 
   // CartoDB dark_all — proven reliable dark tile provider
@@ -11488,6 +11503,9 @@ function assignRunner(h3Index, runnerName, runnerId){
       }
 
       showToast(`🚐 ${runnerName} assigned to ${cell.homeowners?.length||0} stop${(cell.homeowners?.length||0)!==1?'s':''}${hexZone?' in '+hexZone.name:''}`, 'ok', 4000)
+
+      // Auto-evaluate zone status — may promote to live
+      if(zoneId) await _evalZoneStatus(zoneId)
     } catch(e){
       console.warn('[assignRunner] Error:', e?.message)
       showToast('Assignment error: ' + (e?.message||e), 'err')
@@ -24611,6 +24629,8 @@ async function createZoneAndApproveHW(appId){
   newZone.homeowners = 1
 
   notifyWaitlistRunners(app.zip, name)
+  // Auto-evaluate zone status — may promote to live if runner already assigned
+  if(realZoneId) setTimeout(() => _evalZoneStatus(realZoneId), 1200)
   showToast('Zone "'+name+'" created ✅ · Dustin added as waitlist HO', 'ok', 5000)
   renderAdminZones()
   syncZoneData()
@@ -29693,9 +29713,28 @@ function renderAdminZones(){
     const sc   = z.status==='live'?'#22c55e':z.status==='waitlist'?'#f59e0b':'#6b7280'
     const sl   = z.status==='live'?'Live':z.status==='waitlist'?'Waitlist':'Inactive'
     const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
-    const hwCount  = HOMEOWNERS.filter(h=>h.status==='active'&&(h.zoneId===z.id||zips.includes(h.zip))).length
+    // Count: match by zoneId (authoritative), ZIP fallback, OR h3_index parent match
+    const _zH6 = z.h3_index || null
+    const hwCount  = HOMEOWNERS.filter(h => {
+      if(h.status !== 'active') return false
+      if(h.zoneId === z.id) return true
+      if(zips.length && zips.includes(h.zip)) return true
+      // H3 parent match — if HO has h3_index and zone has h3_index, check containment
+      if(_zH6 && h.h3_index && typeof h3 !== 'undefined'){
+        try { return h3.cellToParent(h.h3_index, 6) === _zH6 } catch(e){}
+      }
+      return false
+    }).length
     const rnList   = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id)||zips.includes(r.zip))
-    const wlCount  = HOMEOWNERS.filter(h=>h.status==='waitlist'&&(zips.some(z2=>h.zip===z2)||h.zoneId===z.id)).length
+    const wlCount  = HOMEOWNERS.filter(h => {
+      if(h.status !== 'waitlist') return false
+      if(h.zoneId === z.id) return true
+      if(zips.length && zips.some(z2 => h.zip === z2)) return true
+      if(_zH6 && h.h3_index && typeof h3 !== 'undefined'){
+        try { return h3.cellToParent(h.h3_index, 6) === _zH6 } catch(e){}
+      }
+      return false
+    }).length
     const days     = [...new Set(HOMEOWNERS.filter(h=>h.zoneId===z.id||zips.includes(h.zip)).map(h=>h.day).filter(d=>d&&d!=='--'))].join(', ')
     const pct      = z.threshold>0 ? Math.min(100,Math.round((hwCount/z.threshold)*100)) : 0
     const planRates= { plan_a:34.99, plan_b:44.99, plan_c:54.99, oan_a:19.99, oan_b:19.99, oan_c:19.99 }
@@ -32117,6 +32156,62 @@ async function dbDeleteZone(id){
     const { error } = await _supa.from('zones').delete().eq('id', id)
     if(error) console.warn('[BinDash] Zone delete failed:', error.message)
   } catch(err){ console.warn('[BinDash] Zone delete error:', err) }
+}
+
+// ── _evalZoneStatus — auto-promote zone to live / demote to waitlist ───────────
+// Rule: live = at least 1 active HO in zone AND at least 1 runner covering it
+// Writes to DB and updates in-memory ADMIN_ZONES. Silent on error.
+async function _evalZoneStatus(zoneId){
+  if(!zoneId) return
+  const zone = ADMIN_ZONES.find(z => z.id === zoneId)
+  if(!zone || zone.status === 'inactive') return
+
+  const zips = zone.zips?.length ? zone.zips : (zone.zip ? [zone.zip] : [])
+
+  // Count active HOs in this zone (by zoneId or ZIP fallback)
+  const activeHOs = HOMEOWNERS.filter(h =>
+    h.status === 'active' &&
+    (h.zoneId === zoneId || zips.includes(h.zip))
+  ).length
+
+  // Check runner coverage
+  const hasRunner = RUNNERS.some(r =>
+    r.status !== 'INACTIVE' &&
+    (r.zoneId === zoneId || r.coverageZones?.includes(zoneId))
+  )
+
+  const shouldBeLive = activeHOs >= 1 && hasRunner
+  const currentlyLive = zone.status === 'live'
+
+  if(shouldBeLive === currentlyLive) return  // no change needed
+
+  const newStatus = shouldBeLive ? 'live' : 'waitlist'
+  console.log('[Zone] Auto-status:', zone.name, currentlyLive?'live':'waitlist', '→', newStatus,
+    '('+activeHOs+' active HOs, runner:', hasRunner+')')
+
+  try {
+    const { error } = await _supa.from('zones')
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', zoneId)
+    if(error) throw new Error(error.message)
+    zone.status = newStatus
+    renderAdminZones()
+    _scheduleMapLayerUpdate(400)
+    showToast(
+      shouldBeLive
+        ? '🟢 '+zone.name+' is now Live — runner assigned + active HO'
+        : '🟡 '+zone.name+' returned to Waitlist — runner or active HO removed',
+      shouldBeLive ? 'ok' : 'info',
+      5000
+    )
+  } catch(e){ console.warn('[Zone] _evalZoneStatus write:', e.message) }
+}
+
+// ── _evalAllZones — re-evaluate every zone (run after bulk changes) ──────────
+async function _evalAllZones(){
+  for(const z of ADMIN_ZONES.filter(z => z.status !== 'inactive')){
+    await _evalZoneStatus(z.id)
+  }
 }
 
 function syncZoneData(){
