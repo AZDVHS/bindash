@@ -2544,9 +2544,22 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             <input id="lead-ln" placeholder="Last name">
           </div>
         </div>
-        <div style="font-size:12px;color:var(--sub);margin-bottom:6px">How should we reach you? <span style="color:var(--muted)">(at least one required)</span></div>
-        <div class="field"><label>Email</label><input type="email" id="lead-em" placeholder="jane@example.com"></div>
+        <div style="font-size:12px;color:var(--sub);margin-bottom:6px">Create your BinDash account — you can log in to track your waitlist status</div>
+        <div class="field"><label>Email *</label><input type="email" id="lead-em" placeholder="jane@example.com" oninput="_checkLeadEmail(this.value)"></div>
+        <div id="lead-em-warn" style="display:none;font-size:11px;color:#ef4444;margin-top:-6px;margin-bottom:6px"></div>
         <div class="field"><label>Phone</label><input id="lead-ph" placeholder="(555) 000-0000"></div>
+        <div class="g2">
+          <div class="field">
+            <label>Password *</label>
+            <input type="password" id="lead-pw" placeholder="At least 8 characters" oninput="_checkLeadPw()">
+          </div>
+          <div class="field">
+            <label>Confirm Password *</label>
+            <input type="password" id="lead-pw2" placeholder="Repeat password" oninput="_checkLeadPw()">
+          </div>
+        </div>
+        <div id="lead-pw-warn" style="display:none;font-size:11px;color:#ef4444;margin-top:-6px;margin-bottom:6px"></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:-4px;margin-bottom:10px">You'll use this to log in and check your waitlist status, service date, and referral progress.</div>
         <div class="sec-h" style="margin-top:4px">Service Preference</div>
         <div class="radio-row" style="margin-bottom:8px" id="lead-svc-opts">
           <div class="r-opt on" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display=''" data-val="Recycling">♻️ Recycling</div>
@@ -9971,11 +9984,26 @@ async function addressToHex(address, city, state, zip, trashDay = null){
   return { hexId, lat: coords.lat, lng: coords.lng, zone }
 }
 
-function getHexFomoMessage(zone){
-  if(!zone) return null
-  const { status, member_count, waitlist_count, activation_threshold, trash_day } = zone
-  const total = (member_count||0) + (waitlist_count||0)
-  const needed = Math.max(0, (activation_threshold||3) - total)
+function getHexFomoMessage(zone, zipOverride){
+  // Supplement micro_zones data with real ADMIN_ZONES data for accurate counts
+  const _adminZone = zipOverride
+    ? ADMIN_ZONES.find(z => (z.zips||[z.zip]).map(zz=>(zz||'').slice(0,5)).includes((zipOverride||'').slice(0,5)))
+    : null
+  const _realThreshold = _adminZone?.threshold || _adminZone?.capacity || null
+  const _realHOCount   = _adminZone
+    ? HOMEOWNERS.filter(h => h.zoneId===_adminZone.id || ((_adminZone.zips||[_adminZone.zip]).includes(h.zip))).length
+    : 0
+  const _realWlCount   = _adminZone
+    ? (PENDING_HOMEOWNERS||[]).filter(p => (p.isWaitlist||p.status==='waitlist_pending') && ((_adminZone.zips||[_adminZone.zip]).includes(p.zip))).length
+    : 0
+
+  if(!zone && !_adminZone) return null
+  const status = _adminZone?.status || zone?.status || 'pending'
+  const member_count    = Math.max(_realHOCount,   zone?.member_count    || 0)
+  const waitlist_count  = Math.max(_realWlCount,   zone?.waitlist_count  || 0)
+  const activation_threshold = _realThreshold || zone?.activation_threshold || 8
+  const total = member_count + waitlist_count
+  const needed = Math.max(0, activation_threshold - total)
   if(status === 'active') return { type:'active', color:'#22c55e', icon:'✅',
     headline:'BinDash is live in your area!',
     sub: 'Service is active in your area — a runner will be in touch about collection timing.' }
@@ -10118,7 +10146,7 @@ async function _h3CheckAddress(){
   if(hasClassicZone){ el.innerHTML = ''; return } // zone banner already shown by checkZipCoverage
 
   const zone = result?.zone
-  const msg  = getHexFomoMessage(zone)
+  const msg  = getHexFomoMessage(zone, zip)
   if(!msg){ el.innerHTML = ''; return }
 
   const rgb = msg.color==='#22c55e'?'34,197,94':msg.color==='#f59e0b'?'245,158,11':
@@ -11842,11 +11870,7 @@ function _bindHexPopup(layer, cell, key){
     ? `<div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:5px;padding:5px 8px;font-size:10px;color:#92400e;margin-bottom:8px">⚠️ No zone for ZIP ${_hexZip} — assign a runner here will only update HO records. <strong>Create a zone first</strong> for full dispatch assignment.</div>`
     : `<div style="font-size:10px;color:#059669;margin-bottom:6px">📍 ${_hexZone.name}${_hexZone.status==='waitlist'?' · <span style=\"color:#f59e0b\">Waitlist zone — no runner yet</span>':''}</div>`
 
-  // Runner options for dropdown
-  const runnerOpts = RUNNERS
-    .filter(r => r.status !== 'INACTIVE')
-    .map(r => `<option value="${r.id}" data-name="${r.name}">${r.name}</option>`)
-    .join('')
+  // No runner assign dropdown — replaced with Edit Profile buttons
 
   const popupHtml = `
   <div style="font-family:system-ui;min-width:220px;max-width:260px;color:#0f172a">
@@ -11857,33 +11881,20 @@ function _bindHexPopup(layer, cell, key){
     </div>
     ${_noZoneWarn}
     ${hos.length ? `
-    <div style="border-top:1px solid #e2e8f0;padding-top:8px;margin-bottom:8px">
-      ${hos.slice(0,3).map(h=>`
-      <div style="display:flex;flex-direction:column;gap:1px;padding:4px 0;border-bottom:1px solid #f1f5f9">
-        <div style="font-size:12px;font-weight:600">${h.name}</div>
-        <div style="font-size:10px;color:#94a3b8">${h.address}${h.zip?' · '+h.zip:''}</div>
-        <div style="font-size:10px;color:#64748b">${h.service && h.service !== 'undefined' ? h.service : (h.plan ? h.plan.replace('plan_','').replace('_',' ') : 'Recycling')}${h.day && h.day!=='--' && h.day !== 'undefined' ?' · '+h.day:''}</div>
-      </div>`).join('')}
-      ${hos.length>3?`<div style="font-size:10px;color:#94a3b8;padding-top:4px">+${hos.length-3} more homeowners</div>`:''}
-    </div>` : '<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">No homeowners with coordinates</div>'}
-    ${runnerOpts ? `
     <div style="border-top:1px solid #e2e8f0;padding-top:8px">
-      <div style="font-size:10px;font-weight:600;color:#475569;margin-bottom:5px;text-transform:uppercase;letter-spacing:.06em">Assign Runner</div>
-      <div style="display:flex;gap:6px">
-        <select id="assign-runner-sel-${key}" style="flex:1;font-size:11px;padding:4px 6px;border:1px solid #e2e8f0;border-radius:5px;background:#fff;min-width:0">
-          <option value="">-- Select runner --</option>
-          ${runnerOpts}
-        </select>
-        <button onclick="(()=>{
-          const sel=document.getElementById('assign-runner-sel-${key}');
-          const rid=sel.value;
-          const rname=sel.options[sel.selectedIndex]?.dataset?.name||'';
-          if(!rid){return;}
-          assignRunner('${cell.h3Index}',rname,rid);
-          window._adminMap?.closePopup?.();
-        })()" style="padding:4px 10px;background:#06d6a0;border:none;border-radius:5px;color:#0f172a;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">Assign</button>
-      </div>
-    </div>` : '<div style="font-size:10px;color:#94a3b8">No active runners in system</div>'}
+      ${hos.slice(0,4).map(h => {
+        const _hwId = HOMEOWNERS.find(x => x.email?.toLowerCase()===h.email?.toLowerCase())?.id || ''
+        const _svc = h.service && h.service !== 'undefined' ? h.service : (h.plan ? h.plan.replace('plan_','').replace('_',' ') : 'Recycling')
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid #f1f5f9">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${h.name}</div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:1px">${_svc}${h.day&&h.day!=='--'&&h.day!=='undefined'?' · '+h.day:''}</div>
+          </div>
+          ${_hwId ? `<button onclick="window._adminMap?.closePopup?.(); setTimeout(()=>{ const hw=HOMEOWNERS.find(x=>x.id==='${_hwId}'); if(hw){ const card=document.getElementById('hwcard-${_hwId}'); if(card){ card.scrollIntoView({behavior:'smooth',block:'center'}); card.click(); } else { go('S-ad-hw'); setTimeout(()=>showHWDetail('${_hwId}'),400) } } },100)" style="padding:3px 9px;background:#4f46e5;border:none;border-radius:5px;color:#fff;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">Edit</button>` : ''}
+        </div>`
+      }).join('')}
+      ${hos.length>4?`<div style="font-size:10px;color:#94a3b8;padding-top:5px;text-align:center">${hos.length-4} more — open HO Management to see all</div>`:''}
+    </div>` : '<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">No homeowners with coordinates</div>'}
   </div>`
 
   layer.bindPopup(popupHtml, { maxWidth: 280 })
@@ -12863,6 +12874,32 @@ function hBack(s){
 }
 
 // -- LEAD CAPTURE SUBMIT (no-zone path) --------------------------
+function _checkLeadEmail(val){
+  const warn = document.getElementById('lead-em-warn')
+  if(!warn) return
+  if(!val || !val.includes('@') || !val.includes('.')){
+    warn.textContent = 'Please enter a valid email address'
+    warn.style.display = 'block'
+  } else {
+    warn.style.display = 'none'
+  }
+}
+function _checkLeadPw(){
+  const pw  = document.getElementById('lead-pw')?.value || ''
+  const pw2 = document.getElementById('lead-pw2')?.value || ''
+  const warn = document.getElementById('lead-pw-warn')
+  if(!warn) return
+  if(pw.length > 0 && pw.length < 8){
+    warn.textContent = 'Password must be at least 8 characters'
+    warn.style.display = 'block'
+  } else if(pw2.length > 0 && pw !== pw2){
+    warn.textContent = 'Passwords do not match'
+    warn.style.display = 'block'
+  } else {
+    warn.style.display = 'none'
+  }
+}
+
 async function submitLead(){
   const fn    = document.getElementById('lead-fn')?.value.trim() || ''
   const ln    = document.getElementById('lead-ln')?.value.trim() || ''
@@ -12883,13 +12920,19 @@ async function submitLead(){
   const day   = isSplit ? null : (document.getElementById('lead-day')?.value || 'Thursday')
   const serviceLabel = isSplit ? 'Split days — ♻️ '+dayR+' / 🗑️ '+dayW : svcVal
 
+  const pw  = document.getElementById('lead-pw')?.value  || ''
+  const pw2 = document.getElementById('lead-pw2')?.value || ''
+
   if(!fn){ showToast('Please enter your name','err'); return }
-  if(!em && !ph){ showToast('Please enter at least an email or phone number','err'); return }
+  if(!em){ showToast('Please enter your email address','err'); return }
+  if(!em.includes('@') || !em.includes('.')){ showToast('Please enter a valid email address','err'); return }
+  if(pw.length < 8){ showToast('Password must be at least 8 characters','err'); return }
+  if(pw !== pw2){ showToast('Passwords do not match','err'); return }
 
   const btn = document.querySelector('#h-lead .btn-cyan')
-  if(btn){ btn.disabled=true; btn.textContent='Saving...' }
+  if(btn){ btn.disabled=true; btn.textContent='Creating account...' }
 
-  const email = em || (fn.toLowerCase().replace(/\s/g,'') + '+' + zip + '@lead.bindash')
+  const email = em
 
   let saveErr = null
   try {
@@ -12946,6 +12989,46 @@ async function submitLead(){
       console.warn('[BinDash] Status constraint — retrying with pending_review')
       const res2 = await _supa.from('homeowner_signups').insert({ ..._baseInsert, status: 'pending_review' })
       saveErr = res2?.error?.message || null
+    }
+
+    if(saveErr && (saveErr.includes('duplicate') || saveErr.includes('unique') || saveErr.includes('already exists'))){
+      // Already signed up — try to update instead
+      console.warn('[BinDash] Duplicate signup — updating existing record')
+      await _supa.from('homeowner_signups').update({
+        ..._baseInsert, updated_at: new Date().toISOString()
+      }).eq('email', email)
+      saveErr = null
+    }
+
+    // Create Supabase Auth account so they can log in to their waitlist dashboard
+    if(!saveErr){
+      try {
+        const { data: authData, error: authErr } = await _supa.auth.signUp({
+          email: email,
+          password: pw,
+          options: {
+            data: {
+              first_name: fn,
+              last_name:  ln || '',
+              role:       'homeowner',
+              zip_code:   zip,
+              is_waitlist: true,
+            }
+          }
+        })
+        if(authErr){
+          // If account already exists, try to sign them in instead
+          if(authErr.message?.includes('already registered') || authErr.message?.includes('already exists')){
+            console.log('[BinDash] Auth account exists — signing in existing account')
+            await _supa.auth.signInWithPassword({ email, password: pw })
+          } else {
+            console.warn('[BinDash] Auth signUp warning:', authErr.message)
+            // Non-fatal — they're still on the waitlist even without auth
+          }
+        } else {
+          console.log('[BinDash] Auth account created ✅', authData?.user?.id)
+        }
+      } catch(authEx){ console.warn('[BinDash] Auth exception:', authEx.message) }
     }
 
     if(saveErr){
