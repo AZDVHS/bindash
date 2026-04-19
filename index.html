@@ -1083,7 +1083,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .badge{display:inline-flex;align-items:center;gap:3px;padding:3px 9px;border-radius:99px;font-size:10px;font-weight:700;letter-spacing:.04em}
 
 /* Modal */
-.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;align-items:center;justify-content:center;padding:20px}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1200;align-items:center;justify-content:center;padding:20px}
 /* Keep property map Leaflet panes below modal overlay */
 #hw-prop-map .leaflet-pane,
 #hw-prop-map .leaflet-top,
@@ -10215,7 +10215,7 @@ function drawHexLayers(map, zones, opts = {}){
         const circle = L.circle([z.lat, z.lng], {
           radius: 800,  // ~0.8km ≈ size of one H3 res-8 hex
           color: col.fill, fillColor: col.fill,
-          fillOpacity: col.opacity, weight: 1.5,
+          fillOpacity: Math.min(col.opacity, 0.12),  // cap heatmap hex opacity weight: 1.5,
         })
         const needed = Math.max(0, (z.activation_threshold||3) - total)
         circle.bindPopup(`<div style="font-family:system-ui;min-width:140px">
@@ -10391,8 +10391,8 @@ async function _adDrawRunnerCoverage(map){
     } catch(e){}
   })
 
-  const STROKE = '#4f46e5'
-  const FILL   = 'rgba(79,70,229,0.10)'
+  const STROKE = '#6366f1'
+  const FILL   = '#6366f1'   // solid color — opacity controlled by fillOpacity below
 
   // ── 3. Draw each runner ───────────────────────────────────────────────────
   RUNNERS.filter(r => r.status !== 'INACTIVE').forEach(r => {
@@ -10471,12 +10471,12 @@ async function _adDrawRunnerCoverage(map){
         // ── Draw res-6 zone outline ───────────────────────────────────────
         const b6 = h3.cellToBoundary(zoneH6).map(([la,ln])=>[la,ln])
         const ol = L.polygon(b6, {
-          color:      STROKE,
-          fillColor:  FILL,
-          fillOpacity: 1,
-          weight:     isPrimary ? 2.5 : 1.5,
-          dashArray:  isPrimary ? null : '6 4',
-          opacity:    1,
+          color:       STROKE,
+          fillColor:   FILL,
+          fillOpacity: isPrimary ? 0.07 : 0.04,  // very transparent — just a tint
+          weight:      isPrimary ? 2 : 1,
+          dashArray:   isPrimary ? null : '6 4',
+          opacity:     isPrimary ? 0.7 : 0.45,   // border also more subtle
         })
         // Count HOs in this specific zone
         const _zHoCount    = HOMEOWNERS.filter(h=>h.zoneId===zid).length
@@ -10868,6 +10868,54 @@ function _buildHOPopup(ho, zone){
     </div>
   </div>
 </div>`
+}
+
+// ── _openHOFromMap — navigate to HO edit from map popup Edit button ──────────
+// Can be called from any screen — handles navigation to HO Management + opens edit modal
+window._openHOFromMap = function(email){
+  window._adminMap?.closePopup?.()
+  // Find in-memory HO
+  const hw = HOMEOWNERS.find(x => (x.email||'').toLowerCase() === (email||'').toLowerCase())
+  if(!hw){ showToast('HO not found in memory — try refreshing','err'); return }
+
+  const _openEdit = () => {
+    // Try card first (if HO Management is already rendered)
+    const card = document.getElementById('hwcard-'+hw.id)
+    if(card){
+      card.scrollIntoView({ behavior:'smooth', block:'center' })
+      // Open expanded detail
+      if(card.querySelector('.hw-card-body')?.style.display === 'none' || !card.querySelector('.hw-card-body')){
+        card.click()
+      }
+      setTimeout(() => showHWDetail(hw.id), 200)
+    } else {
+      showHWDetail(hw.id)
+    }
+  }
+
+  // Check if HO Management screen is active
+  const hwScreen = document.getElementById('S-ad-hw')
+  const isHWScreenVisible = hwScreen && hwScreen.offsetParent !== null
+
+  if(isHWScreenVisible){
+    _openEdit()
+  } else {
+    // Navigate to HO Management — find and click the nav link
+    const navLinks = document.querySelectorAll('[onclick*="S-ad-hw"], [onclick*="ad-hw"]')
+    let navigated = false
+    navLinks.forEach(l => {
+      if(!navigated && l.textContent?.toLowerCase().includes('homeowner')){
+        l.click(); navigated = true
+      }
+    })
+    // Fallback: call go() directly
+    if(!navigated) { try { go('S-ad-hw') } catch(e){} }
+    // Wait for render then open edit modal
+    setTimeout(() => {
+      renderHomeownerList?.()
+      setTimeout(_openEdit, 500)
+    }, 300)
+  }
 }
 
 // ── _buildHOTooltip — rich hover tooltip for any homeowner dot ──────────────
@@ -11890,7 +11938,7 @@ function _bindHexPopup(layer, cell, key){
             <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${h.name}</div>
             <div style="font-size:10px;color:#94a3b8;margin-top:1px">${_svc}${h.day&&h.day!=='--'&&h.day!=='undefined'?' · '+h.day:''}</div>
           </div>
-          ${_hwId ? `<button onclick="window._adminMap?.closePopup?.(); setTimeout(()=>{ const hw=HOMEOWNERS.find(x=>x.id==='${_hwId}'); if(hw){ const card=document.getElementById('hwcard-${_hwId}'); if(card){ card.scrollIntoView({behavior:'smooth',block:'center'}); card.click(); } else { go('S-ad-hw'); setTimeout(()=>showHWDetail('${_hwId}'),400) } } },100)" style="padding:3px 9px;background:#4f46e5;border:none;border-radius:5px;color:#fff;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">Edit</button>` : ''}
+          ${h.email ? `<button onclick="window._openHOFromMap('${h.email.replace(/'/g,'')}')\" style=\"padding:3px 9px;background:#4f46e5;border:none;border-radius:5px;color:#fff;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0\">Edit</button>` : ''}
         </div>`
       }).join('')}
       ${hos.length>4?`<div style="font-size:10px;color:#94a3b8;padding-top:5px;text-align:center">${hos.length-4} more — open HO Management to see all</div>`:''}
@@ -18995,7 +19043,11 @@ function showSkipModal(date){
 </div><div class="mf"><button class="btn btn-ghost btn-sm" onclick="closeM()">Cancel</button><button class="btn btn-outline btn-sm" onclick="closeM();showToast('${date} skipped -- your schedule continues the following week','info')">Skip This Week</button></div>`
   openM()
 }
-function openM(){document.getElementById('modal-bg').classList.add('open')}
+function openM(){
+  // Close any open Leaflet popup so it doesn't show above the modal
+  try { window._adminMap?.closePopup?.() } catch(e){}
+  document.getElementById('modal-bg').classList.add('open')
+}
 function closeM(){document.getElementById('modal-bg').classList.remove('open')}
 
 // -- SUBSCRIPTION PLAN PICKER ---------------------
