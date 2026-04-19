@@ -2901,30 +2901,103 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
 <!-- ========== HW PENDING APPROVAL ========== -->
 <!-- ========== HW WAITLIST (not in service area) ========== -->
 <div id="S-hw-waitlist" class="screen">
-  <div style="min-height:100vh;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:36px 20px">
-    <div style="max-width:520px;width:100%;text-align:center">
-      <div style="font-size:64px;margin-bottom:16px">📍</div>
-      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:900;margin-bottom:10px">Not in your area yet</div>
-      <div style="font-size:16px;color:var(--sub);line-height:1.7;margin-bottom:10px">
-        Unfortunately BinDash isn't currently servicing <strong id="waitlist-zip-display" style="color:var(--text)">your area</strong> yet.
+  <div style="min-height:100vh;background:var(--bg);padding:0 0 48px">
+    <!-- Header -->
+    <div style="background:linear-gradient(135deg,#0f172a,#1e293b);padding:28px 24px 24px;text-align:center;border-bottom:1px solid rgba(255,255,255,.07)">
+      <div style="font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--cyan);margin-bottom:8px">BinDash Waitlist</div>
+      <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:900;color:#f1f5f9;margin-bottom:4px">You're in line, <span id="wl-dash-name">neighbor</span> 👋</div>
+      <div style="font-size:13px;color:#94a3b8">We're building your zone — here's where things stand</div>
+    </div>
+
+    <div style="max-width:540px;margin:0 auto;padding:20px 18px;display:flex;flex-direction:column;gap:16px">
+
+      <!-- Zone status card -->
+      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:18px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <div>
+            <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:3px">Your Zone</div>
+            <div style="font-size:17px;font-weight:700;color:var(--text)" id="wl-zone-name">Loading...</div>
+          </div>
+          <div id="wl-zone-badge" style="background:rgba(245,158,11,.15);color:#f59e0b;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700">⏳ Building</div>
+        </div>
+        <!-- Neighbor progress bar -->
+        <div style="margin-bottom:6px;display:flex;justify-content:space-between;align-items:baseline">
+          <div style="font-size:12px;color:var(--muted)">Neighbors signed up</div>
+          <div style="font-size:13px;font-weight:700;color:var(--cyan)"><span id="wl-ho-count">0</span> / <span id="wl-threshold">8</span></div>
+        </div>
+        <div style="background:rgba(255,255,255,.07);border-radius:99px;height:8px;overflow:hidden;margin-bottom:10px">
+          <div id="wl-progress-bar" style="height:100%;border-radius:99px;background:linear-gradient(90deg,var(--cyan),#818cf8);transition:width .6s ease;width:0%"></div>
+        </div>
+        <div id="wl-progress-note" style="font-size:12px;color:var(--muted)">More neighbors = faster launch. Share your referral link below!</div>
       </div>
-      <div style="background:rgba(6,214,160,.08);border:1.5px solid rgba(6,214,160,.25);border-radius:14px;padding:22px;margin-bottom:24px">
-        <div style="font-size:22px;margin-bottom:10px">🎉</div>
-        <div style="font-size:16px;font-weight:700;color:var(--cyan);margin-bottom:8px">Good news -- you're on the interest list!</div>
-        <div style="font-size:14px;color:var(--sub);line-height:1.7">
-          We've saved your details. As soon as a runner becomes available in your area we'll reach out to get you set up -- no action needed on your end.
+
+      <!-- Runner status -->
+      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:18px">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Runner Status</div>
+        <div id="wl-runner-block" style="display:flex;align-items:center;gap:12px">
+          <div style="width:40px;height:40px;border-radius:50%;background:rgba(99,102,241,.15);border:2px solid rgba(99,102,241,.3);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🚐</div>
+          <div>
+            <div id="wl-runner-name" style="font-size:14px;font-weight:700;color:var(--text)">Recruiting runners...</div>
+            <div id="wl-runner-sub" style="font-size:12px;color:var(--muted);margin-top:2px">A runner will be assigned when your zone activates</div>
+          </div>
         </div>
       </div>
-      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:18px;margin-bottom:24px;text-align:left">
-        <div style="font-size:13px;font-weight:700;margin-bottom:12px">What happens next</div>
-        <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--sub)">
-          <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">1</span><span>We monitor runner sign-ups near your ZIP code</span></div>
-          <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</span><span>When your area has enough interest to launch, we activate the zone</span></div>
-          <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">3</span><span>You'll get an email and can complete signup -- your info is already saved</span></div>
+
+      <!-- Referral card -->
+      <div style="background:linear-gradient(135deg,rgba(6,214,160,.08),rgba(99,102,241,.08));border:1px solid rgba(6,214,160,.25);border-radius:16px;padding:18px">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--cyan);margin-bottom:8px">🎁 Refer a Neighbor</div>
+        <div style="font-size:13px;color:var(--sub);margin-bottom:14px;line-height:1.6">
+          Every neighbor you refer speeds up your zone launch. Share your unique link and help us hit the threshold faster.
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-family:'DM Mono',monospace;font-size:12px;color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="wl-ref-link">Loading...</div>
+          <button onclick="_wlCopyRef()" style="padding:9px 14px;background:var(--cyan);border:none;border-radius:8px;color:#0f172a;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Copy Link</button>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button onclick="_wlShareSMS()" style="flex:1;padding:8px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.25);border-radius:8px;color:#4ade80;font-size:12px;font-weight:700;cursor:pointer">📱 Text a Neighbor</button>
+          <button onclick="_wlShareEmail()" style="flex:1;padding:8px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.25);border-radius:8px;color:#a5b4fc;font-size:12px;font-weight:700;cursor:pointer">✉️ Email a Friend</button>
+        </div>
+        <div style="margin-top:10px;text-align:center;font-size:11px;color:var(--muted)">Your code: <span id="wl-ref-code" style="font-family:'DM Mono',monospace;color:var(--cyan);font-weight:700">--</span></div>
+      </div>
+
+      <!-- Profile completion CTA -->
+      <div id="wl-profile-cta" style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:16px;padding:16px;display:none">
+        <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:6px">⚠️ Complete your profile</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Your service details help us assign the right runner and schedule when your zone goes live.</div>
+        <button onclick="go('S-hw-signup-2')" style="width:100%;padding:10px;background:#f59e0b;border:none;border-radius:8px;color:#0f172a;font-size:13px;font-weight:700;cursor:pointer">Complete My Profile →</button>
+      </div>
+
+      <!-- Map placeholder -->
+      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;overflow:hidden">
+        <div style="padding:14px 16px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:13px;font-weight:700">Neighbors Near You</div>
+          <div style="font-size:11px;color:var(--muted)">Dots = waitlist signups</div>
+        </div>
+        <div id="wl-neighbor-map" style="height:200px;background:#0f172a;position:relative">
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px">Loading map...</div>
         </div>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:20px">We'll contact you at the email address you provided. You can unsubscribe at any time.</div>
-      <button class="btn btn-outline btn-lg" onclick="go('S-land')" style="margin-right:10px"><- Back to BinDash</button>
+
+      <!-- What happens next -->
+      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:18px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:14px">What happens next</div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;gap:12px;align-items:flex-start">
+            <div style="width:28px;height:28px;background:rgba(6,214,160,.12);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">1</div>
+            <div><div style="font-size:13px;font-weight:600;color:var(--text)">Zone reaches threshold</div><div style="font-size:12px;color:var(--muted);margin-top:2px">When enough neighbors sign up, we activate your zone</div></div>
+          </div>
+          <div style="display:flex;gap:12px;align-items:flex-start">
+            <div style="width:28px;height:28px;background:rgba(99,102,241,.12);color:#a5b4fc;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">2</div>
+            <div><div style="font-size:13px;font-weight:600;color:var(--text)">Runner assigned</div><div style="font-size:12px;color:var(--muted);margin-top:2px">A local runner is matched to your neighborhood</div></div>
+          </div>
+          <div style="display:flex;gap:12px;align-items:flex-start">
+            <div style="width:28px;height:28px;background:rgba(34,197,94,.12);color:#4ade80;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">3</div>
+            <div><div style="font-size:13px;font-weight:600;color:var(--text)">You get the launch email</div><div style="font-size:12px;color:var(--muted);margin-top:2px">Your profile is already saved — just confirm and you're live</div></div>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-ghost btn-sm" onclick="go('S-land')" style="align-self:center;color:var(--muted)">← Back to BinDash</button>
     </div>
   </div>
 </div>
@@ -5615,7 +5688,7 @@ async function populateHWDashboard(){
     } else if(status === 'zone_assigned'){
       const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id) || findZoneForZip(row.zip_code||'')
       if(zone){ populateConfirmScreen(row, zone); go('S-hw-confirm') }
-      else { go('S-hw-waitlist') }
+      else { go('S-hw-waitlist'); setTimeout(()=>populateWaitlistDashboard(row), 200) }
 
     } else if(status === 'waitlisted'){
       // Check homeowners table first — if they have a record, show dashboard
@@ -5633,7 +5706,7 @@ async function populateHWDashboard(){
       const zip = row.zip_code || ''
       const zone = findZoneForZip(zip)
       if(zone && zone.status === 'live'){ populateConfirmScreen(row, zone); go('S-hw-confirm') }
-      else { const zipDisplay = document.getElementById('waitlist-zip-display'); if(zipDisplay) zipDisplay.textContent = 'ZIP '+zip; go('S-hw-waitlist') }
+      else { go('S-hw-waitlist'); setTimeout(()=>populateWaitlistDashboard(row), 200) }
 
     } else if(status === 'pending_review'){
       go('S-hw-pending')
@@ -5990,6 +6063,154 @@ function validateHomeownerData(row, context){
     }
   }
   return row
+}
+
+// ── Waitlist HO Dashboard ────────────────────────────────────────────────────
+async function populateWaitlistDashboard(row){
+  const fn    = row.first_name || row.full_name?.split(' ')[0] || 'neighbor'
+  const zip   = (row.zip_code || row.zip || '').replace(/-.*$/,'').slice(0,5)
+  const email = row.email || currentUser?.email || ''
+
+  // Name
+  const nameEl = document.getElementById('wl-dash-name')
+  if(nameEl) nameEl.textContent = fn
+
+  // Find zone
+  const zone = ADMIN_ZONES.find(z =>
+    z.id === (row.zone_id || row.zoneId) ||
+    (z.zips||[z.zip]).map(zz=>(zz||'').slice(0,5)).includes(zip)
+  )
+
+  // Zone name + badge
+  const zoneNameEl = document.getElementById('wl-zone-name')
+  const zoneBadgeEl = document.getElementById('wl-zone-badge')
+  if(zoneNameEl) zoneNameEl.textContent = zone?.name || ('ZIP ' + zip + ' Area')
+  if(zoneBadgeEl){
+    if(zone?.status === 'live'){
+      zoneBadgeEl.textContent = '🟢 Live'
+      zoneBadgeEl.style.cssText = 'background:rgba(34,197,94,.15);color:#4ade80;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700'
+    } else {
+      zoneBadgeEl.textContent = '⏳ Building'
+      zoneBadgeEl.style.cssText = 'background:rgba(245,158,11,.15);color:#f59e0b;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700'
+    }
+  }
+
+  // HO count toward threshold
+  const hoCount   = zone ? HOMEOWNERS.filter(h => h.zoneId===zone.id || (zone.zips||[zone.zip]).includes(h.zip)).length : 1
+  const threshold = zone?.threshold || zone?.capacity || 8
+  const pct       = Math.min(100, Math.round(hoCount / threshold * 100))
+  const countEl   = document.getElementById('wl-ho-count')
+  const threshEl  = document.getElementById('wl-threshold')
+  const barEl     = document.getElementById('wl-progress-bar')
+  const noteEl    = document.getElementById('wl-progress-note')
+  if(countEl)  countEl.textContent  = hoCount
+  if(threshEl) threshEl.textContent = threshold
+  if(barEl)    barEl.style.width    = pct + '%'
+  if(noteEl){
+    const needed = threshold - hoCount
+    noteEl.textContent = needed <= 0
+      ? '🎉 Threshold reached! Zone activation in progress.'
+      : needed === 1
+      ? 'Just 1 more neighbor needed to trigger zone activation!'
+      : needed + ' more neighbors needed. Share your link to speed things up!'
+  }
+
+  // Runner
+  const runner = zone
+    ? RUNNERS.find(r => r.zoneId===zone.id || r.coverageZones?.includes(zone.id))
+    : null
+  const rnNameEl = document.getElementById('wl-runner-name')
+  const rnSubEl  = document.getElementById('wl-runner-sub')
+  if(rnNameEl) rnNameEl.textContent = runner ? (runner.name || 'Runner assigned') : 'Recruiting runners...'
+  if(rnSubEl)  rnSubEl.textContent  = runner
+    ? 'Your runner is ready — they will get your first dispatch when the zone activates'
+    : 'A runner will be matched once your zone reaches the threshold'
+
+  // Referral code — generate from email if not stored
+  const refCode = row.referred_by_code || row.invite_code || _generateWlRefCode(email)
+  const refLink = window.location.origin + '/?ref=' + refCode
+  const refLinkEl = document.getElementById('wl-ref-link')
+  const refCodeEl = document.getElementById('wl-ref-code')
+  if(refLinkEl) refLinkEl.textContent = refLink
+  if(refCodeEl) refCodeEl.textContent = refCode
+  // Store for share fns
+  window._wlRefCode = refCode
+  window._wlRefLink = refLink
+  window._wlHOName  = fn
+  window._wlZoneName = zone?.name || ('ZIP ' + zip + ' Area')
+
+  // Profile completion check
+  const ctaEl = document.getElementById('wl-profile-cta')
+  if(ctaEl){
+    const incomplete = !row.collection_day || !row.street_address || row.street_address === '--'
+    ctaEl.style.display = incomplete ? 'block' : 'none'
+  }
+
+  // Mini neighbor map — simple Leaflet if available
+  _initWlNeighborMap(row, zone)
+}
+
+function _generateWlRefCode(email){
+  // Deterministic short code from email — no DB needed
+  let hash = 0
+  for(let i = 0; i < email.length; i++) hash = ((hash << 5) - hash) + email.charCodeAt(i)
+  return 'BD' + Math.abs(hash).toString(36).toUpperCase().slice(0,5)
+}
+
+function _wlCopyRef(){
+  const link = window._wlRefLink || window.location.href
+  navigator.clipboard?.writeText(link).then(()=>showToast('Link copied! 🎉','ok',3000))
+    .catch(()=>{ const t=document.createElement('textarea'); t.value=link; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); showToast('Link copied!','ok',3000) })
+}
+
+function _wlShareSMS(){
+  const msg = encodeURIComponent('Hey! I signed up for BinDash bin service in our neighborhood. The more neighbors join, the faster they launch. Use my link: ' + (window._wlRefLink||''))
+  window.open('sms:?body=' + msg)
+}
+
+function _wlShareEmail(){
+  const subj = encodeURIComponent('Join me on BinDash — neighborhood bin service launching soon!')
+  const _body = 'Hi, I signed up for BinDash, a local bin moving service. The more neighbors that sign up, the faster they launch service. Use my referral link: ' + (window._wlRefLink||'') + ' - Hope to see you on the list! ' + (window._wlHOName||'')
+  const body = encodeURIComponent(_body)
+  window.location.href = 'mailto:?subject=' + subj + '&body=' + body
+}
+
+function _initWlNeighborMap(row, zone){
+  const mapEl = document.getElementById('wl-neighbor-map')
+  if(!mapEl || typeof L === 'undefined') return
+  try {
+    // Clear previous map
+    if(window._wlMap){ window._wlMap.remove(); window._wlMap = null }
+    const lat = parseFloat(row.lat) || (zone?.lat) || 33.45
+    const lng = parseFloat(row.lng) || (zone?.lng) || -112.07
+    const m = L.map(mapEl, { zoomControl:false, attributionControl:false, dragging:false, scrollWheelZoom:false })
+    window._wlMap = m
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(m)
+    m.setView([lat, lng], 13)
+    // This HO's dot
+    L.circleMarker([lat, lng], { radius:8, color:'#06d6a0', fillColor:'#06d6a0', fillOpacity:1, weight:2 })
+      .bindTooltip('You are here', { direction:'top' }).addTo(m)
+    // Neighbors (other waitlist HOs in same zone) — anonymized dots
+    const neighbors = HOMEOWNERS.filter(h =>
+      h.lat && h.lng && h.email !== row.email &&
+      (h.zoneId === (zone?.id) || (zone?.zips||[zone?.zip]).includes(h.zip))
+    )
+    neighbors.slice(0,20).forEach(n => {
+      // Fuzzy offset for privacy — ±0.003 degrees (~300m)
+      const fLat = parseFloat(n.lat) + (Math.random()-.5)*.006
+      const fLng = parseFloat(n.lng) + (Math.random()-.5)*.006
+      L.circleMarker([fLat, fLng], { radius:5, color:'#a5b4fc', fillColor:'#818cf8', fillOpacity:0.7, weight:1.5 })
+        .bindTooltip('Neighbor on waitlist', { direction:'top' }).addTo(m)
+    })
+    // Zone hex outline
+    if(zone?.h3_index && typeof h3 !== 'undefined'){
+      try {
+        const pts = h3.cellToBoundary(zone.h3_index).map(([la,ln])=>[la,ln])
+        L.polygon(pts, { color:'#06d6a0', fillColor:'rgba(6,214,160,.05)', weight:1.5, dashArray:'5 4' }).addTo(m)
+      } catch(e){}
+    }
+    setTimeout(()=>m.invalidateSize(), 200)
+  } catch(e){ console.warn('[WL Map]', e.message) }
 }
 
 async function _populateHWDashData(row, fn, ln, initials){
@@ -25374,10 +25595,12 @@ function renderPendingHWList(){
 
   // Update tab counts
   const counts = { pending:0, info:0, rejected:0, waitlist:0 }
+  const _hoEmailsForCount = new Set(HOMEOWNERS.map(h => (h.email||'').toLowerCase()))
   PENDING_HOMEOWNERS.forEach(a => {
-    if(a.status==='waitlist_pending'||a.isWaitlist) counts.waitlist++
+    // Don't count waitlist HOs that are already in HO Management
+    const alreadyInHO = _hoEmailsForCount.has((a.email||'').toLowerCase())
+    if((a.status==='waitlist_pending'||a.isWaitlist) && !alreadyInHO) counts.waitlist++
     else if(a.status==='pending_review'||a.status==='payment_pending') counts.pending++
-    // Note: waitlist entries don't count toward pending badge
     else if(a.status==='info_requested') counts.info++
     else if(a.status==='rejected') counts.rejected++
   })
@@ -30229,7 +30452,9 @@ function renderAdminZones(){
       }
       return false
     }).length
-    const rnList   = RUNNERS.filter(r=>r.zoneId===z.id||r.coverageZones?.includes(z.id)||zips.includes(r.zip))
+    // Only show runners who have this as their PRIMARY zone (zoneId) OR explicit coverage assignment
+    // Do NOT match by runner ZIP alone — that caused all runners to show for every zone
+    const rnList   = RUNNERS.filter(r => r.zoneId===z.id || r.coverageZones?.includes(z.id))
     const wlCount  = HOMEOWNERS.filter(h => {
       if(h.status !== 'waitlist') return false
       if(h.zoneId === z.id) return true
@@ -32250,7 +32475,8 @@ async function loadSignupsFromSupabase(){
     const _beforeLen = PENDING_HOMEOWNERS.length
     for(let i = PENDING_HOMEOWNERS.length-1; i >= 0; i--){
       const p = PENDING_HOMEOWNERS[i]
-      if(p.status === 'waitlist_pending' && _hoEmails.has((p.email||'').toLowerCase())){
+      const _isWlStatus = p.status === 'waitlist_pending' || p.status === 'waitlist_approved' || p.isWaitlist
+      if(_isWlStatus && _hoEmails.has((p.email||'').toLowerCase())){
         PENDING_HOMEOWNERS.splice(i, 1)
       }
     }
@@ -32261,6 +32487,16 @@ async function loadSignupsFromSupabase(){
     if(document.getElementById('pending-hw-list')?.offsetParent !== null){
       renderPendingHWList()
     }
+    // Notify admin if new waitlist signups appeared since last load
+    const _wlNow = PENDING_HOMEOWNERS.filter(p => p.isWaitlist || p.status==='waitlist_pending').length
+    if(typeof window._lastWlCount === 'number' && _wlNow > window._lastWlCount){
+      const _newCount = _wlNow - window._lastWlCount
+      showToast('🏠 '+_newCount+' new waitlist signup'+ (_newCount!==1?'s':'') +' — check Pending Homeowners → Waitlist tab', 'info', 8000)
+      // Flash the nav badge
+      const nb = document.getElementById('hw-pcount')
+      if(nb){ nb.style.background='#f59e0b'; setTimeout(()=>{ nb.style.background='' }, 3000) }
+    }
+    window._lastWlCount = _wlNow
     console.log('[BinDash] Signups loaded:', PENDING_HOMEOWNERS.length, 'pending,', WAITLIST_SIGNUPS.length, 'waitlisted')
   } catch(err){
     console.warn('[BinDash] Signup load failed:', String(err?.message || err))
