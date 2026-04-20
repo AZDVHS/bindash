@@ -13042,25 +13042,24 @@ async function submitLead(){
   const email = em
 
   let saveErr = null
-  try {
-    // Detect zone for this ZIP
-    const _leadZone = ADMIN_ZONES.find(z => {
-      const zips = z.zips || (z.zip ? [z.zip] : [])
-      return zips.includes(zip) && z.status !== 'inactive'
-    })
-    const _zoneExists   = !!_leadZone
-    const _zoneIsLive   = _leadZone?.status === 'live' || _leadZone?.status === 'active'
-    const _zoneWaitlist = _zoneExists && !_zoneIsLive  // waitlist or building zone exists
 
-    // NEW ROUTING:
-    // Existing waitlist zone → auto-approve into HO Management (waitlist status) + notify admin
-    // No zone at all        → goes to Pending HW Waitlist tab + notify admin to create zone
-    // Live zone             → full pending_review signup flow
-    // Use 'approved' instead of 'waitlist_approved' for DB compat (constraint may not allow it)
-    // The homeowners table status='waitlist' is what matters for display
+  // Hoist zone variables BEFORE try so they're accessible in success/error handlers below
+  const _leadZone = ADMIN_ZONES.find(z => {
+    const zips = z.zips || (z.zip ? [z.zip] : [])
+    return zips.includes(zip) && z.status !== 'inactive'
+  })
+  const _zoneExists   = !!_leadZone
+  const _zoneIsLive   = _leadZone?.status === 'live' || _leadZone?.status === 'active'
+  const _zoneWaitlist = _zoneExists && !_zoneIsLive  // waitlist or building zone exists
+
+  try {
+    // Zone already detected above
+
+    // _zoneWaitlist/_leadZone computed above (hoisted before try)
+    // Status routing:
     const _leadStatus = _zoneIsLive ? 'pending_review'
-                      : _zoneWaitlist ? 'approved'            // auto-add to HO Management
-                      : 'waitlist_pending'                     // no zone — needs admin action
+                      : _zoneWaitlist ? 'approved'
+                      : 'waitlist_pending'
     const _leadIsWl   = _leadStatus !== 'pending_review'
 
     // Compute H3 index from ZIP centroid for heatmap
@@ -13198,10 +13197,28 @@ async function submitLead(){
 
   if(btn){ btn.disabled=false; btn.textContent='✅ Save My Spot — Notify Me' }
 
-  // Always go to waitlist screen -- success or not
-  const zipDisplay = document.getElementById('waitlist-zip-display')
-  if(zipDisplay) zipDisplay.textContent = 'ZIP ' + zip
+  // Navigate to waitlist dashboard and populate it with the new HO's data
   go('S-hw-waitlist')
+  // Build a row object from form data so the dashboard populates immediately
+  // (DB reload happens async — this gives instant feedback)
+  const _wlDashRow = {
+    first_name:     fn,
+    last_name:      ln || '',
+    email:          email,
+    phone:          ph || '',
+    street_address: addr || '',
+    city:           city || '',
+    zip_code:       zip,
+    zip:            zip,
+    zone_id:        _leadZone?.id || null,
+    zoneId:         _leadZone?.id || null,
+    lat:            window._hwGeoLat || null,
+    lng:            window._hwGeoLng || null,
+    service_type:   isSplit ? 'SPLIT' : svcVal,
+    collection_day: day || null,
+    status:         'waitlist_pending',
+  }
+  setTimeout(() => populateWaitlistDashboard(_wlDashRow), 300)
 
   if(!saveErr){
     showToast('You\'re on the list for ZIP '+zip+' 🎉','ok')
