@@ -1041,7 +1041,7 @@ const EMAIL = {
     <p>We sincerely apologize that your scheduled Bin Out service on <strong>${dateLabel}</strong> was not completed on time.</p>
     <div class="card">
       <div class="row"><div class="lbl">Scheduled date</div><div class="val">${dateLabel}</div></div>
-      <div class="row"><div class="lbl">Status</div><div class="val"><strong style="color:#ef4444">Missed — being resolved</strong></div></div>
+    <p>Our admin team has been alerted and is working to get someone out as quickly as possible. We'll be in touch shortly with next steps — no action needed on your part.</p>
     </div>
     <p>Our admin team has been alerted and is working to get someone out as quickly as possible. We'll be in touch shortly with next steps — no action needed on your part.</p>\n'
     <p style="color:#64748b;font-size:13px">If you have questions, reply to this email or contact us directly. We take service reliability seriously and apologize for the inconvenience.</p>
@@ -9222,9 +9222,9 @@ async function completeBatch(batchId){
     const visitType   = jobs?.[0]?.visit_type
     console.log('[BinDash] completeBatch: marked', jobCount, 'jobs complete. visitType:', visitType)
 
-    // Create pending payout
     // Create pending payout — skip entirely for admin cover routes (no runner credit)
     if(runnerRow?.id && jobCount > 0 && !window._adminCoverMode && !runnerRow?._isAdminCover){
+      const today    = new Date()
       const daysToFri = (5 - today.getDay() + 7) % 7 || 7
       const payDate  = new Date(today); payDate.setDate(today.getDate() + daysToFri)
       await _supa.from('runner_payouts').insert({
@@ -9239,7 +9239,6 @@ async function completeBatch(batchId){
         created_at:       new Date().toISOString(),
       })
     }
-
     // Increment total_stops and total_visits if columns exist (schema-safe)
     if(runnerRow?.id && jobCount > 0 && !window._adminCoverMode && !runnerRow?._isAdminCover){
       try {
@@ -9341,7 +9340,6 @@ async function completeBatch(batchId){
     window._livePipelineBatches = null
     loadLiveJobsIntoPipeline?.().catch(e => console.warn('[BinDash] pipeline refresh on complete:', e.message))
 
-    showToast(`Route complete ✅ — $${totalEarned} queued for Friday payout`, 'ok', 5000)
     showToast(window._adminCoverMode ? `Route complete ✅ — ${jobCount} stop${jobCount!==1?'s':''} done (admin cover, no payout)` : `Route complete ✅ — $${totalEarned} queued for Friday payout`, 'ok', 5000)
     await loadRunnerRoutes(runnerRow)
     await loadRNEarnings()
@@ -21778,6 +21776,7 @@ function getHWServiceLabel(hw){
   if(hw.service==='GENERAL')   return '🗑️ General Waste'
   if(hw.service==='BOTH')      return '♻️🗑️ Both bins'
   if(hw.service==='SPLIT')     return '♻️+🗑️ Split days'
+  if(hw.service==='OAN')       return '🟡 Bin Out As Needed'
   return hw.service
 }
 
@@ -22840,8 +22839,8 @@ function showHWDetailForce(hwId){
     { val:'GENERAL',   label:'🗑 General Waste only',     split:false },
     { val:'BOTH',      label:'♻️🗑 Both bins — same day', split:false },
     { val:'SPLIT',     label:'♻️🗑 Split days — different days', split:true },
+    { val:'OAN',      label:'🟡 Bin Out As Needed',              split:false },
   ]
-
   document.getElementById('modal-box').innerHTML=`
   <div class="mh"><div style="font-size:15px;font-weight:700">✏️ Edit — ${hw.name}</div><button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button></div>
   <div class="mb" style="max-height:70vh;overflow-y:auto">
@@ -23064,8 +23063,7 @@ async function saveHWDetail(hwId){
   hw.day            = newDay
   hw.dayRecycling   = newService==='SPLIT' ? newDayR : null
   hw.dayWaste       = newService==='SPLIT' ? newDayW : null
-  hw.bins           = (newService==='SPLIT'||newService==='BOTH') ? 2 : 1
-  hw.svcNotes       = newNotes
+  hw.bins           = (newService==='SPLIT'||newService==='BOTH') ? 2 : newService==='OAN' ? (hw.plan==='oan_b'||hw.plan==='oan_c'?2:1) : 1
   hw.initials       = newName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
 
   closeM()
@@ -23073,15 +23071,16 @@ async function saveHWDetail(hwId){
   showToast(newName + ' updated ✅', 'ok')
 
   // Derive canonical plan_id from service type — synced with STRIPE_PRICES
-  const _svcToPlan = { 'RECYCLING':'plan_a', 'GENERAL':'plan_b', 'BOTH':'plan_b', 'SPLIT':'plan_c' }
+  const _svcToPlan = { 'RECYCLING':'plan_a', 'GENERAL':'plan_b', 'BOTH':'plan_b', 'SPLIT':'plan_c', 'OAN':'oan_a' }
   const newPlanKey = _svcToPlan[newService] || hw.plan || 'plan_a'
-  // Preserve OAN plan if not changing service type category
-  const finalPlanKey = (hw.plan?.startsWith('oan_') && newService !== 'SPLIT') ? hw.plan : newPlanKey
+  // OAN: preserve existing oan sub-tier (oan_a/b/c); otherwise use derived plan
+  const finalPlanKey = newService === 'OAN'
+    ? (hw.plan?.startsWith('oan_') ? hw.plan : 'oan_a')
+    : (hw.plan?.startsWith('oan_') && newService !== 'SPLIT') ? hw.plan : newPlanKey
 
   // Standardized service_type strings — consistent across all DB tables
-  const _svcLabel = { 'RECYCLING':'Recycling', 'GENERAL':'General Waste', 'BOTH':'Recycling + General Waste', 'SPLIT':'Split Days' }
+  const _svcLabel = { 'RECYCLING':'Recycling', 'GENERAL':'General Waste', 'BOTH':'Recycling + General Waste', 'SPLIT':'Split Days', 'OAN':'Bin Out As Needed' }
 
-  // Update in-memory plan so MRR card shows correctly immediately
   hw.plan = finalPlanKey
 
   // homeowner_signups — all columns
@@ -33017,13 +33016,12 @@ async function loadHomeownersFromSupabase(){
         || (day && day2 && day2 !== day)
 
       const service = isSplit ? 'SPLIT'
+        : ((row.plan_id||'').startsWith('oan_') || svcRaw.includes('bin out as needed') || svcRaw.startsWith('oan')) ? 'OAN'
         : (row.plan_id==='plan_b'||row.plan_id==='w2'||row.plan_id==='b2'||row.plan_id==='m2'
            || svcRaw.includes('both') || svcRaw.includes('recycling + general') || svcRaw.includes('general waste + recycling'))
           ? 'BOTH'
         : (svcRaw.includes('general') || svcRaw.includes('waste')) ? 'GENERAL'
         : 'RECYCLING'
-
-      // Always resolve a valid plan key — never leave null
       const resolvedPlanId = (() => {
         if(row.plan_id && STRIPE_PRICES[row.plan_id]) return row.plan_id
         if(isSplit) return 'plan_c'
@@ -33055,9 +33053,8 @@ async function loadHomeownersFromSupabase(){
         status:         (['waitlist_approved','waitlist','waitlist_pending'].includes(row.status)) ? 'waitlist' : 'active',
         pendingCompletion: (['waitlist_approved','waitlist'].includes(row.status)) &&
           (!row.stripe_customer_id && !row.stripe_subscription_id),
-        bins:           isSplit || service==='BOTH' ? 2 : 1,
+        bins:           isSplit || service==='BOTH' ? 2 : service==='OAN' ? ((row.plan_id==='oan_b'||row.plan_id==='oan_c')?2:1) : 1,
         storage:        row.bin_location  || '--',
-        gate:           row.gate_type     || '--',
         gateCode:       row.gate_code     || '',
         pets:           row.pet_info      || 'None',
         curb:           row.curb_notes    || '--',
