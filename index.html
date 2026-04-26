@@ -7385,21 +7385,18 @@ async function adminCoverRoute(batchId){
   if(!batchJobs?.length){ showToast('No jobs found','err'); return }
 
   let runnerRow = null
-  const rEmail = batchJobs[0]?.runner_email
-  if(rEmail){ const {data:r}=await _supa.from('runners').select('*').ilike('email',rEmail).maybeSingle(); runnerRow=r }
-  if(!runnerRow&&currentUser?.email){ const {data:r}=await _supa.from('runners').select('*').ilike('email',currentUser.email).maybeSingle(); runnerRow=r }
-  if(!runnerRow) runnerRow={id:'admin-'+Date.now(),email:currentUser?.email||'admin@bindash.org',first_name:'Admin',last_name:'(Covering)',name:'Admin (Covering)',status:'AVAILABLE',loyaltyRate:3.25}
+  // Admin cover: always use a synthetic 'Admin (Covering)' row — never credit the original runner
+  const adminCoverRow = {id:'admin-cover-'+Date.now(),email:currentUser?.email||'admin@bindash.org',first_name:'Admin',last_name:'(Covering)',name:'Admin (Covering)',status:'AVAILABLE',loyaltyRate:0,_isAdminCover:true}
 
-  await _supa.from('jobs').update({runner_email:runnerRow.email,runner_name:(runnerRow.first_name||'')+' '+(runnerRow.last_name||''),status:'accepted',updated_at:new Date().toISOString()}).eq('batch_id',batchId)
   // Don't overwrite 'missed' status — admin can cover a missed route and complete it
   const _coverStatus = (batchJobs.some(j=>j.status==='missed') && !batchJobs.some(j=>['accepted','in_progress'].includes(j.status))) ? 'in_progress' : 'accepted'
-  await _supa.from('jobs').update({runner_email:runnerRow.email,runner_name:(runnerRow.first_name||'')+' '+(runnerRow.last_name||''),status:_coverStatus,updated_at:new Date().toISOString()}).eq('batch_id',batchId)
-  window._adminCoverMode=true; window._adminCoverBatchId=batchId; window._currentRunnerRow=runnerRow
-  await loadRunnerRoutes(runnerRow)
+  await _supa.from('jobs').update({runner_email:adminCoverRow.email,runner_name:'Admin (Covering)',status:_coverStatus,updated_at:new Date().toISOString()}).eq('batch_id',batchId)
+  window._adminCoverMode=true; window._adminCoverBatchId=batchId; window._currentRunnerRow=adminCoverRow
+  await loadRunnerRoutes(adminCoverRow)
   go('S-rn-dash')
   setTimeout(()=>{
     const t=document.querySelector('#S-rn-dash .nav-i:nth-child(2)'); if(t) rnNav(t,'rn-routes')
-    setTimeout(()=>{ startBatch(batchId); _showAdminReturnBanner(); showToast('👤 Admin cover mode — full runner view. Tap “Back to Admin” when done.','info',8000) },1200)
+    setTimeout(()=>{ startBatch(batchId); _showAdminReturnBanner(); showToast('👤 Admin cover mode — full runner view. Tap "Back to Admin" when done.','info',8000) },1200)
   },600)
 }
 
@@ -9226,8 +9223,8 @@ async function completeBatch(batchId){
     console.log('[BinDash] completeBatch: marked', jobCount, 'jobs complete. visitType:', visitType)
 
     // Create pending payout
-    if(runnerRow?.id && jobCount > 0){
-      const today    = new Date()
+    // Create pending payout — skip entirely for admin cover routes (no runner credit)
+    if(runnerRow?.id && jobCount > 0 && !window._adminCoverMode && !runnerRow?._isAdminCover){
       const daysToFri = (5 - today.getDay() + 7) % 7 || 7
       const payDate  = new Date(today); payDate.setDate(today.getDate() + daysToFri)
       await _supa.from('runner_payouts').insert({
@@ -9244,7 +9241,7 @@ async function completeBatch(batchId){
     }
 
     // Increment total_stops and total_visits if columns exist (schema-safe)
-    if(runnerRow?.id && jobCount > 0){
+    if(runnerRow?.id && jobCount > 0 && !window._adminCoverMode && !runnerRow?._isAdminCover){
       try {
         const { data: rnData, error: rnSelErr } = await _supa.from('runners')
           .select('id').eq('id',runnerRow.id).maybeSingle()
@@ -9345,7 +9342,7 @@ async function completeBatch(batchId){
     loadLiveJobsIntoPipeline?.().catch(e => console.warn('[BinDash] pipeline refresh on complete:', e.message))
 
     showToast(`Route complete ✅ — $${totalEarned} queued for Friday payout`, 'ok', 5000)
-    // Refresh routes AND earnings stats together so dashboard reflects completion immediately
+    showToast(window._adminCoverMode ? `Route complete ✅ — ${jobCount} stop${jobCount!==1?'s':''} done (admin cover, no payout)` : `Route complete ✅ — $${totalEarned} queued for Friday payout`, 'ok', 5000)
     await loadRunnerRoutes(runnerRow)
     await loadRNEarnings()
     // Re-populate dashboard stat pills (visits, earnings, rating, bins moved)
