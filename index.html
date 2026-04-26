@@ -2624,6 +2624,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display=''" data-val="General Waste">🗑️ Waste</div>
           <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display=''" data-val="Both">♻️+🗑️ Both</div>
           <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='grid';document.getElementById('lead-day-wrap').style.display='none'" data-val="Split">📅 Split days</div>
+          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display='none'" data-val="Bin Out As Needed">🟡 As Needed</div>
         </div>
         <!-- Split day sub-fields — hidden until Split selected -->
         <div id="lead-split-days" style="display:none;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
@@ -13186,11 +13187,11 @@ async function submitLead(){
   const svcEl = document.querySelector('#lead-svc-opts .r-opt.on')
   const svcVal = svcEl?.dataset?.val || svcEl?.textContent?.trim() || 'Recycling'
   const isSplit = svcVal === 'Split'
-
+  const isOAN   = svcVal === 'Bin Out As Needed'
   // Day(s) — split or single
   const dayR  = document.getElementById('lead-day-recycling')?.value || 'Wednesday'
   const dayW  = document.getElementById('lead-day-waste')?.value || 'Thursday'
-  const day   = isSplit ? null : (document.getElementById('lead-day')?.value || 'Thursday')
+  const day   = isSplit || isOAN ? null : (document.getElementById('lead-day')?.value || 'Thursday')
   const serviceLabel = isSplit ? 'Split days — ♻️ '+dayR+' / 🗑️ '+dayW : svcVal
 
   const pw  = document.getElementById('lead-pw')?.value  || ''
@@ -13248,6 +13249,7 @@ async function submitLead(){
       city:           city || null,
       zip_code:       zip,
       service_type:   isSplit ? 'SPLIT' : svcVal,
+      plan_id:        isOAN ? 'oan_a' : isSplit ? 'plan_c' : svcVal==='Both' ? 'plan_b' : 'plan_a',
       collection_day: day || null,
       status:         _leadStatus,
       zone_id:        _leadZone?.id || null,
@@ -13322,6 +13324,7 @@ async function submitLead(){
             zip_code:       zip,
             zone_id:        _leadZone.id,
             service_type:   isSplit ? 'SPLIT' : svcVal,
+            plan_id:        isOAN ? 'oan_a' : isSplit ? 'plan_c' : svcVal==='Both' ? 'plan_b' : 'plan_a',
             collection_day: day || null,
             status:         'waitlist',
             created_at:     new Date().toISOString(),
@@ -13333,8 +13336,8 @@ async function submitLead(){
             name: (fn+' '+(ln||'')).trim(),
             initials: ((fn[0]||'')+(ln?.[0]||'')).toUpperCase()||'?',
             email, phone: ph||'--', address: addr||'--', city: city||'--',
-            zip, zoneId: _leadZone.id, service: isSplit?'SPLIT':svcVal,
-            day: day||'--', status: 'waitlist', plan: 'plan_a',
+            zoneId: _leadZone.id, service: isOAN ? 'OAN' : isSplit ? 'SPLIT' : svcVal==='Both' ? 'BOTH' : svcVal==='General Waste' ? 'GENERAL' : 'RECYCLING',
+            day: day||'--', status: 'waitlist', plan: isOAN ? 'oan_a' : isSplit ? 'plan_c' : svcVal==='Both' ? 'plan_b' : 'plan_a',
             storage:'--', gate:'--', pets:'None',
           })
           if(typeof renderHomeownerList === 'function') renderHomeownerList()
