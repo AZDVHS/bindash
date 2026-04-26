@@ -622,7 +622,7 @@ function handleStripeReturn(){
           await _supa.from('homeowner_signups').update({
             status: 'pending_review',
             updated_at: new Date().toISOString(),
-          }).ilike('email', session.user.email)
+          }).eq('email', session.user.email)
           console.log('[BinDash] Signup status → pending_review after checkout ✅')
         }
       } catch(e){ console.warn('[BinDash] Post-checkout status update:', e) }
@@ -6797,7 +6797,7 @@ async function populateRNDashboard(){
         await _supa.from('runners').update({
           stripe_connect_id: merged.stripe_connect_id || 'setup_complete',
           updated_at: new Date().toISOString()
-        }).ilike('email', currentUser?.email||'')
+        }).eq('email', currentUser?.email||'')
       } catch(e){ console.warn('[BinDash] Stripe connect save:', e) }
     }
 
@@ -9959,7 +9959,7 @@ async function assignH3IndexToHO(email, lat, lng){
       h3_zone_res6: hex6,
       lat, lng,
       updated_at: new Date().toISOString(),
-    }).ilike('email', email)
+    }).eq('email', email)
     console.log('[H3] Assigned', email, '→ Res8:', hex8, '| Res6 zone:', hex6)
     return { hex8, hex6 }
   } catch(e){ console.warn('[H3] assignH3IndexToHO:', e.message); return null }
@@ -12083,10 +12083,10 @@ function assignRunner(h3Index, runnerName, runnerId){
       for(const ho of (cell.homeowners||[])){
         await _supa.from('homeowner_signups')
           .update({ assigned_runner: runnerId, updated_at: new Date().toISOString() })
-          .ilike('email', ho.email)
+          .eq('email', ho.email)
         await _supa.from('homeowners')
           .update({ assigned_runner: runnerId, updated_at: new Date().toISOString() })
-          .ilike('email', ho.email)
+          .eq('email', ho.email)
       }
 
       // 2. Assign runner to zone if one exists
@@ -14622,7 +14622,7 @@ async function rnSaveServiceArea(){
       anchor_hex6:    anchor6,
       coverage_hexes: hexJson,
       updated_at:     new Date().toISOString(),
-    }).ilike('email', email)
+    }).eq('email', email)
     if(rnErr) {
       // Columns may not exist — try minimal update and warn
       console.warn('[ServiceArea] runners update error (columns may need migration):', rnErr.message)
@@ -14634,7 +14634,7 @@ async function rnSaveServiceArea(){
       anchor_hex6:    anchor6,
       coverage_hexes: hexJson,
       updated_at:     new Date().toISOString(),
-    }).ilike('email', email)
+    }).eq('email', email)
     // Update in-memory row
     if(window._rnRow){ window._rnRow.coverage_hexes = JSON.stringify(hexes); window._rnRow.anchor_hex7 = anchor7; window._rnRow.anchor_hex6 = anchor6 }
     showToast('Service area saved ✅ — '+hexes.length+' hexes', 'ok', 4000)
@@ -14829,7 +14829,7 @@ async function _rnAutoDefaultZone(){
       anchor_hex7:    anchor8,
       coverage_hexes: hexJson,
       updated_at:     new Date().toISOString(),
-    }).ilike('email', email)
+    }).eq('email', email)
 
     // Update in-memory
     if(window._rnRow){
@@ -15692,7 +15692,7 @@ async function _rnToggleCoverageHex(hexId, opts){
   try {
     await _supa.from('runners').update({
       coverage_hexes: hexJson, updated_at: new Date().toISOString()
-    }).ilike('email', email)
+    }).eq('email', email)
     if(window._rnRow) window._rnRow.coverage_hexes = hexJson
     showToast(isActive ? 'Hex removed from coverage' : 'Hex added to coverage', 'ok', 2000)
   } catch(e){ showToast('Could not save: '+e.message, 'err') }
@@ -16137,7 +16137,7 @@ async function _rnZspAccept(){
     try {
       await _supa.from('runners').update({
         coverage_hexes: hexJson, updated_at: new Date().toISOString()
-      }).ilike('email', email)
+      }).eq('email', email)
       if(window._rnRow) window._rnRow.coverage_hexes = hexJson
       showToast('Your zone coverage saved — '+hexes.length+' hexes active ✅', 'ok', 4000)
       _rnZspClose()
@@ -16172,7 +16172,7 @@ async function _rnZspAccept(){
 
         await _supa.from('runners').update({
           coverage_hexes: hexJson, updated_at: new Date().toISOString(),
-        }).ilike('email', email)
+        }).eq('email', email)
         if(window._rnRow) window._rnRow.coverage_hexes = hexJson
 
         // Draw new zone border immediately on current map
@@ -17833,7 +17833,7 @@ async function _addZoneToRunnerCoverage(runner, zoneId){
     if(!runner.zoneId) updatePayload.zone_id = zoneId
     const { error } = await _supa.from('runners')
       .update(updatePayload)
-      .ilike('email', runner.email)
+      .eq('email', runner.email)
     if(error) console.warn('[Coverage] runners.coverage_zones update:', error.message)
     else console.log('[Coverage] ✅', runner.name, 'coverage_zones →',
       updated.map(id => ADMIN_ZONES.find(z=>z.id===id)?.name||id).join(', '))
@@ -18055,7 +18055,7 @@ async function adminUpdateZoneRole(zoneId, runnerId, newRole, newOrder){
       // Also update runners table so dispatch knows this runner owns this zone
       _supa.from('runners').update({
         zone_id: zoneId, updated_at: new Date().toISOString(),
-      }).ilike('email', r.email).then(res => {
+      }).eq('email', r.email).then(res => {
         if(res.error) console.warn('[BinDash] runners.zone_id update:', res.error.message)
         else console.log('[BinDash] runners.zone_id set to', zone.name)
       })
@@ -18486,7 +18486,7 @@ async function saveRnEdit(rId){
         first_name: fn, last_name: ln, phone: r.phone||null,
         street_address: r.streetAddress||null, city: r.city||null, zip_code: r.zip||null,
         updated_at: new Date().toISOString(),
-      }).ilike('email', r.email)
+      }).eq('email', r.email)
     } catch(e){ console.warn('[BinDash] runner_applications update:', e.message) }
   } catch(e){ console.warn('[BinDash] Runner update:', String(e?.message||e)) }
 
@@ -18498,7 +18498,7 @@ async function saveRnEdit(rId){
     try {
       await _supa.from('runner_zone_requests')
         .update({ status: 'removed', updated_at: new Date().toISOString() })
-        .ilike('runner_email', rEmail)
+        .eq('runner_email', rEmail)
         .eq('status', 'approved')
 
       const zoneInserts = r.coverageZones.map(zId => {
@@ -18526,7 +18526,7 @@ async function saveRnEdit(rId){
     try {
       await _supa.from('runner_zone_requests')
         .update({ status: 'removed', updated_at: new Date().toISOString() })
-        .ilike('runner_email', rEmail).eq('status', 'approved')
+        .eq('runner_email', rEmail).eq('status', 'approved')
     } catch(e){}
   }
 
@@ -19397,7 +19397,7 @@ async function requestOANSwitch(oanTier){
     await _supa.from('homeowner_signups').update({
       service_notes: 'PLAN_CHANGE_REQUEST: ' + oanTier + ' requested on ' + new Date().toLocaleDateString(),
       updated_at: new Date().toISOString()
-    }).ilike('email', currentUser?.email||'')
+    }).eq('email', currentUser?.email||'')
     showToast('OAN switch requested ✅ — we\'ll confirm via email within 24 hours', 'ok', 6000)
   } catch(e){ showToast('Request sent — our team will follow up', 'ok') }
 }
@@ -22015,7 +22015,7 @@ async function _adminActivateHW(hwId){
       status: 'approved',
       reviewed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    }).ilike('email', hw.email)
+    }).eq('email', hw.email)
 
     // Step 3: Update homeowners → active + sync all preserved fields
     await _supa.from('homeowners').update({
@@ -22035,7 +22035,7 @@ async function _adminActivateHW(hwId){
       gate_code:        sigData?.gate_code     || null,
       pet_info:         sigData?.pet_info      || null,
       updated_at:       new Date().toISOString(),
-    }).ilike('email', hw.email)
+    }).eq('email', hw.email)
 
     // Step 4: Update in-memory
     hw.status  = 'active'
@@ -24943,7 +24943,7 @@ async function routeAfterSignup(appData){
         status:  'pending_review',
         zone_id: matchedZone?.id || null,
         updated_at: new Date().toISOString(),
-      }).ilike('email', email)
+      }).eq('email', email)
     } catch(err){ console.warn('[BinDash] routeAfterSignup live update:', err) }
 
     // Email admin — live zone signup
@@ -32081,7 +32081,7 @@ async function _quickCreateZoneSubmit(){
           zone_id: rnObj.zoneId || realZoneId,
           coverage_zones: JSON.stringify(existingCoverage),
           updated_at: new Date().toISOString(),
-        }).ilike('email', runner)
+        }).eq('email', runner)
         rnObj.coverageZones = existingCoverage
         if(!rnObj.zoneId) rnObj.zoneId = realZoneId
         // Mark any pending zone requests for this ZIP as approved
