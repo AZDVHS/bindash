@@ -13408,10 +13408,11 @@ async function submitLead(){
     collection_day: day || null,
     status:         'waitlist_pending',
   }
-  setTimeout(() => populateWaitlistDashboard(_wlDashRow), 300)
 
   if(!saveErr){
     showToast('You\'re on the list for ZIP '+zip+' 🎉','ok')
+    go('S-hw-waitlist')
+    setTimeout(() => populateWaitlistDashboard(_wlDashRow), 400)
 
     // Only add to PENDING_HOMEOWNERS if no zone (needs admin action)
     // If existing zone, they're already in HOMEOWNERS via auto-insert above
@@ -20297,9 +20298,17 @@ function _renderNavModal(){
       propRows += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0"><span style="font-size:18px;flex-shrink:0">🐾</span><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Pets</div><div style="font-size:13px;font-weight:600;color:#fbbf24">${s.pets||'Pet on premises — use caution'}</div></div></div>`
     if(s.binLocation && s.binLocation !== '--')
       propRows += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0"><span style="font-size:18px;flex-shrink:0">📦</span><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Bin Storage</div><div style="font-size:13px;font-weight:600;color:var(--text)">${s.binLocation}</div></div></div>`
-    if(s.serviceType && s.serviceType !== '--')
-      propRows += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0"><span style="font-size:18px;flex-shrink:0">♻️</span><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Service</div><div style="font-size:13px;font-weight:600;color:var(--text)">${s.serviceType}</div></div></div>`
-    if(s.notes && s.notes !== '--')
+    if(s.serviceType && s.serviceType !== '--'){
+      const _isOANSvc = (s.serviceType||'').toLowerCase().includes('bin out as needed') || (s.plan||'').startsWith('oan_')
+      if(_isOANSvc){
+        propRows += `<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:8px;padding:10px 12px;margin-top:4px">`
+        propRows += `<div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">🟡 Bin Out As Needed — Drive-by</div>`
+        propRows += `<div style="font-size:12px;color:var(--text);line-height:1.6">✅ Bins look good? <strong>Take photo, mark done — no charge.</strong><br>🚛 Bin(s) full? <strong>Move them — homeowner is charged per move.</strong></div>`
+        propRows += `</div>`
+      } else {
+        propRows += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0"><span style="font-size:18px;flex-shrink:0">♻️</span><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Service</div><div style="font-size:13px;font-weight:600;color:var(--text)">${s.serviceType}</div></div></div>`
+      }
+    }
       propRows += `<div style="display:flex;align-items:flex-start;gap:10px;padding:5px 0"><span style="font-size:18px;flex-shrink:0">📋</span><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Special Instructions</div><div style="font-size:13px;color:var(--text);line-height:1.5">${s.notes}</div></div></div>`
     if(!propRows)
       propRows = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:4px 0">No special access notes on file</div>'
@@ -23560,9 +23569,17 @@ function renderActiveRouteTab(){
     _propRows += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0"><span style="font-size:18px;flex-shrink:0">🐾</span><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Pets</div><div style="font-size:13px;font-weight:600;color:#fbbf24">${s.pets||'Pet on premises — use caution'}</div></div></div>`
   if(s.binLocation&&s.binLocation!=='--')
     _propRows += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0"><span style="font-size:18px;flex-shrink:0">📦</span><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Bin Storage</div><div style="font-size:13px;font-weight:600;color:var(--text)">${s.binLocation}</div></div></div>`
-  if(s.serviceType&&s.serviceType!=='--')
-    _propRows += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0"><span style="font-size:18px;flex-shrink:0">♻️</span><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Service</div><div style="font-size:13px;font-weight:600;color:var(--text)">${s.serviceType}</div></div></div>`
-  if(s.notes&&s.notes!=='--')
+  if(s.serviceType&&s.serviceType!=='--'){
+    const _isOANSvc2 = (s.serviceType||'').toLowerCase().includes('bin out as needed') || (s.plan||'').startsWith('oan_')
+    if(_isOANSvc2){
+      _propRows += `<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:8px;padding:10px 12px;margin-top:4px">`
+      _propRows += `<div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">🟡 Bin Out As Needed — Drive-by</div>`
+      _propRows += `<div style="font-size:12px;color:var(--text);line-height:1.6">✅ Bins look good? <strong>Take photo, mark done — no charge.</strong><br>🚛 Bin(s) full? <strong>Move them — homeowner is charged per move.</strong></div>`
+      _propRows += `</div>`
+    } else {
+      _propRows += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0"><span style="font-size:18px;flex-shrink:0">♻️</span><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Service</div><div style="font-size:13px;font-weight:600;color:var(--text)">${s.serviceType}</div></div></div>`
+    }
+  }
     _propRows += `<div style="display:flex;align-items:flex-start;gap:10px;padding:5px 0"><span style="font-size:18px;flex-shrink:0">📋</span><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Special Instructions</div><div style="font-size:13px;color:var(--text);line-height:1.5">${s.notes}</div></div></div>`
   if(!_propRows)
     _propRows = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:4px 0">No special access notes on file</div>'
@@ -23785,22 +23802,34 @@ async function navOanMoved(){
       'oan_bin_moved')
   }
 
-  // Auto-schedule Bin In for tomorrow
+  // Auto-schedule Bin In for tomorrow and offer it to the runner
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate()+1)
-  _supa.from('jobs').insert({
-    homeowner_email: stop?.email,
-    job_type:        'oan_bin_in',
-    service_type:    'Bin Out As Needed Bin In',
-    visit_type:      'BIN_IN',
-    status:          'offered',
-    amount:          0,  // Bin In is included — no extra charge
-    runner_name:     (currentUser?.first_name||'')+' '+(currentUser?.last_name||''),
-    scheduled_date:  tomorrow.toISOString().slice(0,10),
-    created_at:      new Date().toISOString(),
-    updated_at:      new Date().toISOString(),
-  }).then(()=>console.log('[BinDash] Bin Out As Needed Bin In scheduled for tomorrow ✅'))
-    .catch(e=>console.warn('[BinDash] oan bin-in schedule:', e))
-
+  const _oanBinInDate = tomorrow.toISOString().slice(0,10)
+  const _oanBinInBatchId = (stop.batchId || stop.id || stop.email?.split('@')[0] || 'oan') + '-IN'
+  const _oanRunnerRow = window._currentRunnerRow || { email: currentUser?.email, first_name: currentUser?.first_name||'', last_name: currentUser?.last_name||'', id: currentUser?.id||'admin', name: (currentUser?.first_name||'')+ ' '+(currentUser?.last_name||'') }
+  try {
+    const { error: binInErr } = await _supa.from('jobs').insert({
+      homeowner_email: stop?.email,
+      batch_id:        _oanBinInBatchId,
+      job_type:        'oan_bin_in',
+      service_type:    'Bin Out As Needed Bin In',
+      visit_type:      'BIN_IN',
+      status:          'offered',
+      amount:          3.25,  // runner earns $3.25 for Bin In
+      zone_id:         stop?.zoneId || stop?.zone_id || null,
+      runner_name:     (_oanRunnerRow.first_name+' '+_oanRunnerRow.last_name).trim(),
+      runner_email:    _oanRunnerRow.email || null,
+      scheduled_date:  _oanBinInDate,
+      created_at:      new Date().toISOString(),
+      updated_at:      new Date().toISOString(),
+    })
+    if(binInErr) console.warn('[BinDash] OAN bin-in insert:', binInErr.message)
+    else {
+      console.log('[BinDash] OAN Bin In scheduled for tomorrow ✅')
+      // Show the standard Bin In offer modal to the runner
+      await _autoCreateBinInBatch([{ batch_id: _oanBinInBatchId, scheduled_date: _oanBinInDate, zone_id: stop?.zoneId||stop?.zone_id, homeowner_email: stop?.email }], _oanRunnerRow)
+    }
+  } catch(e){ console.warn('[BinDash] OAN bin-in schedule:', e?.message) }
   showToast(`✅ Bin moved · $${STRIPE_PRICES[stop.planId||'oan_b']?.usageFee||12.99} billed · Bin In scheduled tomorrow`, 'ok', 5000)
   navAdvanceStop()
 }
@@ -29079,7 +29108,7 @@ async function sendDirectTestEmail(){
       lee.name?.split(' ')[0] || 'Lee',
       stops.length, earnOut, day,
       glendaleZone.name,
-      stops.map(h => ({ name: h.name, address: h.address || h.zip, service: h.service === 'GENERAL' ? '🗑️ Waste' : '♻️ Recycling' }))
+      stops.map(h => ({ name: h.name, address: h.address || h.zip, service: h.service==='OAN'||(h.plan||'').startsWith('oan_') ? '🟡 OAN Drive-by' : h.service === 'GENERAL' ? '🗑️ Waste' : h.service==='BOTH' ? '♻️🗑️ Both' : '♻️ Recycling' }))
     ),
     'batch_offer_test'
   )
@@ -29245,12 +29274,12 @@ async function launchDispatchRoutes(){
 
       batch.stops.forEach(hw => {
         let serviceType = 'Recycling'
-        if(hw.service==='BOTH')  serviceType = 'Recycling + General Waste'
+        if(hw.service==='OAN'||(hw.plan||'').startsWith('oan_')) serviceType = 'Bin Out As Needed'
+        else if(hw.service==='BOTH')  serviceType = 'Recycling + General Waste'
         else if(hw.service==='GENERAL') serviceType = 'General Waste'
         else if(hw.service==='SPLIT'){
           serviceType = normDay(hw.dayRecycling)===normDay(batch.day) ? 'Recycling' : 'General Waste'
         }
-
         jobRows.push({
           batch_id:         batch.id,
           homeowner_email:  hw.email,
@@ -29656,7 +29685,8 @@ function renderDispatchPipeline(){
     const stopRows = b.stops.map((h,idx)=>{
       const isSplit = h.service==='SPLIT'
       const isRecDay = isSplit && normDay(h.dayRecycling)===normDay(b.day)
-      const svcLabel = isSplit ? (isRecDay?'♻️ Recycling':'🗑️ Waste') : h.service==='BOTH'||(h.bins&&h.bins>=2) ? '♻️🗑️ Both' : h.service==='GENERAL' ? '🗑️ Waste' : '♻️ Recycling'
+      const isOANStop = h.service==='OAN' || (h.plan||'').startsWith('oan_') || (h.service_type||'').toLowerCase().includes('bin out as needed')
+      const svcLabel = isOANStop ? '🟡 OAN · Drive-by check' : isSplit ? (isRecDay?'♻️ Recycling':'🗑️ Waste') : h.service==='BOTH'||(h.bins&&h.bins>=2) ? '♻️🗑️ Both' : h.service==='GENERAL' ? '🗑️ Waste' : '♻️ Recycling'
       const addr = h.address&&h.address!=='--' ? h.address+(h.zip?' · '+h.zip:'') : (h.zip||'No address')
       const alerts = []
       if(h.gate&&h.gate!=='No gate'&&h.gate!=='--') alerts.push('🔑 '+h.gate+(h.gateCode?' · '+h.gateCode:''))
