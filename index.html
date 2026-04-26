@@ -2620,13 +2620,38 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         <div style="font-size:11px;color:var(--muted);margin-top:-4px;margin-bottom:10px">You'll use this to log in and check your waitlist status, service date, and referral progress.</div>
         <div class="sec-h" style="margin-top:4px">Service Preference</div>
         <div class="radio-row" style="margin-bottom:8px" id="lead-svc-opts">
-          <div class="r-opt on" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display=''" data-val="Recycling">♻️ Recycling</div>
-          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display=''" data-val="General Waste">🗑️ Waste</div>
-          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display=''" data-val="Both">♻️+🗑️ Both</div>
-          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='grid';document.getElementById('lead-day-wrap').style.display='none'" data-val="Split">📅 Split days</div>
+          <div class="r-opt on" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display='';document.getElementById('lead-oan-fields').style.display='none';" data-val="Recycling">♻️ Recycling</div>
+          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display='';document.getElementById('lead-oan-fields').style.display='none';" data-val="General Waste">🗑️ Waste</div>
+          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display='';document.getElementById('lead-oan-fields').style.display='none';" data-val="Both">♻️+🗑️ Both</div>
+          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='grid';document.getElementById('lead-day-wrap').style.display='none';document.getElementById('lead-oan-fields').style.display='none';" data-val="Split">📅 Split days</div>
           <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display='none'" data-val="Bin Out As Needed">🟡 As Needed</div>
-        </div>
+          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display='none';document.getElementById('lead-oan-fields').style.display=''" data-val="Bin Out As Needed">🟡 As Needed</div>
         <!-- Split day sub-fields — hidden until Split selected -->
+        <!-- OAN sub-fields — hidden until As Needed selected -->
+        <div id="lead-oan-fields" style="display:none;background:rgba(251,191,36,.05);border:1px solid rgba(251,191,36,.2);border-radius:8px;padding:12px;margin-bottom:8px">
+          <div style="font-size:11px;font-weight:700;color:#fbbf24;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px">🟡 Bin Out As Needed — Configure</div>
+          <div class="field" style="margin-bottom:10px">
+            <label style="font-size:12px">How many bins?</label>
+            <div class="radio-row" id="lead-oan-cans" style="margin-top:4px">
+              <div class="r-opt on" onclick="rOpt(this);document.getElementById('lead-oan-split-wrap').style.display='none'" data-val="oan_a">🗑️ 1 can — $12.99/move</div>
+              <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-oan-split-wrap').style.display=''" data-val="oan_b">🗑️🗑️ 2 cans — $16.99/move</div>
+            </div>
+          </div>
+          <div id="lead-oan-split-wrap" style="display:none;margin-bottom:10px">
+            <label style="font-size:12px;display:block;margin-bottom:4px">Collection schedule?</label>
+            <div class="radio-row" id="lead-oan-split">
+              <div class="r-opt on" onclick="rOpt(this)" data-val="same">Same day — $16.99/move</div>
+              <div class="r-opt" onclick="rOpt(this)" data-val="split">Split days — $19.99/move</div>
+            </div>
+          </div>
+          <div class="field" style="margin:0">
+            <label style="font-size:12px">Preferred drive-by day <span style="color:var(--muted);font-size:10px">(runner checks weekly)</span></label>
+            <select id="lead-oan-day" style="font-size:13px">
+              <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+              <option selected>Thursday</option><option>Friday</option>
+            </select>
+          </div>
+        </div>
         <div id="lead-split-days" style="display:none;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
           <div class="field" style="margin:0">
             <label style="font-size:11px">♻️ Recycling day</label>
@@ -13188,11 +13213,17 @@ async function submitLead(){
   const svcVal = svcEl?.dataset?.val || svcEl?.textContent?.trim() || 'Recycling'
   const isSplit = svcVal === 'Split'
   const isOAN   = svcVal === 'Bin Out As Needed'
+  // OAN sub-fields — cans, split preference, drive-by day
+  const oanCans     = isOAN ? (document.querySelector('#lead-oan-cans .r-opt.on')?.dataset?.val || 'oan_a') : null
+  const oanSplitEl  = isOAN ? document.querySelector('#lead-oan-split .r-opt.on') : null
+  const oanIsSplit  = isOAN && oanCans !== 'oan_a' && oanSplitEl?.dataset?.val === 'split'
+  const oanPlanKey  = isOAN ? (oanIsSplit ? 'oan_c' : oanCans === 'oan_b' ? 'oan_b' : 'oan_a') : null
+  const oanDay      = isOAN ? (document.getElementById('lead-oan-day')?.value || 'Thursday') : null
   // Day(s) — split or single
   const dayR  = document.getElementById('lead-day-recycling')?.value || 'Wednesday'
   const dayW  = document.getElementById('lead-day-waste')?.value || 'Thursday'
-  const day   = isSplit || isOAN ? null : (document.getElementById('lead-day')?.value || 'Thursday')
-  const serviceLabel = isSplit ? 'Split days — ♻️ '+dayR+' / 🗑️ '+dayW : svcVal
+  const day   = isSplit ? null : isOAN ? oanDay : (document.getElementById('lead-day')?.value || 'Thursday')
+  const serviceLabel = isSplit ? 'Split days — ♻️ '+dayR+' / 🗑️ '+dayW : isOAN ? 'Bin Out As Needed ('+oanPlanKey+') · '+oanDay+' drive-by' : svcVal
 
   const pw  = document.getElementById('lead-pw')?.value  || ''
   const pw2 = document.getElementById('lead-pw2')?.value || ''
@@ -13249,7 +13280,7 @@ async function submitLead(){
       city:           city || null,
       zip_code:       zip,
       service_type:   isSplit ? 'SPLIT' : svcVal,
-      plan_id:        isOAN ? 'oan_a' : isSplit ? 'plan_c' : svcVal==='Both' ? 'plan_b' : 'plan_a',
+      plan_id:        isOAN ? oanPlanKey : isSplit ? 'plan_c' : svcVal==='Both' ? 'plan_b' : 'plan_a',
       collection_day: day || null,
       status:         _leadStatus,
       zone_id:        _leadZone?.id || null,
@@ -13324,7 +13355,7 @@ async function submitLead(){
             zip_code:       zip,
             zone_id:        _leadZone.id,
             service_type:   isSplit ? 'SPLIT' : svcVal,
-            plan_id:        isOAN ? 'oan_a' : isSplit ? 'plan_c' : svcVal==='Both' ? 'plan_b' : 'plan_a',
+            plan_id:        isOAN ? oanPlanKey : isSplit ? 'plan_c' : svcVal==='Both' ? 'plan_b' : 'plan_a',
             collection_day: day || null,
             status:         'waitlist',
             created_at:     new Date().toISOString(),
@@ -13337,7 +13368,7 @@ async function submitLead(){
             initials: ((fn[0]||'')+(ln?.[0]||'')).toUpperCase()||'?',
             email, phone: ph||'--', address: addr||'--', city: city||'--',
             zoneId: _leadZone.id, service: isOAN ? 'OAN' : isSplit ? 'SPLIT' : svcVal==='Both' ? 'BOTH' : svcVal==='General Waste' ? 'GENERAL' : 'RECYCLING',
-            day: day||'--', status: 'waitlist', plan: isOAN ? 'oan_a' : isSplit ? 'plan_c' : svcVal==='Both' ? 'plan_b' : 'plan_a',
+            day: day||'--', status: 'waitlist', plan: isOAN ? oanPlanKey : isSplit ? 'plan_c' : svcVal==='Both' ? 'plan_b' : 'plan_a',
             storage:'--', gate:'--', pets:'None',
           })
           if(typeof renderHomeownerList === 'function') renderHomeownerList()
