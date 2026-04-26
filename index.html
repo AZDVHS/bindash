@@ -204,6 +204,23 @@ const EMAIL_TEST_ADMIN = 'alpha1miller@gmail.com'
 // adminLaunchBatch, loadRunnerRoutes, and many others.
 // Never use new Date().toISOString().slice(0,10) — that returns UTC which
 // shifts the date after ~5pm Phoenix time (UTC-7, no DST).
+// Returns current Phoenix time as "HH:MM AM/PM" string
+function _phxTimeStr(){
+  return new Date().toLocaleTimeString('en-US',{
+    hour:'2-digit', minute:'2-digit', timeZone:'America/Phoenix'
+  })
+}
+// Returns current Phoenix date as "Weekday, Mon D" string
+function _phxDateStr(opts){
+  return new Date().toLocaleDateString('en-US', {
+    timeZone:'America/Phoenix', ...(opts || {weekday:'long', month:'short', day:'numeric'})
+  })
+}
+// Returns current Phoenix weekday as full name e.g. "Monday"
+function _phxWeekday(){
+  return new Date().toLocaleDateString('en-US',{weekday:'long', timeZone:'America/Phoenix'})
+}
+
 function _phxToday(){
   try {
     const p = new Intl.DateTimeFormat('en-US',{
@@ -275,6 +292,7 @@ async function sendSMS(to, message, type){
     console.log('[BinDash] SMS TEST MODE: redirecting from', to, 'to admin')
   }
 
+  let _smsDelivered = false
   try {
     const res = await fetch('https://vaktkyrtfxlqfzdqfeiq.supabase.co/functions/v1/send-sms', {
       method: 'POST',
@@ -288,11 +306,36 @@ async function sendSMS(to, message, type){
     const d = await res.json()
     if(res.ok && d.ok){
       console.log('[BinDash] sendSMS OK:', type, '->', actualTo, '| SID:', d.sid)
+      _smsDelivered = true
     } else {
-      console.warn('[BinDash] sendSMS failed:', d.error || d, 'type:', type)
+      console.warn('[BinDash] sendSMS failed:', d.error || d, 'type:', type, '— trying email fallback')
     }
   } catch(e){
-    console.warn('[BinDash] sendSMS exception:', e?.message, 'type:', type)
+    console.warn('[BinDash] sendSMS exception:', e?.message, 'type:', type, '— trying email fallback')
+  }
+
+  // Email fallback — if SMS failed and we have an email for this recipient,
+  // look them up in HOMEOWNERS/RUNNERS and send the message as an email
+  if(!_smsDelivered){
+    try {
+      // Find email for this phone number
+      const _fallbackHO = HOMEOWNERS.find(h => h.phone && h.phone.replace(/\D/g,'') === to.replace(/\D/g,''))
+      const _fallbackRN = !_fallbackHO ? RUNNERS.find(r => r.phone && r.phone.replace(/\D/g,'') === to.replace(/\D/g,'')) : null
+      const _fallbackEmail = _fallbackHO?.email || _fallbackRN?.email
+      if(_fallbackEmail){
+        const _emailSubj = '[BinDash] ' + (type ? type.replace(/_/g,' ') : 'Notification')
+        const _emailBody = '<div style="font-family:sans-serif;padding:20px;max-width:520px">'
+          + '<p style="font-size:14px;color:#334155">' + message.split('\n').join('<br>') + '</p>'
+          + '<p style="font-size:11px;color:#94a3b8;margin-top:16px">Sent via BinDash (SMS unavailable — email fallback)</p>'
+          + '</div>'
+        await sendEmail(_fallbackEmail, _emailSubj, _emailBody, type + '_sms_fallback')
+        console.log('[BinDash] SMS fallback email sent to', _fallbackEmail, 'for', to, type)
+      } else {
+        console.warn('[BinDash] SMS fallback: no email found for phone', to, '— message not delivered')
+      }
+    } catch(fe){
+      console.warn('[BinDash] SMS fallback email also failed:', fe?.message)
+    }
   }
 }
 
@@ -936,7 +979,7 @@ const EMAIL = {
     <p>Your runner <strong style="color:#1e293b;font-weight:700">${runnerName}</strong> has placed your bins at the curb and they're ready for collection.</p>
     <div class="card">
       <div class="row"><div class="lbl">Collection Day</div><div class="val">${day}</div></div>
-      <div class="row"><div class="lbl">Completed</div><div class="val">${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div></div>
+      <div class="row"><div class="lbl">Completed</div><div class="val">${_phxTimeStr()} MST</div></div>
     </div>
     <p>Your bins will be retrieved after the truck has passed. No action needed -- we'll email you when they're back.</p>
   `),
@@ -946,7 +989,7 @@ const EMAIL = {
     <p>Your runner <strong style="color:#1e293b;font-weight:700">${runnerName}</strong> has returned your bins to their storage spot.</p>
     <div class="card">
       <div class="row"><div class="lbl">Status</div><div class="val" style="color:${BRAND.cyan}">✅ All done for today</div></div>
-      <div class="row"><div class="lbl">Completed</div><div class="val">${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div></div>
+      <div class="row"><div class="lbl">Completed</div><div class="val">${_phxTimeStr()} MST</div></div>
     </div>
     <p>See you next collection! Log in anytime to check your schedule or update your preferences.</p>
     <a href="${BRAND.url}" class="btn">View My Dashboard -></a>
@@ -978,7 +1021,7 @@ const EMAIL = {
     <p>Your runner <strong style="color:#1e293b;font-weight:700">${runnerName}</strong> has returned your bins to their storage spot. All done for today!</p>
     <div class="card">
       <div class="row"><div class="lbl">Status</div><div class="val" style="color:${BRAND.cyan}">\u2705 Complete</div></div>
-      <div class="row"><div class="lbl">Completed</div><div class="val">${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div></div>
+      <div class="row"><div class="lbl">Completed</div><div class="val">${_phxTimeStr()} MST</div></div>
     </div>
     <a href="${BRAND.url}" class="btn">View My Dashboard \u2192</a>
   `),
@@ -1568,6 +1611,9 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         <button class="btn btn-cyan btn-lg" onclick="go('S-hw-ob')">🚀 Get Started Free</button>
         <button class="btn btn-outline btn-lg" onclick="openDemoModal()">👀 View Demo</button>
       </div>
+      <div style="text-align:center;font-size:11px;color:rgba(255,255,255,.3);margin-top:12px">
+        <a href="https://www.bindash.org/BinDash_Terms_of_Service.pdf" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">Terms of Service</a> · <a href="https://www.bindash.org/BinDash_Privacy_Policy.pdf" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">Privacy Policy</a>
+      </div>
       <p class="a5" style="font-size:14px;color:var(--muted)">Already have an account? <a onclick="go('S-login')" style="color:var(--cyan);cursor:pointer;font-weight:600">Log in here -></a></p>
     </div>
 
@@ -1734,7 +1780,8 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
     <footer style="padding:24px 56px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--border)">
       <div style="font-size:12px;color:var(--muted)">© 2025 BinDash. All rights reserved.</div>
       <div style="display:flex;gap:20px;align-items:center;font-size:12px;color:var(--muted)">
-        <a style="cursor:pointer">Privacy</a><a style="cursor:pointer">Terms</a>
+        <a href="https://www.bindash.org/BinDash_Privacy_Policy.pdf" target="_blank" rel="noopener" style="cursor:pointer">Privacy Policy</a>
+        <a href="https://www.bindash.org/BinDash_Terms_of_Service.pdf" target="_blank" rel="noopener" style="cursor:pointer">Terms of Service</a>
         <a onclick="showRunnerInviteModal()" style="cursor:pointer;color:var(--muted)">Become a Runner</a>
         <a onclick="go('S-admin-login')" style="cursor:pointer;color:rgba(74,85,104,.25);font-size:11px">Staff Portal</a>
       </div>
@@ -2530,7 +2577,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         <div style="color:var(--sub);font-size:14px;margin-bottom:22px">Review your details and activate your account.</div>
         <div class="card" style="margin-bottom:14px" id="h-review"></div>
         <div class="field">
-          <div class="chk-row"><input type="checkbox" id="h-terms"><div><div style="font-size:13px">I agree to the <a href="https://raw.githubusercontent.com/AZDVHS/bindash/main/BinDash_Terms_of_Service.pdf" target="_blank" rel="noopener" style="color:var(--cyan)">Terms of Service</a> and <a href="https://raw.githubusercontent.com/AZDVHS/bindash/main/BinDash_Privacy_Policy.pdf" target="_blank" rel="noopener" style="color:var(--cyan)">Privacy Policy</a></div></div></div>
+          <div class="chk-row"><input type="checkbox" id="h-terms"><div><div style="font-size:13px">I agree to the <a href="https://www.bindash.org/BinDash_Terms_of_Service.pdf" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">Terms of Service</a> and <a href="https://www.bindash.org/BinDash_Privacy_Policy.pdf" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">Privacy Policy</a></div></div></div>
           <div class="chk-row"><input type="checkbox" checked id="h-comms"><div><div style="font-size:13px">Send me collection reminders and updates by email</div></div></div>
         </div>
         <div style="display:flex;justify-content:space-between;margin-top:6px">
@@ -2915,7 +2962,14 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         <div style="color:var(--sub);font-size:14px;margin-bottom:16px">Your application goes to Pending Review -- approved within 24-48 hours.</div>
         <div class="info-box">📋 Once approved you'll be added to the dispatch pool for your selected visit types.</div>
         <div class="card" style="margin-bottom:14px" id="r-review"></div>
-        <div style="display:flex;justify-content:space-between;margin-top:6px"><button class="btn btn-outline" onclick="rBack(5)"><- Back</button><button class="btn btn-cyan" onclick="rSubmit()">📤 Submit Application</button></div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px"><button class="btn btn-outline" onclick="rBack(5)"><- Back</button>
+              <div style="display:flex;flex-direction:column;gap:8px;flex:1">
+                <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--sub);cursor:pointer">
+                  <input type="checkbox" id="rn-terms" style="margin-top:2px;flex-shrink:0">
+                  <span>I agree to the <a href="https://www.bindash.org/BinDash_Terms_of_Service.pdf" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">Terms of Service</a> and <a href="https://www.bindash.org/BinDash_Privacy_Policy.pdf" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">Privacy Policy</a></span>
+                </label>
+                <button class="btn btn-cyan" onclick="rSubmit()">📤 Submit Application</button>
+              </div></div>
       </div>
     </div>
   </div>
@@ -3022,6 +3076,9 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       </div>
 
       <button class="btn btn-ghost btn-sm" onclick="go('S-land')" style="align-self:center;color:var(--muted)">← Back to BinDash</button>
+      <div style="text-align:center;font-size:11px;color:var(--muted);padding:8px 0">
+        <a href="https://www.bindash.org/BinDash_Terms_of_Service.pdf" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">Terms of Service</a> · <a href="https://www.bindash.org/BinDash_Privacy_Policy.pdf" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">Privacy Policy</a>
+      </div>
     </div>
   </div>
 </div>
@@ -3129,7 +3186,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
         <!-- Terms -->
         <div class="chk-row" style="margin-top:8px">
           <input type="checkbox" id="confirm-terms">
-          <div><div style="font-size:13px">I confirm my details are correct and I agree to the <a href="https://raw.githubusercontent.com/AZDVHS/bindash/main/BinDash_Terms_of_Service.pdf" target="_blank" rel="noopener" style="color:var(--cyan)">Terms of Service</a></div></div>
+          <div><div style="font-size:13px">I confirm my details are correct and I agree to the <a href="https://www.bindash.org/BinDash_Terms_of_Service.pdf" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">Terms of Service</a> and <a href="https://www.bindash.org/BinDash_Privacy_Policy.pdf" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline">Privacy Policy</a></div></div>
         </div>
         <div class="chk-row">
           <input type="checkbox" id="confirm-comms" checked>
@@ -13592,6 +13649,12 @@ async function rSubmit(){
                : 'bin_in'
   const bgc  = document.getElementById('r-bgc')?.checked || false
 
+  // Terms checkbox validation
+  if(!document.getElementById('rn-terms')?.checked){
+    showToast('Please agree to the Terms of Service and Privacy Policy to continue', 'err', 4000)
+    return
+  }
+
   const submitBtn = document.querySelector('#r-s5 .btn-cyan')
   if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='Submitting...' }
 
@@ -20719,7 +20782,7 @@ async function navComplete(){
     if(!sessionStorage.getItem(_key) && !stop.email.includes('.test')){
       sessionStorage.setItem(_key,'1')
       const rname = (window._rnRow?.first_name||window._currentRunnerRow?.first_name||'Your runner')
-      const day = new Date().toLocaleDateString([],{weekday:'long'})
+      const day = _phxWeekday()  // Phoenix timezone — consistent with _phxToday()
       const pref = (stop.notifPref||'email').toLowerCase()
       const hoName = stop.name?.split(' ')[0]||'there'
       setTimeout(()=>{
@@ -22861,6 +22924,12 @@ async function saveHWDetail(hwId){
   if(newService === 'SPLIT'){
     newDayR  = document.getElementById('hwd-day-recycling')?.value || hw.dayRecycling || ''
     newDayW  = document.getElementById('hwd-day-waste')?.value     || hw.dayWaste     || ''
+    // Validate split days are different — same day is a config error
+    if(newDayR && newDayW && newDayR === newDayW){
+      showToast('Split service requires two different days — recycling and waste cannot be on the same day', 'err', 5000)
+      if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
+      return
+    }
     newDay   = newDayR   // primary day = recycling day
     newDay2  = newDayW
   } else {
@@ -23849,13 +23918,13 @@ async function navSubmitIssue(){
 
   // Notify admin via email
   sendEmail('alpha1miller@gmail.com',
-    `⚠️ BinDash Issue — ${s?.name||'Stop'} · ${new Date().toLocaleDateString()}`,
+    `⚠️ BinDash Issue — ${s?.name||'Stop'} · ${_phxDateStr({month:'short',day:'numeric',year:'numeric'})}`,
     `<div style="font-family:sans-serif;padding:20px;max-width:500px">
       <h2 style="color:#f59e0b;margin:0 0 12px">Runner Reported Issue</h2>
       <p><strong>Stop:</strong> ${s?.name} · ${s?.address}</p>
       <p><strong>Issue:</strong> ${issueText}</p>
       <p><strong>Runner:</strong> ${(window._rnRow?.first_name||'')+' '+(window._rnRow?.last_name||'')}</p>
-      <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+      <p><strong>Time:</strong> ${_phxDateStr({weekday:'short',month:'short',day:'numeric'})} ${_phxTimeStr()} MST</p>
     </div>`,
     'runner_issue_report'
   ).catch(()=>{})
@@ -25753,6 +25822,15 @@ async function savePendingHWCard(appId){
   const newZoneId   = zoneEl?.value   || null
   const newRunnerId = runnerEl?.value  || null
   const newNotes    = notesEl?.value?.trim() || null
+
+  // Split-day validation — can't have recycling and waste on the same day
+  const _pendingDayR = document.getElementById('hwpc-day-recycling-'+appId)?.value
+  const _pendingDayW = document.getElementById('hwpc-day-waste-'+appId)?.value
+  if(_pendingDayR && _pendingDayW && _pendingDayR === _pendingDayW){
+    showToast('Split service requires two different days — recycling and waste cannot be on the same day', 'err', 5000)
+    if(btn){ btn.disabled=false; btn.textContent='Save Changes' }
+    return
+  }
 
   // Coordinate update (optional — only if fields exist and have been changed)
   let newLat = latEl?.value ? parseFloat(latEl.value) : null
@@ -31700,7 +31778,7 @@ function confirmActivateMicroZone(zip, city){
     assignedRunner: runner || null,
     priorityRunnerId: runner || null,
     stopOrder:   [],
-    notes:       `Activated from micro zone · ${new Date().toLocaleDateString()}`,
+    notes:       `Activated from micro zone · ${_phxDateStr({month:'short',day:'numeric',year:'numeric'})}`,
     leadCap:     15,
   }
 
