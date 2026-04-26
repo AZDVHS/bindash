@@ -7372,76 +7372,45 @@ async function markBatchMissedAndAct(batchId, zoneName, runnerName, stopCount){
 }
 
 // ── adminCoverRoute — switch admin to a runner-mode view to complete the route ──
-async function adminCoverRoute(batchId, zoneName, jobEmails){
-  // Store context so admin can return to admin view after completing
-  window._adminCoverBatchId = batchId
-  window._adminCoverZone    = zoneName
+async function adminCoverRoute(batchId){
+  const _bm = Object.values(window._rnBatchMap||{}).find(b=>b.batchId===batchId||b.id===batchId)
+  const zoneName = _bm?.zoneName||'Zone'
 
-  // Get the jobs for this batch
-  const { data: jobs } = await _supa.from('jobs')
-    .select('*')
-    .eq('batch_id', batchId)
-    .order('created_at', { ascending: true })
+  showToast('Switching to runner mode — covering this route as admin','info',4000)
 
-  if(!jobs?.length){ showToast('No jobs found for this batch', 'err'); return }
+  const { data: batchJobs } = await _supa.from('jobs').select('*').eq('batch_id',batchId).order('created_at',{ascending:true})
+  if(!batchJobs?.length){ showToast('No jobs found','err'); return }
 
-  // Mark batch as in_progress under admin coverage
-  await _supa.from('jobs')
-    .update({ status: 'in_progress', updated_at: new Date().toISOString() })
-    .eq('batch_id', batchId)
+  let runnerRow = null
+  const rEmail = batchJobs[0]?.runner_email
+  if(rEmail){ const {data:r}=await _supa.from('runners').select('*').ilike('email',rEmail).maybeSingle(); runnerRow=r }
+  if(!runnerRow&&currentUser?.email){ const {data:r}=await _supa.from('runners').select('*').ilike('email',currentUser.email).maybeSingle(); runnerRow=r }
+  if(!runnerRow) runnerRow={id:'admin-'+Date.now(),email:currentUser?.email||'admin@bindash.org',first_name:'Admin',last_name:'(Covering)',name:'Admin (Covering)',status:'AVAILABLE',loyaltyRate:3.25}
 
-  // Build admin cover modal with stop list — quick-complete each stop
-  const stopList = jobs.map((j,idx) => {
-    const hw = HOMEOWNERS.find(h => h.email === j.homeowner_email)
-    const name = hw?.name || j.homeowner_email?.split('@')[0] || 'Stop '+(idx+1)
-    const addr = hw?.address || hw?.street_address || '--'
-    const gate = hw?.gate || hw?.gate_type || ''
-    const pets = hw?.pets || ''
-    const notes = hw?.storage || hw?.curb_notes || ''
-    return `<div id="admin-cover-stop-${j.id}" style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        <div style="width:28px;height:28px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${idx+1}</div>
-        <div style="flex:1">
-          <div style="font-size:14px;font-weight:700">${name}</div>
-          <div style="font-size:11px;color:var(--muted)">📍 ${addr}</div>
-          ${gate?`<div style="font-size:11px;color:#f59e0b">🔑 ${gate}</div>`:''}
-          ${pets?`<div style="font-size:11px;color:#ef4444">🐾 ${pets}</div>`:''}
-          ${notes?`<div style="font-size:11px;color:var(--muted)">📝 ${notes}</div>`:''}
-        </div>
-        <span id="admin-stop-status-${j.id}" style="background:rgba(245,158,11,.15);color:#f59e0b;font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px">Pending</span>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button onclick="adminMarkStopDone('${j.id}','${batchId}',${jobs.length})"
-          style="flex:1;padding:8px;background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.3);border-radius:7px;color:#22c55e;font-size:12px;font-weight:700;cursor:pointer">
-          ✅ Mark Complete
-        </button>
-        <button onclick="adminSkipStop('${j.id}')"
-          style="padding:8px 12px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:7px;color:#ef4444;font-size:12px;cursor:pointer">
-          Skip
-        </button>
-      </div>
-    </div>`
-  }).join('')
+  await _supa.from('jobs').update({runner_email:runnerRow.email,runner_name:(runnerRow.first_name||'')+' '+(runnerRow.last_name||''),status:'accepted',updated_at:new Date().toISOString()}).eq('batch_id',batchId)
 
-  document.getElementById('modal-box').innerHTML = `
-  <div class="mh" style="background:rgba(99,102,241,.07)">
-    <div>
-      <div style="font-size:15px;font-weight:700;color:#a5b4fc">👤 Admin Covering Route</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:2px">${zoneName} · ${jobs.length} stop${jobs.length!==1?'s':''}</div>
-    </div>
-    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
-  </div>
-  <div class="mb" style="display:flex;flex-direction:column;gap:10px;max-height:65vh;overflow-y:auto">
-    <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 14px;font-size:12px;color:#fbbf24">
-      ⚠️ You are covering this route as admin. Mark each stop complete as you go. 
-      When all stops are done the route auto-completes.
-    </div>
-    ${stopList}
-  </div>
-  <div class="mf">
-    <button class="btn btn-ghost btn-sm" onclick="closeM()">Exit (saves progress)</button>
-  </div>`
-  openM()
+  window._adminCoverMode=true; window._adminCoverBatchId=batchId; window._currentRunnerRow=runnerRow
+  await loadRunnerRoutes(runnerRow)
+  go('S-rn-dash')
+  setTimeout(()=>{
+    const t=document.querySelector('#S-rn-dash .nav-i:nth-child(2)'); if(t) rnNav(t,'rn-routes')
+    setTimeout(()=>{ startBatch(batchId); _showAdminReturnBanner(); showToast('👤 Admin cover mode — full runner view. Tap “Back to Admin” when done.','info',8000) },1200)
+  },600)
+}
+
+function _showAdminReturnBanner(){
+  const ex=document.getElementById('admin-cover-banner'); if(ex) ex.remove()
+  const b=document.createElement('div'); b.id='admin-cover-banner'
+  b.style.cssText='position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:9999;background:rgba(15,23,42,.95);border:1px solid rgba(99,102,241,.5);border-radius:99px;padding:6px 14px 6px 10px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(0,0,0,.4);font-family:system-ui,sans-serif'
+  b.innerHTML='<span style="font-size:11px;font-weight:700;color:#a5b4fc">👤 Admin Cover Mode</span><button onclick="returnToAdminFromCover()" style="padding:3px 10px;background:#4f46e5;border:none;border-radius:99px;color:#fff;font-size:11px;font-weight:700;cursor:pointer">← Back to Admin</button>'
+  document.body.appendChild(b)
+}
+
+function returnToAdminFromCover(){
+  window._adminCoverMode=false
+  const b=document.getElementById('admin-cover-banner'); if(b) b.remove()
+  go('S-ad-main')
+  setTimeout(()=>{ adNav(null,'ad-jobs'); loadAdminJobs(); showToast('Back to admin view ✓','ok',3000) },300)
 }
 
 // Mark a single stop done in admin cover mode
