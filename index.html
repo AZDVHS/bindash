@@ -7239,6 +7239,21 @@ function filterAdminJobs(){
   // Overdue banner — compact count only, includes missed routes
   const overdueCount = Object.values(batchMap).filter(b=>b.isOverdue).length
   const missedCount  = Object.values(batchMap).filter(b=>b.routeStatus==='missed').length
+
+  // Alert admin about newly overdue routes (accepted but not started past scheduled time)
+  const _newOverdue = Object.values(batchMap).filter(b =>
+    b.isOverdue && b.routeStatus === 'accepted' && b.routeStatus !== 'missed'
+  )
+  if(_newOverdue.length > 0 && !window._overdueAlertShown){
+    window._overdueAlertShown = true
+    showToast(
+      '🚨 '+_newOverdue.length+' overdue route'+(overdueCount!==1?'s':'')+' — runner has not started. Use "Mark Missed & Act" or "Admin Will Cover" to resolve.',
+      'err',
+      12000
+    )
+    // Play audio alert if available
+    try { new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAA').play() } catch(e){}
+  }
   if(banner){
     if(missedCount){
       banner.style.display='block'
@@ -7290,6 +7305,11 @@ function filterAdminJobs(){
       </div>`
     }).join('')
 
+    const _overdueActionBtns = (b.isOverdue && b.routeStatus !== 'missed' && b.routeStatus !== 'complete')
+      ? '<button onclick="markBatchMissedAndAct(\'' + b.batchId + '\')" style="padding:5px 10px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">🚨 Mark Missed &amp; Act</button> '
+        + '<button onclick="adminCoverRoute(\'' + b.batchId + '\')" style="padding:5px 10px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);color:#a5b4fc;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">👤 Admin Will Cover</button>'
+      : ''
+
     return `<div style="border:${b.routeStatus==='missed'?'2px':'1px'} solid rgba(${rgba},.25);border-left:4px solid ${col};border-radius:10px;overflow:hidden;background:var(--surface);${b.routeStatus==='missed'?'box-shadow:0 0 12px rgba(239,68,68,.12)':''}">
       ${b.routeStatus==='missed'?`<div style="background:rgba(239,68,68,.08);border-bottom:1px solid rgba(239,68,68,.25);padding:7px 16px;font-size:12px;display:flex;align-items:center;gap:10px">
         <span style="font-size:16px">🚨</span>
@@ -7325,7 +7345,7 @@ function filterAdminJobs(){
           <span style="font-size:10px;color:var(--muted);font-family:monospace">${b.batchId}</span>
           ${b.routeStatus==='expired'||b.routeStatus==='unassigned'?`<button class="btn btn-outline btn-sm" style="font-size:11px" onclick="showExpiredJobActions(this)" data-jobid="${b.jobs[0]?.id||''}" data-email="${b.jobs[0]?.homeowner_email||''}" data-runner="${b.runnerName||''}" data-batch="${b.batchId}">📡 Re-broadcast Route</button>`:''}
           ${['accepted','in_progress','offered'].includes(b.routeStatus)?`<button class="btn btn-ghost btn-sm" style="font-size:11px;color:#fbbf24" onclick="flagBatchLate('${b.batchId}')">⚠️ Flag All Late</button>`:''}
-        </div>
+          ${_overdueActionBtns}        </div>
       </div>
     </div>`
   }).join('')
@@ -7335,6 +7355,128 @@ function toggleJobBatch(id){
   const d=document.getElementById('jb-detail-'+id), c=document.getElementById('jb-chevron-'+id)
   if(!d)return; const open=d.style.display==='block'
   d.style.display=open?'none':'block'; if(c)c.style.transform=open?'':'rotate(180deg)'
+}
+
+// ── markBatchMissedAndAct — mark overdue batch as missed then show action modal ──
+async function markBatchMissedAndAct(batchId, zoneName, runnerName, stopCount){
+  try {
+    // Mark all jobs in batch as missed
+    await _supa.from('jobs')
+      .update({ status: 'missed', updated_at: new Date().toISOString() })
+      .eq('batch_id', batchId)
+    showToast('Route marked as missed — choose how to resolve', 'info', 4000)
+    await loadAdminJobs()
+    // Open the missed route action modal
+    setTimeout(() => showMissedRouteActions(batchId, zoneName, runnerName, stopCount), 400)
+  } catch(e){ showToast('Error: '+e.message, 'err') }
+}
+
+// ── adminCoverRoute — switch admin to a runner-mode view to complete the route ──
+async function adminCoverRoute(batchId, zoneName, jobEmails){
+  // Store context so admin can return to admin view after completing
+  window._adminCoverBatchId = batchId
+  window._adminCoverZone    = zoneName
+
+  // Get the jobs for this batch
+  const { data: jobs } = await _supa.from('jobs')
+    .select('*')
+    .eq('batch_id', batchId)
+    .order('created_at', { ascending: true })
+
+  if(!jobs?.length){ showToast('No jobs found for this batch', 'err'); return }
+
+  // Mark batch as in_progress under admin coverage
+  await _supa.from('jobs')
+    .update({ status: 'in_progress', updated_at: new Date().toISOString() })
+    .eq('batch_id', batchId)
+
+  // Build admin cover modal with stop list — quick-complete each stop
+  const stopList = jobs.map((j,idx) => {
+    const hw = HOMEOWNERS.find(h => h.email === j.homeowner_email)
+    const name = hw?.name || j.homeowner_email?.split('@')[0] || 'Stop '+(idx+1)
+    const addr = hw?.address || hw?.street_address || '--'
+    const gate = hw?.gate || hw?.gate_type || ''
+    const pets = hw?.pets || ''
+    const notes = hw?.storage || hw?.curb_notes || ''
+    return `<div id="admin-cover-stop-${j.id}" style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="width:28px;height:28px;border-radius:50%;background:rgba(99,102,241,.2);color:#a5b4fc;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${idx+1}</div>
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:700">${name}</div>
+          <div style="font-size:11px;color:var(--muted)">📍 ${addr}</div>
+          ${gate?`<div style="font-size:11px;color:#f59e0b">🔑 ${gate}</div>`:''}
+          ${pets?`<div style="font-size:11px;color:#ef4444">🐾 ${pets}</div>`:''}
+          ${notes?`<div style="font-size:11px;color:var(--muted)">📝 ${notes}</div>`:''}
+        </div>
+        <span id="admin-stop-status-${j.id}" style="background:rgba(245,158,11,.15);color:#f59e0b;font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px">Pending</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="adminMarkStopDone('${j.id}','${batchId}',${jobs.length})"
+          style="flex:1;padding:8px;background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.3);border-radius:7px;color:#22c55e;font-size:12px;font-weight:700;cursor:pointer">
+          ✅ Mark Complete
+        </button>
+        <button onclick="adminSkipStop('${j.id}')"
+          style="padding:8px 12px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:7px;color:#ef4444;font-size:12px;cursor:pointer">
+          Skip
+        </button>
+      </div>
+    </div>`
+  }).join('')
+
+  document.getElementById('modal-box').innerHTML = `
+  <div class="mh" style="background:rgba(99,102,241,.07)">
+    <div>
+      <div style="font-size:15px;font-weight:700;color:#a5b4fc">👤 Admin Covering Route</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">${zoneName} · ${jobs.length} stop${jobs.length!==1?'s':''}</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">✕</button>
+  </div>
+  <div class="mb" style="display:flex;flex-direction:column;gap:10px;max-height:65vh;overflow-y:auto">
+    <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 14px;font-size:12px;color:#fbbf24">
+      ⚠️ You are covering this route as admin. Mark each stop complete as you go. 
+      When all stops are done the route auto-completes.
+    </div>
+    ${stopList}
+  </div>
+  <div class="mf">
+    <button class="btn btn-ghost btn-sm" onclick="closeM()">Exit (saves progress)</button>
+  </div>`
+  openM()
+}
+
+// Mark a single stop done in admin cover mode
+async function adminMarkStopDone(jobId, batchId, totalStops){
+  try {
+    await _supa.from('jobs').update({
+      status: 'complete',
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', jobId)
+    // Update UI
+    const statusEl = document.getElementById('admin-stop-status-'+jobId)
+    const stopEl   = document.getElementById('admin-cover-stop-'+jobId)
+    if(statusEl){ statusEl.textContent = '✅ Done'; statusEl.style.background = 'rgba(34,197,94,.15)'; statusEl.style.color = '#22c55e' }
+    if(stopEl){ stopEl.style.opacity = '0.6' }
+    // Check if all complete
+    const { data: remaining } = await _supa.from('jobs')
+      .select('id').eq('batch_id', batchId).neq('status', 'complete').neq('status', 'missed')
+    if(!remaining?.length){
+      showToast('All stops complete — route finished! ✅', 'ok', 5000)
+      closeM()
+      await loadAdminJobs()
+    } else {
+      showToast(remaining.length + ' stop'+(remaining.length!==1?'s':'')+' remaining', 'info', 2000)
+    }
+  } catch(e){ showToast('Error: '+e.message, 'err') }
+}
+
+// Skip a stop in admin cover mode (marks as missed, moves on)
+async function adminSkipStop(jobId){
+  if(!confirm('Skip this stop? It will be marked as missed and the homeowner will receive an apology.')) return
+  await _supa.from('jobs').update({ status: 'missed', updated_at: new Date().toISOString() }).eq('id', jobId)
+  const statusEl = document.getElementById('admin-stop-status-'+jobId)
+  if(statusEl){ statusEl.textContent = 'Skipped'; statusEl.style.background = 'rgba(239,68,68,.15)'; statusEl.style.color = '#ef4444' }
+  showToast('Stop skipped and marked missed', 'info')
 }
 
 async function flagBatchLate(batchId){
