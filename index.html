@@ -2631,9 +2631,10 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           <div style="font-size:11px;font-weight:700;color:#fbbf24;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px">🟡 Bin Out As Needed — Configure</div>
           <div class="field" style="margin-bottom:10px">
             <label style="font-size:12px">How many bins?</label>
-            <div class="radio-row" id="lead-oan-cans" style="margin-top:4px">
+            <div class="radio-row" id="lead-oan-cans" style="margin-top:4px;flex-wrap:wrap;gap:6px">
               <div class="r-opt on" onclick="rOpt(this)" data-val="oan_a">🗑️ 1 can — $12.99/move</div>
-              <div class="r-opt" onclick="rOpt(this)" data-val="oan_b">🗑️🗑️ 2 cans — $16.99/move</div>
+              <div class="r-opt" onclick="rOpt(this)" data-val="oan_b">🗑️🗑️ 2 cans same day — $16.99/move</div>
+              <div class="r-opt" onclick="rOpt(this)" data-val="oan_c" style="font-size:11px">🗑️↩️🗑️ 2 cans split — $19.99/move <span style="color:var(--muted);display:block;font-size:10px;margin-top:2px">1 drive-by · runner returns for 2nd can if needed</span></div>
             </div>
           </div>
           <div class="field" style="margin:0">
@@ -13207,7 +13208,7 @@ async function submitLead(){
   const isOAN   = svcVal === 'Bin Out As Needed'
   // OAN sub-fields — cans and drive-by day (always one drive-by, no split for OAN)
   const oanCans    = isOAN ? (document.querySelector('#lead-oan-cans .r-opt.on')?.dataset?.val || 'oan_a') : null
-  const oanPlanKey = isOAN ? (oanCans === 'oan_b' ? 'oan_b' : 'oan_a') : null
+  const oanPlanKey = isOAN ? (oanCans === 'oan_c' ? 'oan_c' : oanCans === 'oan_b' ? 'oan_b' : 'oan_a') : null
   const oanDay     = isOAN ? (document.getElementById('lead-oan-day')?.value || 'Thursday') : null
   const dayR  = document.getElementById('lead-day-recycling')?.value || 'Wednesday'
   const dayW  = document.getElementById('lead-day-waste')?.value || 'Thursday'
