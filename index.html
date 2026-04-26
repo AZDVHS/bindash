@@ -2624,7 +2624,6 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display='';document.getElementById('lead-oan-fields').style.display='none';" data-val="General Waste">🗑️ Waste</div>
           <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display='';document.getElementById('lead-oan-fields').style.display='none';" data-val="Both">♻️+🗑️ Both</div>
           <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='grid';document.getElementById('lead-day-wrap').style.display='none';document.getElementById('lead-oan-fields').style.display='none';" data-val="Split">📅 Split days</div>
-          <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display='none'" data-val="Bin Out As Needed">🟡 As Needed</div>
           <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-split-days').style.display='none';document.getElementById('lead-day-wrap').style.display='none';document.getElementById('lead-oan-fields').style.display=''" data-val="Bin Out As Needed">🟡 As Needed</div>
         <!-- Split day sub-fields — hidden until Split selected -->
         <!-- OAN sub-fields — hidden until As Needed selected -->
@@ -2633,15 +2632,8 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           <div class="field" style="margin-bottom:10px">
             <label style="font-size:12px">How many bins?</label>
             <div class="radio-row" id="lead-oan-cans" style="margin-top:4px">
-              <div class="r-opt on" onclick="rOpt(this);document.getElementById('lead-oan-split-wrap').style.display='none'" data-val="oan_a">🗑️ 1 can — $12.99/move</div>
-              <div class="r-opt" onclick="rOpt(this);document.getElementById('lead-oan-split-wrap').style.display=''" data-val="oan_b">🗑️🗑️ 2 cans — $16.99/move</div>
-            </div>
-          </div>
-          <div id="lead-oan-split-wrap" style="display:none;margin-bottom:10px">
-            <label style="font-size:12px;display:block;margin-bottom:4px">Collection schedule?</label>
-            <div class="radio-row" id="lead-oan-split">
-              <div class="r-opt on" onclick="rOpt(this)" data-val="same">Same day — $16.99/move</div>
-              <div class="r-opt" onclick="rOpt(this)" data-val="split">Split days — $19.99/move</div>
+              <div class="r-opt on" onclick="rOpt(this)" data-val="oan_a">🗑️ 1 can — $12.99/move</div>
+              <div class="r-opt" onclick="rOpt(this)" data-val="oan_b">🗑️🗑️ 2 cans — $16.99/move</div>
             </div>
           </div>
           <div class="field" style="margin:0">
@@ -13213,13 +13205,10 @@ async function submitLead(){
   const svcVal = svcEl?.dataset?.val || svcEl?.textContent?.trim() || 'Recycling'
   const isSplit = svcVal === 'Split'
   const isOAN   = svcVal === 'Bin Out As Needed'
-  // OAN sub-fields — cans, split preference, drive-by day
-  const oanCans     = isOAN ? (document.querySelector('#lead-oan-cans .r-opt.on')?.dataset?.val || 'oan_a') : null
-  const oanSplitEl  = isOAN ? document.querySelector('#lead-oan-split .r-opt.on') : null
-  const oanIsSplit  = isOAN && oanCans !== 'oan_a' && oanSplitEl?.dataset?.val === 'split'
-  const oanPlanKey  = isOAN ? (oanIsSplit ? 'oan_c' : oanCans === 'oan_b' ? 'oan_b' : 'oan_a') : null
-  const oanDay      = isOAN ? (document.getElementById('lead-oan-day')?.value || 'Thursday') : null
-  // Day(s) — split or single
+  // OAN sub-fields — cans and drive-by day (always one drive-by, no split for OAN)
+  const oanCans    = isOAN ? (document.querySelector('#lead-oan-cans .r-opt.on')?.dataset?.val || 'oan_a') : null
+  const oanPlanKey = isOAN ? (oanCans === 'oan_b' ? 'oan_b' : 'oan_a') : null
+  const oanDay     = isOAN ? (document.getElementById('lead-oan-day')?.value || 'Thursday') : null
   const dayR  = document.getElementById('lead-day-recycling')?.value || 'Wednesday'
   const dayW  = document.getElementById('lead-day-waste')?.value || 'Thursday'
   const day   = isSplit ? null : isOAN ? oanDay : (document.getElementById('lead-day')?.value || 'Thursday')
