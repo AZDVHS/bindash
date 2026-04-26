@@ -14626,7 +14626,7 @@ async function rnSaveServiceArea(){
     if(rnErr) {
       // Columns may not exist — try minimal update and warn
       console.warn('[ServiceArea] runners update error (columns may need migration):', rnErr.message)
-      await _supa.from('runners').update({ updated_at: new Date().toISOString() }).ilike('email', email)
+      await _supa.from('runners').update({ updated_at: new Date().toISOString() }).eq('email', email)
     }
     // runner_applications — same approach
     await _supa.from('runner_applications').update({
@@ -14739,7 +14739,7 @@ async function _rnGeocodeSaveAnchor(addr, city, zip){
         _runnerUpdatePayload.lat = coords.lat
         _runnerUpdatePayload.lng = coords.lng
       }
-      await _supa.from('runners').update(_runnerUpdatePayload).ilike('email', email)
+      await _supa.from('runners').update(_runnerUpdatePayload).eq('email', email)
       // Backfill zone.lat/lng from runner anchor if zone lacks coords
       if(r?.zoneId && a6){
         try {
@@ -19921,8 +19921,8 @@ async function saveRNAccountInfo(){
     const upd  = { first_name: fn, last_name: ln, phone: ph, zip_code: zip,
                    street_address: addr, city: city, updated_at: new Date().toISOString() }
 
-    const r1 = await _supa.from('runner_applications').update(upd).ilike('email', currentUser.email)
-    const r2 = await _supa.from('runners').update(upd).ilike('email', currentUser.email)
+    const r1 = await _supa.from('runner_applications').update(upd).eq('email', currentUser.email)
+    const r2 = await _supa.from('runners').update(upd).eq('email', currentUser.email)
     if(r1?.error) console.warn('[BinDash] saveRNAccount app:', r1.error.message)
     if(r2?.error) console.warn('[BinDash] saveRNAccount runner:', r2.error.message)
 
@@ -23165,8 +23165,8 @@ async function saveHWDetail(hwId){
 
   try {
     const [r1, r2] = await Promise.all([
-      _supa.from('homeowners').update(updHomeowners).ilike('email', originalEmail),
-      _supa.from('homeowner_signups').update(updSignups).ilike('email', originalEmail),
+      _supa.from('homeowners').update(updHomeowners).eq('email', originalEmail),
+      _supa.from('homeowner_signups').update(updSignups).eq('email', originalEmail),
     ])
     const ok1 = !r1?.error, ok2 = !r2?.error
     if(r1?.error) console.warn('[BinDash] homeowners update error:', r1.error.message)
@@ -23227,7 +23227,7 @@ async function assignHWZone(hwId, zoneId){
   try {
     const _upd = { zone_id: zoneId, updated_at: new Date().toISOString() }
     await _supa.from('homeowners').update(_upd).eq('email', hw.email)
-    await _supa.from('homeowner_signups').update(_upd).ilike('email', hw.email)
+    await _supa.from('homeowner_signups').update(_upd).eq('email', hw.email)
     console.log('[BinDash] Zone reassigned:', hw.name, '->', zoneId)
   } catch(e){ console.warn('[BinDash] assignHWZone save:', e.message) }
 }
@@ -27245,6 +27245,10 @@ function detectRouteChanges(zoneId, day, newStops, newRunnerId){
 // without the admin needing to click "Geocode HOs".
 function _setupAutoGeocodeChannel(){
   if(!_supa || typeof syncHomeownerToHex !== 'function') return
+  if(!_supa || typeof syncHomeownerToHex !== 'function') return
+  if(window._autoGeocodeChannelActive) return  // already subscribed
+  window._autoGeocodeChannelActive = true
+  const _geoProcessing = new Set()  // prevent re-entry when lat/lng write triggers UPDATE
 
   // Watch homeowner_signups — new signups with an address
   _supa.channel('auto-geocode-signups')
@@ -27259,6 +27263,8 @@ function _setupAutoGeocodeChannel(){
       const addrChanged = payload.eventType === 'UPDATE'
         && (payload.old?.street_address !== row.street_address || payload.old?.zip_code !== row.zip_code)
       if(!isInsert && !addrChanged && hasCoords) return
+      if(_geoProcessing.has(row.id)) return  // already processing this row
+      _geoProcessing.add(row.id); setTimeout(()=>_geoProcessing.delete(row.id), 30000)
 
       console.log('[AutoGeocode] Detected', payload.eventType, 'on homeowner_signups:', row.street_address, row.zip_code)
       // Small delay so the DB row is fully committed
@@ -27300,6 +27306,8 @@ function _setupAutoGeocodeChannel(){
         && (payload.old?.street_address !== row.street_address || payload.old?.zip_code !== row.zip_code)
       const isInsert = payload.eventType === 'INSERT'
       if(!isInsert && !addrChanged) return
+      if(_geoProcessing.has(row.id)) return
+      _geoProcessing.add(row.id); setTimeout(()=>_geoProcessing.delete(row.id), 30000)
 
       console.log('[AutoGeocode] Detected', payload.eventType, 'on homeowners:', row.street_address, row.zip_code)
       await new Promise(r => setTimeout(r, 1500))
