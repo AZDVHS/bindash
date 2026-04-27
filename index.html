@@ -8084,7 +8084,6 @@ async function loadRunnerRoutes(runnerRow){
     const batches = {}
     ;[...offerJobs, ...routeJobs].forEach(j=>{
       const key = j.batch_id || j.id
-      if(!batches[key]) batches[key] = { id:key, date:j.scheduled_date, type:j.visit_type, status:j.status, stops:[], isOffer: j.status==='offered' }
       if(!batches[key]) batches[key] = { id:key, date:j.scheduled_date, type:j.visit_type, status:j.status, stops:[], isOffer: j.status==='offered', _stopEmails:new Set() }
       // Dedup stops by homeowner_email — prevents duplicate rows when a HO has 2 job records for same batch
       const _stopEmail = j.homeowner_email || j.email || j.id
@@ -8656,25 +8655,10 @@ async function declineOffer(batchId){
 }
 
 function _executeStartRoute(){
-  // Save nav state THEN switch tab — order matters
-  _saveNavState()
-  _saveNavState()
-  // Free heavy admin data not needed during active route — reduces memory pressure
-  // Preserve only what the runner screen needs (NAV_STOPS, _currentRunnerRow, _rnBatchMap)
-  try {
-    if(window.ADMIN_ZONES && window.HOMEOWNERS && window.HOMEOWNERS.length > 50){
-      // Keep lightweight references, clear heavy map/zone data
-      window._adminZonesCache = window.ADMIN_ZONES; window.ADMIN_ZONES = []
-      window._homownersCache  = window.HOMEOWNERS;  window.HOMEOWNERS  = []
-      window._pendingHWCache  = window.PENDING_HOMEOWNERS; window.PENDING_HOMEOWNERS = []
-      window._runnersCache    = window.RUNNERS;     window.RUNNERS     = []
-      console.log('[BinDash] Memory freed for active route — admin data cached')
-    }
-  } catch(e){ console.warn('[BinDash] memory free:', e?.message) }
-
+  _saveNavState()  // persist before tab switch
+  switchRouteTab('active')
   renderActiveRouteTab()
   showToast('▶ Route started — good luck! 🚀', 'ok', 3000)
-  // Ensure jobs marked in_progress
   if(navBatchId){
     ;(async()=>{
       try {
@@ -8684,16 +8668,6 @@ function _executeStartRoute(){
       } catch(e){ console.warn('[BinDash] in_progress update:', e?.message) }
     })()
   }
-}
-
-function _restoreAdminMemory(){
-  try {
-    if(window._adminZonesCache){ window.ADMIN_ZONES = window._adminZonesCache; window._adminZonesCache = null }
-    if(window._homownersCache){  window.HOMEOWNERS  = window._homownersCache;  window._homownersCache  = null }
-    if(window._pendingHWCache){  window.PENDING_HOMEOWNERS = window._pendingHWCache; window._pendingHWCache = null }
-    if(window._runnersCache){    window.RUNNERS     = window._runnersCache;    window._runnersCache    = null }
-    console.log('[BinDash] Admin memory restored after route')
-  } catch(e){ console.warn('[BinDash] restore memory:', e?.message) }
 }
 
 async function resumeBatch(batchId){
@@ -16434,28 +16408,30 @@ _loadRnStopOrders()
 
 
 // Explicitly save current drag order to both localStorage and DB stop_index
-function rnSaveOrderToDB(batchId){
+// Explicitly save current drag order to both localStorage and DB stop_index
+async function rnSaveOrderToDB(batchId){
   const container = document.querySelector(`.rn-stop-row[data-bid='${batchId}']`)?.parentNode
   if(!container){ showToast('Could not find stop list','err'); return }
   const orderedEmails = Array.from(container.querySelectorAll('.rn-stop-row')).map(r => r.dataset.email)
   _rnStopOrders[batchId] = orderedEmails
   try { localStorage.setItem('rn_stop_order:'+batchId, JSON.stringify(orderedEmails)) } catch(e){}
-  if(_supa && orderedEmails.length){
-    _supa.from('jobs').select('id,homeowner_email').eq('batch_id',batchId)
-      .then(({data:jbs}) => {
-        if(!jbs?.length) return
-        jbs.forEach(j => {
-          const orderIdx = orderedEmails.indexOf(j.homeowner_email)
-          if(orderIdx >= 0)
-            _supa.from('jobs').update({stop_index: orderIdx, updated_at: new Date().toISOString()}).eq('id', j.id)
-              .then(({error}) => { if(error) console.warn('[stopOrder] job update:', error.message) })
-        })
-        showToast('✅ Stop order saved — route will run in this sequence', 'ok', 3000)
-      }).catch(e => { console.warn('[stopOrder]', e.message); showToast('Order saved locally only','info',2000) })
-  } else {
-    showToast('Order saved locally ✓','ok',2000)
+  if(!_supa || !orderedEmails.length){ showToast('Order saved locally ✓','ok',2000); return }
+  try {
+    const {data:jbs} = await _supa.from('jobs').select('id,homeowner_email').eq('batch_id',batchId)
+    if(jbs?.length){
+      await Promise.all(jbs.map(j => {
+        const idx = orderedEmails.indexOf(j.homeowner_email)
+        if(idx < 0) return Promise.resolve()
+        return _supa.from('jobs').update({stop_index:idx, updated_at:new Date().toISOString()}).eq('id',j.id)
+      }))
+    }
+    showToast('✅ Stop order saved — route will run in this sequence','ok',3000)
+  } catch(e){
+    console.warn('[stopOrder]',e.message)
+    showToast('Order saved locally only','info',2000)
   }
 }
+
 
 function rnDragStart(e, el){
   _rnDragSrc = el
@@ -16503,18 +16479,17 @@ function rnDrop(e, el, batchId){
   const orderedEmails = Array.from(container.querySelectorAll('.rn-stop-row')).map(r => r.dataset.email)
   _rnStopOrders[batchId] = orderedEmails
   try { localStorage.setItem('rn_stop_order:'+batchId, JSON.stringify(orderedEmails)) } catch(e){}
-  try { localStorage.setItem('rn_stop_order:'+batchId, JSON.stringify(orderedEmails)) } catch(e){}
 
-  // Persist stop order to jobs table so it survives memory resets
+  // Persist stop order — fire-and-forget, don't block UI
   if(_supa && orderedEmails.length){
-    _supa.from('jobs').select('id,homeowner_email').eq('batch_id',batchId).then(({data:jbs})=>{
-      if(!jbs?.length) return
-      jbs.forEach((j,_) => {
-        const orderIdx = orderedEmails.indexOf(j.homeowner_email)
-        if(orderIdx >= 0)
-          _supa.from('jobs').update({stop_index: orderIdx, updated_at: new Date().toISOString()}).eq('id', j.id).then(({error})=>{ if(error) console.warn('[stopOrder] job update:', error.message) })
-      })
-    }).catch(e => console.warn('[stopOrder] persist:', e.message))
+    _supa.from('jobs').select('id,homeowner_email').eq('batch_id',batchId)
+      .then(({data:jbs}) => {
+        if(!jbs?.length) return
+        jbs.forEach(j => {
+          const idx = orderedEmails.indexOf(j.homeowner_email)
+          if(idx >= 0) _supa.from('jobs').update({stop_index:idx, updated_at:new Date().toISOString()}).eq('id',j.id)
+        })
+      }).catch(e => console.warn('[stopOrder] persist:', e.message))
   }
 
   showToast('Stop order saved ✓', 'ok', 2000)
@@ -20961,42 +20936,34 @@ async function navComplete(){
 
   if(_photoFiles.length){
     const photoUrls = []
-    // Revoke all preview blob URLs BEFORE compression — free preview memory first
-    document.querySelectorAll('img.nav-proof-img').forEach(img => {
-      if(img._blobUrl){ URL.revokeObjectURL(img._blobUrl); img._blobUrl = null }
-      img.src = ''  // drop reference so browser can GC the decoded bitmap
-    })
-    // Clear global references immediately
-    window._navPhotoObjectUrl = null
     // Process photos one at a time — never hold more than one compressed blob at once
     for(let pi = 0; pi < Math.min(_photoFiles.length, 3); pi++){
       const _pfile = _photoFiles[pi]
       _photoFiles[pi] = null  // release reference before compression starts
       try {
         const compressed = await _compressPhoto(_pfile, 640, 0.68)
-        // _pfile is no longer referenced — GC can collect original file buffer
         const fname = `jobs/${stop?.jobId||Date.now()}_stop${navStop}_${pi}_${Date.now()}.jpg`
         const { data, error } = await _supa.storage.from('job-photos').upload(fname, compressed, {
           upsert: true, contentType: 'image/jpeg', cacheControl: '3600'
         })
-        // Null the compressed blob immediately after upload attempt
-        // eslint-disable-next-line no-unused-vars
-        const _drop = compressed  // local ref so GC sees it go out of scope
         if(!error){
           const { data:ud } = _supa.storage.from('job-photos').getPublicUrl(fname)
           const url = ud?.publicUrl || null
           if(url){ photoUrls.push(url); console.log('[BinDash] Photo', pi, 'uploaded ✅') }
         } else {
-          console.warn('[BinDash] Photo', pi, 'upload failed:', error.message, '— skipping (no b64 fallback)')
-          // No base64 fallback — that would hold ~300KB string per photo in memory
+          console.warn('[BinDash] Photo', pi, 'upload failed:', error.message)
         }
       } catch(e){ console.warn('[BinDash] Photo', pi, 'exception:', e.message) }
-      // Force a microtask yield between photos so GC can run
-      await new Promise(r => setTimeout(r, 50))
+      // Yield between photos so GC can run
+      await new Promise(r => setTimeout(r, 80))
     }
     photoUrl = photoUrls[0] || null
     if(photoUrls.length > 1) window._lastPhotoUrls = photoUrls
-    // Clear all photo references
+    // Only AFTER upload — revoke blob URLs and clear references
+    document.querySelectorAll('img.nav-proof-img').forEach(img => {
+      if(img._blobUrl){ URL.revokeObjectURL(img._blobUrl); img._blobUrl = null }
+    })
+    window._navPhotoObjectUrl = null
     window._navPhotoFile  = null
     window._navPhotoFiles = []
   }
