@@ -8085,8 +8085,13 @@ async function loadRunnerRoutes(runnerRow){
     ;[...offerJobs, ...routeJobs].forEach(j=>{
       const key = j.batch_id || j.id
       if(!batches[key]) batches[key] = { id:key, date:j.scheduled_date, type:j.visit_type, status:j.status, stops:[], isOffer: j.status==='offered' }
-      batches[key].stops.push(j)
-      // Escalate status: in_progress > accepted > scheduled > offered
+      if(!batches[key]) batches[key] = { id:key, date:j.scheduled_date, type:j.visit_type, status:j.status, stops:[], isOffer: j.status==='offered', _stopEmails:new Set() }
+      // Dedup stops by homeowner_email — prevents duplicate rows when a HO has 2 job records for same batch
+      const _stopEmail = j.homeowner_email || j.email || j.id
+      if(!batches[key]._stopEmails.has(_stopEmail)){
+        batches[key]._stopEmails.add(_stopEmail)
+        batches[key].stops.push(j)
+      }
       const rank = {in_progress:4, accepted:3, scheduled:2, offered:1}
       if((rank[j.status]||0) > (rank[batches[key].status]||0)) batches[key].status = j.status
     })
@@ -8183,6 +8188,10 @@ async function loadRunnerRoutes(runnerRow){
           </div>
         </div>` : ''}
         <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">⠿ Drag to reorder</div>
+            <button onclick="rnSaveOrderToDB('${batch.id}')" style="background:rgba(6,214,160,.12);border:1px solid rgba(6,214,160,.3);color:var(--cyan);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">💾 Save Order</button>
+          </div>
           ${_getRnStopOrder(batch.id, batch.stops).map((s,i)=>`
           <div class="rn-stop-row" draggable="true" data-bid="${batch.id}" data-idx="${i}" data-email="${s.homeowner_email||''}"
             ondragstart="rnDragStart(event,this)" ondragover="rnDragOver(event,this)" ondragleave="rnDragLeave(this)" ondrop="rnDrop(event,this,'${batch.id}')"
@@ -8649,7 +8658,20 @@ async function declineOffer(batchId){
 function _executeStartRoute(){
   // Save nav state THEN switch tab — order matters
   _saveNavState()
-  switchRouteTab('active')
+  _saveNavState()
+  // Free heavy admin data not needed during active route — reduces memory pressure
+  // Preserve only what the runner screen needs (NAV_STOPS, _currentRunnerRow, _rnBatchMap)
+  try {
+    if(window.ADMIN_ZONES && window.HOMEOWNERS && window.HOMEOWNERS.length > 50){
+      // Keep lightweight references, clear heavy map/zone data
+      window._adminZonesCache = window.ADMIN_ZONES; window.ADMIN_ZONES = []
+      window._homownersCache  = window.HOMEOWNERS;  window.HOMEOWNERS  = []
+      window._pendingHWCache  = window.PENDING_HOMEOWNERS; window.PENDING_HOMEOWNERS = []
+      window._runnersCache    = window.RUNNERS;     window.RUNNERS     = []
+      console.log('[BinDash] Memory freed for active route — admin data cached')
+    }
+  } catch(e){ console.warn('[BinDash] memory free:', e?.message) }
+
   renderActiveRouteTab()
   showToast('▶ Route started — good luck! 🚀', 'ok', 3000)
   // Ensure jobs marked in_progress
@@ -8662,6 +8684,16 @@ function _executeStartRoute(){
       } catch(e){ console.warn('[BinDash] in_progress update:', e?.message) }
     })()
   }
+}
+
+function _restoreAdminMemory(){
+  try {
+    if(window._adminZonesCache){ window.ADMIN_ZONES = window._adminZonesCache; window._adminZonesCache = null }
+    if(window._homownersCache){  window.HOMEOWNERS  = window._homownersCache;  window._homownersCache  = null }
+    if(window._pendingHWCache){  window.PENDING_HOMEOWNERS = window._pendingHWCache; window._pendingHWCache = null }
+    if(window._runnersCache){    window.RUNNERS     = window._runnersCache;    window._runnersCache    = null }
+    console.log('[BinDash] Admin memory restored after route')
+  } catch(e){ console.warn('[BinDash] restore memory:', e?.message) }
 }
 
 async function resumeBatch(batchId){
@@ -9088,12 +9120,19 @@ async function startBatch(batchId){
     console.log('[startBatch] allBatchJobs:', allBatchJobs.length, '(from', batchMapEntry ? '_rnBatchMap' : '_lastEnrichedJobs', ')')
 
     const savedOrder = _rnStopOrders[batchId]
-    const batchJobs = savedOrder?.length
-      ? savedOrder.map(email => allBatchJobs.find(j=>j.homeowner_email===email)).filter(Boolean).concat(
-          allBatchJobs.filter(j=>!savedOrder.includes(j.homeowner_email))
-        )
-      : allBatchJobs
-
+    // Also try stop_index from jobs table (survives memory resets)
+    const _hasStopIdx = allBatchJobs.some(j => j.stop_index != null)
+    let batchJobs
+    if(savedOrder?.length){
+      batchJobs = savedOrder.map(email => allBatchJobs.find(j=>j.homeowner_email===email)).filter(Boolean).concat(
+        allBatchJobs.filter(j=>!savedOrder.includes(j.homeowner_email)))
+    } else if(_hasStopIdx){
+      batchJobs = [...allBatchJobs].sort((a,b)=>(a.stop_index??99)-(b.stop_index??99))
+      // Restore to in-memory so nav stays correct after memory reset
+      _rnStopOrders[batchId] = batchJobs.map(j=>j.homeowner_email)
+    } else {
+      batchJobs = allBatchJobs
+    }
     // Last resort: all today's accepted/in_progress jobs
     const jobsToUse = batchJobs.length ? batchJobs : (window._lastEnrichedJobs||[]).filter(j=>
       j.scheduled_date >= _phxToday() &&
@@ -16393,6 +16432,31 @@ function _loadRnStopOrders(){
 }
 _loadRnStopOrders()
 
+
+// Explicitly save current drag order to both localStorage and DB stop_index
+function rnSaveOrderToDB(batchId){
+  const container = document.querySelector(`.rn-stop-row[data-bid='${batchId}']`)?.parentNode
+  if(!container){ showToast('Could not find stop list','err'); return }
+  const orderedEmails = Array.from(container.querySelectorAll('.rn-stop-row')).map(r => r.dataset.email)
+  _rnStopOrders[batchId] = orderedEmails
+  try { localStorage.setItem('rn_stop_order:'+batchId, JSON.stringify(orderedEmails)) } catch(e){}
+  if(_supa && orderedEmails.length){
+    _supa.from('jobs').select('id,homeowner_email').eq('batch_id',batchId)
+      .then(({data:jbs}) => {
+        if(!jbs?.length) return
+        jbs.forEach(j => {
+          const orderIdx = orderedEmails.indexOf(j.homeowner_email)
+          if(orderIdx >= 0)
+            _supa.from('jobs').update({stop_index: orderIdx, updated_at: new Date().toISOString()}).eq('id', j.id)
+              .then(({error}) => { if(error) console.warn('[stopOrder] job update:', error.message) })
+        })
+        showToast('✅ Stop order saved — route will run in this sequence', 'ok', 3000)
+      }).catch(e => { console.warn('[stopOrder]', e.message); showToast('Order saved locally only','info',2000) })
+  } else {
+    showToast('Order saved locally ✓','ok',2000)
+  }
+}
+
 function rnDragStart(e, el){
   _rnDragSrc = el
   el.style.opacity = '0.4'
@@ -16439,11 +16503,21 @@ function rnDrop(e, el, batchId){
   const orderedEmails = Array.from(container.querySelectorAll('.rn-stop-row')).map(r => r.dataset.email)
   _rnStopOrders[batchId] = orderedEmails
   try { localStorage.setItem('rn_stop_order:'+batchId, JSON.stringify(orderedEmails)) } catch(e){}
+  try { localStorage.setItem('rn_stop_order:'+batchId, JSON.stringify(orderedEmails)) } catch(e){}
 
-  // Update Google Maps URL to reflect new order
-  const zoneKey = 'rn_stop_order:'+batchId
+  // Persist stop order to jobs table so it survives memory resets
+  if(_supa && orderedEmails.length){
+    _supa.from('jobs').select('id,homeowner_email').eq('batch_id',batchId).then(({data:jbs})=>{
+      if(!jbs?.length) return
+      jbs.forEach((j,_) => {
+        const orderIdx = orderedEmails.indexOf(j.homeowner_email)
+        if(orderIdx >= 0)
+          _supa.from('jobs').update({stop_index: orderIdx, updated_at: new Date().toISOString()}).eq('id', j.id).then(({error})=>{ if(error) console.warn('[stopOrder] job update:', error.message) })
+      })
+    }).catch(e => console.warn('[stopOrder] persist:', e.message))
+  }
+
   showToast('Stop order saved ✓', 'ok', 2000)
-
   if(_rnDragSrc) _rnDragSrc.style.opacity = '1'
   _rnDragSrc = null
 }
