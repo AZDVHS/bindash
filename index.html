@@ -9372,13 +9372,17 @@ async function completeBatch(batchId){
     window._livePipelineBatches = null
     loadLiveJobsIntoPipeline?.().catch(e => console.warn('[BinDash] pipeline refresh on complete:', e.message))
 
+
     showToast(window._adminCoverMode ? `Route complete ✅ — ${jobCount} stop${jobCount!==1?'s':''} done (admin cover, no payout)` : `Route complete ✅ — $${totalEarned} queued for Friday payout`, 'ok', 5000)
-    await loadRunnerRoutes(runnerRow)
-    await loadRNEarnings()
-    // Re-populate dashboard stat pills (visits, earnings, rating, bins moved)
-    if(runnerRow) await populateRNDashboard(runnerRow)
-    // Refresh admin dispatch pipeline if admin has it open (background, non-blocking)
-    try { if(window._livePipelineBatches) loadLiveJobsIntoPipeline() } catch(e){}
+    // Defer dashboard refresh until after BIN_IN modal is resolved
+    if(!window._pendingBinInBatch){
+      await loadRunnerRoutes(runnerRow)
+      await loadRNEarnings()
+      if(runnerRow) await populateRNDashboard(runnerRow)
+    } else {
+      window._pendingBinInRefreshRow = runnerRow
+    }
+    try { if(window._livePipelineBatches) loadLiveJobsIntoPipeline() } catch(_e){}
   } catch(e){
     console.error('[BinDash] completeBatch FAILED:', e?.message || e, e)
     showToast('Route complete error: '+String(e?.message||e), 'err')
@@ -9387,9 +9391,7 @@ async function completeBatch(batchId){
 
 async function _autoCreateBinInBatch(binOutJobs, runnerRow){
   // ── NEW ARCHITECTURE: BIN_IN jobs are pre-created at launch time ─────────
-  // This function now only: shows the offer modal to the runner.
   // The actual jobs already exist with status='offered' (unlocked by completeBatch).
-  // Do NOT insert new jobs here — that caused duplicates and 409 conflicts.
   try {
     const ref       = binOutJobs[0]
     const inBatchId = (ref.batch_id || ref.id) + '-IN'
@@ -9489,6 +9491,7 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
         clearInterval(countdownInterval)
         closeM()
         _offerBinInToZone(inBatchId, binOutJobs, runnerRow, scheduledDate, loyaltyExpiry)
+        _runDeferredBinInRefresh()
       }
     }, 1000)
     window._binInCountdownInterval = countdownInterval
@@ -9497,6 +9500,39 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
   } catch(e){
     console.warn('[BinDash] _autoCreateBinInBatch:', e?.message)
   }
+}
+
+// Deferred refresh after BIN_IN modal resolves
+async function _runDeferredBinInRefresh(){
+  const row = window._pendingBinInRefreshRow
+  window._pendingBinInRefreshRow = null
+  window._pendingBinInBatch = null
+  if(row){
+    await loadRunnerRoutes(row)
+    await loadRNEarnings()
+    await populateRNDashboard(row)
+  }
+}
+
+async function _acceptBinIn(inBatchId){
+  clearInterval(window._binInCountdownInterval)
+  closeM()
+  const p = window._pendingBinInBatch
+  if(!p) return
+  try {
+    await _supa.from('jobs')
+      .update({ status:'accepted', updated_at:new Date().toISOString() })
+      .eq('batch_id', inBatchId)
+      .in('status',['offered','pending'])
+    showToast('☀️ Bin In accepted — route locked for tomorrow morning!', 'ok', 4000)
+    // Navigate to routes tab so runner sees the new route card
+    const tabEl = document.querySelector('#S-rn-dash .nav-i:nth-child(2)')
+    if(tabEl) rnNav(tabEl, 'rn-routes')
+  } catch(e){
+    console.warn('[BinDash] _acceptBinIn:', e?.message)
+    showToast('Could not accept — try from My Routes', 'err', 4000)
+  }
+  await _runDeferredBinInRefresh()
 }
 
 async function _declineBinIn(inBatchId){
@@ -15471,7 +15507,15 @@ async function renderRunnerHeatmap(){
       )
 
       if(isExpand){
-        const openZsp = () => _rnZspOpen(adj6, null, { hoCount: adjHoCount, hasRunner: adjHasRunner })
+        const openZsp = () => {
+          // Zoom to H6 first so runner can see sub-grids, then open panel
+          try {
+            const b6 = h3.cellToBoundary(adj6).map(([la,ln])=>[la,ln])
+            window._rnHeatMap?.fitBounds(b6, { padding:[30,30], maxZoom:13, animate:true })
+          } catch(e){}
+          // Small delay so map finishes panning before panel opens
+          setTimeout(() => _rnZspOpen(adj6, null, { hoCount: adjHoCount, hasRunner: adjHasRunner }), 300)
+        }
         outline.on('click', openZsp)
         // Also add a transparent clickable overlay so tapping anywhere in the zone works
         const overlay = L.polygon(b6pts, {
@@ -15531,8 +15575,8 @@ async function renderRunnerHeatmap(){
       try { return h3.cellToBoundary(h6).map(([la,ln])=>[la,ln]) } catch(e){ return [] }
     })
     if(allPts.length){
-      map.fitBounds(allPts, { padding:[20,20], maxZoom:12, animate:false })
-      setTimeout(() => { if(map.getZoom() < 10) map.setZoom(11) }, 100)
+      map.fitBounds(allPts, { padding:[30,30], maxZoom:11, animate:false })
+      setTimeout(() => { if(map.getZoom() > 12) map.setZoom(12); else if(map.getZoom() < 9) map.setZoom(10) }, 100)
     } else if(anchorLat){
       map.setView([anchorLat, anchorLng], 11)
     }
@@ -16032,15 +16076,23 @@ async function _rnZspOpen(hex6, zone, previewOpts){
   } catch(e){}
 
   const totalHOs = Object.values(hoMap).reduce((a,b)=>a+b,0)
-  if(info) info.innerHTML = children.length + ' res-8 hexes · ' + totalHOs + ' homeowner' + (totalHOs!==1?'s':'') + ' in area' +
-    (totalHOs > 0 ? ' <span style="color:var(--cyan)">· Demand confirmed ✅</span>' : '') +
-    '<br>Deselect any areas you do not want to cover, then tap Accept.'
-
-  // Draw the selection overlay on top of the heatmap
-  _rnZspDrawOverlay(children, hoMap)
+  const _clrAllBtn = '<button onclick="_rnZspSelectAll(false)" style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);color:#f87171;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer">✕ Clear All</button>'
+  if(info) info.innerHTML = '<strong style="color:var(--cyan)">Step 1 — Entire zone selected</strong> · ' + children.length + ' sub-grids · ' + totalHOs + ' HO' + (totalHOs!==1?'s':'') + (totalHOs > 0 ? ' <span style="color:#22c55e">✅ Demand here</span>' : '') +
+    '<br><span style="color:var(--muted);font-size:11px">Step 2 (optional) — Tap any sub-grid to de-select it, then press Accept to claim.</span><br><div style="margin-top:6px">' + _selAllBtn + _clrAllBtn + '</div>'
 
   // Scroll panel into view
   panel?.scrollIntoView({ behavior:'smooth', block:'nearest' })
+}
+
+function _rnZspSelectAll(selectAll){
+  const children = window._rnZspChildren || []
+  children.forEach(h8 => {
+    if(selectAll) window._rnZspPendingHexes.add(h8)
+    else window._rnZspPendingHexes.delete(h8)
+    const poly = window._rnZspLayers[h8]
+    if(poly) poly.setStyle(_rnZspStyle(selectAll, false))
+  })
+  _rnZspUpdateCount()
 }
 
 function _rnZspDrawOverlay(children, hoMap){
@@ -22075,7 +22127,6 @@ async function _adminActivateHW(hwId){
       reviewed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('email', hw.email)
-
     // Step 3: Update homeowners → active + sync all preserved fields
     await _supa.from('homeowners').update({
       status: 'active',
@@ -22094,15 +22145,17 @@ async function _adminActivateHW(hwId){
       gate_code:        sigData?.gate_code     || null,
       pet_info:         sigData?.pet_info      || null,
       updated_at:       new Date().toISOString(),
-    }).eq('email', hw.email)
-
+    }).ilike('email', hw.email)
     // Step 4: Update in-memory
     hw.status  = 'active'
     hw.service = canonicalSvc
     hw.day     = day
     hw.plan    = planKey
 
-    // Step 5: Calculate bin-out night
+
+    // Force DB re-fetch so merge uses fresh homeowners.status='active'
+    // Without this, next reload re-merges from stale cached signup data
+    try { await loadHomeownersFromSupabase?.() } catch(e){}
     const _days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
     const _idx  = _days.findIndex(d => d.toLowerCase() === (day||'').toLowerCase())
     const binOutNight = _idx >= 0 ? _days[(_idx + 6) % 7] + ' evening' : 'Evening before collection'
@@ -33219,7 +33272,12 @@ async function loadHomeownersFromSupabase(){
       const _wlStatuses = ['waitlist_approved','waitlist','waitlist_pending','waitlisted']
       const _signupIsWl = _wlStatuses.includes(signup.status)
       const _hwIsWl     = _wlStatuses.includes(row.status)
-      const _mergedStatus = (_signupIsWl || _hwIsWl) ? 'waitlist' : (row.status || signup.status || 'active')
+      // Merge rule: homeowners.status='active' wins (admin explicitly activated them)
+      // waitlist only wins if homeowners table does NOT say 'active'
+      const _hwIsActive = row.status === 'active'
+      const _mergedStatus = _hwIsActive ? 'active'
+        : (_signupIsWl || _hwIsWl) ? 'waitlist'
+        : (row.status || signup.status || 'active')
       const merged = {
         ...signup,   // signup fields as base (has collection_day_2, service_notes etc)
         ...row,      // homeowners fields override (more authoritative for zone, runner etc)
