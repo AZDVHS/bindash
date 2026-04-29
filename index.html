@@ -1183,6 +1183,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .ob-day-pill.on{border-color:var(--cyan);background:rgba(6,214,160,.1);color:var(--cyan)}
 .vt-in{background:rgba(6,214,160,.1);border:1px solid rgba(6,214,160,.3);color:#6ee7b7;border-radius:6px;font-size:10px;font-weight:700;padding:3px 8px;letter-spacing:.04em}
 .vt-sos{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:6px;font-size:10px;font-weight:700;padding:3px 8px;letter-spacing:.04em}
+.jobs-tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-size:12px;font-weight:600;padding:6px 14px;cursor:pointer;transition:all .15s;position:relative;white-space:nowrap}
+.jobs-tab:hover{color:var(--text)}
+.jobs-tab.jobs-tab-on{color:var(--cyan);border-bottom-color:var(--cyan)}
+.jobs-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;border-radius:99px;background:rgba(99,102,241,.6);color:#fff;font-size:9px;font-weight:800;margin-left:4px;padding:0 4px;vertical-align:middle}
+.jobs-badge:empty{display:none}
 
 /* Batch cards */
 .batch-card{border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:12px}
@@ -4899,28 +4904,22 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
 
         <!-- AD JOBS -->
         <div class="pg" id="ad-jobs">
-          <div class="toolbar">
-            <input placeholder="Search routes..." id="jobs-search" oninput="filterAdminJobs()" style="width:150px">
-            <select id="jobs-status-filter" onchange="filterAdminJobs()" style="width:auto">
-              <option value="">All Status</option>
-              <option value="missed">🚨 Missed</option>
-              <option value="offered">Offered</option>
-              <option value="accepted">Accepted</option>
-              <option value="in_progress">In Progress</option>
-              <option value="complete">Complete</option>
-              <option value="late">Late / Flagged</option>
-              <option value="broadcast">Broadcast</option>
-            </select>
-            <select id="jobs-type-filter" onchange="filterAdminJobs()" style="width:auto">
-              <option value="">All Types</option>
-              <option value="BIN_OUT">🌙 Bin Out</option>
-              <option value="BIN_IN">☀️ Bin In</option>
-              <option value="sos">🚨 SOS</option>
-            </select>
-            <span class="tc" id="jobs-count">0 routes</span>
-            <button class="btn btn-ghost btn-sm" onclick="loadAdminJobs()">↺ Refresh</button>
+          <!-- Jobs tab bar -->
+          <div style="display:flex;align-items:center;gap:0;border-bottom:2px solid var(--border);margin-bottom:14px;flex-wrap:wrap">
+            <input placeholder="Search routes..." id="jobs-search" oninput="filterAdminJobs()" style="width:130px;margin-right:12px;margin-bottom:4px">
+            <button id="jobs-tab-pending"  onclick="setJobsTab('pending')"  class="jobs-tab jobs-tab-on">⏳ Pending<span id="jobs-badge-pending"  class="jobs-badge"></span></button>
+            <button id="jobs-tab-accepted" onclick="setJobsTab('accepted')" class="jobs-tab">✅ Accepted<span id="jobs-badge-accepted" class="jobs-badge"></span></button>
+            <button id="jobs-tab-active"   onclick="setJobsTab('active')"   class="jobs-tab">▶ Active<span id="jobs-badge-active"   class="jobs-badge"></span></button>
+            <button id="jobs-tab-complete" onclick="setJobsTab('complete')" class="jobs-tab">✓ Completed<span id="jobs-badge-complete" class="jobs-badge"></span></button>
+            <button id="jobs-tab-alerts"   onclick="setJobsTab('alerts')"   class="jobs-tab" style="margin-left:auto;color:#ef4444">🚨 Alerts<span id="jobs-badge-alerts"   class="jobs-badge" style="background:#ef4444"></span></button>
+            <button class="btn btn-ghost btn-sm" onclick="loadAdminJobs()" style="margin-left:8px;font-size:11px">↺</button>
           </div>
-          <!-- Overdue banner — compact summary only -->
+          <!-- Hidden inputs for backward compat (filterAdminJobs reads these) -->
+          <input type="hidden" id="jobs-status-filter" value="">
+          <input type="hidden" id="jobs-type-filter" value="">
+          <input type="hidden" id="jobs-active-tab" value="pending">
+          <span class="tc" id="jobs-count" style="display:none"></span>
+          <!-- Alerts banner -->
           <div id="jobs-late-banner" style="display:none;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:13px;color:#fca5a5"></div>
           <!-- Batch route cards -->
           <div id="jobs-batch-list" style="display:flex;flex-direction:column;gap:10px"></div>
@@ -7186,6 +7185,16 @@ async function loadAdminJobs(){
   }
 }
 
+// ── Jobs tab switcher ────────────────────────────────────────────────────
+function setJobsTab(tab){
+  document.querySelectorAll('.jobs-tab').forEach(b => b.classList.remove('jobs-tab-on'))
+  const btn = document.getElementById('jobs-tab-'+tab)
+  if(btn) btn.classList.add('jobs-tab-on')
+  const inp = document.getElementById('jobs-active-tab')
+  if(inp) inp.value = tab
+  filterAdminJobs()
+}
+
 function filterAdminJobs(){
   const q      = (document.getElementById('jobs-search')?.value||'').toLowerCase()
   const status = document.getElementById('jobs-status-filter')?.value||''
@@ -7228,32 +7237,58 @@ function filterAdminJobs(){
     b.isOverdue  = b.routeStatus==='missed'||(['accepted','in_progress','late'].includes(b.routeStatus)&&b.date&&now>new Date(b.date+'T23:59:00'))
   })
 
-  // Filter
-  const allBatches = Object.values(batchMap).filter(b => {
-    if(status){
-      if(status==='late'   && !['late','expired'].includes(b.routeStatus)) return false
-      if(status==='missed' && b.routeStatus!=='missed') return false
-      if(status!=='late' && status!=='missed' && b.routeStatus!==status) return false
-    }
-    if(type && b.visitType!==type) return false
-    if(q){
+
+  // Tab-based filtering
+  const activeTab = document.getElementById('jobs-active-tab')?.value || 'pending'
+  const allBatchArr = Object.values(batchMap)
+
+  // Compute counts for each tab (for badges)
+  const _tabCount = { pending:0, accepted:0, active:0, complete:0, alerts:0 }
+  allBatchArr.forEach(b => {
+    if(b.routeStatus==='missed'||b.isOverdue||b.routeStatus==='expired') _tabCount.alerts++
+    else if(b.routeStatus==='complete') _tabCount.complete++
+    else if(b.routeStatus==='in_progress') _tabCount.active++
+    else if(b.routeStatus==='accepted') _tabCount.accepted++
+    else _tabCount.pending++  // offered, broadcast, unassigned
+  })
+  // Update badges
+  Object.keys(_tabCount).forEach(k => {
+    const el = document.getElementById('jobs-badge-'+k)
+    if(el) el.textContent = _tabCount[k] > 0 ? _tabCount[k] : ''
+  })
+
+  // Filter by active tab
+  let allBatches = allBatchArr.filter(b => {
+    const rs = b.routeStatus
+    if(activeTab === 'alerts')  return rs==='missed'||b.isOverdue||rs==='expired'
+    if(activeTab === 'complete') return rs==='complete'
+    if(activeTab === 'active')  return rs==='in_progress'
+    if(activeTab === 'accepted') return rs==='accepted'
+    // pending: everything not matched above
+    return ['offered','broadcast','unassigned','pending'].includes(rs)
+  })
+
+  // Search filter
+  if(q){
+    allBatches = allBatches.filter(b => {
       const str = [b.batchId,b.runnerName,b.zoneName,
         ...b.jobs.map(j=>{const h=HOMEOWNERS.find(x=>x.email===j.homeowner_email);return h?.name||j.homeowner_email||''})
       ].join(' ').toLowerCase()
-      if(!str.includes(q)) return false
+      return str.includes(q)
+    })
+  }
+
+  // Sort by tab context
+  allBatches.sort((a,b) => {
+    if(activeTab==='alerts'){
+      if(a.routeStatus==='missed'&&b.routeStatus!=='missed') return -1
+      if(a.routeStatus!=='missed'&&b.routeStatus==='missed') return  1
     }
-    return true
-  })
-  // Sort: missed first, then overdue, then by date descending
-  allBatches.sort((a,b)=>{
-    if(a.routeStatus==='missed'&&b.routeStatus!=='missed') return -1
-    if(a.routeStatus!=='missed'&&b.routeStatus==='missed') return  1
     if(a.isOverdue&&!b.isOverdue) return -1
     if(!a.isOverdue&&b.isOverdue) return  1
     return (b.date||'')>(a.date||'')?1:-1
   })
 
-  if(countEl) countEl.textContent = allBatches.length+' route'+(allBatches.length!==1?'s':'')
 
   // Overdue banner — compact count only, includes missed routes
   const overdueCount = Object.values(batchMap).filter(b=>b.isOverdue).length
@@ -27992,12 +28027,11 @@ function loadPendingApprovalsIntoDispatch(){
   )
   const allPending = getPendingRoutes().filter(p => {
     if(p.status!=='draft'&&p.status!=='change_detected'&&p.status!=='queued') return false
+    if(p.visitType==='BIN_IN') return false  // BIN_IN auto-schedules after BIN_OUT — never show in approval strip
     const key = p.zoneId+':'+normDay(p.day||'')
-    // Exclude if already launched this session or marked sent in pipeline
     if(_launched.has(key) || _sentZoneDays.has(key)) return false
     return true
   })
-  // Filter to selected day if one is chosen, otherwise show all pending
   const pending = selectedDay
     ? allPending.filter(p => normDay(p.day) === normDay(selectedDay))
     : allPending
