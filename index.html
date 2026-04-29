@@ -22121,14 +22121,19 @@ async function _adminActivateHW(hwId){
     const city      = sigData?.city || hw.city || ''
     const zip       = sigData?.zip_code || hw.zip || ''
 
-    // Step 2: Update homeowner_signups → approved + preserve data
-    await _supa.from('homeowner_signups').update({
-      status: 'approved',
-      reviewed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }).eq('email', hw.email)
-    // Step 3: Update homeowners → active + sync all preserved fields
-    await _supa.from('homeowners').update({
+    // Normalize email — DB may store mixed case
+    const _hwEmail = (hw.email || '').toLowerCase().trim()
+    const _hwId    = hw.id || null
+
+    // Step 2: Update homeowner_signups → approved
+    // Match signup by id (most reliable) or email
+    const { error: sigErr } = sigData?.id
+      ? await _supa.from('homeowner_signups').update({ status:'approved', reviewed_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('id', sigData.id)
+      : await _supa.from('homeowner_signups').update({ status:'approved', reviewed_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('email', sigData?.email || hw.email)
+    if(sigErr) console.warn('[Activate] homeowner_signups update:', sigErr.message)
+
+    // Step 3: Update homeowners → active (use id when available — most reliable)
+    const _hwUpdate = {
       status: 'active',
       service_type:     canonicalSvc,
       collection_day:   day !== '--' ? day : null,
@@ -22139,14 +22144,24 @@ async function _adminActivateHW(hwId){
       zip_code:         zip  || null,
       service_notes:    sigData?.service_notes || null,
       curb_notes:       sigData?.curb_notes    || null,
-      bin_photos:       sigData?.bin_photos    || null,
       bin_location:     sigData?.bin_location  || null,
       gate_type:        sigData?.gate_type     || null,
       gate_code:        sigData?.gate_code     || null,
       pet_info:         sigData?.pet_info      || null,
       updated_at:       new Date().toISOString(),
-    }).ilike('email', hw.email)
-    // Step 4: Update in-memory
+    }
+    let hwErr = null
+    if(_hwId && typeof _hwId === 'string' && _hwId.includes('-')){
+      // UUID id — most reliable
+      const { error } = await _supa.from('homeowners').update(_hwUpdate).eq('id', _hwId)
+      hwErr = error
+    } else {
+      // Fallback: match by email
+      const { error } = await _supa.from('homeowners').update(_hwUpdate).ilike('email', _hwEmail)
+      hwErr = error
+    }
+    if(hwErr) console.warn('[Activate] homeowners update:', hwErr.message)
+
     hw.status  = 'active'
     hw.service = canonicalSvc
     hw.day     = day
@@ -27971,22 +27986,50 @@ function loadPendingApprovalsIntoDispatch(){
 
   // Get currently selected day — only show relevant approvals
   const selectedDay = document.getElementById('dispatch-day-val')?.value || ''
-  const allPending = getPendingRoutes().filter(p=>p.status==='draft'||p.status==='change_detected'||p.status==='queued')
-
+  const _launched = window._launchedBatchKeys || new Set()
+  const _sentZoneDays = new Set(
+    (window._livePipelineBatches||[]).filter(b=>b.manualSend||b.sentAt||b.status==='sent').map(b=>b.zoneId+':'+normDay(b.day||''))
+  )
+  const allPending = getPendingRoutes().filter(p => {
+    if(p.status!=='draft'&&p.status!=='change_detected'&&p.status!=='queued') return false
+    const key = p.zoneId+':'+normDay(p.day||'')
+    // Exclude if already launched this session or marked sent in pipeline
+    if(_launched.has(key) || _sentZoneDays.has(key)) return false
+    return true
+  })
   // Filter to selected day if one is chosen, otherwise show all pending
   const pending = selectedDay
     ? allPending.filter(p => normDay(p.day) === normDay(selectedDay))
     : allPending
 
+
+  // Count sent zones for selected day
+  const _sentForDay = (window._livePipelineBatches||[]).filter(b => {
+    const isThisDay = !selectedDay || normDay(b.day||'') === normDay(selectedDay)
+    return isThisDay && (b.manualSend || b.sentAt || b.status==='sent')
+  })
+
   if(!pending.length){
-    el.style.display = 'none'
+    if(_sentForDay.length){
+      // Show dispatched confirmation instead of hiding
+      const _sentTime = _sentForDay[0]?.sentAt ? new Date(_sentForDay[0].sentAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/Phoenix'}) : null
+      el.style.display = 'block'
+      el.innerHTML = `<div style="padding:8px 14px;background:rgba(6,214,160,.05);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--cyan);font-weight:700">🚀 Route dispatched${_sentTime?' at '+_sentTime:''}</span>
+        <span style="font-size:11px;color:var(--muted)">${_sentForDay.map(b=>(b.zoneName||b.zoneId)+' · '+(b.stops?.length||0)+' stop'+(b.stops?.length!==1?'s':'')+' · '+(b.runner?.name||'')).join(' &nbsp;|&nbsp; ')}</span>
+        <span style="font-size:10px;color:var(--muted);margin-left:auto">Managing in Jobs →</span>
+      </div>`
+    } else {
+      el.style.display = 'none'
+    }
     return
   }
 
+
   el.style.display = 'block'
   const needApproval = pending.filter(p=>p.status==='draft'||p.status==='change_detected')
-  const dayQueued = pending.filter(p=>p.status==='queued')
-  // Also include expired routes that need re-launch (jobs show offered+expired but never accepted)
+  // dayQueued: routes approved and ready to launch (already filtered for sent zones above)
+  const dayQueued = pending.filter(p => p.status==='queued')
   const dayExpired = generatedBatches.filter(b => {
     const isExpired = (b.status==='sent'||b.status==='offered') && b.offerExpiresAt && new Date(b.offerExpiresAt) < new Date()
     const matchDay = !selectedDay || normDay(b.day)===normDay(selectedDay)
@@ -27994,8 +28037,6 @@ function loadPendingApprovalsIntoDispatch(){
   })
 
   el.innerHTML = needApproval.map(p=>`
-  <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
-    <span style="width:8px;height:8px;border-radius:50%;background:${p.status==='change_detected'?'#ef4444':'#f59e0b'};flex-shrink:0"></span>
     <span style="font-size:12px;font-weight:700">${p.zoneName}</span>
     <span style="font-size:11px;color:var(--muted)">${p.day} · ${(p.stops||[]).length} stops · ${p.runner?.name||'no runner'}</span>
     ${p.status==='change_detected'
@@ -28300,6 +28341,8 @@ async function adminLaunchBatch(zoneId, day, btnEl){
     // Remove from generatedBatches array entirely so it can't come back
     const _gbIdx = generatedBatches.findIndex(b => b.zoneId===zoneId && normDay(b.day)===normDay(day))
     if(_gbIdx >= 0) generatedBatches.splice(_gbIdx, 1)
+    if(!window._launchedBatchKeys) window._launchedBatchKeys = new Set()
+    window._launchedBatchKeys.add(zoneId+':'+normDay(day))
     // Clear live pipeline cache so next render fetches fresh (route will be filtered as launched)
     window._livePipelineBatches = null
 
@@ -28321,7 +28364,15 @@ async function adminLaunchBatch(zoneId, day, btnEl){
       } catch(e){ console.warn('[Scheduler] 1hr broadcast:', e.message) }
     }, 60 * 60 * 1000)  // 60 minutes
     loadPendingApprovalsIntoDispatch()
-    window._livePipelineBatches = null
+    // Show 'dispatched' status in the day panel immediately — prevents re-launch confusion
+    const _sentTime = new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/Phoenix'})
+    const _dStatusEl = document.getElementById('dispatch-day-status')
+    if(_dStatusEl) _dStatusEl.innerHTML = `
+      <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:9px;padding:10px 14px">
+        <div style="font-size:13px;font-weight:700;color:var(--cyan)">🚀 Route dispatched at ${_sentTime}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">${stops.length} stop${stops.length!==1?'s':''} · ${runner.name} notified</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Manage from <strong>Jobs</strong>. Selecting this date again will show route status.</div>
+      </div>`
     await loadLiveJobsIntoPipeline()
     renderDispatchPipeline()
 
@@ -28532,8 +28583,31 @@ function pickDispatchDay(el){
     renderDispatchPipeline()
     loadLiveJobsIntoPipeline()
   } else {
-    // Auto-preview: generate routes for this collection day silently
-    _adGenerateBatchesAsync(true)
+    // Check if route already dispatched for this date — if so skip regeneration
+    if(_supa && dateStr2){
+      _supa.from('dispatch_queue').select('status,sent_at,zone_name,stop_count,runner_name').eq('scheduled_date', dateStr2).eq('visit_type','BIN_OUT').then(({data:dq}) => {
+        const alreadySent = (dq||[]).filter(r => r.status === 'sent' || r.status === 'complete' || r.status === 'queued_sent')
+        if(alreadySent.length){
+          // Route already dispatched — show status, do NOT regenerate
+          const sentAt = alreadySent[0]?.sent_at ? new Date(alreadySent[0].sent_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/Phoenix'}) : null
+          const statusEl = document.getElementById('dispatch-day-status')
+          if(statusEl) statusEl.innerHTML = `
+            <div style="background:rgba(6,214,160,.06);border:1px solid rgba(6,214,160,.2);border-radius:9px;padding:10px 14px">
+              <div style="font-size:13px;font-weight:700;color:var(--cyan)">🚀 Routes dispatched${sentAt ? ' at ' + sentAt : ''}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:3px">${alreadySent.map(r=>(r.zone_name||'Zone')+' · '+(r.stop_count||0)+' stops'+(r.runner_name?' · '+r.runner_name:'')).join('<br>')}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px">Route is in <strong>Jobs</strong> — manage from there. No further dispatch action needed.</div>
+            </div>`
+          // Load pipeline to show route in card view but don't regenerate
+          renderDispatchPipeline()
+          loadLiveJobsIntoPipeline()
+        } else {
+          // Not yet dispatched — generate preview
+          _adGenerateBatchesAsync(true)
+        }
+      }).catch(() => _adGenerateBatchesAsync(true))
+    } else {
+      _adGenerateBatchesAsync(true)
+    }
   }
 }
 
