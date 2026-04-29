@@ -28022,9 +28022,14 @@ function loadPendingApprovalsIntoDispatch(){
   // Get currently selected day — only show relevant approvals
   const selectedDay = document.getElementById('dispatch-day-val')?.value || ''
   const _launched = window._launchedBatchKeys || new Set()
-  const _sentZoneDays = new Set(
-    (window._livePipelineBatches||[]).filter(b=>b.manualSend||b.sentAt||b.status==='sent').map(b=>b.zoneId+':'+normDay(b.day||''))
-  )
+  // A zone+day is 'sent' if: pipeline says manualSend/sentAt, OR it was launched this session,
+  // OR the live pipeline has a batch with offered/accepted/in_progress/complete status
+  const _sentZoneDays = new Set([
+    ...(window._livePipelineBatches||[]).filter(b => b.manualSend || b.sentAt || b.status==='sent' ||
+      ['offered','broadcast','accepted','in_progress','complete'].includes(b.status))
+      .map(b => b.zoneId+':'+normDay(b.day||'')),
+    ..._launched
+  ])
   const allPending = getPendingRoutes().filter(p => {
     if(p.status!=='draft'&&p.status!=='change_detected'&&p.status!=='queued') return false
     if(p.visitType==='BIN_IN') return false  // BIN_IN auto-schedules after BIN_OUT — never show in approval strip
@@ -29706,9 +29711,13 @@ function renderDispatchPipeline(){
     // Always show queued/draft/change_detected (not yet launched)
     if(!_launchedStatuses.has(b.status)) return true
     // BIN_IN pending = pre-created but not yet active — keep in dispatch as a preview
-    if(b.visitType === 'BIN_IN' && b.status === 'pending') return true
-    // BIN_IN queued = unlocked after BIN_OUT completes, runner hasn't accepted yet — keep
+    // BIN_IN pending = pre-created, not yet active — only show if scheduled date matches selected day
+    if(b.visitType === 'BIN_IN' && b.status === 'pending') return false  // suppress — shows only in Jobs
+    // BIN_IN offered/unassigned/missed = needs admin attention — show as alert
+    if(b.visitType === 'BIN_IN' && ['offered','unassigned','missed','broadcast'].includes(b.status)) return true
+    // BIN_IN queued = unlocked, runner hasn't accepted — keep
     if(b.visitType === 'BIN_IN' && b.status === 'queued') return true
+    // Everything else (launched, accepted, complete routes) → Jobs only
     // Everything else (launched BIN_OUT, accepted/complete routes) → Jobs only
     return false
   })
@@ -29717,19 +29726,16 @@ function renderDispatchPipeline(){
   const binOutBatches = batches.filter(b=>b.visitType!=='BIN_IN'&&!b.id?.endsWith('-IN'))
   // BIN_IN: include items matching the day filter OR items paired to a BIN_OUT in this view
   // This lets Thursday pill show "BIN IN — tomorrow" preview alongside the BIN_OUT card
-  const _binInAll = (batchSource).filter(b=>b.visitType==='BIN_IN'||b.id?.endsWith('-IN'))
+  const _binInAll = (batchSource).filter(b=>(b.visitType==='BIN_IN'||b.id?.endsWith('-IN')) && b.status!=='complete' && b.status!=='pending')
   const binInBatches = effectiveDayFil
     ? _binInAll.filter(b => {
-        // Direct day match (e.g. Friday pill shows Friday BIN_IN)
+        // Exact day match — show BIN_INs for this specific day
         if(normDay(b.day)===normDay(effectiveDayFil)) return true
-        // Also show if this BIN_IN's paired BIN_OUT day matches the pill
-        // (Thursday pill shows Friday BIN_IN as "coming tomorrow")
-        const _pairedDay = b.day  // already shifted? No — b.day = actual day (Friday)
-        // Check if any BIN_OUT in binOutBatches is from the same zone
-        return binOutBatches.some(bout => bout.zoneId===b.zoneId)
+        // Show unassigned/missed BIN_INs regardless of day — they need admin attention
+        if(['unassigned','missed','broadcast'].includes(b.status)) return true
+        return false  // don't show other BIN_INs just because zone matches
       })
     : _binInAll
-
   // Pipeline header
   const titleEl = document.getElementById('pipeline-title')
   const badgeEl = document.getElementById('pipeline-badge')
@@ -29896,6 +29902,8 @@ function renderDispatchPipeline(){
       badgeTxt = '☀️ Offered to runner'; badgeCol = '#06d6a0'
     } else if(isBinIn && statusKey==='accepted'){
       badgeTxt = '✅ Accepted · ready to start'; badgeCol = '#22c55e'
+    } else if(isBinIn && (statusKey==='missed'||statusKey==='unassigned'||statusKey==='broadcast')){
+      badgeTxt = '🚨 Bin In missed — action needed'; badgeCol = '#ef4444'
     } else if(!_wasLaunched && !['accepted','in_progress','complete'].includes(statusKey)){
       // Not yet launched — always show ready to launch regardless of DB status
       badgeTxt = '✅ Approved · ready to launch'
@@ -29977,15 +29985,23 @@ function renderDispatchPipeline(){
         +'</div>'
 
     const borderRgb = borderCol==='#22c55e'?'34,197,94':borderCol==='#06d6a0'?'6,214,160':borderCol==='#a5b4fc'?'165,180,252':borderCol==='#f59e0b'?'245,158,11':borderCol==='#3b82f6'?'59,130,246':'239,68,68'
+    const _binInNeedsAction = isBinIn && ['missed','unassigned','broadcast'].includes(statusKey)
     const missedBar = isMissed
       ? '<div style="background:rgba(239,68,68,.08);border-bottom:1px solid rgba(239,68,68,.3);padding:8px 14px;font-size:12px;display:flex;align-items:center;gap:10px">'
         +'<span style="font-size:16px">🚨</span>'
         +'<div style="flex:1"><strong style="color:#ef4444">Missed route</strong> <span style="color:var(--muted)">— action required</span></div>'
-        +'<button onclick="showMissedRouteActions(\''+b.id+'\',\''+b.zoneName.replace(/'/g,'')+'\',\''+(b.runner?.name||'').replace(/'/g,'')+'\','+b.stops.length+')" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">⚡ Take action →</button>'
+        +'<button onclick="showMissedRouteActions(\''+b.id+'\',\''+b.zoneName.replace(/'/g,'')+'\',\''+( b.runner?.name||'').replace(/'/g,'')+'\','+b.stops.length+')" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">⚡ Take action →</button>'
+        +'</div>'
+      : _binInNeedsAction
+      ? '<div style="background:rgba(239,68,68,.06);border-bottom:1px solid rgba(239,68,68,.2);padding:8px 14px;font-size:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+        +'<span style="font-size:16px">☀️</span>'
+        +'<div style="flex:1"><strong style="color:#ef4444">Bin In unassigned</strong> <span style="color:var(--muted)">— bins are at the curb</span></div>'
+        +'<button onclick="adminCoverRoute(\''+b.id+'\')" style="background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);color:#a5b4fc;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">👤 Admin Cover</button>'
+        +'<button onclick="adForceReassign(\''+b.id+'\')" style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:#fbbf24;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">↔ Reassign</button>'
+        +'<button onclick="adminCancelBinIn(\''+b.id+'\')" style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);color:#f87171;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:700">✕ Remove</button>'
+        +'</div>'
         +'</div>'
       : ''
-    return '<div style="border:'+(isMissed?'2px':'1px')+' solid rgba('+borderRgb+(isMissed?',.5':',.3')+');border-left:4px solid '+borderCol+';border-radius:10px;overflow:hidden;background:var(--surface);margin-bottom:8px'+(isMissed?';box-shadow:0 0 12px rgba(239,68,68,.15)':'')+'"'
-      +' data-batch-id="'+b.id+'" data-zone-id="'+b.zoneId+'" data-day="'+(b.day||'')+'"'+(isOpen?' data-dispatch-card-open="1"':'')+' id="dbc-'+b.id+'">'
       +'<div style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer" onclick="toggleDispatchCard(\''+b.id+'\')">'
       +'<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;'+(isBinIn?'background:rgba(6,214,160,.15);color:#06d6a0':'background:rgba(99,102,241,.15);color:#a5b4fc')+';flex-shrink:0">'+vtLabel+'</span>'
       +'<div style="flex:1;min-width:0">'
@@ -34669,6 +34685,17 @@ async function _executeMissedAction(){
     showToast('Error: ' + (e.message||String(e)), 'err', 6000)
     if(btn){ btn.disabled=false; btn.textContent='Retry' }
   }
+}
+
+async function adminCancelBinIn(batchId){
+  if(!confirm('Remove this Bin In route? The homeowner will not be charged. Bins remain at the curb.')) return
+  try {
+    await _supa.from('jobs').update({ status:'cancelled', updated_at:new Date().toISOString() }).eq('batch_id', batchId)
+    showToast('Bin In removed — homeowner not charged', 'ok', 4000)
+    window._livePipelineBatches = null
+    await loadLiveJobsIntoPipeline()
+    renderDispatchPipeline()
+  } catch(e){ showToast('Remove failed: '+e.message,'err') }
 }
 
 async function adForceReassign(batchId){
