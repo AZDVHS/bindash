@@ -28254,38 +28254,59 @@ function loadPendingApprovalsIntoDispatch(){
     return isExpired && matchDay
   })
 
-  el.innerHTML = needApproval.map(p=>`
-    <span style="font-size:12px;font-weight:700">${p.zoneName}</span>
-    <span style="font-size:11px;color:var(--muted)">${p.day} · ${(p.stops||[]).length} stops · ${p.runner?.name||'no runner'}</span>
-    ${p.status==='change_detected'
-      ? `<span style="font-size:10px;background:rgba(239,68,68,.12);color:#ef4444;padding:1px 7px;border-radius:4px">⚠️ ${(p.changes||[]).join(', ')}</span>`
-      : '<span style="font-size:10px;background:rgba(245,158,11,.12);color:#fbbf24;padding:1px 7px;border-radius:4px">New route</span>'}
-    <div style="margin-left:auto;display:flex;gap:6px">
-      <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="showRouteApprovalModal('${p.zoneId}','${p.day}')">Review →</button>
-      <button class="btn btn-cyan btn-sm" style="font-size:10px" onclick="approvePendingRoute('${p.zoneId}','${p.day}',true)">✓ Approve</button>
-    </div>
-  </div>`).join('')
-  + (dayQueued.length ? `<div style="padding:7px 14px;background:rgba(6,214,160,.05);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <span style="font-size:11px;color:var(--cyan);font-weight:700">✅ ${dayQueued.length} route${dayQueued.length!==1?'s':''} approved — ready to dispatch</span>
-    <span style="font-size:11px;color:var(--muted)">${dayQueued.map(p=>p.zoneName+' · '+(p.stops?.length||0)+' stops').join(' · ')}</span>
-    <div style="margin-left:auto;display:flex;gap:6px">
-      ${dayQueued.map(p=>`
+  // Build the strip: each route gets its own pill row
+  const _stripRows = []
+
+  // Need-approval pills (draft / change_detected) — one per zone
+  needApproval.forEach(p => {
+    const isChange = p.status === 'change_detected'
+    _stripRows.push(`
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap;background:${isChange?'rgba(239,68,68,.04)':'rgba(245,158,11,.04)'}">
+        <span style="width:8px;height:8px;border-radius:50%;background:${isChange?'#ef4444':'#f59e0b'};flex-shrink:0"></span>
+        <div style="flex:1;min-width:160px">
+          <span style="font-size:12px;font-weight:700;color:var(--text)">${p.zoneName}</span>
+          <span style="font-size:10px;color:var(--muted);margin-left:6px">${p.day} · ${(p.stops||[]).length} stop${(p.stops||[]).length!==1?'s':''} · ${p.runner?.name||'no runner'}</span>
+        </div>
+        <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:${isChange?'rgba(239,68,68,.12)':'rgba(245,158,11,.12)'};color:${isChange?'#ef4444':'#fbbf24'}">${isChange?'⚠️ Changes detected':'New route'}</span>
+        <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="showRouteApprovalModal('${p.zoneId}','${p.day}')">Review →</button>
+        <button class="btn btn-cyan btn-sm" style="font-size:10px" onclick="approvePendingRoute('${p.zoneId}','${p.day}',true)">✓ Approve</button>
+      </div>`)
+  })
+
+  // Ready-to-launch pills — one per zone, each with its own Launch button
+  dayQueued.forEach(p => {
+    const stopCount = (p.stops||[]).length
+    const runnerName = p.runner?.name || 'no runner'
+    const earnOut = p.earnOut ? '$'+p.earnOut : ''
+    _stripRows.push(`
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap;background:rgba(6,214,160,.04)">
+        <span style="width:8px;height:8px;border-radius:50%;background:#06d6a0;flex-shrink:0"></span>
+        <div style="flex:1;min-width:160px">
+          <span style="font-size:12px;font-weight:700;color:var(--text)">${p.zoneName}</span>
+          <span style="font-size:10px;color:var(--muted);margin-left:6px">${p.day} · ${stopCount} stop${stopCount!==1?'s':''} · ${runnerName}${earnOut?' · '+earnOut:''}</span>
+        </div>
+        <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:rgba(6,214,160,.15);color:var(--cyan);font-weight:600">✅ Approved</span>
         <button onclick="adminLaunchBatch('${p.zoneId}','${p.day}',this)"
-          style="background:linear-gradient(135deg,#06d6a0,#22c55e);color:#07090f;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer;display:flex;align-items:center;gap:5px">
-          🚀 Launch ${p.zoneName}
-        </button>`).join('')}
-    </div>
-  </div>` : '')
-  + (dayExpired.length ? `<div style="padding:7px 14px;background:rgba(239,68,68,.06);border-bottom:1px solid rgba(239,68,68,.2);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <span style="font-size:11px;color:#ef4444;font-weight:700">⏰ ${dayExpired.length} offer${dayExpired.length!==1?'s':''} expired — runner did not accept</span>
-    <div style="margin-left:auto;display:flex;gap:6px">
-      ${dayExpired.map(b=>`
+          style="background:linear-gradient(135deg,#06d6a0,#22c55e);color:#07090f;border:none;border-radius:8px;padding:6px 16px;font-size:12px;font-weight:800;cursor:pointer">🚀 Launch ${p.zoneName}</button>
+      </div>`)
+  })
+
+  // Expired offer pills — one per zone
+  dayExpired.forEach(b => {
+    _stripRows.push(`
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap;background:rgba(239,68,68,.04)">
+        <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;flex-shrink:0"></span>
+        <div style="flex:1;min-width:160px">
+          <span style="font-size:12px;font-weight:700;color:var(--text)">${b.zoneName||b.zoneId}</span>
+          <span style="font-size:10px;color:var(--muted);margin-left:6px">Offer expired — runner did not accept</span>
+        </div>
+        <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:rgba(239,68,68,.12);color:#ef4444">⏰ Expired</span>
         <button onclick="sendRouteNow('${b.zoneId}','${b.day}',this)"
-          style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer">
-          ↻ Re-send ${b.zoneName||b.zoneId}
-        </button>`).join('')}
-    </div>
-  </div>` : '')
+          style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#ef4444;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer">↻ Re-send</button>
+      </div>`)
+  })
+
+  el.innerHTML = _stripRows.join('')
 }
 
 // Full day names for matching
