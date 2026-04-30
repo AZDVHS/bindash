@@ -8519,18 +8519,16 @@ async function loadRunnerRoutes(runnerRow){
     const _inProgBatch = Object.values(deduped).find(b => b.status === 'in_progress')
     if(_inProgBatch){
       const activeBadge = document.getElementById('rtab-active-count')
-      if(activeBadge){ activeBadge.textContent = '!'; activeBadge.style.display = 'inline' }
+      if(activeBadge){ activeBadge.textContent = '1'; activeBadge.style.display = 'inline'; activeBadge.style.background = '#22c55e' }
       if(!navRouteActive){
-        // Load directly by runner identity — no batch_id dependency
         _loadAndRenderActiveRoute()
       } else {
-        // Already have stops loaded — switch to active tab
         switchRouteTab('active')
         renderActiveRouteTab()
       }
-    }
 
     // Update badge counts on route tabs
+    }
     const upcomingBadge = document.getElementById('rtab-upcoming-count')
     const now = new Date()
     const upcomingJobs = activeJobs.filter(j => {
@@ -9714,7 +9712,7 @@ async function _autoCreateBinInBatch(binOutJobs, runnerRow){
   // The actual jobs already exist with status='offered' (unlocked by completeBatch).
   try {
     const ref       = binOutJobs[0]
-    const inBatchId = (ref.batch_id || ref.id) + '-IN'
+    let inBatchId = (ref.batch_id || ref.id) + '-IN'
 
     // Verify pre-created jobs exist
     let { data: existingBinIn } = await _supa.from('jobs')
@@ -24856,9 +24854,9 @@ function navSubmitRoute(){
     const activeBadge = document.getElementById('rtab-active-count')
     const todayDone = COMPLETED_ROUTES.filter(r=>r.label==='Today').length
     if(upBadge)    upBadge.textContent  = upcomingCards.length
-    if(compBadge)  compBadge.textContent= todayDone
-    if(activeBadge)activeBadge.style.display = 'none'
-
+    const _completedCount = (window._rnCompletedJobs||[]).length
+    if(upBadge)    upBadge.textContent  = upcomingCards.length || ''
+    if(compBadge)  compBadge.textContent = _completedCount > 0 ? _completedCount : ''
     // 6. Update runner dashboard projected pay and pending pay
     updateRnDashboardAfterSubmit(batchId, earned)
 
