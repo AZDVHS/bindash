@@ -22134,10 +22134,18 @@ function renderHomeownerCard(hw){
   const runner   = RUNNERS.find(r=>r.id===hw.assignedRunner||r.name===hw.assignedRunner||r.email===hw.assignedRunner)
   const zone     = getHWZoneName(hw)
   const statusColors = {
-    active:   ['#22c55e', '● Active'],
-    waitlist: ['#f59e0b', '⏳ Waitlist'],
-    paused:   ['#3b82f6', '⏸ Paused'],
-    inactive: ['#64748b', '○ Inactive'],
+    active:         ['#22c55e', '● Active'],
+    approved:       ['#22c55e', '● Active'],
+    waitlist:       ['#f59e0b', '⏳ Waitlist'],
+    waitlist_approved: ['#f59e0b', '⏳ Waitlist'],
+    pending:        ['#6366f1', '🔔 Pending'],
+    pending_review: ['#6366f1', '🔔 Pending'],
+    payment_pending:['#6366f1', '💳 Payment Pending'],
+    zone_assigned:  ['#6366f1', '🔔 Zone Assigned'],
+    paused:         ['#3b82f6', '⏸ Paused'],
+    inactive:       ['#64748b', '○ Inactive'],
+    cancelled:      ['#64748b', '○ Cancelled'],
+    disabled:       ['#64748b', '○ Disabled'],
   }
   const [scol,slbl] = statusColors[hw.status] || statusColors.active
   // Waitlist HOs get a distinct amber left border and background tint
@@ -30313,11 +30321,6 @@ function swapBatchRunnerKeepOpen(selectEl){
   // Re-render but card will stay open because we track open state
   renderDispatchPipeline()
 }
-
-  // Use live DB batches if no preview batches have been generated
-  const batchSource = generatedBatches.length ? generatedBatches : (window._livePipelineBatches || [])
-  const isLiveView = !generatedBatches.length && batchSource.length > 0
-
 
 function moveStopToBatch(fromBatchId, stopIdx, toBatchId){
   const from = generatedBatches.find(x=>x.id===fromBatchId)
