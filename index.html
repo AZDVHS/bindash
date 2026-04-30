@@ -28306,18 +28306,22 @@ function loadPendingApprovalsIntoDispatch(){
       </div>`)
   })
 
-  // Build context header — shows the BIN OUT night label above the zone pills
+  // Build context header
   const _pendingDay = pending[0]?.day || selectedDay || ''
   const _pendingDate = pending[0]?.date || ''
-  // Collection day = next day after the BIN OUT pill day
   const _d7 = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   const _pillIdx = _d7.findIndex(x => x === _pendingDay)
   const _colDay = _pillIdx >= 0 ? _d7[(_pillIdx + 1) % 7] : ''
-  const _contextHeader = _stripRows.length ? `<div style="padding:8px 14px;background:rgba(99,102,241,.06);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">`
-    + `<span style="font-size:11px;font-weight:700;color:#a5b4fc">🌙 BIN OUT — EVENING</span>`
-    + `<span style="font-size:11px;color:var(--muted)">${_dateLbl}${_colDay?' &nbsp;→&nbsp; '+_colDay+' collection':''}</span>`
-    + `<span style="font-size:10px;color:var(--muted);margin-left:auto">${_stripRows.length} route${_stripRows.length!==1?'s':''}</span>`
-    + `</div>` : ''
+  const _dateLbl = _pendingDate
+    ? new Date(_pendingDate + 'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})
+    : _pendingDay
+  const _contextHeader = _stripRows.length
+    ? '<div style="padding:8px 14px;background:rgba(99,102,241,.06);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">'
+      + '<span style="font-size:11px;font-weight:700;color:#a5b4fc">🌙 BIN OUT — EVENING</span>'
+      + '<span style="font-size:11px;color:var(--muted)">' + _dateLbl + (_colDay ? ' &nbsp;→&nbsp; ' + _colDay + ' collection' : '') + '</span>'
+      + '<span style="font-size:10px;color:var(--muted);margin-left:auto">' + _stripRows.length + ' route' + (_stripRows.length !== 1 ? 's' : '') + '</span>'
+      + '</div>'
+    : ''
   el.innerHTML = _contextHeader + _stripRows.join('')
 }
 
