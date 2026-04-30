@@ -28309,12 +28309,10 @@ function loadPendingApprovalsIntoDispatch(){
   // Build context header — shows the BIN OUT night label above the zone pills
   const _pendingDay = pending[0]?.day || selectedDay || ''
   const _pendingDate = pending[0]?.date || ''
-  const _colDay = pending[0]?.collectionDay || (()=>{
-    const d7=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
-    const idx = d7.findIndex(x=>x===_pendingDay)
-    return idx>=0 ? d7[(idx+1)%7] : ''
-  })()
-  const _dateLbl = _pendingDate ? new Date(_pendingDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : _pendingDay
+  // Collection day = next day after the BIN OUT pill day
+  const _d7 = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  const _pillIdx = _d7.findIndex(x => x === _pendingDay)
+  const _colDay = _pillIdx >= 0 ? _d7[(_pillIdx + 1) % 7] : ''
   const _contextHeader = _stripRows.length ? `<div style="padding:8px 14px;background:rgba(99,102,241,.06);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">`
     + `<span style="font-size:11px;font-weight:700;color:#a5b4fc">🌙 BIN OUT — EVENING</span>`
     + `<span style="font-size:11px;color:var(--muted)">${_dateLbl}${_colDay?' &nbsp;→&nbsp; '+_colDay+' collection':''}</span>`
@@ -30271,15 +30269,17 @@ function renderDispatchPipeline(){
 
   // Render with BIN_OUT first, then BIN_IN, each with a clear section header
   let html = mergeHtml
-  if(binOutBatches.length){
-    const colDay = binOutBatches[0]?.collectionDay || ''
+  // Only show BIN OUT section in pipeline if batches are past the queued/draft stage
+  // (queued routes are shown in the approval strip above — no need to duplicate)
+  const _pipelineBinOut = binOutBatches.filter(b => !['draft','queued','change_detected'].includes(b.status))
+  if(binOutBatches.length && _pipelineBinOut.length){
     const binOutNightLabel = binOutBatches[0]?.dateLabel || ''
     const sectionSub = [
       binOutNightLabel,
       colDay ? `→ ${colDay} collection` : 'Place bins at curb before 6am'
     ].filter(Boolean).join(' · ')
-    html += sectionHeader('🌙 BIN OUT — evening', binOutBatches.length, '#a5b4fc', sectionSub)
-    html += binOutBatches.map(renderBatchCard).join('')
+    html += sectionHeader('🌙 BIN OUT — evening', _pipelineBinOut.length, '#a5b4fc', sectionSub)
+    html += _pipelineBinOut.map(renderBatchCard).join('')
   }
   if(binInBatches.length){
     const colDay = binInBatches[0]?.collectionDay || ''
