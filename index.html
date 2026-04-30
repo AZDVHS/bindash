@@ -33502,6 +33502,8 @@ async function loadRunnerApplicationsFromSupabase(){
 // Reads from homeowners table first, then falls back to homeowner_signups
 // for backwards compatibility with homeowners approved before homeowners table existed
 async function loadHomeownersFromSupabase(){
+  if(window._hwLoading) return  // prevent concurrent loads
+  window._hwLoading = true
   try {
     HOMEOWNERS.length = 0
 
@@ -33643,11 +33645,9 @@ async function loadHomeownersFromSupabase(){
       '(', hwData.length, 'from homeowners table,', signupData.length, 'from signups,',
       HOMEOWNERS.length, 'total after dedup,', _wlCount, 'waitlist)')
     updateOverviewCounts()
-    if(document.getElementById('hw-card-list')?.offsetParent !== null){
+    if(document.getElementById('hw-card-list')){
       renderHomeownerList()
     }
-    renderHomeownerList()
-
     // Background: geocode any HO that has an address but no lat/lng
     // This enriches the admin map with real anchor points over time
     const needsGeocode = HOMEOWNERS.filter(h =>
@@ -33666,6 +33666,7 @@ async function loadHomeownersFromSupabase(){
       } catch(e){ /* skip */ }
     }
   } catch(e){ console.warn('[BinDash] loadHomeowners exception:', String(e?.message||e)) }
+  finally { window._hwLoading = false }
 }
 
 // -- LOAD ACTIVE RUNNERS from Supabase -------------------------
