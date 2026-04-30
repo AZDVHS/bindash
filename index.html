@@ -8412,6 +8412,69 @@ async function loadRunnerRoutes(runnerRow){
 
     // Build upcoming cards — exclude in_progress (those live in Active tab)
     const _deduped = Object.values(deduped)
+    // ── Merge Routes feature ──────────────────────────────────────────
+    // When runner has both BIN_OUT and BIN_IN for the same day, offer to merge
+    const _dedupedArr = Object.values(deduped)
+    const _mergeCard = (() => {
+      const _binOuts = _dedupedArr.filter(b => b.type==='BIN_OUT' && ['accepted','offered'].includes(b.status))
+      const _binIns  = _dedupedArr.filter(b => b.type==='BIN_IN'  && ['accepted','offered'].includes(b.status))
+      if(!_binOuts.length || !_binIns.length) return ''
+      // Find pairs with same date
+      const _pairs = []
+      _binOuts.forEach(bout => {
+        const _match = _binIns.find(bin => bin.date === bout.date)
+        if(_match) _pairs.push({ bout, bin: _match })
+      })
+      if(!_pairs.length) return ''
+      return _pairs.map(({bout, bin}) => {
+        const totalStops = bout.stops.length + bin.stops.length
+        const earn = (totalStops * 3.25).toFixed(2)
+        const win = getBinOutWindow(bout.date)
+        const canStart = win?.urgency === 'active' || win?.urgency === 'late'
+        const isToday = bout.date && new Date(bout.date+'T12:00:00').toDateString() === new Date().toDateString()
+        const dateStr = bout.date ? new Date(bout.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}) : '--'
+        const btnStyle = canStart
+          ? 'background:linear-gradient(135deg,#06d6a0,#a5b4fc);color:#07090f;border:none;border-radius:10px;padding:10px 20px;font-size:13px;font-weight:800;cursor:pointer;width:100%'
+          : 'background:rgba(99,102,241,.15);color:#a5b4fc;border:1.5px solid rgba(99,102,241,.3);border-radius:10px;padding:10px 20px;font-size:13px;font-weight:700;cursor:not-allowed;width:100%;opacity:.7'
+        const lockMsg = !canStart && isToday ? '<div style="font-size:10px;color:#f59e0b;margin-top:6px;text-align:center">⏰ Merged route unlocks at 3:00 PM — bin out window</div>' : ''
+        return `<div class="batch-card" style="border:2px solid rgba(99,102,241,.4);background:rgba(99,102,241,.04);margin-bottom:14px">
+          <div class="batch-head" style="background:rgba(99,102,241,.08);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="flex:1">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="background:rgba(99,102,241,.2);color:#a5b4fc;font-size:10px;font-weight:800;padding:2px 8px;border-radius:4px">🔗 MERGED ROUTE</span>
+                <span style="font-weight:700;font-size:13px">${totalStops} stops · $${earn}</span>
+              </div>
+              <div style="font-size:11px;color:var(--muted);margin-top:3px">${dateStr} · Both routes run together · BIN IN cannot start before 3 PM</div>
+            </div>
+          </div>
+          <div style="padding:12px 16px">
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px">Choose run order:</div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+              <button onclick="_setMergeOrder(this,'out-first','${bout.id}','${bin.id}')" id="merge-order-out-first-${bout.id}"
+                style="flex:1;min-width:120px;background:rgba(165,180,252,.15);border:2px solid rgba(99,102,241,.5);color:#a5b4fc;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer">
+                🌙 Bin Out first<br><span style="font-size:10px;font-weight:400;color:var(--muted)">${bout.stops.length} out → ${bin.stops.length} in</span>
+              </button>
+              <button onclick="_setMergeOrder(this,'in-first','${bout.id}','${bin.id}')" id="merge-order-in-first-${bout.id}"
+                style="flex:1;min-width:120px;background:rgba(110,231,183,.08);border:2px solid rgba(110,231,183,.3);color:#6ee7b7;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer">
+                ☀️ Bin In first<br><span style="font-size:10px;font-weight:400;color:var(--muted)">${bin.stops.length} in → ${bout.stops.length} out</span>
+              </button>
+            </div>
+            <button ${canStart?'':'disabled'} onclick="startMergedBatch('${bout.id}','${bin.id}',window._mergeOrder||'out-first')" style="${btnStyle}">
+              ${canStart ? '🚀 Start Merged Route' : '🔒 Merged route cannot start before 3:00 PM'}
+            </button>
+            ${lockMsg}
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:center">
+              <span style="font-size:10px;color:var(--muted)">Or run separately:</span>
+              <button onclick="startBatch('${bout.id}')" style="background:none;border:none;color:#a5b4fc;font-size:10px;cursor:pointer;text-decoration:underline">Run Bin Out alone</button>
+              <button onclick="startBatch('${bin.id}')" style="background:none;border:none;color:#6ee7b7;font-size:10px;cursor:pointer;text-decoration:underline">Run Bin In alone</button>
+            </div>
+          </div>
+        </div>`
+      }).join('')
+    })()
+    // Prepend merge card to batch list so it's visible at top
+    const _batchCardsWithMerge = _mergeCard + (batchCards || '')
+
     const _inProgBatches = _deduped.filter(b => b.status === 'in_progress')
     const _upcomingCards = Object.values(deduped).filter(b => b.status !== 'in_progress').map(b => {
       // Re-render only this batch's card from batchCards by finding its id
@@ -8441,7 +8504,7 @@ async function loadRunnerRoutes(runnerRow){
     const upcomingList = document.getElementById('upcoming-batch-list')
     const upcomingOnlyCards = _inProgBatches.length
       ? _inProgBanner
-      : batchCards || ''
+      : _batchCardsWithMerge || ''
 
     if(upcomingList) upcomingList.innerHTML = upcomingOnlyCards || `
       <div style="text-align:center;padding:40px 20px;color:var(--muted)">
@@ -9158,6 +9221,95 @@ function _startOfferPoll(runnerRow){
   _rnOfferPollTimer = setInterval(() => {
     _checkForNewOffer(runnerRow || window._currentRunnerRow)
   }, 60000)
+}
+
+// ── Merged Route: combines BIN_OUT stops then BIN_IN stops in one nav session ──
+// Track selected merge order — toggled by the order chips
+function _setMergeOrder(btn, order, boutId, binId){
+  window._mergeOrder = order
+  // Update chip styles
+  const outBtn = document.getElementById('merge-order-out-first-'+boutId)
+  const inBtn  = document.getElementById('merge-order-in-first-'+boutId)
+  if(outBtn) outBtn.style.borderColor = order==='out-first' ? '#a5b4fc' : 'rgba(99,102,241,.3)'
+  if(outBtn) outBtn.style.background  = order==='out-first' ? 'rgba(165,180,252,.25)' : 'rgba(165,180,252,.08)'
+  if(inBtn)  inBtn.style.borderColor  = order==='in-first'  ? '#6ee7b7' : 'rgba(110,231,183,.3)'
+  if(inBtn)  inBtn.style.background   = order==='in-first'  ? 'rgba(110,231,183,.18)' : 'rgba(110,231,183,.08)'
+}
+
+async function startMergedBatch(binOutBatchId, binInBatchId){
+  // Enforce 3pm window — same as BIN_OUT
+  const bout = window._rnBatchMap?.[Object.keys(window._rnBatchMap||{}).find(k=>window._rnBatchMap[k].id===binOutBatchId)]
+    || Object.values(window._rnBatchMap||{}).find(b=>b.id===binOutBatchId)
+  if(bout) {
+    const win = getBinOutWindow(bout.date)
+    if(win && win.urgency !== 'active' && win.urgency !== 'late'){
+      showToast('🔒 Merged route starts at 3:00 PM — bin out window not yet open', 'warn', 4000)
+      return
+    }
+  }
+
+  showToast('Building merged route...', 'info', 2000)
+  try {
+    // Fetch all stops for both batches
+    const [outRes, inRes] = await Promise.all([
+      _supa.from('jobs').select('*').eq('batch_id', binOutBatchId).in('status',['accepted','offered','in_progress']),
+      _supa.from('jobs').select('*').eq('batch_id', binInBatchId).in('status',['accepted','offered','in_progress'])
+    ])
+    const outJobs = outRes.data || []
+    const inJobs  = inRes.data  || []
+
+    if(!outJobs.length){ showToast('No BIN OUT stops found', 'err'); return }
+
+    // Build merged NAV_STOPS: BIN_OUT first, then BIN_IN
+    const hwMap = window._rnHwMap || {}
+    const hwName = email => {
+      const h = hwMap[email]
+      if(h) return ((h.first_name||'')+' '+(h.last_name||'')).trim() || email
+      return (window.HOMEOWNERS||[]).find(x=>x.email===email)?.name || email?.split('@')[0] || '--'
+    }
+    const toStop = (j, isBinIn=false) => ({
+      ...j,
+      hw: hwMap[j.homeowner_email] || null,
+      hwDisplayName: hwName(j.homeowner_email),
+      jobId: j.id,
+      address: hwMap[j.homeowner_email]?.street_address || j.homeowner_address || '',
+      zip: hwMap[j.homeowner_email]?.zip_code || '',
+      gateCode: hwMap[j.homeowner_email]?.gate_code || '',
+      visitType: isBinIn ? 'BIN_IN' : 'BIN_OUT',
+      _isMergedBinIn: isBinIn,
+    })
+
+    const _outStops = outJobs.map(j => toStop(j, false))
+    const _inStops  = inJobs.map(j  => toStop(j, true))
+    const mergedStops = (order === 'in-first')
+      ? [..._inStops, ..._outStops]
+      : [..._outStops, ..._inStops]
+
+    // Set global nav state — use BIN_OUT batch as primary ID
+    NAV_STOPS    = mergedStops
+    navBatchId   = binOutBatchId
+    window._mergedBinInBatchId = binInBatchId
+    window._isMergedRoute = true
+    navStop      = 0
+    navPhase     = 'navigate'
+    navRouteActive = true
+
+    // Mark both batches in_progress
+    await Promise.all([
+      _supa.from('jobs').update({ status:'in_progress', updated_at:new Date().toISOString() }).eq('batch_id', binOutBatchId),
+      _supa.from('jobs').update({ status:'in_progress', updated_at:new Date().toISOString() }).eq('batch_id', binInBatchId)
+    ])
+
+    _saveNavState()
+    switchRouteTab('active')
+    renderActiveRouteTab()
+    const _orderStr = (order==='in-first') ? 'Bin In first, then Bin Out' : 'Bin Out first, then Bin In'
+    showToast('🔗 Merged route started — ' + mergedStops.length + ' stops · ' + _orderStr, 'ok', 4000)
+    showToast('🔗 Merged route started — ' + mergedStops.length + ' stops · ' + _orderStr, 'ok', 4000)
+  } catch(e){
+    showToast('Could not start merged route: ' + (e?.message||e), 'err')
+    console.error('[MergedRoute]', e)
+  }
 }
 
 async function startBatch(batchId){
@@ -21251,6 +21403,12 @@ async function navComplete(){
     ;(async()=>{
       try {
         await completeBatch(navBatchId)
+        // For merged routes, also complete the BIN_IN batch
+        if(window._isMergedRoute && window._mergedBinInBatchId){
+          await completeBatch(window._mergedBinInBatchId)
+          window._isMergedRoute = false
+          window._mergedBinInBatchId = null
+        }
         if(rnRow.email) sendEmail(rnRow.email,'Route complete — $'+earn+' earned 🎉',
           EMAIL.routeComplete(rnRow.first_name||'Runner',NAV_STOPS.length,zname,earn),'route_complete')
       } catch(e){ console.warn('[BinDash] navComplete last stop:', e.message) }
@@ -23805,6 +23963,15 @@ function renderActiveRouteTab(){
   }
 
   const s = stops[navStop] || stops[stops.length-1]
+
+  // Merged route indicator
+  const _mergedBanner = window._isMergedRoute
+    ? '<div style="background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);border-radius:8px;padding:8px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px">'
+      + '<span style="font-size:13px">🔗</span>'
+      + '<div style="flex:1"><span style="font-size:11px;font-weight:700;color:#a5b4fc">Merged Route</span> <span style="font-size:10px;color:var(--muted)">'
+      + NAV_STOPS.filter(s=>!s._isMergedBinIn).length + ' Bin Out · ' + NAV_STOPS.filter(s=>s._isMergedBinIn).length + ' Bin In · Stop ' + (navStop+1) + ' of ' + NAV_STOPS.length
+      + '</span></div></div>'
+    : ''
   const totalStops = stops.length
   const pct = Math.round((navStop / totalStops) * 100)
   const isArrived = navPhase === 'arrived'
@@ -23818,7 +23985,7 @@ function renderActiveRouteTab(){
     const earned = (totalStops * 3.25).toFixed(2)
     const friday = (() => { const d=new Date(); const days=(5-d.getDay()+7)%7||7; d.setDate(d.getDate()+days); return d.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}) })()
     if(stickyBar) stickyBar.style.display = 'none'
-    container.innerHTML = `
+    container.innerHTML = _mergedBanner + `
       <div style="padding:24px 16px;text-align:center">
         <div style="font-size:64px;margin-bottom:12px">🎉</div>
         <div style="font-size:24px;font-weight:800;color:#22c55e;margin-bottom:4px">All Done!</div>
