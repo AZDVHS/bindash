@@ -1183,6 +1183,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.012
 .ob-day-pill.on{border-color:var(--cyan);background:rgba(6,214,160,.1);color:var(--cyan)}
 .vt-in{background:rgba(6,214,160,.1);border:1px solid rgba(6,214,160,.3);color:#6ee7b7;border-radius:6px;font-size:10px;font-weight:700;padding:3px 8px;letter-spacing:.04em}
 .vt-sos{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:6px;font-size:10px;font-weight:700;padding:3px 8px;letter-spacing:.04em}
+.rn-hex-selected{animation:hexPulse 1.2s ease-in-out infinite}
+@keyframes hexPulse{0%,100%{opacity:1;stroke-width:4}50%{opacity:.5;stroke-width:6}}
 .jobs-tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-size:12px;font-weight:600;padding:6px 14px;cursor:pointer;transition:all .15s;position:relative;white-space:nowrap}
 .jobs-tab:hover{color:var(--text)}
 .jobs-tab.jobs-tab-on{color:var(--cyan);border-bottom-color:var(--cyan)}
@@ -3838,8 +3840,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <div class="s-logo">🗑️ BIN<em>DASH</em></div>
       <div class="nav-i on" onclick="rnNav(this,'rn-home')"><span class="ic">📊</span> Dashboard</div>
       <div class="nav-i" onclick="rnNav(this,'rn-routes')"><span class="ic">🗺️</span> My Routes</div>
-      <div class="nav-i" onclick="rnNav(this,'rn-zones')"><span class="ic">📍</span> My Zones</div>
-      <div class="nav-i" onclick="rnNav(this,'rn-scout');renderRunnerHeatmap()"><span class="ic">🚩</span> Scout Area</div>
+      <div class="nav-i" onclick="rnNav(this,'rn-scout');renderRunnerHeatmap()"><span class="ic">📍</span> My Zones</div>
       <div class="nav-i" onclick="rnNav(this,'rn-earnings')"><span class="ic">💵</span> Earnings &amp; Pay</div>
       <div class="nav-i" onclick="rnNav(this,'rn-account')"><span class="ic">👤</span> My Info</div>
       <div class="s-bot">
@@ -4147,7 +4148,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           <!-- Header -->
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;gap:10px">
             <div>
-              <div style="font-size:20px;font-weight:700">📡 Scout Area</div>
+              <div style="font-size:20px;font-weight:700">📍 My Zones</div>
               <div style="font-size:12px;color:var(--muted);margin-top:3px" id="rn-scout-mode-label">Your zones &amp; coverage — tap hexes to manage</div>
             </div>
             <button class="btn btn-outline btn-sm" onclick="renderRunnerHeatmap()" style="flex-shrink:0;font-size:11px">↺ Refresh</button>
@@ -4178,13 +4179,6 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             <div style="background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);border-radius:9px;padding:10px 13px;font-size:12px;color:var(--sub);line-height:1.6;margin-bottom:8px">
               <strong style="color:#fbbf24">Tap any greyed res-6 zone</strong> outside your area to request it. You will be added as a secondary runner once admin approves.
               Zones with 🟡 amber hexes have homeowner demand — good targets.
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;font-size:11px">
-              <span style="color:var(--muted);flex-shrink:0">Expand from:</span>
-              <select id="rn-scout-anchor-zone" onchange="renderRunnerHeatmap()"
-                style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:4px 8px;font-size:11px">
-                <option value="home">My Home Location</option>
-              </select>
             </div>
           </div>
 
@@ -15542,53 +15536,8 @@ async function renderRunnerHeatmap(){
   let anchorLat = null, anchorLng = null
 
   // Build anchor zone selector options from runner's approved zones
-  const anchorSel = document.getElementById('rn-scout-anchor-zone')
-  if(anchorSel && mode === 'expand'){
-    // Preserve current selection across re-renders
-    const currentVal = window._rnScoutAnchorVal || anchorSel.value || 'home'
-
-    // Collect zone IDs from all sources: coverage_zones, zone_id, and in-memory RUNNERS
-    const zoneIdSet = new Set()
-    try {
-      const czRaw = rnRow.coverage_zones
-      const czIds = czRaw ? (typeof czRaw==='string'?JSON.parse(czRaw):czRaw) : []
-      czIds.forEach(id => zoneIdSet.add(id))
-    } catch(e){}
-    if(rnRow.zone_id) zoneIdSet.add(rnRow.zone_id)
-    // Also check in-memory RUNNERS for this runner's zones
-    const myRunner = RUNNERS.find(r => r.email?.toLowerCase() === (rnRow.email||'').toLowerCase())
-    if(myRunner){
-      myRunner.coverageZones?.forEach(id => zoneIdSet.add(id))
-      if(myRunner.zoneId) zoneIdSet.add(myRunner.zoneId)
-    }
-    // Also check runner_zone_requests approved entries (loaded in loadRNZones)
-    if(window._runnerZoneRoles){
-      Object.keys(window._runnerZoneRoles).forEach(zid => zoneIdSet.add(zid))
-    }
-
-    const opts = ['<option value="home">My Home ('+rnZip+')</option>']
-    zoneIdSet.forEach(zid => {
-      const z = ADMIN_ZONES.find(x=>x.id===zid)
-      if(!z) return
-      opts.push('<option value="'+zid+'"'+(currentVal===zid?' selected':'')+'>'+z.name+' — '+( z.zips?.[0]||z.zip||'?')+'</option>')
-    })
-    anchorSel.innerHTML = opts.join('')
-    // Restore selection
-    if(currentVal && anchorSel.querySelector('option[value="'+currentVal+'"]')){
-      anchorSel.value = currentVal
-    }
-    anchorSel.onchange = () => { window._rnScoutAnchorVal = anchorSel.value; renderRunnerHeatmap() }
-  }
-
-  // Determine anchor based on selected zone (in expand mode) or home (mine mode)
-  const selectedAnchorZoneId = mode==='expand' ? (anchorSel?.value||'home') : 'home'
-  if(selectedAnchorZoneId !== 'home'){
-    // Use selected zone's ZIP centroid as anchor
-    const selZone = ADMIN_ZONES.find(z=>z.id===selectedAnchorZoneId)
-    const selZip  = selZone?.zips?.[0] || selZone?.zip || ''
-    const selCtr  = ZIP_CENTROIDS[selZip]
-    if(selCtr){ anchorLat = selCtr[0]; anchorLng = selCtr[1] }
-  }
+  // No dropdown — always anchor from runner's home location
+  const selectedAnchorZoneId = 'home'
 
   // Try cached anchor hex first (home location)
   if(!anchorLat && window._rnAnchorHex6 && typeof h3 !== 'undefined'){
@@ -15826,15 +15775,21 @@ async function renderRunnerHeatmap(){
 
       if(isExpand){
         const openZsp = () => {
-          // Zoom to H6 first so runner can see sub-grids, then open panel
+          // Flash a highlight outline on the selected H6 so runner sees what they picked
           try {
             const b6 = h3.cellToBoundary(adj6).map(([la,ln])=>[la,ln])
+            // Remove any existing selection highlight
+            if(window._rnSelectedHex6Layer) window._rnSelectedHex6Layer.remove()
+            // Draw thick pulsing selection ring
+            window._rnSelectedHex6Layer = L.polygon(b6, {
+              color: '#06d6a0', weight: 4, fillColor: '#06d6a0', fillOpacity: 0.12,
+              opacity: 1, dashArray: null, className: 'rn-hex-selected'
+            }).addTo(window._rnHeatMap)
+            // Zoom to H6
             window._rnHeatMap?.fitBounds(b6, { padding:[30,30], maxZoom:13, animate:true })
           } catch(e){}
-          // Small delay so map finishes panning before panel opens
           setTimeout(() => _rnZspOpen(adj6, null, { hoCount: adjHoCount, hasRunner: adjHasRunner }), 300)
         }
-        outline.on('click', openZsp)
         // Also add a transparent clickable overlay so tapping anywhere in the zone works
         const overlay = L.polygon(b6pts, {
           color:'transparent', fillColor:'transparent', fillOpacity:0.01,
@@ -16484,9 +16439,12 @@ function _rnZspClose(){
   window._rnZspPendingHexes.clear()
   const panel = document.getElementById('rn-zone-select-panel')
   if(panel) panel.style.display = 'none'
+  if(window._rnSelectedHex6Layer){ window._rnSelectedHex6Layer.remove(); window._rnSelectedHex6Layer = null }
 }
 
 async function _rnZspAccept(){
+  // Clear the selection highlight
+  if(window._rnSelectedHex6Layer){ window._rnSelectedHex6Layer.remove(); window._rnSelectedHex6Layer = null }
   const hexes = [...window._rnZspPendingHexes]
   if(!hexes.length){ showToast('Select at least one hex', 'err'); return }
 
@@ -17092,7 +17050,7 @@ async function _renderRnZonesMap(myZones, myHomeowners, waitlistedHOs){
           .bindTooltip(
             '<div style="font-size:11px;font-weight:700;color:#1e293b">'+z.name+'</div>'
             +'<div style="font-size:10px;color:#475569">'+hoCt+' HO'+(hoCt!==1?'s':'')+' · '+(isWl?'Building':'No zone yet')
-            +'</div><div style="font-size:10px;color:#0d9488;margin-top:2px">→ Go to Scout Area to request</div>',
+            +'</div><div style="font-size:10px;color:#0d9488;margin-top:2px">→ Go to My Zones to request</div>',
             { className:'h3-tip', direction:'top' }
           )
           .addTo(map)
@@ -17368,7 +17326,7 @@ async function loadRNZones(){
       <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">No zones found</div>
       <div style="font-size:12px;margin-bottom:4px">ZIP: <strong>${runnerZip||'unknown'}</strong> · ID: <strong>${runnerId||'not found'}</strong></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Ask admin to assign you via the Runners tab, or request a zone below.</div>
-      <button class="btn btn-outline btn-sm" onclick="rnNav(null,'rn-scout');rnScoutSetMode('expand')" style="font-size:11px">📡 Go to Scout Area →</button>
+      <button class="btn btn-outline btn-sm" onclick="rnNav(null,'rn-scout');rnScoutSetMode('expand')" style="font-size:11px">📡 Go to My Zones →</button>
     </div>`}
 
     ${pendingReqs.length ? `<div style="margin-top:16px">
