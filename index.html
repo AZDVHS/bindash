@@ -4913,6 +4913,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             <button id="jobs-tab-complete" onclick="setJobsTab('complete')" class="jobs-tab">✓ Completed<span id="jobs-badge-complete" class="jobs-badge"></span></button>
             <button id="jobs-tab-alerts"   onclick="setJobsTab('alerts')"   class="jobs-tab" style="margin-left:auto;color:#ef4444">🚨 Alerts<span id="jobs-badge-alerts"   class="jobs-badge" style="background:#ef4444"></span></button>
             <button class="btn btn-ghost btn-sm" onclick="loadAdminJobs()" style="margin-left:8px;font-size:11px">↺</button>
+            <button class="btn btn-ghost btn-sm" onclick="adminPurgeOldJobs()" style="font-size:11px;color:#f87171" title="Delete jobs older than 30 days">🗑 Purge old</button>
           </div>
           <!-- Hidden inputs for backward compat (filterAdminJobs reads these) -->
           <input type="hidden" id="jobs-status-filter" value="">
@@ -7171,13 +7172,45 @@ async function loadRNInterestList(runnerRow){
 let _adminJobsCache = []
 
 async function loadAdminJobs(){
+async function adminPurgeOldJobs(){
+  const cutoffDate = new Date()
+  cutoffDate.setDate(cutoffDate.getDate() - 30)
+  const cutoffStr = cutoffDate.toISOString().slice(0,10)
+  const label = cutoffStr  // e.g. '2026-03-30'
+  if(!confirm(`Delete all jobs scheduled before ${label}?\nThis also cleans dispatch_queue entries. Cannot be undone.`)) return
+  try {
+    showToast('Purging old jobs...', 'info', 3000)
+    // Delete old jobs
+    const { error: jobErr, count: jobCount } = await _supa
+      .from('jobs').delete({ count:'exact' }).lt('scheduled_date', cutoffStr)
+    if(jobErr) throw jobErr
+    // Delete old dispatch_queue entries
+    const { error: dqErr } = await _supa
+      .from('dispatch_queue').delete().lt('scheduled_date', cutoffStr)
+    if(dqErr) console.warn('[Purge] dispatch_queue:', dqErr.message)
+    // Delete old runner_earnings
+    const { error: reErr } = await _supa
+      .from('runner_earnings').delete().lt('created_at', cutoffStr)
+    if(reErr) console.warn('[Purge] runner_earnings:', reErr.message)
+    showToast(`✅ Purged ${jobCount||0} old jobs — DB cleaned`, 'ok', 5000)
+    window._dqCleanupDone = false  // allow pipeline cleanup to re-run
+    window._livePipelineBatches = null
+    _adminJobsCache = []
+    await loadAdminJobs()
+  } catch(e){
+    showToast('Purge failed: '+e.message, 'err')
+    console.error('[Purge]', e)
+  }
+}
+
   const list   = document.getElementById('jobs-batch-list')
   const banner = document.getElementById('jobs-late-banner')
   if(list) list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">Loading routes...</div>'
   try {
+    const _cutoff = new Date(); _cutoff.setDate(_cutoff.getDate() - 30)
+    const _cutoffStr = _cutoff.toISOString().slice(0,10)
     const { data: jobs, error } = await _supa
-      .from('jobs').select('*').order('scheduled_date', { ascending: false }).limit(300)
-    if(error) throw error
+      .from('jobs').select('*').gte('scheduled_date', _cutoffStr).order('scheduled_date', { ascending: false }).limit(150)
     _adminJobsCache = jobs || []
     filterAdminJobs()
   } catch(e) {
