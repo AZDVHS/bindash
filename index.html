@@ -4804,25 +4804,29 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
           </div>
         </div>
         <div class="pg" id="ad-homeowners">
-          <div class="toolbar">
-            <input placeholder="Search homeowners..." style="width:210px" oninput="filterHomeowners(this.value)">
-            <select style="width:auto" id="hw-filter-zone" onchange="filterHomeowners()">
+        <div class="pg" id="ad-homeowners">
+          <!-- Search + zone filter row -->
+          <div class="toolbar" style="margin-bottom:0;padding-bottom:8px;border-bottom:none">
+            <input placeholder="Search homeowners..." id="hw-search" style="width:200px" oninput="renderHomeownerList()">
+            <select style="width:auto" id="hw-filter-zone" onchange="renderHomeownerList()">
               <option value="">All Zones</option>
             </select>
-            <select style="width:auto" id="hw-filter-day" onchange="filterHomeowners()">
+            <select style="width:auto" id="hw-filter-day" onchange="renderHomeownerList()">
               <option value="">All Days</option>
               <option>Mon</option><option>Tue</option><option>Wed</option><option>Thu</option><option>Fri</option>
             </select>
-            <select style="width:auto" id="hw-filter-status" onchange="filterHomeowners()">
-              <option value="">All</option>
-              <option value="active">✅ Active</option>
-              <option value="waitlist">⏳ Waitlist</option>
-              <option value="paused">⏸ Paused</option>
-              <option value="inactive">○ Inactive</option>
-            </select>
-            <span class="tc" id="hw-count">0 homeowners</span>
+            <span style="margin-left:auto"></span>
             <button class="btn btn-cyan btn-sm" onclick="showAddHW()">+ Add</button>
           </div>
+          <!-- Status tabs -->
+          <div style="display:flex;align-items:center;gap:0;border-bottom:2px solid var(--border);margin-bottom:14px">
+            <button id="hw-tab-active"   onclick="setHWTab('active')"   class="jobs-tab jobs-tab-on">✅ Active<span   id="hw-badge-active"   class="jobs-badge"></span></button>
+            <button id="hw-tab-waitlist" onclick="setHWTab('waitlist')" class="jobs-tab">⏳ Waitlist<span id="hw-badge-waitlist" class="jobs-badge"></span></button>
+            <button id="hw-tab-pending"  onclick="setHWTab('pending')"  class="jobs-tab">🔔 Pending<span  id="hw-badge-pending"  class="jobs-badge"></span></button>
+            <button id="hw-tab-inactive" onclick="setHWTab('inactive')" class="jobs-tab">○ Inactive<span id="hw-badge-inactive" class="jobs-badge"></span></button>
+            <span id="hw-count" class="tc" style="margin-left:auto;font-size:11px;color:var(--muted)"></span>
+          </div>
+          <input type="hidden" id="hw-active-tab" value="active">
           <div id="hw-card-list" style="display:flex;flex-direction:column;gap:10px"></div>
         </div>
 
@@ -5095,6 +5099,14 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
             <span style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--sub)"><span style="width:8px;height:8px;background:#94a3b8;border-radius:50%;display:inline-block"></span>Inactive -- disabled</span>
           </div>
 
+          <!-- Zone status tabs -->
+          <div style="display:flex;align-items:center;gap:0;border-bottom:2px solid var(--border);margin-bottom:14px">
+            <button id="zone-tab-live"     onclick="setZoneTab('live')"     class="jobs-tab jobs-tab-on">🟢 Live<span     id="zone-badge-live"     class="jobs-badge"></span></button>
+            <button id="zone-tab-waitlist" onclick="setZoneTab('waitlist')" class="jobs-tab">⏳ Waitlist<span id="zone-badge-waitlist" class="jobs-badge"></span></button>
+            <button id="zone-tab-inactive" onclick="setZoneTab('inactive')" class="jobs-tab">○ Inactive<span id="zone-badge-inactive" class="jobs-badge"></span></button>
+            <button class="btn btn-ghost btn-sm" onclick="renderAdminZones()" style="margin-left:auto;font-size:11px">↺</button>
+          </div>
+          <input type="hidden" id="zone-active-tab" value="live">
           <div id="admin-zone-list" style="display:flex;flex-direction:column;gap:10px"></div>
 
         </div>
@@ -5670,14 +5682,14 @@ async function populateHWDashboard(){
     // Tier 2: homeowners table by email + pull prefs from signups
     if(!data){
       try {
-        const { data: hwRow, error: hwErr } = await _supa.from('homeowners').select('*').ilike('email', _userEmail).maybeSingle()
+        const { data: hwRow, error: hwErr } = await _supa.from('homeowners').select('*').eq('email', (_userEmail||'').toLowerCase()).maybeSingle()
         console.log('[BinDash] homeowners by email — found:', !!hwRow, 'err:', hwErr?.message)
         if(hwRow){
           let sigRow = null
           try {
             const { data: sr } = await _supa.from('homeowner_signups')
               .select('street_address,city,zip_code,state,bin_location,gate_type,gate_code,pet_info,curb_notes,service_notes,service_type,frequency,plan_id,collection_day,collection_day_2,stripe_customer_id,stripe_subscription_id')
-              .ilike('email', _userEmail).maybeSingle()
+              .eq('email', (_userEmail||'').toLowerCase()).maybeSingle()
             sigRow = sr
           } catch(e){}
           data = {
@@ -5805,7 +5817,7 @@ async function populateHWDashboard(){
     } else if(status === 'waitlisted'){
       // Check homeowners table first — if they have a record, show dashboard
       try {
-        const { data: hwCheck } = await _supa.from('homeowners').select('*').ilike('email', _userEmail).maybeSingle()
+        const { data: hwCheck } = await _supa.from('homeowners').select('*').eq('email', (_userEmail||'').toLowerCase()).maybeSingle()
         if(hwCheck){
           const mergedRow = { ...row, ...hwCheck, status: hwCheck.status || 'waitlist' }
           window._hwProfileRow = mergedRow
@@ -22260,7 +22272,7 @@ async function _adminActivateHW(hwId){
     // Step 1: Pull latest data from homeowner_signups to preserve all fields
     let sigData = null
     try {
-      const { data: sd } = await _supa.from('homeowner_signups').select('*').ilike('email', hw.email).maybeSingle()
+      const { data: sd } = await _supa.from('homeowner_signups').select('*').eq('email', (hw.email||'').toLowerCase()).maybeSingle()
       sigData = sd
     } catch(e){}
 
@@ -22318,7 +22330,7 @@ async function _adminActivateHW(hwId){
       hwErr = error
     } else {
       // Fallback: match by email
-      const { error } = await _supa.from('homeowners').update(_hwUpdate).ilike('email', _hwEmail)
+      const { error } = await _supa.from('homeowners').update(_hwUpdate).eq('email', _hwEmail)
       hwErr = error
     }
     if(hwErr) console.warn('[Activate] homeowners update:', hwErr.message)
@@ -22402,44 +22414,79 @@ function toggleHWExpand(hwId){
   if(!open && !_adminJobsCache?.length) loadAdminJobs()
 }
 
+function setHWTab(tab){
+  document.querySelectorAll('[id^="hw-tab-"]').forEach(b => b.classList.remove('jobs-tab-on'))
+  const btn = document.getElementById('hw-tab-'+tab)
+  if(btn) btn.classList.add('jobs-tab-on')
+  const inp = document.getElementById('hw-active-tab')
+  if(inp) inp.value = tab
+  renderHomeownerList()
+}
+
 function renderHomeownerList(){
   const list = document.getElementById('hw-card-list')
   if(!list) return
-  const zoneFil   = document.getElementById('hw-filter-zone')?.value  || ''
-  const dayFil    = document.getElementById('hw-filter-day')?.value   || ''
-  const statusFil = document.getElementById('hw-filter-status')?.value|| ''
-  const searchEl  = document.querySelector('#ad-homeowners input[placeholder="Search homeowners..."]')
-  const q = searchEl?.value?.toLowerCase() || ''
+  const zoneFil = document.getElementById('hw-filter-zone')?.value || ''
+  const dayFil  = document.getElementById('hw-filter-day')?.value  || ''
+  const q = (document.getElementById('hw-search')?.value || '').toLowerCase()
+  const activeTab = document.getElementById('hw-active-tab')?.value || 'active'
 
-  let filtered = HOMEOWNERS.filter(hw=>{
+  // Tab → status groups
+  const _tabStatuses = {
+    active:   ['active','approved'],
+    waitlist: ['waitlist','waitlist_approved'],
+    pending:  ['pending','pending_review','payment_pending','zone_assigned'],
+    inactive: ['inactive','paused','cancelled','disabled'],
+  }
+
+  // Compute badge counts
+  const _counts = { active:0, waitlist:0, pending:0, inactive:0 }
+  HOMEOWNERS.forEach(hw => {
+    const s = hw.status || 'active'
+    if(_tabStatuses.active.includes(s))   _counts.active++
+    else if(_tabStatuses.waitlist.includes(s)) _counts.waitlist++
+    else if(_tabStatuses.pending.includes(s))  _counts.pending++
+    else _counts.inactive++
+  })
+  Object.keys(_counts).forEach(k => {
+    const el = document.getElementById('hw-badge-'+k)
+    if(el) el.textContent = _counts[k] > 0 ? _counts[k] : ''
+  })
+
+  // Filter by tab + search + zone + day
+  let filtered = HOMEOWNERS.filter(hw => {
+    const s = hw.status || 'active'
+    const tabGroup = _tabStatuses[activeTab] || []
+    // Active tab catches anything not in other groups (fallback)
+    if(activeTab === 'active' && !Object.values(_tabStatuses).flat().includes(s)) return true
+    if(!tabGroup.includes(s)) return false
     if(zoneFil && hw.zoneId !== zoneFil) return false
     if(dayFil && hw.day !== dayFil && hw.dayRecycling !== dayFil && hw.dayWaste !== dayFil) return false
-    if(statusFil && hw.status !== statusFil) return false
-    if(q && !hw.name.toLowerCase().includes(q) && !hw.address.toLowerCase().includes(q) && !hw.email.toLowerCase().includes(q)) return false
+    if(q && !hw.name.toLowerCase().includes(q) && !(hw.address||'').toLowerCase().includes(q) && !hw.email.toLowerCase().includes(q)) return false
     return true
   })
-  // Sort: waitlist first (needs attention), then active, then paused/inactive
-  const _statusOrder = { waitlist:0, active:1, paused:2, inactive:3 }
-  filtered.sort((a,b) => (_statusOrder[a.status]??1) - (_statusOrder[b.status]??1))
 
+  // Sort within tab
+  if(activeTab === 'waitlist') filtered.sort((a,b) => (a.name||'').localeCompare(b.name||''))
+  else if(activeTab === 'pending') filtered.sort((a,b) => (b.createdAt||'') > (a.createdAt||'') ? 1 : -1)
+  else filtered.sort((a,b) => (a.name||'').localeCompare(b.name||''))
+
+  // Count display
   const countEl = document.getElementById('hw-count')
-  if(countEl){
-    const _wl = filtered.filter(h=>h.status==='waitlist').length
-    const _act = filtered.filter(h=>h.status==='active').length
-    countEl.textContent = filtered.length+' homeowner'+(filtered.length!==1?'s':'')+(_wl?' · '+_wl+' waitlist':'')
-  }
-  list.innerHTML = filtered.length ? filtered.map(renderHomeownerCard).join('') :
-    '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No homeowners match the current filters.</div>'
+  if(countEl) countEl.textContent = filtered.length + ' shown'
 
   // Populate zone filter
   const zf = document.getElementById('hw-filter-zone')
   if(zf && zf.options.length <= 1){
     ADMIN_ZONES.forEach(z=>{ const o=document.createElement('option'); o.value=z.id; o.textContent=z.name; zf.appendChild(o) })
   }
+
+  list.innerHTML = filtered.length
+    ? filtered.map(renderHomeownerCard).join('')
+    : '<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No ' + activeTab + ' homeowners' + (q?' matching "'+q+'"':'') + '.</div>'
 }
 
 function filterHomeowners(q){ renderHomeownerList() }
-
 // ==================================================================
 // PAYMENTS & PAYOUTS SYSTEM
 // ==================================================================
@@ -31271,9 +31318,40 @@ function _renderMicroZoneCard(z){
   </div>`
 }
 
+function setZoneTab(tab){
+  document.querySelectorAll('[id^="zone-tab-"]').forEach(b => b.classList.remove('jobs-tab-on'))
+  const btn = document.getElementById('zone-tab-'+tab)
+  if(btn) btn.classList.add('jobs-tab-on')
+  const inp = document.getElementById('zone-active-tab')
+  if(inp) inp.value = tab
+  renderAdminZones()
+}
+
 function renderAdminZones(){
   const el = document.getElementById('admin-zone-list')
   if(!el) return
+
+  // Update zone tab badges
+  const _zCounts = { live:0, waitlist:0, inactive:0 }
+  ADMIN_ZONES.forEach(z => {
+    if(z.status === 'live') _zCounts.live++
+    else if(z.status === 'waitlist') _zCounts.waitlist++
+    else _zCounts.inactive++
+  })
+  Object.keys(_zCounts).forEach(k => {
+    const badge = document.getElementById('zone-badge-'+k)
+    if(badge) badge.textContent = _zCounts[k] > 0 ? _zCounts[k] : ''
+  })
+
+  // Filter zones by active tab
+  const _zActiveTab = document.getElementById('zone-active-tab')?.value || 'live'
+  const _zFiltered = ADMIN_ZONES.filter(z => {
+    if(_zActiveTab === 'live')     return z.status === 'live'
+    if(_zActiveTab === 'waitlist') return z.status === 'waitlist'
+    if(_zActiveTab === 'inactive') return z.status !== 'live' && z.status !== 'waitlist'
+    return true
+  })
+
   if(!ADMIN_ZONES.length){
     el.innerHTML = `<div style="text-align:center;padding:48px 20px;color:var(--muted)">
       <div style="font-size:36px;margin-bottom:12px">📍</div>
@@ -31284,7 +31362,13 @@ function renderAdminZones(){
     return
   }
 
-  el.innerHTML = ADMIN_ZONES.map((z,idx) => {
+
+  if(!_zFiltered.length){
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No ' + _zActiveTab + ' zones.</div>'
+    return
+  }
+
+  el.innerHTML = _zFiltered.map((z,idx) => {
     const sc   = z.status==='live'?'#22c55e':z.status==='waitlist'?'#f59e0b':'#6b7280'
     const sl   = z.status==='live'?'Live':z.status==='waitlist'?'Waitlist':'Inactive'
     const zips = (z.zips?.length ? z.zips : [z.zip]).filter(Boolean)
