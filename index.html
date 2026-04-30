@@ -17537,7 +17537,6 @@ function adNav(el, pg){
   if(pg === 'ad-dispatch')   setTimeout(initDispatchPage, 50)
   if(pg === 'ad-homeowners'){ loadHomeownersFromSupabase().then(function(){ renderHomeownerList() }) }
   if(pg === 'ad-pending-hw'){
-    // Always reload from DB when navigating to this page — ensures freshest data
     loadSignupsFromSupabase().then(() => renderPendingHWList())
   }
   if(pg === 'ad-pending')    setTimeout(renderPendingRunnerList, 50)
