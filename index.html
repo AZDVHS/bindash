@@ -33567,7 +33567,10 @@ async function loadHomeownersFromSupabase(){
         assignedRunner: row.assigned_runner||null,
         referredBy:     row.referred_by||row.referred_by_runner||null,
         referredByEmail:row.referred_by_email||null,
-        status:         (['waitlist_approved','waitlist','waitlist_pending'].includes(row.status)) ? 'waitlist' : 'active',
+        status:         (['waitlist_approved','waitlist','waitlist_pending','waitlisted'].includes(row.status)) ? 'waitlist'
+          : (['pending','pending_review','payment_pending','zone_assigned'].includes(row.status)) ? row.status
+          : (['inactive','paused','cancelled','disabled'].includes(row.status)) ? row.status
+          : (row.status || 'active'),
         pendingCompletion: (['waitlist_approved','waitlist'].includes(row.status)) &&
           (!row.stripe_customer_id && !row.stripe_subscription_id),
         bins:           isSplit || service==='BOTH' ? 2 : service==='OAN' ? ((row.plan_id==='oan_b'||row.plan_id==='oan_c')?2:1) : 1,
