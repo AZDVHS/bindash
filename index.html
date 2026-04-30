@@ -7171,7 +7171,93 @@ async function loadRNInterestList(runnerRow){
 // ── ADMIN JOBS TAB ─────────────────────────────────
 let _adminJobsCache = []
 
-async function loadAdminJobs(){
+// ── Expired Offer Monitor ─────────────────────────────────────────────────
+// Polls every 2 minutes while Jobs page is open. When an offered route
+// expires without acceptance: marks it unassigned in DB, fires admin alert,
+// lights the Alerts tab badge, and shows an actionable toast.
+function _startOfferExpiryMonitor(){
+  if(window._offerExpiryTimer) return  // already running
+  window._offerExpiryTimer = setInterval(_checkExpiredOffers, 2 * 60 * 1000)
+  _checkExpiredOffers()  // run immediately on page open
+}
+
+async function _checkExpiredOffers(){
+  if(!_adminJobsCache?.length) return
+  const now = new Date()
+  const expired = []
+
+  // Find offered jobs whose expiry has passed in the cache
+  ;(_adminJobsCache||[]).forEach(j => {
+    if(j.status === 'offered' && j.offer_expires_at && new Date(j.offer_expires_at) < now){
+      expired.push(j)
+    }
+  })
+
+  if(!expired.length) return
+
+  // Group by batch
+  const batches = {}
+  expired.forEach(j => {
+    const key = j.batch_id || j.id
+    if(!batches[key]) batches[key] = { batchId:key, jobs:[], runnerName:j.runner_name, zone:j.zone_id }
+    batches[key].jobs.push(j)
+  })
+
+  const batchList = Object.values(batches)
+  if(!batchList.length) return
+
+  // Mark each expired batch as unassigned in DB (so it shows in Alerts)
+  for(const b of batchList){
+    const ids = b.jobs.map(j=>j.id)
+    try {
+      const { error } = await _supa.from('jobs')
+        .update({ status:'unassigned', runner_email:null, runner_name:null, offer_expires_at:null, updated_at:new Date().toISOString() })
+        .in('id', ids)
+        .eq('status','offered')
+      if(!error){
+        b.jobs.forEach(j => { j.status='unassigned'; j.runner_email=null; j.runner_name=null })
+        console.log('[BinDash] Expired offer escalated to unassigned:', b.batchId)
+        const binInBatchId = b.batchId + '-IN'
+        _supa.from('jobs').update({ status:'cancelled', updated_at:new Date().toISOString() })
+          .eq('batch_id', binInBatchId).eq('status','pending')
+          .then(({error:e})=>{ if(e) console.warn('[ExpiryMonitor] BIN_IN cancel:', e.message) })
+      }
+    } catch(e){ console.warn('[ExpiryMonitor]', e?.message) }
+  }
+
+  // Fire admin alert
+  const count = batchList.length
+  const zoneNames = batchList.map(b => {
+    const z = ADMIN_ZONES.find(z=>z.id===b.zone)
+    return z?.name || b.batchId.slice(0,8)
+  }).join(', ')
+
+  // Toast with action button
+  showToast(
+    `⚠️ ${count} offer${count!==1?'s':''} expired without acceptance — ${zoneNames}. Needs reassignment.`,
+    'err', 10000
+  )
+
+  // Switch to Alerts tab so admin sees it
+  setJobsTab('alerts')
+
+  // Send admin email alert
+  try {
+    const adminEmail = 'alpha1miller@gmail.com'
+    const _expBody = '<p><strong>OFFER EXPIRED ALERT</strong></p>'
+      + '<p>' + count + ' route offer' + (count!==1?'s':'') + ' expired without a runner accepting:</p>'
+      + '<ul>' + batchList.map(b => '<li>' + (ADMIN_ZONES.find(z=>z.id===b.zone)?.name||b.batchId) + ': ' + (b.runnerName||'No runner') + ' — offer was not accepted in time</li>').join('') + '</ul>'
+      + '<p>Log in to BinDash → Jobs → Alerts to reassign or take action.</p>'
+    sendEmail(adminEmail,
+      '⚠️ ' + count + ' route offer' + (count!==1?'s':'') + ' expired — action required',
+      _expBody,
+      'offer_expired_alert'
+    )
+  // Re-filter to update badges
+  } catch(e){ console.warn('[ExpiryMonitor] email:', e?.message) }
+  filterAdminJobs()
+}
+
 async function adminPurgeOldJobs(){
   const cutoffDate = new Date()
   cutoffDate.setDate(cutoffDate.getDate() - 30)
@@ -7202,6 +7288,8 @@ async function adminPurgeOldJobs(){
     console.error('[Purge]', e)
   }
 }
+
+async function loadAdminJobs(){
 
   const list   = document.getElementById('jobs-batch-list')
   const banner = document.getElementById('jobs-late-banner')
@@ -7267,9 +7355,8 @@ function filterAdminJobs(){
     b.completedCount = statuses.filter(s=>s==='complete').length
     b.totalCount = b.jobs.length
     b.earnTotal  = (b.totalCount*3.25).toFixed(2)
-    b.isOverdue  = b.routeStatus==='missed'||(['accepted','in_progress','late'].includes(b.routeStatus)&&b.date&&now>new Date(b.date+'T23:59:00'))
+    b.isOverdue  = b.routeStatus==='missed'||b.routeStatus==='expired'||(b.routeStatus==='unassigned'&&b.date&&now>new Date(b.date+'T18:00:00'))||(['accepted','in_progress','late'].includes(b.routeStatus)&&b.date&&now>new Date(b.date+'T23:59:00'))
   })
-
 
   // Tab-based filtering
   const activeTab = document.getElementById('jobs-active-tab')?.value || 'pending'
@@ -17416,8 +17503,13 @@ function adNav(el, pg){
   }
   const titleEl = document.getElementById('ad-pg-title')
   if(titleEl) titleEl.textContent = t[pg] || pg
+  // Stop offer expiry monitor when leaving Jobs page
+  if(pg !== 'ad-jobs' && window._offerExpiryTimer){
+    clearInterval(window._offerExpiryTimer)
+    window._offerExpiryTimer = null
+  }
+
   if(pg === 'ad-overview')   { updateOverviewCounts(); renderDensityAlerts() }
-  if(pg === 'ad-probes') loadAdminProbes()
   if(pg === 'ad-zones'){
     renderAdminZones()
     // If micro zones map is visible, force re-render after nav transition
@@ -17441,8 +17533,9 @@ function adNav(el, pg){
   if(pg === 'ad-zone-waitlist')       setTimeout(renderZoneWaitlist, 50)
   if(pg === 'ad-runner-zone-requests') setTimeout(renderRunnerZoneRequests, 50)
   if(pg === 'ad-runner-requests') setTimeout(loadRunnerRequests, 50)
-  if(pg === 'ad-jobs')            setTimeout(loadAdminJobs, 50)
-  if(pg === 'ad-rules')           setTimeout(initRulesPage, 50)
+  if(pg === 'ad-jobs')            { setTimeout(loadAdminJobs, 50); _startOfferExpiryMonitor() }
+  if(pg === 'ad-probes')           loadAdminProbes()
+  if(pg === 'ad-rules')            setTimeout(initRulesPage, 50)
 }
 
 // =================================================================
