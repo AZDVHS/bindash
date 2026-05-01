@@ -17019,6 +17019,7 @@ async function _renderRnZonesMap(myZones, myHomeowners, waitlistedHOs, coverageH
           const pts = h3.cellToBoundary(h8c).map(([la,ln])=>[la,ln])
           const activeCount    = hoByHex[h8c] || 0
           const waitlistCount  = hoByHex['wl_'+h8c] || 0
+          const isSelected = selectedH8s.size === 0 || selectedH8s.has(h8c)
           let fc, fo, bc
           if(!isSelected){
             fc='rgba(100,116,139,.15)'; fo=0.3; bc='rgba(100,116,139,.2)'  // outside runner's selection — dimmed
