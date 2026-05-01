@@ -15952,6 +15952,37 @@ async function renderRunnerHeatmap(){
     })
     console.log('[Scout] Drew', _wlZones.length, 'waitlist/building zones in expand mode')
   }
+  // ── Draw HO location dots on expand map ─────────────────────────────────
+  // Show exact homeowner locations — same style as Service Area map
+  if(window._rnHeatDotsLayer){ try{ window._rnHeatDotsLayer.remove() }catch(e){} }
+  const _heatDots = L.layerGroup().addTo(map)
+  window._rnHeatDotsLayer = _heatDots
+  const _hoForHeat = (window.HOMEOWNERS||[]).filter(h => {
+    const s = h.status || 'active'
+    return ['active','approved','waitlist','waitlist_approved'].includes(s)
+  })
+  let _dotCount = 0
+  for(const h of _hoForHeat){
+    try {
+      const lat = parseFloat(h.lat || h.latitude)
+      const lng = parseFloat(h.lng || h.longitude)
+      if(!lat || !lng || isNaN(lat) || isNaN(lng)) continue
+      // Only draw dots inside or adjacent to visible zone hexes
+      const _isWl = ['waitlist','waitlist_approved'].includes(h.status)
+      const dotColor = _isWl ? '#f59e0b' : '#22c55e'
+      L.circleMarker([lat, lng], {
+        radius: 7, color: '#000', weight: 1.5,
+        fillColor: dotColor, fillOpacity: 0.9,
+      }).bindTooltip(
+        '<div style="font-size:12px;font-weight:800">' + (h.name||'Homeowner') + '</div>'
+        + '<div style="font-size:10px;color:' + dotColor + ';font-weight:700">' + (_isWl ? '⏳ Waitlist' : '✅ Active') + '</div>'
+        + '<div style="font-size:10px;color:#94a3b8">ZIP ' + (h.zip||'--') + '</div>',
+        { direction:'top', className:'h3-tip', sticky:false }
+      ).addTo(_heatDots)
+      _dotCount++
+    } catch(e){}
+  }
+
 
   window._rnHeatmapRendering = false
   if(loadEl) loadEl.style.display = 'none'
