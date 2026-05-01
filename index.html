@@ -3840,7 +3840,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       <div class="s-logo">🗑️ BIN<em>DASH</em></div>
       <div class="nav-i on" onclick="rnNav(this,'rn-home')"><span class="ic">📊</span> Dashboard</div>
       <div class="nav-i" onclick="rnNav(this,'rn-routes')"><span class="ic">🗺️</span> My Routes</div>
-      <div class="nav-i" onclick="rnNav(this,'rn-scout');renderRunnerHeatmap()"><span class="ic">📍</span> My Zones</div>
+      <div class="nav-i" onclick="rnNav(this,'rn-zones');loadRNZones()"><span class="ic">📍</span> My Zones</div>
       <div class="nav-i" onclick="rnNav(this,'rn-earnings')"><span class="ic">💵</span> Earnings &amp; Pay</div>
       <div class="nav-i" onclick="rnNav(this,'rn-account')"><span class="ic">👤</span> My Info</div>
       <div class="s-bot">
@@ -4090,6 +4090,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
               <div style="font-size:12px;color:var(--muted);margin-top:2px">Your service zones and route homeowners</div>
             </div>
             <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="rnToggleAreaEditor()">🗺️ Edit Service Area</button>
+            <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="rnNav(null,'rn-scout');rnScoutSetMode('expand')">📡 Expand Coverage →</button>
           </div>
           <!-- Collapsible area editor -->
           <div id="rn-area-editor" style="display:none;margin-bottom:16px;border:1.5px solid rgba(6,214,160,.25);border-radius:12px;overflow:hidden">
