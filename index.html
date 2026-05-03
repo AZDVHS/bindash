@@ -14579,6 +14579,8 @@ async function rnToggleAreaEditor(){
       const raw = row.coverage_hexes
       if(raw){ const p = typeof raw==='string' ? JSON.parse(raw) : raw; if(Array.isArray(p) && p.length) return p }
     } catch(e){}
+    // Fallback: use the already-loaded coverage hexes from all runner zones
+    if(window._rnCoverageHexes?.length) return window._rnCoverageHexes
     return []
   })()
 
@@ -14900,20 +14902,20 @@ function _rnPickerDrawHex(map, hexId, selectableSet, opts){
 }
 
 function _rnPickerHexStyle(isAnchor, isSelected, isSelectable, isAssigned, hasActiveHO, hasWaitHO){
-  // All fillOpacity values are low so the Voyager map tiles show through clearly
-  if(isAnchor)     return { color:'#0d9488', weight:3,   fillColor:'#06d6a0', fillOpacity:0.45 }
-  if(!isSelectable)return { color:'rgba(100,116,139,.4)', weight:1, fillColor:'rgba(100,116,139,.06)', fillOpacity:1, dashArray:'4,4' }
+  // Solid borders always visible; low fill so Voyager map tiles show through
+  if(isAnchor)     return { color:'#0d9488', weight:3,   fillColor:'#06d6a0', fillOpacity:0.18, opacity:1 }
+  if(!isSelectable)return { color:'rgba(100,116,139,.3)', weight:0.8, fillColor:'transparent', fillOpacity:0, dashArray:'4,4' }
   if(isSelected){
-    if(isAssigned)   return { color:'#4f46e5', weight:2.5, fillColor:'rgba(79,70,229,.22)', fillOpacity:1 }
-    if(hasActiveHO)  return { color:'#15803d', weight:2,   fillColor:'rgba(21,128,61,.25)',  fillOpacity:1 }
-    if(hasWaitHO)    return { color:'#d97706', weight:2.5, fillColor:'#FFA500', fillOpacity:0.6 }
-    return { color:'#0d9488', weight:1.5, fillColor:'rgba(13,148,136,.18)', fillOpacity:1 }
+    if(isAssigned)   return { color:'#4f46e5', weight:2.5, fillColor:'rgba(79,70,229,.15)',  fillOpacity:1, opacity:1 }
+    if(hasActiveHO)  return { color:'#16a34a', weight:2.5, fillColor:'rgba(22,163,74,.15)',  fillOpacity:1, opacity:1 }
+    if(hasWaitHO)    return { color:'#d97706', weight:2.5, fillColor:'rgba(217,119,6,.12)',  fillOpacity:1, opacity:1 }
+    return              { color:'#0d9488', weight:2,   fillColor:'rgba(13,148,136,.13)', fillOpacity:1, opacity:1 }
   }
-  // Not selected — very transparent so map shows through
-  if(isAssigned)   return { color:'rgba(79,70,229,.5)',  weight:1.5, fillColor:'rgba(79,70,229,.06)',  fillOpacity:1, dashArray:'3,3' }
-  if(hasActiveHO)  return { color:'rgba(21,128,61,.6)',  weight:1,   fillColor:'rgba(21,128,61,.10)',  fillOpacity:1 }
-  if(hasWaitHO)    return { color:'#d97706', weight:2.5, fillColor:'#FFA500', fillOpacity:0.6 }
-  return { color:'rgba(100,116,139,.25)', weight:1, fillColor:'rgba(100,116,139,.04)', fillOpacity:1 }
+  // Not selected — map shows through, only a light tint for context
+  if(isAssigned)   return { color:'rgba(79,70,229,.45)',  weight:1.5, fillColor:'rgba(79,70,229,.04)',  fillOpacity:1, dashArray:'3,3' }
+  if(hasActiveHO)  return { color:'rgba(22,163,74,.55)',  weight:1.2, fillColor:'rgba(22,163,74,.06)',  fillOpacity:1 }
+  if(hasWaitHO)    return { color:'rgba(217,119,6,.55)',  weight:1.2, fillColor:'rgba(217,119,6,.06)',  fillOpacity:1 }
+  return              { color:'rgba(100,116,139,.2)',  weight:0.8, fillColor:'transparent', fillOpacity:0 }
 }
 
 // ── Hex picker Select All / Clear All ──
@@ -16054,7 +16056,7 @@ async function _rnToggleCoverageHex(hexId, opts){
   const meta = window._rnHeatHexMeta[hexId]
   if(meta?.poly){
     if(!isActive){
-      meta.poly.setStyle({ color:'#06d6a0', fillColor:'#06d6a0', fillOpacity:0.45, weight:2 })
+      meta.poly.setStyle({ color:'#06d6a0', fillColor:'#06d6a0', fillOpacity:0.15, weight:2.5, opacity:0.95 })
     } else {
       meta.poly.setStyle({ color:'rgba(255,255,255,.2)', fillColor:'rgba(255,255,255,1)', fillOpacity:0.06, weight:1, dashArray:'3,4' })
     }
@@ -16201,7 +16203,7 @@ function _rnHexTap(hexId, typeLabel, opts){
     if(poly) poly.setStyle({ color:meta.borderColor, fillColor:meta.fillColor, fillOpacity:meta.fillOpacity, dashArray:meta.borderDash||null, weight:1.5 })
   } else {
     window._rnHeatSelected.add(hexId)
-    if(poly) poly.setStyle({ color:'#1d4ed8', fillColor:'#3b82f6', fillOpacity:0.45, dashArray:null, weight:2.5 })
+    if(poly) poly.setStyle({ color:'#1d4ed8', fillColor:'#3b82f6', fillOpacity:0.12, dashArray:null, weight:2.5, opacity:0.9 })
   }
 
   _rnUpdateClaimBar()
@@ -17017,15 +17019,15 @@ async function _renderRnZonesMap(myZones, myHomeowners, waitlistedHOs, coverageH
           const [hLat, hLng] = h3.cellToLatLng(h7)
           const activeCount   = Object.keys(hoByHex).filter(k => !k.startsWith('wl_') && h3.cellToParent(k,7)===h7).length
           const waitlistCount = Object.keys(hoByHex).filter(k => k.startsWith('wl_') && h3.cellToParent(k.slice(3),7)===h7).length
-          let fc, fo, bc
+          let fc, fo, bc, bw, bo
           if(activeCount > 0){
-            fc='#16a34a'; fo=0.55; bc='#15803d'
+            fc='#16a34a'; fo=0.14; bc='#16a34a'; bw=2; bo=0.85
           } else if(waitlistCount > 0){
-            fc='#f59e0b'; fo=0.45; bc='#d97706'
+            fc='#f59e0b'; fo=0.10; bc='#d97706'; bw=1.5; bo=0.75
           } else {
-            fc='#06d6a0'; fo=0.25; bc='rgba(6,214,160,.6)'
+            fc='#06d6a0'; fo=0.06; bc='rgba(6,214,160,.7)'; bw=1.2; bo=0.65
           }
-          L.polygon(pts7, { color:bc, fillColor:fc, fillOpacity:fo, weight:1.5, opacity:0.9 }).addTo(map)
+          L.polygon(pts7, { color:bc, fillColor:fc, fillOpacity:fo, weight:bw, opacity:bo }).addTo(map)
         } catch(e){}
       })
     } else {
