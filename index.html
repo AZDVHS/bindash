@@ -27121,8 +27121,8 @@ async function activateWaitlistZone(zip, appId){
 
     if(zone){
       // Update existing zone to waitlist
-      await _supa.from('zones').update({ status:'waitlist', updated_at:new Date().toISOString() }).eq('id', zone.id)
-      zone.status = 'waitlist'
+      await _supa.from('zones').update({ status:'live', updated_at:new Date().toISOString() }).eq('id', zone.id)
+      zone.status = 'live'
       showToast(zone.name+' → waitlist zone ✅', 'ok', 4000)
     } else {
       // Build a proper zone object then use zoneToRow for correct column names
@@ -27132,7 +27132,7 @@ async function activateWaitlistZone(zip, appId){
         name:           zoneName,
         zip:            zip,
         zips:           [zip],
-        status:         'waitlist',
+        status:         'live',
         pilot:          false,
         overridden:     false,
         capacity:       20,
@@ -27151,7 +27151,7 @@ async function activateWaitlistZone(zip, appId){
       const { data: newZone, error } = await _supa.from('zones').insert(row).select().single()
       if(error){ showToast('Zone create failed: '+error.message, 'err'); console.error('[BinDash] Zone insert error:', error); return }
 
-      zone = { id:newZone.id, name:zoneName, zip, zips:[zip], status:'waitlist',
+      zone = { id:newZone.id, name:zoneName, zip, zips:[zip], status:'live',
                homeowners:1, runners:0, capacity:20, threshold:3 }
       ADMIN_ZONES.push(zone)
       showToast('Waitlist zone created for ZIP '+zip+' ✅', 'ok', 4000)
@@ -27174,6 +27174,7 @@ async function activateWaitlistZone(zip, appId){
     // They keep status='waitlist' (amber) until payment + runner assignment.
     await _bulkApproveToHomeowners(zone, zip)
 
+    dbSaveZone(zone)
     syncZoneData()
     renderAdminZones?.()
     await loadHomeownersFromSupabase()
@@ -27181,7 +27182,7 @@ async function activateWaitlistZone(zip, appId){
     renderPendingHWList()
     renderHomeownerList?.()
     updateOverviewCounts?.()
-    showToast('✅ Zone activated — homeowners moved to HO Management', 'ok', 5000)
+    showToast('✅ Zone is now LIVE — homeowners set to Active ✅', 'ok', 5000)
   } catch(e){
     console.error('[BinDash] activateWaitlistZone error:', e)
     showToast('Error: '+e.message, 'err')
@@ -27238,7 +27239,7 @@ async function _bulkApproveToHomeowners(zone, zip){
         lng:             s.lng ? parseFloat(s.lng) : null,
         h3_index:        s.h3_index || null,
         hex_id:          null,  // FK to micro_zones — leave null, h3_index carries the value
-        status:          'waitlist',   // amber — not active until payment confirmed
+        status:          'active',     // zone is live — homeowners are active
         created_at:      new Date().toISOString(),
       }
     })
@@ -27262,7 +27263,7 @@ async function _bulkApproveToHomeowners(zone, zip){
     // Mark signups as waitlist_approved so they no longer show in Pending tab
     const ids = toInsert.map(s => s.id)
     await _supa.from('homeowner_signups').update({
-      status:      'waitlist_approved',
+      status:      'approved',
       zone_id:     zone.id,
       reviewed_at: new Date().toISOString(),
       updated_at:  new Date().toISOString(),
