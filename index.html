@@ -7193,39 +7193,66 @@ async function _checkExpiredOffers(){
   const batchList = Object.values(batches)
   if(!batchList.length) return
 
-  // Mark each expired batch as unassigned in DB (so it shows in Alerts)
+  // Phase logic:
+  // Phase 1 (offered) expires → broadcast to all zone runners for 60 more min
+  // Phase 2 (broadcast) expires → mark unassigned, alert admin
+  const _broadcastExpiry = new Date(now.getTime() + 60 * 60 * 1000).toISOString()
+
   for(const b of batchList){
     const ids = b.jobs.map(j=>j.id)
+    const isAlreadyBroadcast = b.jobs.some(j => j.status === 'broadcast')
     try {
-      const { error } = await _supa.from('jobs')
-        .update({ status:'unassigned', runner_email:null, runner_name:null, offer_expires_at:null, updated_at:new Date().toISOString() })
-        .in('id', ids)
-        .eq('status','offered')
-      if(!error){
-        b.jobs.forEach(j => { j.status='unassigned'; j.runner_email=null; j.runner_name=null })
-        console.log('[BinDash] Expired offer escalated to unassigned:', b.batchId)
-        const binInBatchId = b.batchId + '-IN'
-        _supa.from('jobs').update({ status:'cancelled', updated_at:new Date().toISOString() })
-          .eq('batch_id', binInBatchId).eq('status','pending')
-          .then(({error:e})=>{ if(e) console.warn('[ExpiryMonitor] BIN_IN cancel:', e.message) })
+      if(!isAlreadyBroadcast){
+        // Phase 1 expired → broadcast to all zone runners
+        const { error } = await _supa.from('jobs')
+          .update({ status:'broadcast', offer_type:'broadcast', runner_email:null, runner_name:null,
+            offer_expires_at:_broadcastExpiry, updated_at:new Date().toISOString() })
+          .in('id', ids).eq('status','offered')
+        if(!error){
+          b.jobs.forEach(j => { j.status='broadcast'; j.runner_email=null; j.runner_name=null; j.offer_expires_at=_broadcastExpiry })
+          console.log('[BinDash] Offer escalated to broadcast:', b.batchId)
+          // Notify all zone runners via realtime/channel
+          b._escalatedToBroadcast = true
+        }
+      } else {
+        // Phase 2 expired (broadcast window done) → mark unassigned, alert admin
+        const { error } = await _supa.from('jobs')
+          .update({ status:'unassigned', offer_expires_at:null, updated_at:new Date().toISOString() })
+          .in('id', ids).in('status',['broadcast','offered'])
+        if(!error){
+          b.jobs.forEach(j => { j.status='unassigned'; j.offer_expires_at=null })
+          b._escalatedToAdmin = true
+          console.log('[BinDash] Broadcast expired, now unassigned — admin alerted:', b.batchId)
+        }
       }
     } catch(e){ console.warn('[ExpiryMonitor]', e?.message) }
   }
 
-  // Fire admin alert
-  const count = batchList.length
-  const zoneNames = batchList.map(b => {
-    const z = ADMIN_ZONES.find(z=>z.id===b.zone)
-    return z?.name || b.batchId.slice(0,8)
-  }).join(', ')
+  // Only alert admin if phase 2 escalation happened (broadcast → unassigned)
+  const adminAlertBatches = batchList.filter(b => b._escalatedToAdmin)
+  const broadcastBatches = batchList.filter(b => b._escalatedToBroadcast)
 
-  // Toast with action button
+  if(broadcastBatches.length){
+    const zNames = broadcastBatches.map(b => ADMIN_ZONES.find(z=>z.id===b.zone)?.name||b.batchId.slice(0,8)).join(', ')
+    showToast('📢 ' + broadcastBatches.length + ' route' + (broadcastBatches.length!==1?'s':'') + ' broadcast to all zone runners — ' + zNames, 'warn', 8000)
+  }
+
+  const count = adminAlertBatches.length
+  if(!count){
+    // Refresh jobs display but no admin email needed yet
+    filterAdminJobs()
+    return
+  }
+
+  const zoneNames = adminAlertBatches.map(b => ADMIN_ZONES.find(z=>z.id===b.zone)?.name||b.batchId.slice(0,8)).join(', ')
+
+  // Fire admin alert
+  // Fire admin alert (phase 2 only)
   showToast(
-    `⚠️ ${count} offer${count!==1?'s':''} expired without acceptance — ${zoneNames}. Needs reassignment.`,
+    '⚠️ ' + count + ' offer' + (count!==1?'s':'') + ' expired all windows — ' + zoneNames + '. Needs reassignment.',
     'err', 10000
   )
 
-  // Switch to Alerts tab so admin sees it
   setJobsTab('alerts')
 
   // Send admin email alert
@@ -7974,7 +8001,7 @@ async function triggerOverdueEscalation(jobs, runnerRow){
     await _supa.from('jobs')
       .update({ status:'missed', updated_at: new Date().toISOString() })
       .eq('batch_id', batchId)
-      .in('status', ['offered','accepted','in_progress','scheduled','missed'])
+      .in('status', ['offered','broadcast','unassigned','accepted','in_progress','scheduled','missed'])
 
     // Send apology email to each affected homeowner
     uniqueHOs.forEach(email => {
@@ -8033,7 +8060,7 @@ async function loadRunnerRoutes(runnerRow){
     if(runnerEmail){
       const res = await _supa.from('jobs')
         .select('*').ilike('runner_email', runnerEmail)
-        .in('status', ['offered','accepted','in_progress','scheduled'])
+        .in('status', ['offered','broadcast','unassigned','accepted','in_progress','scheduled'])
         .order('scheduled_date', { ascending: true })
       jobs = res.data || []; jobError = res.error
     }
@@ -8042,7 +8069,7 @@ async function loadRunnerRoutes(runnerRow){
     if(!jobs.length && rid){
       const res = await _supa.from('jobs')
         .select('*').eq('runner_id', rid)
-        .in('status', ['offered','accepted','in_progress','scheduled'])
+        .in('status', ['offered','broadcast','unassigned','accepted','in_progress','scheduled'])
         .order('scheduled_date', { ascending: true })
       if(res.data?.length) jobs = res.data
     }
@@ -8053,7 +8080,7 @@ async function loadRunnerRoutes(runnerRow){
       if(runnerName){
         const res = await _supa.from('jobs')
           .select('*').ilike('runner_name', runnerName)
-          .in('status', ['offered','accepted','in_progress','scheduled'])
+          .in('status', ['offered','broadcast','unassigned','accepted','in_progress','scheduled'])
           .order('scheduled_date', { ascending: true })
         if(res.data?.length) jobs = res.data
       }
@@ -8227,7 +8254,7 @@ async function loadRunnerRoutes(runnerRow){
       const win = batch.type==='BIN_OUT' ? getBinOutWindow(batch.date) : null
       const isMissed = win?.urgency === 'missed'
       const isToday = batch.date && new Date(batch.date+'T12:00:00').toDateString() === new Date().toDateString()
-      const isOffer = batch.isOffer || batch.status==='offered'
+      const isOffer = batch.isOffer || ['offered','broadcast','unassigned'].includes(batch.status)
       const urgencyBar = (win && (isToday||isOffer||isMissed)) ? `
         <div style="background:${win.color}18;border-top:1px solid ${win.color}30;padding:6px 16px;display:flex;align-items:center;gap:10px;font-size:11px">
           <span style="font-size:14px">${win.icon}</span>
@@ -8240,10 +8267,10 @@ async function loadRunnerRoutes(runnerRow){
           ${win.urgency==='overdue'?'<span style="background:rgba(239,68,68,.15);color:#ef4444;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">OVERDUE</span>':''}
           ${isMissed?'<span style="background:rgba(239,68,68,.2);color:#ef4444;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;animation:pulse 1s infinite">🚨 MISSED</span>':''}
         </div>` : ''
-      const statusBadge = isOffer
+      const statusBadge = (batch.status==='broadcast'||batch.status==='unassigned')
+        ? '<span style="background:rgba(239,68,68,.2);color:#ef4444;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700;animation:pulse 1s infinite">📢 Open to all runners</span>'
+        : isOffer
         ? '<span style="background:rgba(245,158,11,.2);color:#fbbf24;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite">⏳ Awaiting response</span>'
-        : isMissed
-        ? '<span style="background:rgba(239,68,68,.2);color:#ef4444;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700;animation:pulse 1s infinite">🚨 MISSED — action needed</span>'
         : batch.status==='in_progress'
         ? '<span style="background:#22c55e22;color:#22c55e;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700">● In Progress</span>'
         : win?.urgency==='active'
