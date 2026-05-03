@@ -8699,8 +8699,17 @@ async function acceptOffer(){
   const _ob = document.getElementById('offer-banner'); if(_ob) _ob.style.display='none'
   window._lastOfferId = null
   const runnerRow = window._currentRunnerRow
-  if(!window._currentOfferId || !runnerRow) return
-
+  // Resolve offerId — use cached, or find from enriched jobs, or from active batch card
+  let _resolvedOfferId = window._currentOfferId
+  if(!_resolvedOfferId){
+    const _offerJob = (window._lastEnrichedJobs||[]).find(j => j.status==='offered')
+    if(_offerJob) _resolvedOfferId = _offerJob.batch_id || _offerJob.id
+  }
+  if(!_resolvedOfferId || !runnerRow){
+    showToast('Accept failed: no active offer found', 'err')
+    return
+  }
+  window._currentOfferId = _resolvedOfferId  // ensure it's set for the rest of the function
   const btn = document.getElementById('offer-accept-btn') || document.querySelector('.batch-card .btn-cyan')
 
   const offerJobs = (window._lastEnrichedJobs||[]).filter(j=>(j.batch_id||j.id)===window._currentOfferId)
