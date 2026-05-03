@@ -28447,38 +28447,77 @@ function loadPendingApprovalsIntoDispatch(){
   const _stripRows = []
 
   // Need-approval pills (draft / change_detected) — one per zone
-  needApproval.forEach(p => {
+  needApproval.forEach((p, _pi) => {
     const isChange = p.status === 'change_detected'
+    const stopCount = (p.stops||[]).length
+    const pillId = 'strip-na-' + p.zoneId + '-' + _pi
+    const stopsHtml = (p.stops||[]).map((s,si) => {
+      const hw = (window.HOMEOWNERS||[]).find(h=>h.email===s.email||h.email===s.homeowner_email)
+      const name = hw?.name || s.name || s.homeowner_email?.split('@')[0] || 'Stop '+(si+1)
+      const addr = hw?.address || s.address || ''
+      return '<div style="display:flex;align-items:center;gap:10px;padding:6px 16px 6px 36px;border-bottom:1px solid rgba(255,255,255,.04)">'
+        + '<span style="width:20px;height:20px;border-radius:50%;background:rgba(245,158,11,.2);color:#fbbf24;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(si+1)+'</span>'
+        + '<div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--text)">'+name+'</div>'
+        + (addr ? '<div style="font-size:10px;color:var(--muted)">'+addr+'</div>' : '')
+        + '</div><span style="font-size:11px;font-weight:700;color:#fbbf24">$3.25</span></div>'
+    }).join('')
     _stripRows.push(`
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap;background:${isChange?'rgba(239,68,68,.04)':'rgba(245,158,11,.04)'}">
-        <span style="width:8px;height:8px;border-radius:50%;background:${isChange?'#ef4444':'#f59e0b'};flex-shrink:0"></span>
-        <div style="flex:1;min-width:160px">
-          <span style="font-size:12px;font-weight:700;color:var(--text)">${p.zoneName}</span>
-          <span style="font-size:10px;color:var(--muted);margin-left:6px">${p.day} · ${(p.stops||[]).length} stop${(p.stops||[]).length!==1?'s':''} · ${p.runner?.name||'no runner'}</span>
+      <div style="border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;flex-wrap:wrap;background:${isChange?'rgba(239,68,68,.04)':'rgba(245,158,11,.04)'};cursor:pointer" onclick="var d=document.getElementById('${pillId}');d.style.display=d.style.display==='none'?'block':'none';this.querySelector('.strip-chevron').style.transform=d.style.display==='none'?'':'rotate(180deg)'">
+          <span style="width:8px;height:8px;border-radius:50%;background:${isChange?'#ef4444':'#f59e0b'};flex-shrink:0"></span>
+          <div style="flex:1;min-width:160px">
+            <span style="font-size:12px;font-weight:700;color:var(--text)">${p.zoneName}</span>
+            <span style="font-size:10px;color:var(--muted);margin-left:6px">${p.day} · ${stopCount} stop${stopCount!==1?'s':''} · ${p.runner?.name||'no runner'}</span>
+          </div>
+          <span class="strip-chevron" style="font-size:10px;color:var(--muted);transition:transform .2s">▾</span>
+          <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:${isChange?'rgba(239,68,68,.12)':'rgba(245,158,11,.12)'};color:${isChange?'#ef4444':'#fbbf24'}">${isChange?'⚠️ Changes detected':'New route'}</span>
+          <button onclick="event.stopPropagation();showRouteApprovalModal('${p.zoneId}','${p.day}')" class="btn btn-ghost btn-sm" style="font-size:10px">Review →</button>
+          <button onclick="event.stopPropagation();approvePendingRoute('${p.zoneId}','${p.day}',true)" class="btn btn-cyan btn-sm" style="font-size:10px">✓ Approve</button>
         </div>
-        <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:${isChange?'rgba(239,68,68,.12)':'rgba(245,158,11,.12)'};color:${isChange?'#ef4444':'#fbbf24'}">${isChange?'⚠️ Changes detected':'New route'}</span>
-        <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="showRouteApprovalModal('${p.zoneId}','${p.day}')">Review →</button>
-        <button class="btn btn-cyan btn-sm" style="font-size:10px" onclick="approvePendingRoute('${p.zoneId}','${p.day}',true)">✓ Approve</button>
+        <div id="${pillId}" style="display:none;background:rgba(245,158,11,.02)">
+          <div style="padding:6px 14px 2px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Route Preview — ${stopCount} stop${stopCount!==1?'s':''}</div>
+          ${stopsHtml}
+        </div>
       </div>`)
   })
 
+
   // Ready-to-launch pills — one per zone, each with its own Launch button
-  dayQueued.forEach(p => {
+  dayQueued.forEach((p, _pi) => {
     const stopCount = (p.stops||[]).length
     const runnerName = p.runner?.name || 'no runner'
     const earnOut = p.earnOut ? '$'+p.earnOut : ''
+    const pillId = 'strip-q-' + p.zoneId + '-' + _pi
+    const stopsHtml = (p.stops||[]).map((s,si) => {
+      const hw = (window.HOMEOWNERS||[]).find(h=>h.email===s.email||h.email===s.homeowner_email)
+      const name = hw?.name || s.name || s.homeowner_email?.split('@')[0] || 'Stop '+(si+1)
+      const addr = hw?.address || s.address || ''
+      return '<div style="display:flex;align-items:center;gap:10px;padding:6px 16px 6px 36px;border-bottom:1px solid rgba(255,255,255,.04)">'
+        + '<span style="width:20px;height:20px;border-radius:50%;background:rgba(6,214,160,.2);color:#06d6a0;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(si+1)+'</span>'
+        + '<div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--text)">'+name+'</div>'
+        + (addr ? '<div style="font-size:10px;color:var(--muted)">'+addr+'</div>' : '')
+        + '</div><span style="font-size:11px;font-weight:700;color:#06d6a0">$3.25</span></div>'
+    }).join('')
     _stripRows.push(`
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap;background:rgba(6,214,160,.04)">
-        <span style="width:8px;height:8px;border-radius:50%;background:#06d6a0;flex-shrink:0"></span>
-        <div style="flex:1;min-width:160px">
-          <span style="font-size:12px;font-weight:700;color:var(--text)">${p.zoneName}</span>
-          <span style="font-size:10px;color:var(--muted);margin-left:6px">${p.day} · ${stopCount} stop${stopCount!==1?'s':''} · ${runnerName}${earnOut?' · '+earnOut:''}</span>
+      <div style="border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;flex-wrap:wrap;background:rgba(6,214,160,.04);cursor:pointer" onclick="var d=document.getElementById('${pillId}');d.style.display=d.style.display==='none'?'block':'none';this.querySelector('.strip-chevron').style.transform=d.style.display==='none'?'':'rotate(180deg)'">
+          <span style="width:8px;height:8px;border-radius:50%;background:#06d6a0;flex-shrink:0"></span>
+          <div style="flex:1;min-width:160px">
+            <span style="font-size:12px;font-weight:700;color:var(--text)">${p.zoneName}</span>
+            <span style="font-size:10px;color:var(--muted);margin-left:6px">${p.day} · ${stopCount} stop${stopCount!==1?'s':''} · ${runnerName}${earnOut?' · '+earnOut:''}</span>
+          </div>
+          <span class="strip-chevron" style="font-size:10px;color:var(--muted);transition:transform .2s">▾</span>
+          <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:rgba(6,214,160,.15);color:var(--cyan);font-weight:600">✅ Approved</span>
+          <button onclick="event.stopPropagation();adminLaunchBatch('${p.zoneId}','${p.day}',this)"
+            style="background:linear-gradient(135deg,#06d6a0,#22c55e);color:#07090f;border:none;border-radius:8px;padding:6px 16px;font-size:12px;font-weight:800;cursor:pointer">🚀 Launch ${p.zoneName}</button>
         </div>
-        <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:rgba(6,214,160,.15);color:var(--cyan);font-weight:600">✅ Approved</span>
-        <button onclick="adminLaunchBatch('${p.zoneId}','${p.day}',this)"
-          style="background:linear-gradient(135deg,#06d6a0,#22c55e);color:#07090f;border:none;border-radius:8px;padding:6px 16px;font-size:12px;font-weight:800;cursor:pointer">🚀 Launch ${p.zoneName}</button>
+        <div id="${pillId}" style="display:none;background:rgba(6,214,160,.02)">
+          <div style="padding:6px 14px 2px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Route Preview — ${stopCount} stop${stopCount!==1?'s':''}</div>
+          ${stopsHtml}
+        </div>
       </div>`)
   })
+
 
   // Expired offer pills — one per zone
   dayExpired.forEach(b => {
