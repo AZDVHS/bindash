@@ -8699,12 +8699,11 @@ async function acceptOffer(){
   const _ob = document.getElementById('offer-banner'); if(_ob) _ob.style.display='none'
   window._lastOfferId = null
   const runnerRow = window._currentRunnerRow
-  if(!offerId || !runnerRow) return
+  if(!window._currentOfferId || !runnerRow) return
 
-  const btn = document.querySelector('#offer-banner .btn-cyan')
-  if(btn){ btn.disabled=true; btn.textContent='Accepting...' }
+  const btn = document.getElementById('offer-accept-btn') || document.querySelector('.batch-card .btn-cyan')
 
-  const offerJobs = (window._lastEnrichedJobs||[]).filter(j=>(j.batch_id||j.id)===offerId)
+  const offerJobs = (window._lastEnrichedJobs||[]).filter(j=>(j.batch_id||j.id)===window._currentOfferId)
   const scheduledDate = offerJobs[0]?.scheduled_date || null
   const stopCount = offerJobs.length || 1
   const visitType = offerJobs[0]?.visit_type || 'BIN_OUT'
@@ -8829,7 +8828,7 @@ async function acceptOffer(){
     // Notify homeowners that their route is accepted (if they opted in)
     const _acceptedJobs = (window._lastEnrichedJobs||[]).filter(j=>(j.batch_id||j.id)===offerId)
     const rName = ((runnerRow.first_name||'')+' '+(runnerRow.last_name||'')).trim() || 'Your runner'
-    const _acceptKey = 'ho_accept_notified:' + offerId
+    const _acceptKey = 'ho_accept_notified:' + window._currentOfferId
     if(!sessionStorage.getItem(_acceptKey)){
       sessionStorage.setItem(_acceptKey, '1')
       _acceptedJobs.slice(0,20).forEach(j => {
@@ -8860,8 +8859,8 @@ async function declineOffer(batchId){
   const _ob = document.getElementById('offer-banner'); if(_ob) _ob.style.display='none'
   window._lastOfferId = null
   const runnerRow = window._currentRunnerRow
+  const offerId = batchId || window._currentOfferId
   if(!offerId){ showToast('No active offer to decline','err'); return }
-
   const btn = document.querySelector('[onclick*="declineOffer"]')
   if(btn){ btn.disabled=true; btn.textContent='Declining...' }
 
