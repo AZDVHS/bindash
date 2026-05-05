@@ -5774,6 +5774,7 @@ async function populateHWDashboard(){
     window._hwProfileRow       = row
 
     const status = row.status
+    console.log('[BinDash] populateHWDashboard — routing status:', status)
 
     if(status === 'approved' || status === 'active' || status === 'waitlist'){
       go('S-hw-dash')
@@ -5845,8 +5846,9 @@ async function populateHWDashboard(){
     }
 
   } catch(err){
-    console.warn('[BinDash] HW profile load failed:', String(err?.message||err))
-    go('S-hw-dash')
+    console.error('[BinDash] populateHWDashboard CRASH:', err?.message || String(err), err)
+    // Show pending screen as safe fallback rather than blank hw-dash
+    go('S-hw-pending')
   }
 }
 
@@ -10106,11 +10108,10 @@ async function initApp(){
       }
     } else {
       setCurrentUser(user)
-      go('S-hw-dash')
-      populateHWDashboard()
+      await loadZonesFromSupabase()   // load zones first so findZoneForZip works in populateHWDashboard
+      await populateHWDashboard()     // let it route itself — never pre-route to S-hw-dash
     }
-    // Always load zones regardless of session state
-    await loadZonesFromSupabase()
+    // Zones already loaded above
 
   } catch(err) {
     console.warn('[BinDash] Session restore failed:', err)
@@ -10266,8 +10267,8 @@ async function doLogin(){
       loadRunnerApplicationsFromSupabase()
       showToast('Welcome back, ' + name + ' 👋', 'ok')
     } else {
-      go('S-hw-dash')
-      populateHWDashboard()
+      await loadZonesFromSupabase()   // need zones before populateHWDashboard checks zone status
+      await populateHWDashboard()     // routes to correct screen based on DB status
       showToast('Welcome back, ' + name + ' 👋', 'ok')
     }
   } catch(err) {
