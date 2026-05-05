@@ -612,9 +612,8 @@ function handleStripeReturn(){
     window.history.replaceState({},'',' ')
     obClear()  // signup complete -- clear saved progress
     window._checkoutJustCompleted = true  // prevent initApp from re-routing away
-    go('S-hw-pending')
     showToast('Payment successful! Account being set up ✅','ok')
-    // Update signup status to pending_review so admin sees it
+    // Update signup status to pending_review so admin sees it, THEN show screen
     ;(async()=>{
       try {
         const { data:{ session } } = await _supa.auth.getSession()
@@ -626,6 +625,15 @@ function handleStripeReturn(){
           console.log('[BinDash] Signup status → pending_review after checkout ✅')
         }
       } catch(e){ console.warn('[BinDash] Post-checkout status update:', e) }
+      // Show the pending screen after DB update — initApp may not have fired yet
+      // so fall back to directly showing it if populateHWDashboard hasn't run
+      setTimeout(() => {
+        const active = document.querySelector('.screen.active')
+        if(!active || active.id === 'S-land' || !active.id){
+          window._hwPendingPayment = false
+          go('S-hw-pending')
+        }
+      }, 1800)
     })()
   } else if(p.get('checkout')==='cancel'){
     window.history.replaceState({},'',' ')
@@ -10028,8 +10036,8 @@ async function initApp(){
     if(window._checkoutJustCompleted){
       window._checkoutJustCompleted = false
       setCurrentUser(user)
-      populateHWDashboard()
-      await loadZonesFromSupabase()
+      await loadZonesFromSupabase()  // zones needed before populateHWDashboard checks zone status
+      await populateHWDashboard()    // await so screen is set before anything else fires
       return
     }
 
