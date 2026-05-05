@@ -5499,12 +5499,12 @@ function addNotif({ title='', body='', type='info', action='' }){
 }
 
 function go(id){
-  console.log('[BinDash] go() called:', id, '| caller:', new Error().stack?.split('\n')[1]?.trim()?.slice(0,80))
+  // Always dismiss modal backdrop so it never covers the new screen
+  try { document.getElementById('modal-bg')?.classList.remove('open') } catch(e){}
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'))
   const target = document.getElementById(id)
   if(!target){ console.error('[BinDash] go() -- screen not found:', id); return }
   target.classList.add('active')
-  console.log('[BinDash] go() active set:', id, '| element display after:', window.getComputedStyle(target).display)
   window.scrollTo(0,0)
   if(id === 'S-rn-ob' && window._runnerInviteName){
     const parts = (window._runnerInviteName || '').split(' ')
