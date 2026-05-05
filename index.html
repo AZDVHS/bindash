@@ -600,7 +600,7 @@ async function skipPaymentForNow(){
     } catch(e){ console.warn('Status update:', e) }
   }
   obClear()
-  go('S-hw-pending')
+  _showPendingScreen()
   showToast('Account saved ✅ — complete payment from your dashboard to activate scheduling', 'ok', 6000)
 }
 
@@ -631,7 +631,7 @@ function handleStripeReturn(){
         const active = document.querySelector('.screen.active')
         if(!active || active.id === 'S-land' || !active.id){
           window._hwPendingPayment = false
-          go('S-hw-pending')
+          _showPendingScreen()
         }
       }, 1800)
     })()
@@ -5866,19 +5866,20 @@ async function populateHWDashboard(){
       else { go('S-hw-waitlist'); setTimeout(()=>populateWaitlistDashboard(row), 200) }
 
     } else if(status === 'pending_review'){
-      go('S-hw-pending')
+      _showPendingScreen()
 
     } else if(status === 'rejected'){
       showToast('Your application was not approved. Contact support for details.', 'err'); go('S-land')
 
     } else {
-      go('S-hw-pending')
+      _showPendingScreen()
+
     }
 
   } catch(err){
     console.error('[BinDash] populateHWDashboard CRASH:', err?.message || String(err), err)
     // Show pending screen as safe fallback rather than blank hw-dash
-    go('S-hw-pending')
+    _showPendingScreen()
   }
 }
 
@@ -6733,7 +6734,7 @@ async function submitServiceConfirmation(){
     const _sc_zone = ADMIN_ZONES.find(z=>z.id===window._confirmZoneId)?.name||'your zone'
     sendEmail(window._confirmEmail||currentUser?.email, 'Your BinDash service request is under review', EMAIL.signupPending(currentUser?.first_name||'there', _sc_day, _sc_zone), 'confirm_pending')
     if(btn){ btn.disabled=false; btn.textContent='✅ Confirm & Request Service' }
-    go('S-hw-pending')
+    _showPendingScreen()
   } catch(err){
     console.warn('[BinDash] Confirmation failed:', String(err?.message||err))
     showToast('Something went wrong -- please try again', 'err')
@@ -19939,6 +19940,27 @@ function openM(){
 }
 function closeM(){document.getElementById('modal-bg').classList.remove('open')}
 
+function _showPendingScreen(){
+  try { document.getElementById('modal-bg')?.classList.remove('open') } catch(e){}
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'))
+  const scr = document.getElementById('S-hw-pending')
+  if(scr){ scr.style.removeProperty('display'); scr.classList.add('active') }
+  // Personalise greeting
+  try {
+    const greetEl = document.getElementById('hw-pending-greeting')
+    if(greetEl){
+      const fn = window._hwProfileRow?.first_name || currentUser?.user_metadata?.first_name || currentUser?.email?.split('@')[0] || ''
+      greetEl.textContent = fn ? 'Hey ' + fn + ', you’re on the list!' : 'You’re on the list!'
+    }
+    const payState    = document.getElementById('hw-pending-pay-state')
+    const reviewState = document.getElementById('hw-pending-review-state')
+    const isPending   = window._hwPendingPayment === true
+    if(payState)    payState.style.display    = isPending ? 'block' : 'none'
+    if(reviewState) reviewState.style.display = isPending ? 'none'  : 'block'
+  } catch(e){}
+  window.scrollTo(0,0)
+}
+
 // -- SUBSCRIPTION PLAN PICKER ---------------------
 let activePlan = 'a'
 let extraCans = 0
@@ -25676,7 +25698,7 @@ async function routeAfterSignup(appData){
       'admin_hw_live_alert'
     )
 
-    go('S-hw-pending')
+    _showPendingScreen()
   }
 }
 
