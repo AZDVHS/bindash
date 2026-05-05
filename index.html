@@ -8761,6 +8761,7 @@ async function acceptOffer(){
     return
   }
   window._currentOfferId = _resolvedOfferId  // ensure it's set for the rest of the function
+  const offerId = _resolvedOfferId  // local alias used throughout acceptOffer
   const btn = document.getElementById('offer-accept-btn') || document.querySelector('.batch-card .btn-cyan')
 
   const offerJobs = (window._lastEnrichedJobs||[]).filter(j=>(j.batch_id||j.id)===window._currentOfferId)
