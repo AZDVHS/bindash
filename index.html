@@ -3171,7 +3171,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
       </div>
 
       <!-- REVIEW PENDING STATE (payment done, waiting admin) -->
-      <div id="hw-pending-review-state">
+      <div id="hw-pending-review-state" style="display:block">
         <!-- Personalised header — name filled in by go() initialiser -->
         <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
           <button onclick="bindashLogout()" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:4px 8px;border-radius:6px" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">Log Out</button>
@@ -5565,8 +5565,10 @@ function go(id){
     const payState    = document.getElementById('hw-pending-pay-state')
     const reviewState = document.getElementById('hw-pending-review-state')
     const isPending   = window._hwPendingPayment === true
+    // payState only shows when payment was explicitly skipped
     if(payState)    payState.style.display    = isPending ? 'block' : 'none'
-    if(reviewState) reviewState.style.display = isPending ? 'none'  : 'block'
+    // reviewState is ALWAYS visible — it's the default state for pending_review users
+    if(reviewState) reviewState.style.display = 'block'
     if(isPending && _checkoutPlanKey){
       const plan = STRIPE_PRICES[_checkoutPlanKey]
       if(plan){
