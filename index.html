@@ -7171,26 +7171,70 @@ function _startOfferExpiryMonitor(){
 async function _checkExpiredOffers(){
   if(!_adminJobsCache?.length) return
   const now = new Date()
-  const expired = []
 
-  // Find offered jobs whose expiry has passed in the cache
-  ;(_adminJobsCache||[]).forEach(j => {
-    if(j.status === 'offered' && j.offer_expires_at && new Date(j.offer_expires_at) < now){
-      expired.push(j)
-    }
-  })
+  // ── Re-fetch current status from DB for any 'offered' jobs in cache ──
+  // Never trust stale cache — a runner may have accepted between checks.
+  const offeredIds = (_adminJobsCache||[])
+    .filter(j => j.status === 'offered' && j.offer_expires_at && new Date(j.offer_expires_at) < now)
+    .map(j => j.id)
+  if(!offeredIds.length) return
 
-  if(!expired.length) return
+  // ── Cleanup pass: nullify offer_expires_at for offered jobs whose batch has a cancelled sibling ──
+  // Prevents the monitor from re-broadcasting routes that were partially cancelled
+  const batchesWithCancelled = new Set(
+    (_adminJobsCache||[]).filter(j => j.status === 'cancelled' && j.batch_id).map(j => j.batch_id)
+  )
+  const staleOfferedIds = (_adminJobsCache||[])
+    .filter(j => j.status === 'offered' && j.batch_id && batchesWithCancelled.has(j.batch_id) && j.offer_expires_at)
+    .map(j => j.id)
+  if(staleOfferedIds.length){
+    try {
+      await _supa.from('jobs').update({ offer_expires_at: null, updated_at: new Date().toISOString() })
+        .in('id', staleOfferedIds)
+      staleOfferedIds.forEach(id => {
+        const j = (_adminJobsCache||[]).find(x=>x.id===id)
+        if(j) j.offer_expires_at = null
+      })
+      console.log('[ExpiryMonitor] Cleared stale offer_expires_at on', staleOfferedIds.length, 'partially-cancelled jobs')
+    } catch(e){}
+  }
 
-  // Group by batch
+  // Verify current DB status — only escalate if still 'offered' in DB
+  let freshJobs = []
+  try {
+    const { data: refreshed } = await _supa.from('jobs')
+      .select('id,status,batch_id,offer_expires_at,runner_email,runner_name,zone_id,offer_type')
+      .in('id', offeredIds)
+    freshJobs = (refreshed||[]).filter(j =>
+      j.status === 'offered' &&            // still offered (not accepted/in_progress/cancelled)
+      j.offer_expires_at &&
+      new Date(j.offer_expires_at) < now
+    )
+  } catch(e){ console.warn('[ExpiryMonitor] DB refresh failed:', e?.message); return }
+
+  if(!freshJobs.length) return
+
+  // Group by batch — skip any batch that has a non-offered job (means it was partially accepted)
   const batches = {}
-  expired.forEach(j => {
+  freshJobs.forEach(j => {
     const key = j.batch_id || j.id
     if(!batches[key]) batches[key] = { batchId:key, jobs:[], runnerName:j.runner_name, zone:j.zone_id }
     batches[key].jobs.push(j)
   })
 
-  const batchList = Object.values(batches)
+  // Filter out batches where ANY job in the FULL cache is already accepted/in_progress/complete
+  // This prevents re-broadcasting a route that was already picked up
+  const safeStatuses = new Set(['offered','broadcast','unassigned'])
+  const batchList = Object.values(batches).filter(b => {
+    const allJobsInBatch = (_adminJobsCache||[]).filter(j => (j.batch_id||j.id) === b.batchId)
+    const hasActiveJob = allJobsInBatch.some(j => !safeStatuses.has(j.status))
+    if(hasActiveJob){
+      console.log('[ExpiryMonitor] Skipping batch — already has accepted/active job:', b.batchId)
+      return false
+    }
+    return true
+  })
+
   if(!batchList.length) return
 
   // Phase logic:
@@ -7358,14 +7402,20 @@ function filterAdminJobs(){
   // Compute route-level status
   Object.values(batchMap).forEach(b => {
     const statuses = b.jobs.map(j=>j.status)
-    const allComplete  = statuses.every(s=>s==='complete')
-    const anyMissed    = statuses.some(s=>s==='missed')
-    const anyLate      = statuses.some(s=>s==='late')
-    const anyInProg    = statuses.some(s=>s==='in_progress')
-    const anyAccepted  = statuses.some(s=>s==='accepted')
-    const anyOffered   = statuses.some(s=>['offered','broadcast'].includes(s))
-    const allExpired   = b.jobs.every(j=>j.status==='offered'&&j.offer_expires_at&&new Date(j.offer_expires_at)<now)
-    b.routeStatus = anyMissed?'missed':allComplete?'complete':anyLate?'late':anyInProg?'in_progress':anyAccepted?'accepted':allExpired?'expired':anyOffered?'offered':'unassigned'
+    // Exclude cancelled jobs from status checks — they don't represent route state
+    const activeJobs = b.jobs.filter(j => j.status !== 'cancelled')
+    const activeStatuses = activeJobs.map(j=>j.status)
+    const allComplete  = activeStatuses.length > 0 && activeStatuses.every(s=>s==='complete')
+    const anyMissed    = activeStatuses.some(s=>s==='missed')
+    const anyLate      = activeStatuses.some(s=>s==='late')
+    const anyInProg    = activeStatuses.some(s=>s==='in_progress')
+    const anyAccepted  = activeStatuses.some(s=>s==='accepted')
+    const anyOffered   = activeStatuses.some(s=>['offered','broadcast'].includes(s))
+    // allExpired only if ALL non-cancelled jobs are expired-offered (not just any)
+    const allExpired   = activeJobs.length > 0 && activeJobs.every(j=>j.status==='offered'&&j.offer_expires_at&&new Date(j.offer_expires_at)<now)
+    // If all jobs are cancelled, treat as cancelled (don't show as pending)
+    const allCancelled = statuses.every(s=>s==='cancelled')
+    b.routeStatus = allCancelled?'cancelled':anyMissed?'missed':allComplete?'complete':anyLate?'late':anyInProg?'in_progress':anyAccepted?'accepted':allExpired?'expired':anyOffered?'offered':'unassigned'
     b.completedCount = statuses.filter(s=>s==='complete').length
     b.totalCount = b.jobs.length
     b.earnTotal  = (b.totalCount*3.25).toFixed(2)
@@ -7383,7 +7433,7 @@ function filterAdminJobs(){
     else if(b.routeStatus==='complete') _tabCount.complete++
     else if(b.routeStatus==='in_progress') _tabCount.active++
     else if(b.routeStatus==='accepted') _tabCount.accepted++
-    else _tabCount.pending++  // offered, broadcast, unassigned
+    else if(b.routeStatus !== 'cancelled') _tabCount.pending++  // offered, broadcast, unassigned
   })
   // Update badges
   Object.keys(_tabCount).forEach(k => {
@@ -7398,8 +7448,8 @@ function filterAdminJobs(){
     if(activeTab === 'complete') return rs==='complete'
     if(activeTab === 'active')  return rs==='in_progress'
     if(activeTab === 'accepted') return rs==='accepted'
-    // pending: everything not matched above
-    return ['offered','broadcast','unassigned','pending'].includes(rs)
+    // pending: everything not matched above (exclude fully-cancelled batches)
+    return ['offered','broadcast','unassigned','pending'].includes(rs) && rs !== 'cancelled'
   })
 
   // Search filter
@@ -7792,9 +7842,15 @@ async function resolveExpiredJob(btn){
 
     } else if(action === 'cancel'){
       const { error } = await _supa.from('jobs').update({
-        status:     'cancelled',
-        updated_at: new Date().toISOString(),
+        status:          'cancelled',
+        offer_expires_at: null,   // clear expiry so monitor doesn't re-broadcast cancelled jobs
+        updated_at:      new Date().toISOString(),
       }).eq('id', jobId)
+      // Also nullify offer_expires_at on sibling jobs in the same batch
+      if(batchId && batchId !== jobId){
+        await _supa.from('jobs').update({ offer_expires_at: null, updated_at: new Date().toISOString() })
+          .eq('batch_id', batchId).neq('id', jobId)
+      }
       if(error) throw error
       sendEmail(hwEmail,
         'No runner available for your scheduled visit',
@@ -14574,21 +14630,24 @@ async function rnToggleAreaEditor(){
   const addr = row.street_address || row.address || ''
 
   // Pre-load existing hex selection if saved
+  // Build existingHexes from ALL zones — coverage_hexes only stores last-saved zone
   const existingHexes = (() => {
+    const hexSet = new Set()
+    // 1. Runner's saved coverage_hexes (may only be one zone)
     try {
       const raw = row.coverage_hexes
-      if(raw){ const p = typeof raw==='string' ? JSON.parse(raw) : raw; if(Array.isArray(p) && p.length) return p }
+      if(raw){ const p = typeof raw==='string' ? JSON.parse(raw) : raw; if(Array.isArray(p)) p.forEach(h => hexSet.add(h)) }
     } catch(e){}
-    // Fallback: use the already-loaded coverage hexes from all runner zones
-    if(window._rnCoverageHexes?.length) return window._rnCoverageHexes
-    return []
+    // 2. Use window._rnCoverageHexes — built from ALL zones in loadRNZones
+    if(window._rnCoverageHexes?.length) window._rnCoverageHexes.forEach(h => hexSet.add(h))
+    return [...hexSet]
   })()
 
-  // Get coords — try address geocode, then ZIP centroid, then zone ZIP
+  // Get coords — try address geocode, then ZIP centroid, then zone ZIPs
   let coords = await _rnPickerGeocode(addr, '', 'AZ', zip)
   if(!coords && zip) coords = ZIP_CENTROIDS[zip] ? { lat: ZIP_CENTROIDS[zip][0], lng: ZIP_CENTROIDS[zip][1] } : null
   if(!coords){
-    // Try from assigned zone ZIP
+    // Try primary zone ZIP
     const zoneId = row.zone_id
     const zone = zoneId ? ADMIN_ZONES.find(z=>z.id===zoneId) : null
     const zoneZip = zone?.zips?.[0] || zone?.zip || ''
@@ -14618,30 +14677,62 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   window._rnPickerSelected = new Set()
   window._rnPickerMapElId  = mapElId
 
-  // Compute anchors
-  const anchor8 = h3.latLngToCell(lat, lng, RN_PICKER_RES_SELECT)  // now res-8
+  // Compute anchors from primary location (home ZIP / address)
+  const anchor8 = h3.latLngToCell(lat, lng, RN_PICKER_RES_SELECT)  // res-8
   const anchor7 = anchor8  // alias kept for compat
   const anchor6 = h3.cellToParent(anchor7, RN_PICKER_RES_BOUNDARY)
   window._rnPickerAnchorHex7 = anchor7
   window._rnPickerAnchorHex6 = anchor6
 
-  // Selectable = all res-7 children of res-6
-  const selectableChildren = h3.cellToChildren(anchor6, RN_PICKER_RES_SELECT)
-  const selectableSet = new Set(selectableChildren)
-
-  // Default selection: anchor + 1-ring neighbours (all within boundary)
-  if(opts.existingSelected && opts.existingSelected.length){
+  // ── Selectable = res-8 children of ALL runner zone res-6 hexes ──
+  // This lets the picker show & pre-select hexes from every zone the runner has,
+  // not just the single anchor zone. Adjacent zones become navigable on the map.
+  const allAnchorH6s = new Set([anchor6])
+  // Add res-6 hexes for every zone the runner currently covers
+  ;(window._rnRow?.coverage_zones
+    ? (typeof window._rnRow.coverage_zones === 'string'
+        ? JSON.parse(window._rnRow.coverage_zones)
+        : window._rnRow.coverage_zones)
+    : []
+  ).forEach(zoneId => {
+    try {
+      const zone = (typeof ADMIN_ZONES !== 'undefined' ? ADMIN_ZONES : []).find(z => z.id === zoneId)
+      const zips = zone?.zips?.length ? zone.zips : (zone?.zip ? [zone.zip] : [])
+      zips.forEach(zp => {
+        const ctr = (typeof ZIP_CENTROIDS !== 'undefined' ? ZIP_CENTROIDS[zp] : null)
+        if(!ctr) return
+        try { allAnchorH6s.add(h3.cellToParent(h3.latLngToCell(ctr[0], ctr[1], 8), 6)) } catch(e){}
+      })
+    } catch(e){}
+  })
+  // Also expand from any existing selected hexes that fall outside the primary anchor
+  if(opts.existingSelected?.length){
     opts.existingSelected.forEach(h => {
-      // Accept either res-7 directly or res-8 (convert up)
       try {
         const res = h3.getResolution(h)
-        const h7 = res === RN_PICKER_RES_SELECT ? h : h3.cellToParent(h, RN_PICKER_RES_SELECT)
-        if(selectableSet.has(h7)) window._rnPickerSelected.add(h7)
+        const h8 = res === 8 ? h : (res < 8 ? h3.cellToChildren(h, 8)[0] : h3.cellToParent(h, 8))
+        allAnchorH6s.add(h3.cellToParent(h8, 6))
+      } catch(e){}
+    })
+  }
+  // Build selectable set from all res-6 anchors
+  const selectableSet = new Set()
+  allAnchorH6s.forEach(h6 => {
+    try { h3.cellToChildren(h6, RN_PICKER_RES_SELECT).forEach(h => selectableSet.add(h)) } catch(e){}
+  })
+
+  // Pre-select existing hexes — now works across all zones
+  if(opts.existingSelected && opts.existingSelected.length){
+    opts.existingSelected.forEach(h => {
+      try {
+        const res = h3.getResolution(h)
+        const h8 = res === RN_PICKER_RES_SELECT ? h : h3.cellToParent(h, RN_PICKER_RES_SELECT)
+        if(selectableSet.has(h8)) window._rnPickerSelected.add(h8)
       } catch(e){}
     })
   }
   if(window._rnPickerSelected.size === 0){
-    // Default: anchor + its ring-1 neighbours that are within boundary
+    // Default: anchor + ring-1 neighbours within boundary
     h3.gridDisk(anchor7, 1).forEach(h => { if(selectableSet.has(h)) window._rnPickerSelected.add(h) })
   }
   window._rnPickerSelected.add(anchor7) // anchor always selected
@@ -14752,15 +14843,23 @@ async function _rnPickerInit(mapElId, lat, lng, zip, opts){
   window._rnPickerMap = map
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map)
 
-  // Draw res-6 boundary outline
-  try {
-    const b6 = h3.cellToBoundary(anchor6).map(([la,ln])=>[la,ln])
-    L.polygon(b6, { color:'rgba(6,214,160,.6)', fillColor:'transparent', weight:2, dashArray:'6,4' }).addTo(map)
-    map.fitBounds(L.polygon(b6).getBounds(), { padding:[14,14] })
-  } catch(e){}
+  // Draw res-6 boundary outlines for ALL runner zone anchors
+  const allBoundsPts = []
+  allAnchorH6s.forEach(h6 => {
+    try {
+      const b6 = h3.cellToBoundary(h6).map(([la,ln])=>[la,ln])
+      const lineCol = h6 === anchor6 ? 'rgba(6,214,160,.7)' : 'rgba(6,214,160,.4)'
+      L.polygon(b6, { color:lineCol, fillColor:'transparent', weight:2, dashArray:'6,4' }).addTo(map)
+      allBoundsPts.push(...b6)
+    } catch(e){}
+  })
+  // Fit map to show ALL runner zones, not just the primary anchor
+  if(allBoundsPts.length > 0){
+    try { map.fitBounds(L.latLngBounds(allBoundsPts), { padding:[24,24] }) } catch(e){}
+  }
 
-  // Draw all res-7 children + a buffer ring outside (shown as locked)
-  const allToDraw = new Set(selectableChildren)
+  // Draw all res-8 children across all selectable hexes + buffer ring for context
+  const allToDraw = new Set(selectableSet)
   // Add 1-ring outside boundary for context
   try {
     h3.gridDisk(h3.cellToParent(anchor8, RN_PICKER_RES_SELECT), 1)
@@ -17383,8 +17482,32 @@ async function loadRNZones(){
     }).join('')
 
     // Render the multi-zone overview map
-    // Pass runner's selected coverage hexes to overview map
-    const _covHexes = (() => { try { const r = row?.coverage_hexes; return r ? (typeof r==='string' ? JSON.parse(r) : r) : [] } catch(e){ return [] } })()
+    // Build coverage hexes from ALL runner zones — coverage_hexes only stores the last-saved zone,
+    // so we union it with hexes derived from all zone ZIPs to represent the full service area.
+    const _covHexes = (() => {
+      const hexSet = new Set()
+      // 1. Runner's saved coverage_hexes (last picker save)
+      try {
+        const raw = row?.coverage_hexes
+        if(raw){ const p = typeof raw==='string' ? JSON.parse(raw) : raw; if(Array.isArray(p)) p.forEach(h => hexSet.add(h)) }
+      } catch(e){}
+      // 2. For each zone the runner covers, derive res-7 children from zone ZIPs
+      // Ensures zones added via admin assignment appear even if never saved through picker
+      myZones.forEach(zone => {
+        const zips = zone.zips?.length ? zone.zips : (zone.zip ? [zone.zip] : [])
+        zips.forEach(zip => {
+          const ctr = ZIP_CENTROIDS[zip]
+          if(!ctr) return
+          try {
+            const h8 = h3.latLngToCell(ctr[0], ctr[1], 8)
+            const h6 = h3.cellToParent(h8, 6)
+            h3.cellToChildren(h6, 7).forEach(h7 => hexSet.add(h7))
+          } catch(e){}
+        })
+      })
+      return [...hexSet]
+    })()
+    window._rnCoverageHexes = _covHexes  // store for edit picker to read
     _renderRnZonesMap(myZones, myHomeowners, waitlistedHOs, _covHexes)
     el.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
