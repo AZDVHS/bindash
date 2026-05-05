@@ -5834,38 +5834,44 @@ async function populateHWDashboard(){
     const status = row.status
     console.log('[BinDash] populateHWDashboard — routing status:', status)
 
-    if(status === 'approved' || status === 'active' || status === 'waitlist'){
-      go('S-hw-dash')
-      _populateHWDashData(row, fn, ln, initials)
-      loadHWCollections(row.email || _userEmail)
-      setTimeout(_renderHWPayHistory, 600)
+    // Rejected is the only hard block — everyone else gets a dashboard
+    if(status === 'rejected'){
+      showToast('Your application was not approved. Contact support for details.', 'err')
+      go('S-land')
+      return
+    }
 
-      // ── Pending completion check — waitlist-promoted HOs missing payment/property ──
-      const _pendingCompletion = _isHOPendingCompletion(row)
-      if(_pendingCompletion){
-        console.log('[BinDash] HO pending completion — missing', !row.stripe_customer_id ? 'payment' : '', !row.bin_location&&!row.gate_type ? 'property' : '')
-        _showHOPendingCompletionBanner(row)
-        // Don't hide payment banner — it's replaced by the pending_completion banner
-      } else {
-        const payBanner = document.getElementById('hw-payment-banner')
-        if(payBanner) payBanner.style.display = 'none'
-        const pcBanner = document.getElementById('hw-pending-completion-banner')
-        if(pcBanner) pcBanner.style.display = 'none'
-      }
+    // ALL other statuses → S-hw-dash with appropriate status banner
+    // This ensures every logged-in HW sees a real screen regardless of approval state
+    go('S-hw-dash')
+    _populateHWDashData(row, fn, ln, initials)
+    loadHWCollections(row.email || _userEmail)
+    setTimeout(_renderHWPayHistory, 600)
 
-      if(window._showPortalReturnToast){
-        window._showPortalReturnToast = false
-        // After portal return, re-check pending completion (payment may now be complete)
-        setTimeout(async ()=>{
-          showToast('Payment method updated ✅','ok')
-          await populateHWDashboard()
-        }, 500)
+    // Show status-appropriate banner
+    const payBanner    = document.getElementById('hw-payment-banner')
+    const pcBanner     = document.getElementById('hw-pending-completion-banner')
+    const reviewBanner = document.getElementById('hw-pending-review-banner')
+
+    // Hide all banners first
+    if(payBanner)    payBanner.style.display    = 'none'
+    if(pcBanner)     pcBanner.style.display     = 'none'
+    if(reviewBanner) reviewBanner.style.display = 'none'
+
+    if(status === 'pending_review' || status === 'waitlisted' || status === 'waitlist_pending'){
+      // Inject a pending review banner if not already present
+      let _revBanner = document.getElementById('hw-pending-review-banner')
+      if(!_revBanner){
+        _revBanner = document.createElement('div')
+        _revBanner.id = 'hw-pending-review-banner'
+        _revBanner.style.cssText = 'background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.3);border-radius:12px;padding:14px 18px;margin:16px;display:flex;align-items:center;gap:12px'
+        _revBanner.innerHTML = '<div style="font-size:28px">⏳</div><div><div style="font-size:14px;font-weight:700;color:#f0f4ff;margin-bottom:2px">Application under review</div><div style="font-size:12px;color:#94a3b8">Our team is reviewing your details. You\'ll get an email within 24\u201348 hours. Questions? <a href="mailto:admin@bindash.shop" style="color:#06d6a0">admin@bindash.shop</a></div></div>'
+        const dashMain = document.querySelector('#hw-home') || document.querySelector('#S-hw-dash .body') || document.querySelector('#S-hw-dash .main')
+        if(dashMain) dashMain.prepend(_revBanner)
       }
+      _revBanner.style.display = 'flex'
 
     } else if(status === 'payment_pending'){
-      go('S-hw-dash')
-      _populateHWDashData(row, fn, ln, initials)
-      const payBanner = document.getElementById('hw-payment-banner')
       if(payBanner) payBanner.style.display = 'block'
       window._hwPendingPlanKey = row.plan_id || row.plan || 'plan_a'
       window._hwPendingEmail   = row.email || _userEmail
@@ -5873,37 +5879,23 @@ async function populateHWDashboard(){
     } else if(status === 'zone_assigned'){
       const zone = ADMIN_ZONES.find(z=>z.id===row.zone_id) || findZoneForZip(row.zip_code||'')
       if(zone){ populateConfirmScreen(row, zone); go('S-hw-confirm') }
-      else { go('S-hw-waitlist'); setTimeout(()=>populateWaitlistDashboard(row), 200) }
 
-    } else if(status === 'waitlisted'){
-      // Check homeowners table first — if they have a record, show dashboard
-      try {
-        const { data: hwCheck } = await _supa.from('homeowners').select('*').eq('email', (_userEmail||'').toLowerCase()).maybeSingle()
-        if(hwCheck){
-          const mergedRow = { ...row, ...hwCheck, status: hwCheck.status || 'waitlist' }
-          window._hwProfileRow = mergedRow
-          go('S-hw-dash'); _populateHWDashData(mergedRow, fn, ln, initials)
-          loadHWCollections(mergedRow.email || _userEmail)
-          setTimeout(_renderHWPayHistory, 600)
-          return
-        }
-      } catch(e){}
-      const zip = row.zip_code || ''
-      const zone = findZoneForZip(zip)
-      if(zone && zone.status === 'live'){ populateConfirmScreen(row, zone); go('S-hw-confirm') }
-      else { go('S-hw-waitlist'); setTimeout(()=>populateWaitlistDashboard(row), 200) }
-
-    } else if(status === 'pending_review'){
-      // Show waitlist dashboard — has real content. Pending review banner shown on top.
-      go('S-hw-waitlist')
-      setTimeout(() => populateWaitlistDashboard(row), 200)
-
-    } else if(status === 'rejected'){
-      showToast('Your application was not approved. Contact support for details.', 'err'); go('S-land')
-
-    } else {
-      _showPendingScreen()
-
+    } else if(status === 'approved' || status === 'active' || status === 'waitlist'){
+      // Fully active — check pending completion
+      const _pendingCompletion = _isHOPendingCompletion(row)
+      if(_pendingCompletion){
+        _showHOPendingCompletionBanner(row)
+      } else {
+        if(payBanner) payBanner.style.display = 'none'
+        if(pcBanner)  pcBanner.style.display  = 'none'
+      }
+      if(window._showPortalReturnToast){
+        window._showPortalReturnToast = false
+        setTimeout(async ()=>{
+          showToast('Payment method updated ✅','ok')
+          await populateHWDashboard()
+        }, 500)
+      }
     }
 
   } catch(err){
