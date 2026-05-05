@@ -3146,23 +3146,40 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
 
       <!-- REVIEW PENDING STATE (payment done, waiting admin) -->
       <div id="hw-pending-review-state">
-        <div style="font-size:64px;margin-bottom:16px">⏳</div>
-        <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:853;margin-bottom:10px">Application Submitted!</div>
-        <div style="font-size:16px;color:var(--sub);line-height:1.7;margin-bottom:28px">
-          Thank you -- your BinDash account is <strong style="color:var(--text)">pending review</strong>. Our team will verify your details and assign you to a service zone, usually within <strong style="color:var(--cyan)">24-48 hours</strong>.
+        <!-- Personalised header — name filled in by go() initialiser -->
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+          <button onclick="bindashLogout()" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:4px 8px;border-radius:6px" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">Log Out</button>
         </div>
-        <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:22px;margin-bottom:24px;text-align:left">
-          <div style="font-size:13px;font-weight:700;margin-bottom:14px;color:var(--text)">What happens next</div>
-          <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--sub)">
-            <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">1</span><span>Our team reviews your application and property details</span></div>
-            <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</span><span>You're assigned to a service zone and a runner is matched to your area</span></div>
-            <div style="display:flex;gap:10px;align-items:flex-start"><span style="width:22px;height:22px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">3</span><span>You'll receive an email when your account is approved and your first collection is scheduled</span></div>
+        <div style="font-size:56px;margin-bottom:14px">⏳</div>
+        <div id="hw-pending-greeting" style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:6px;color:var(--text)">You're on the list!</div>
+        <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:700;color:#fbbf24;margin-bottom:20px">
+          ⏳ Pending Review
+        </div>
+        <div style="font-size:15px;color:var(--sub);line-height:1.7;margin-bottom:24px">
+          Your application is in — our team will verify your details and assign you to a service zone, usually within <strong style="color:var(--text)">24–48 hours</strong>.
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:20px;margin-bottom:20px;text-align:left">
+          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">What happens next</div>
+          <div style="display:flex;flex-direction:column;gap:12px;font-size:13px;color:var(--sub)">
+            <div style="display:flex;gap:12px;align-items:flex-start">
+              <span style="width:24px;height:24px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">1</span>
+              <span>We review your application and confirm your service address</span>
+            </div>
+            <div style="display:flex;gap:12px;align-items:flex-start">
+              <span style="width:24px;height:24px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</span>
+              <span>You're assigned to a zone and matched with a local runner</span>
+            </div>
+            <div style="display:flex;gap:12px;align-items:flex-start">
+              <span style="width:24px;height:24px;background:rgba(6,214,160,.15);color:var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">3</span>
+              <span>You'll get an email when approved and your first collection is scheduled</span>
+            </div>
           </div>
         </div>
-        <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:14px 16px;font-size:13px;color:var(--sub);margin-bottom:24px">
-          📧 Check your email for confirmation. Questions? Contact <span style="color:var(--cyan)"><a href="mailto:admin@bindash.shop" style="color:var(--cyan)">admin@bindash.shop</a></span>
+        <div style="background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.2);border-radius:10px;padding:14px 16px;font-size:13px;color:var(--sub);margin-bottom:22px;text-align:left">
+          <strong style="color:var(--text)">Need to update your info or have a question?</strong><br>
+          Email us at <a href="mailto:admin@bindash.shop" style="color:var(--cyan)">admin@bindash.shop</a> and we'll get back to you quickly.
         </div>
-        <button class="btn btn-outline btn-lg" onclick="go('S-land')" style="margin-right:10px"><- Back to BinDash</button>
+        <button class="btn btn-outline" onclick="bindashLogout()" style="width:100%;font-size:13px">← Log Out</button>
       </div>
 
     </div>
@@ -5527,11 +5544,22 @@ function go(id){
     if(isPending && _checkoutPlanKey){
       const plan = STRIPE_PRICES[_checkoutPlanKey]
       if(plan){
-        const el = (id) => document.getElementById(id)
-        if(el('hw-pending-plan-name'))  el('hw-pending-plan-name').textContent  = plan.name
-        if(el('hw-pending-plan-price')) el('hw-pending-plan-price').textContent = '$'+plan.monthlyAmt+'/mo'
-        if(el('hw-pending-plan-desc'))  el('hw-pending-plan-desc').textContent  = plan.desc
+        const planNameEl  = document.getElementById('hw-pending-plan-name')
+        const planPriceEl = document.getElementById('hw-pending-plan-price')
+        const planDescEl  = document.getElementById('hw-pending-plan-desc')
+        if(planNameEl)  planNameEl.textContent  = plan.name
+        if(planPriceEl) planPriceEl.textContent = '$'+plan.monthlyAmt+'/mo'
+        if(planDescEl)  planDescEl.textContent  = plan.desc
       }
+    }
+    // Personalise greeting with the user's first name
+    const greetEl = document.getElementById('hw-pending-greeting')
+    if(greetEl){
+      const fn = window._hwProfileRow?.first_name
+             || currentUser?.user_metadata?.first_name
+             || currentUser?.email?.split('@')[0]
+             || ''
+      greetEl.textContent = fn ? 'Hey ' + fn + ', you’re on the list!' : 'You’re on the list!'
     }
   }
 }
