@@ -1109,7 +1109,7 @@ async function dbUpsert(table, payload, onConflict='email'){
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden}
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#1e2840;border-radius:2px}
-.screen{display:none;min-height:100vh}.screen.active{display:block}
+.screen{display:none}.screen.active{display:block;min-height:100vh;width:100%}
 
 @keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
 @keyframes popIn{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
@@ -3143,7 +3143,7 @@ button[onclick*="navReportIssue"]:active { background: rgba(245,158,11,.15) !imp
   </div>
 </div>
 
-<div id="S-hw-pending" class="screen">
+<div id="S-hw-pending" class="screen" style="min-height:100vh;height:auto">
   <div style="min-height:100vh;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:36px 20px">
     <div style="max-width:520px;width:100%;text-align:center">
 
