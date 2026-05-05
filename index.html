@@ -667,6 +667,32 @@ function handleStripeReturn(){
 }
 document.addEventListener('DOMContentLoaded', handleStripeReturn)
 
+// ── Pending screen safety net ────────────────────────────────────────────────
+// If modal-bg.open is covering the screen, kill it every 500ms for 5 seconds after load.
+// This is a catch-all for any case where the modal is left open over a screen transition.
+;(function _pendingScreenGuard(){
+  let _guardChecks = 0
+  const _guardInterval = setInterval(() => {
+    _guardChecks++
+    if(_guardChecks > 10){ clearInterval(_guardInterval); return }
+    const scr = document.querySelector('.screen.active')
+    const modal = document.getElementById('modal-bg')
+    if(scr && modal && modal.classList.contains('open')){
+      console.log('[BinDash] Guard: killed stale modal-bg.open over', scr.id)
+      modal.classList.remove('open')
+    }
+    // If no screen is active and we have a current user who is pending_review
+    if(!scr && window.currentUser && _guardChecks > 2){
+      const _row = window._hwProfileRow
+      if(_row?.status === 'pending_review' || currentUser?.user_metadata?.status === 'pending_review'){
+        console.log('[BinDash] Guard: forcing S-hw-pending visible')
+        if(typeof _showPendingScreen === 'function') _showPendingScreen()
+        clearInterval(_guardInterval)
+      }
+    }
+  }, 500)
+})()
+
 async function _handlePasswordResetHash(hash){
   try {
     // Parse tokens from hash fragment
