@@ -5894,7 +5894,9 @@ async function populateHWDashboard(){
       else { go('S-hw-waitlist'); setTimeout(()=>populateWaitlistDashboard(row), 200) }
 
     } else if(status === 'pending_review'){
-      _showPendingScreen()
+      // Show waitlist dashboard — has real content. Pending review banner shown on top.
+      go('S-hw-waitlist')
+      setTimeout(() => populateWaitlistDashboard(row), 200)
 
     } else if(status === 'rejected'){
       showToast('Your application was not approved. Contact support for details.', 'err'); go('S-land')
@@ -6255,6 +6257,20 @@ function validateHomeownerData(row, context){
 // ── Waitlist HO Dashboard ────────────────────────────────────────────────────
 async function populateWaitlistDashboard(row){
   const fn    = row.first_name || row.full_name?.split(' ')[0] || 'neighbor'
+
+  // If pending_review, inject a status banner at the top of the waitlist dashboard
+  if(row.status === 'pending_review'){
+    const existingBanner = document.getElementById('wl-pending-review-banner')
+    if(!existingBanner){
+      const banner = document.createElement('div')
+      banner.id = 'wl-pending-review-banner'
+      banner.style.cssText = 'background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.3);border-radius:12px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;gap:12px'
+      banner.innerHTML = '<div style="font-size:28px">⏳</div><div><div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:2px">Application under review</div><div style="font-size:12px;color:var(--sub)">Our team is reviewing your details. You\'ll get an email within 24–48 hours when approved. Questions? <a href="mailto:admin@bindash.shop" style="color:var(--cyan)">admin@bindash.shop</a></div></div>'
+      const dashContent = document.getElementById('wl-dash-content') || document.querySelector('#S-hw-waitlist .wl-card')
+      if(dashContent) dashContent.prepend(banner)
+      else document.querySelector('#S-hw-waitlist')?.prepend(banner)
+    }
+  }
   const zip   = (row.zip_code || row.zip || '').replace(/-.*$/,'').slice(0,5)
   const email = row.email || currentUser?.email || ''
 
