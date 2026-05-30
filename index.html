@@ -14058,28 +14058,24 @@ function updateTodayProgress(){
   // Truck: HO confirmed, or it's past noon and BIN_OUT is complete
   const truckDone = !!(window._hwTruckConfirmed) || (binOutDone && hour >= 12)
 
-  // BIN_IN: look within the last 3 days — scheduled_date may differ from collection day
-  // (BIN_IN gets scheduled_date = day after BIN_OUT which may be yesterday or today)
+  // BIN_IN: look within last 3 days including tomorrow
+  const tomorrowStr = new Date(Date.now()+86400000).toISOString().slice(0,10)
   const twoDaysAgo = new Date(Date.now() - 2*86400000).toISOString().slice(0,10)
   const binInJob  = (collections||[]).find(c =>
     c.visit==='BIN_IN' &&
-    (c.sortKey||'') >= twoDaysAgo &&   // within last 2 days
-    (c.sortKey||'') <= todayStr         // not future
+    (c.sortKey||'') >= twoDaysAgo &&
+    (c.sortKey||'') <= tomorrowStr
   )
   const binInDone   = binInJob?.status === 'complete'
   const binInActive = binInJob && !binInDone && ['accepted','in_progress','offered'].includes(binInJob?.status||'')
 
-  // Tonight's upcoming BIN_OUT
-  const tomorrowStr = new Date(Date.now()+86400000).toISOString().slice(0,10)
-  const tonightJob  = (collections||[]).find(c =>
-    c.visit==='BIN_OUT' && (c.sortKey||'').startsWith(tomorrowStr)
-  )
-
-  // Show card if there's any BIN_OUT or BIN_IN job in the current cycle (yesterday+today)
-  const hasActivity = !!(binOutJob || binInJob || (collections||[]).some(c =>
-    (c.sortKey||'').startsWith(todayStr) || (c.sortKey||'').startsWith(yesterday)
-  ))
-  if(!hasActivity){ card.style.display='none'; return }
+  // Only show progress meter during an ACTIVE cycle:
+  // - BIN_OUT or BIN_IN is in progress/accepted, OR
+  // - BIN_OUT done but BIN_IN not yet done (bins at curb waiting for truck/return), OR
+  // - Cycle just completed today or yesterday (show for rest of day, then hide)
+  const cycleActive = binOutActive || binInActive || (binOutDone && !binInDone)
+  const justCompleted = binInDone && binInJob && (binInJob.sortKey||'') >= yesterday
+  if(!cycleActive && !justCompleted){ card.style.display='none'; return }
   card.style.display = ''
 
   const dateEl = document.getElementById('hw-today-date')
